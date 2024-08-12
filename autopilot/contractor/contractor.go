@@ -1357,8 +1357,8 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 	// STEP 2: perform contract maintenance
 	ipFilter := &hostSet{
-		logger:           logger.Named("ipFilter"),
-		addressToHostKey: make(map[string]string),
+		logger:          logger.Named("ipFilter"),
+		subnetToHostKey: make(map[string]string),
 	}
 	keptContracts, churnReasons, err := performContractChecks(ctx, alerter, bus, w, cc, cr, ipFilter, logger, &remaining)
 	if err != nil {
