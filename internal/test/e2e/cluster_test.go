@@ -2388,7 +2388,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	cluster.AddHosts(1)
 
 	// send all money to ourselves, making sure it's unconfirmed
-	feeReserve := types.Siacoins(1).Div64(100)
+	feeReserve := types.Siacoins(1)
 	wr, err := b.Wallet(context.Background())
 	tt.OK(err)
 	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, wr.Confirmed.Sub(feeReserve), false)) // leave some for the fee
