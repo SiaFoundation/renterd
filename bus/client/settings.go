@@ -24,6 +24,12 @@ func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, e
 	return
 }
 
+// PricePinningSettings returns the contract set settings.
+func (c *Client) PricePinningSettings(ctx context.Context) (pps api.PricePinSettings, err error) {
+	err = c.Setting(ctx, api.SettingPricePinning, &pps)
+	return
+}
+
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
 	err = c.Setting(ctx, api.SettingRedundancy, &rs)

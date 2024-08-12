@@ -27,6 +27,22 @@ import (
 	"lukechampine.com/frand"
 )
 
+func (s *testSQLStore) InsertSlab(slab object.Slab) {
+	s.t.Helper()
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: object.SlabSlices{
+			object.SlabSlice{
+				Slab: slab,
+			},
+		},
+	}
+	err := s.UpdateObject(context.Background(), api.DefaultBucketName, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+}
+
 func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string) error {
 	ts := time.Now()
 	time.Sleep(time.Millisecond)
@@ -289,8 +305,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Add an announcement.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -456,18 +471,8 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Make sure the db was cleaned up properly through the CASCADE delete.
-	tableCountCheck := func(table interface{}, tblCount int64) error {
-		var count int64
-		if err := ss.gormDB.Model(table).Count(&count).Error; err != nil {
-			return err
-		}
-		if count != tblCount {
-			return fmt.Errorf("expected %v objects in table %v but got %v", tblCount, table.(schema.Tabler).TableName(), count)
-		}
-		return nil
-	}
-	if err := tableCountCheck(&dbContract{}, 0); err != nil {
-		t.Fatal(err)
+	if count := ss.Count("contracts"); count != 0 {
+		t.Fatalf("expected %v rows in contracts but got %v", 0, count)
 	}
 
 	// Check join table count as well.
@@ -540,12 +545,10 @@ func TestRenewedContract(t *testing.T) {
 	hk, hk2 := hks[0], hks[1]
 
 	// Add announcements.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ss.announceHost(hk2, "address2")
-	if err != nil {
+	if err := ss.announceHost(hk2, "address2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -736,42 +739,41 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// Archived contract should exist.
-	var ac dbArchivedContract
-	err = ss.gormDB.Model(&dbArchivedContract{}).
-		Where("fcid", fileContractID(fcid1)).
-		Take(&ac).
-		Error
+	ancestors, err := ss.AncestorContracts(context.Background(), fcid1Renewed, 0)
 	if err != nil {
 		t.Fatal(err)
+	} else if len(ancestors) != 1 {
+		t.Fatalf("expected 1 ancestor but got %v", len(ancestors))
 	}
+	ac := ancestors[0]
 
-	ac.Model = Model{}
-	expectedContract := dbArchivedContract{
-		Host:      publicKey(c.HostKey()),
-		RenewedTo: fileContractID(fcid1Renewed),
-		Reason:    api.ContractArchivalReasonRenewed,
-
-		ContractCommon: ContractCommon{
-			FCID: fileContractID(fcid1),
-
-			ContractPrice:  currency(oldContractPrice),
-			TotalCost:      currency(oldContractTotal),
-			ProofHeight:    0,
-			RevisionHeight: 0,
-			RevisionNumber: "1",
-			StartHeight:    100,
-			WindowStart:    2,
-			WindowEnd:      3,
-			Size:           rhpv2.SectorSize,
-			State:          contractStatePending,
-
-			UploadSpending:      currency(types.Siacoins(1)),
-			DownloadSpending:    currency(types.Siacoins(2)),
-			FundAccountSpending: currency(types.Siacoins(3)),
-			DeleteSpending:      currency(types.Siacoins(4)),
-			ListSpending:        currency(types.Siacoins(5)),
+	expectedContract := api.ArchivedContract{
+		ID:        fcid1,
+		HostIP:    "address",
+		HostKey:   c.HostKey(),
+		RenewedTo: fcid1Renewed,
+		Spending: api.ContractSpending{
+			Uploads:     types.Siacoins(1),
+			Downloads:   types.Siacoins(2),
+			FundAccount: types.Siacoins(3),
+			Deletions:   types.Siacoins(4),
+			SectorRoots: types.ZeroCurrency, // currently not persisted
 		},
+
+		ArchivalReason: api.ContractArchivalReasonRenewed,
+		ContractPrice:  oldContractPrice,
+		ProofHeight:    0,
+		RenewedFrom:    types.FileContractID{},
+		RevisionHeight: 0,
+		RevisionNumber: 1,
+		Size:           rhpv2.SectorSize,
+		StartHeight:    100,
+		State:          contractStatePending.String(),
+		TotalCost:      oldContractTotal,
+		WindowStart:    2,
+		WindowEnd:      3,
 	}
+
 	if !reflect.DeepEqual(ac, expectedContract) {
 		t.Fatal("mismatch", cmp.Diff(ac, expectedContract))
 	}
@@ -813,9 +815,9 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a chain of 4 contracts.
-	// Their start heights are 0, 1, 2, 3.
-	fcids := []types.FileContractID{{1}, {2}, {3}, {4}}
+	// Create a chain of 6 contracts.
+	// Their start heights are 0, 1, 2, 3, 4, 5, 6.
+	fcids := []types.FileContractID{{1}, {2}, {3}, {4}, {5}, {6}}
 	if _, err := ss.addTestContract(fcids[0], hk); err != nil {
 		t.Fatal(err)
 	}
@@ -835,13 +837,22 @@ func TestAncestorsContracts(t *testing.T) {
 	if len(contracts) != len(fcids)-2 {
 		t.Fatal("wrong number of contracts returned", len(contracts))
 	}
-	for i := 0; i < len(contracts)-1; i++ {
+	for i := 0; i < len(contracts); i++ {
+		var renewedFrom, renewedTo types.FileContractID
+		if j := len(fcids) - 3 - i; j >= 0 {
+			renewedFrom = fcids[j]
+		}
+		if j := len(fcids) - 1 - i; j >= 0 {
+			renewedTo = fcids[j]
+		}
 		expected := api.ArchivedContract{
+			ArchivalReason: api.ContractArchivalReasonRenewed,
 			ID:             fcids[len(fcids)-2-i],
 			HostKey:        hk,
-			RenewedTo:      fcids[len(fcids)-1-i],
+			RenewedFrom:    renewedFrom,
+			RenewedTo:      renewedTo,
 			RevisionNumber: 200,
-			StartHeight:    2,
+			StartHeight:    uint64(len(fcids) - 2 - i),
 			Size:           4096,
 			State:          api.ContractStatePending,
 			WindowStart:    400,
@@ -853,8 +864,8 @@ func TestAncestorsContracts(t *testing.T) {
 		}
 	}
 
-	// Fetch the ancestors with startHeight >= 3. That should return 0 contracts.
-	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 3)
+	// Fetch the ancestors with startHeight >= 5. That should return 0 contracts.
+	contracts, err = ss.AncestorContracts(context.Background(), fcids[len(fcids)-1], 5)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
@@ -900,19 +911,27 @@ func TestArchiveContracts(t *testing.T) {
 	ffcids := make([]fileContractID, 2)
 	ffcids[0] = fileContractID(fcids[1])
 	ffcids[1] = fileContractID(fcids[2])
-	var acs []dbArchivedContract
-	err = ss.gormDB.Model(&dbArchivedContract{}).
-		Where("fcid IN (?)", ffcids).
-		Find(&acs).
-		Error
+	rows, err := ss.DB().Query(context.Background(), "SELECT reason FROM archived_contracts WHERE fcid IN (?, ?)",
+		sql.FileContractID(ffcids[0]), sql.FileContractID(ffcids[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(acs) != 2 {
-		t.Fatal("wrong number of archived contracts", len(acs))
+	defer rows.Close()
+
+	var cnt int
+	for rows.Next() {
+		var reason string
+		if err := rows.Scan(&reason); err != nil {
+			t.Fatal(err)
+		} else if cnt == 0 && reason != "foo" {
+			t.Fatal("unexpected reason", reason)
+		} else if cnt == 1 && reason != "bar" {
+			t.Fatal("unexpected reason", reason)
+		}
+		cnt++
 	}
-	if acs[0].Reason != "foo" || acs[1].Reason != "bar" {
-		t.Fatal("unexpected reason", acs[0].Reason, acs[1].Reason)
+	if cnt != 2 {
+		t.Fatal("wrong number of archived contracts", cnt)
 	}
 }
 
@@ -1031,14 +1050,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj1Slab0Key, err := obj1.Slabs[0].Key.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	obj1Slab1Key, err := obj1.Slabs[1].Key.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
+	obj1Slab0Key := obj1.Slabs[0].Key
+	obj1Slab1Key := obj1.Slabs[1].Key
 
 	// Set the Model fields to zero before comparing. These are set by gorm
 	// itself and contain a few timestamps which would make the following
@@ -1118,108 +1131,112 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(fullObj, obj1))
 	}
 
-	expectedObjSlab1 := dbSlab{
-		DBContractSetID: 1,
-		Health:          1,
-		Key:             obj1Slab0Key,
-		MinShards:       1,
-		TotalShards:     1,
-		Shards: []dbSector{
+	expectedObjSlab1 := object.Slab{
+		Health:    1,
+		Key:       obj1Slab0Key,
+		MinShards: 1,
+		Shards: []object.Sector{
 			{
-				DBSlabID:   3,
-				SlabIndex:  1,
-				Root:       obj1.Slabs[0].Shards[0].Root[:],
-				LatestHost: publicKey(obj1.Slabs[0].Shards[0].LatestHost),
-				Contracts: []dbContract{
-					{
-						HostID: 1,
-						Host: dbHost{
-							PublicKey: publicKey(hk1),
-						},
-
-						ContractCommon: ContractCommon{
-							FCID: fileContractID(fcid1),
-
-							TotalCost:      currency(totalCost1),
-							RevisionNumber: "0",
-							StartHeight:    startHeight1,
-							WindowStart:    400,
-							WindowEnd:      500,
-							Size:           4096,
-							State:          contractStatePending,
-
-							UploadSpending:      zeroCurrency,
-							DownloadSpending:    zeroCurrency,
-							FundAccountSpending: zeroCurrency,
-						},
-					},
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk1: {fcid1},
 				},
+				LatestHost: hk1,
+				Root:       types.Hash256{1},
 			},
 		},
 	}
 
-	expectedObjSlab2 := dbSlab{
-		DBContractSetID: 1,
-		Health:          1,
-		Key:             obj1Slab1Key,
-		MinShards:       2,
-		TotalShards:     1,
-		Shards: []dbSector{
+	expectedContract1 := api.ContractMetadata{
+		ID:             fcid1,
+		HostIP:         "",
+		HostKey:        hk1,
+		SiamuxAddr:     "",
+		ProofHeight:    0,
+		RevisionHeight: 0,
+		RevisionNumber: 0,
+		Size:           4096,
+		StartHeight:    startHeight1,
+		State:          api.ContractStatePending,
+		WindowStart:    400,
+		WindowEnd:      500,
+		ContractPrice:  types.ZeroCurrency,
+		RenewedFrom:    types.FileContractID{},
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
+		},
+		TotalCost:    totalCost1,
+		ContractSets: nil,
+	}
+
+	expectedObjSlab2 := object.Slab{
+		Health:    1,
+		Key:       obj1Slab1Key,
+		MinShards: 2,
+		Shards: []object.Sector{
 			{
-				DBSlabID:   4,
-				SlabIndex:  1,
-				Root:       obj1.Slabs[1].Shards[0].Root[:],
-				LatestHost: publicKey(obj1.Slabs[1].Shards[0].LatestHost),
-				Contracts: []dbContract{
-					{
-						HostID: 2,
-						Host: dbHost{
-							PublicKey: publicKey(hk2),
-						},
-						ContractCommon: ContractCommon{
-							FCID: fileContractID(fcid2),
-
-							TotalCost:      currency(totalCost2),
-							RevisionNumber: "0",
-							StartHeight:    startHeight2,
-							WindowStart:    400,
-							WindowEnd:      500,
-							Size:           4096,
-							State:          contractStatePending,
-
-							UploadSpending:      zeroCurrency,
-							DownloadSpending:    zeroCurrency,
-							FundAccountSpending: zeroCurrency,
-						},
-					},
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk2: {fcid2},
 				},
+				LatestHost: hk2,
+				Root:       types.Hash256{2},
 			},
 		},
+	}
+
+	expectedContract2 := api.ContractMetadata{
+		ID:             fcid2,
+		HostIP:         "",
+		HostKey:        hk2,
+		SiamuxAddr:     "",
+		ProofHeight:    0,
+		RevisionHeight: 0,
+		RevisionNumber: 0,
+		Size:           4096,
+		StartHeight:    startHeight2,
+		State:          api.ContractStatePending,
+		WindowStart:    400,
+		WindowEnd:      500,
+		ContractPrice:  types.ZeroCurrency,
+		RenewedFrom:    types.FileContractID{},
+		Spending: api.ContractSpending{
+			Uploads:     types.ZeroCurrency,
+			Downloads:   types.ZeroCurrency,
+			FundAccount: types.ZeroCurrency,
+		},
+		TotalCost:    totalCost2,
+		ContractSets: nil,
 	}
 
 	// Compare slabs.
-	slab1, err := ss.dbSlab(obj1Slab0Key)
+	slab1, err := ss.Slab(context.Background(), obj1Slab0Key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slab2, err := ss.dbSlab(obj1Slab1Key)
+	contract1, err := ss.Contract(context.Background(), fcid1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slabs := []*dbSlab{&slab1, &slab2}
-	for i := range slabs {
-		slabs[i].Model = Model{}
-		slabs[i].Shards[0].Model = Model{}
-		slabs[i].Shards[0].Contracts[0].Model = Model{}
-		slabs[i].Shards[0].Contracts[0].Host.Model = Model{}
-		slabs[i].Shards[0].Contracts[0].Host.LastAnnouncement = time.Time{}
-		slabs[i].HealthValidUntil = 0
+	slab2, err := ss.Slab(context.Background(), obj1Slab1Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract2, err := ss.Contract(context.Background(), fcid2)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(slab1, expectedObjSlab1) {
 		t.Fatal("mismatch", cmp.Diff(slab1, expectedObjSlab1))
 	}
 	if !reflect.DeepEqual(slab2, expectedObjSlab2) {
 		t.Fatal("mismatch", cmp.Diff(slab2, expectedObjSlab2))
+	}
+	if !reflect.DeepEqual(contract1, expectedContract1) {
+		t.Fatal("mismatch", cmp.Diff(contract1, expectedContract1))
+	}
+	if !reflect.DeepEqual(contract2, expectedContract2) {
+		t.Fatal("mismatch", cmp.Diff(contract2, expectedContract2))
 	}
 
 	// Remove the first slab of the object.
@@ -2148,7 +2165,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Helper()
 		if err = ss.gormDB.
 			Where(&dbSlab{Key: key}).
-			Preload("Shards.Contracts").
+			Preload("Shards").
 			Take(&slab).
 			Error; err != nil {
 			t.Fatal(err)
@@ -2156,10 +2173,26 @@ func TestUpdateSlab(t *testing.T) {
 		return
 	}
 
-	// helper to extract the FCID from a list of contracts
-	contractIds := func(contracts []dbContract) (ids []fileContractID) {
-		for _, c := range contracts {
-			ids = append(ids, fileContractID(c.FCID))
+	// helper to fetch contract ids for a sector
+	contractIds := func(root types.Hash256) (fcids []types.FileContractID) {
+		t.Helper()
+		rows, err := ss.DB().Query(context.Background(), `
+			SELECT fcid
+			FROM contracts c
+			INNER JOIN contract_sectors cs ON c.id = cs.db_contract_id
+			INNER JOIN sectors s ON s.id = cs.db_sector_id
+			WHERE s.root = ?
+		`, sql.Hash256(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var fcid types.FileContractID
+			if err := rows.Scan((*sql.FileContractID)(&fcid)); err != nil {
+				t.Fatal(err)
+			}
+			fcids = append(fcids, fcid)
 		}
 		return
 	}
@@ -2169,7 +2202,7 @@ func TestUpdateSlab(t *testing.T) {
 
 	// assert both sectors were upload to one contract/host
 	for i := 0; i < 2; i++ {
-		if cids := contractIds(inserted.Shards[i].Contracts); len(cids) != 1 {
+		if cids := contractIds(types.Hash256(inserted.Shards[i].Root)); len(cids) != 1 {
 			t.Fatalf("sector %d was uploaded to unexpected amount of contracts, %v!=1", i+1, len(cids))
 		} else if inserted.Shards[i].LatestHost != publicKey(hks[i]) {
 			t.Fatalf("sector %d was uploaded to unexpected amount of hosts, %v!=1", i+1, len(hks))
@@ -2208,7 +2241,7 @@ func TestUpdateSlab(t *testing.T) {
 	updated := fetchSlab()
 
 	// assert the first sector is still only on one host, also assert it's h1
-	if cids := contractIds(updated.Shards[0].Contracts); len(cids) != 1 {
+	if cids := contractIds(types.Hash256(updated.Shards[0].Root)); len(cids) != 1 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
@@ -2219,7 +2252,7 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// assert the second sector however is uploaded to two hosts, assert it's h2 and h3
-	if cids := contractIds(updated.Shards[1].Contracts); len(cids) != 2 {
+	if cids := contractIds(types.Hash256(updated.Shards[1].Root)); len(cids) != 2 {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
@@ -2259,18 +2292,18 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.SetContractSet(ctx, "other", nil); err != nil {
 		t.Fatal(err)
 	}
+	csID := ss.ContractSetID("other")
 	err = ss.UpdateSlab(ctx, slab, "other")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var s dbSlab
 	if err := ss.gormDB.Where(&dbSlab{Key: key}).
-		Joins("DBContractSet").
 		Preload("Shards").
 		Take(&s).
 		Error; err != nil {
 		t.Fatal(err)
-	} else if s.DBContractSet.Name != "other" {
+	} else if s.DBContractSetID != uint(csID) {
 		t.Fatal("contract set was not updated")
 	}
 }
@@ -2315,8 +2348,7 @@ func TestRecordContractSpending(t *testing.T) {
 	}
 
 	// Add an announcement.
-	_, err = ss.announceHost(hk, "address")
-	if err != nil {
+	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2490,8 +2522,8 @@ func TestRenameObjects(t *testing.T) {
 
 	// Assert directories are correct
 	expectedDirs := []struct {
-		id       uint
-		parentID uint
+		id       int64
+		parentID int64
 		name     string
 	}{
 		{
@@ -2505,24 +2537,45 @@ func TestRenameObjects(t *testing.T) {
 			name:     "/fileś/",
 		},
 	}
-	var directories []dbDirectory
-	test.Retry(100, 100*time.Millisecond, func() error {
-		if err := ss.gormDB.Find(&directories).Error; err != nil {
+
+	err = test.Retry(100, 100*time.Millisecond, func() error {
+		var n int64
+		if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
 			return err
-		} else if len(directories) != len(expectedDirs) {
-			return fmt.Errorf("unexpected number of directories, %v != %v", len(directories), len(expectedDirs))
+		} else if n != int64(len(expectedDirs)) {
+			return fmt.Errorf("unexpected number of directories, %v != %v", n, len(expectedDirs))
 		}
 		return nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	for i, dir := range directories {
-		if dir.ID != expectedDirs[i].id {
+	type row struct {
+		ID       int64
+		ParentID int64
+		Name     string
+	}
+	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var i int
+	for rows.Next() {
+		var dir row
+		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
+			t.Fatal(err)
+		} else if dir.ID != expectedDirs[i].id {
 			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
-		} else if dir.DBParentID != expectedDirs[i].parentID {
-			t.Fatalf("unexpected directory parent id, %v != %v", dir.DBParentID, expectedDirs[i].parentID)
+		} else if dir.ParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected directory parent id, %v != %v", dir.ParentID, expectedDirs[i].parentID)
 		} else if dir.Name != expectedDirs[i].name {
 			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
 		}
+		i++
+	}
+	if len(expectedDirs) != i {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), i)
 	}
 }
 
@@ -3103,18 +3156,6 @@ func (s *SQLStore) dbObject(key string) (dbObject, error) {
 	return obj, nil
 }
 
-// dbSlab retrieves a dbSlab from the store.
-func (s *SQLStore) dbSlab(key []byte) (dbSlab, error) {
-	var slab dbSlab
-	tx := s.gormDB.Where(&dbSlab{Key: key}).
-		Preload("Shards.Contracts.Host").
-		Take(&slab)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return dbSlab{}, api.ErrObjectNotFound
-	}
-	return slab, nil
-}
-
 func TestObjectsBySlabKey(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -3636,37 +3677,26 @@ func TestDeleteHostSector(t *testing.T) {
 	hk1, hk2 := hks[0], hks[1]
 
 	// create 2 contracts with each
-	_, _, err = ss.addTestContracts([]types.PublicKey{hk1, hk1, hk2, hk2})
+	fcids, _, err := ss.addTestContracts([]types.PublicKey{hk1, hk1, hk2, hk2})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// get all contracts
-	var dbContracts []dbContract
-	if err := ss.gormDB.Model(&dbContract{}).Preload("Host").Find(&dbContracts).Error; err != nil {
-		t.Fatal(err)
-	}
-
 	// create a healthy slab with one sector that is uploaded to all contracts.
-	key, _ := object.GenerateEncryptionKey().MarshalBinary()
 	root := types.Hash256{1, 2, 3}
-	slab := dbSlab{
-		DBContractSetID:  1,
-		Key:              key,
-		Health:           1.0,
-		HealthValidUntil: time.Now().Add(time.Hour).Unix(),
-		TotalShards:      1,
-		Shards: []dbSector{
+	ss.InsertSlab(object.Slab{
+		Key:       object.GenerateEncryptionKey(),
+		MinShards: 1,
+		Shards: []object.Sector{
 			{
-				Contracts:  dbContracts,
-				Root:       root[:],
-				LatestHost: publicKey(hk1), // hk1 is latest host
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk1: fcids,
+				},
+				Root:       root,
+				LatestHost: hk1,
 			},
 		},
-	}
-	if err := ss.gormDB.Create(&slab).Error; err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// Make sure 4 contractSector entries exist.
 	var n int64
@@ -3704,14 +3734,28 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
 	}
 
+	sectorContractCnt := func(root types.Hash256) (n int) {
+		t.Helper()
+		err := ss.DB().QueryRow(context.Background(), `
+			SELECT COUNT(*)
+			FROM contract_sectors cs
+			INNER JOIN sectors s ON s.id = cs.db_sector_id
+			WHERE s.root = ?
+		`, (*sql.Hash256)(&root)).Scan(&n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	// Fetch the sector and assert the contracts association.
 	var sectors []dbSector
-	if err := ss.gormDB.Model(&dbSector{}).Preload("Contracts").Find(&sectors).Preload("Contracts").Error; err != nil {
+	if err := ss.gormDB.Model(&dbSector{}).Find(&sectors).Error; err != nil {
 		t.Fatal(err)
 	} else if len(sectors) != 1 {
 		t.Fatal("expected 1 sector", len(sectors))
-	} else if sector := sectors[0]; len(sector.Contracts) != 2 {
-		t.Fatal("expected 2 contracts", len(sector.Contracts))
+	} else if cnt := sectorContractCnt(types.Hash256(sectors[0].Root)); cnt != 2 {
+		t.Fatal("expected 2 contracts", cnt)
 	}
 
 	hi, err := ss.Host(context.Background(), hk1)
@@ -4122,10 +4166,13 @@ func TestSlabCleanup(t *testing.T) {
 	defer ss.Close()
 
 	// create contract set
-	cs := dbContractSet{}
-	if err := ss.gormDB.Create(&cs).Error; err != nil {
+	err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		return tx.SetContractSet(context.Background(), testContractSet, nil)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	csID := ss.ContractSetID(testContractSet)
 
 	// create buffered slab
 	bsID := uint(1)
@@ -4134,7 +4181,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	var dirID int64
-	err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
 		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
 		return err
@@ -4166,7 +4213,7 @@ func TestSlabCleanup(t *testing.T) {
 	// create a slab
 	ek, _ := object.GenerateEncryptionKey().MarshalBinary()
 	slab := dbSlab{
-		DBContractSet:    cs,
+		DBContractSetID:  uint(csID),
 		Health:           1,
 		Key:              secretKey(ek),
 		HealthValidUntil: 100,
@@ -4219,7 +4266,7 @@ func TestSlabCleanup(t *testing.T) {
 	ek, _ = object.GenerateEncryptionKey().MarshalBinary()
 	bufferedSlab := dbSlab{
 		DBBufferedSlabID: bsID,
-		DBContractSet:    cs,
+		DBContractSetID:  uint(csID),
 		Health:           1,
 		Key:              ek,
 		HealthValidUntil: 100,
@@ -4600,86 +4647,6 @@ func TestUpdateObjectParallel(t *testing.T) {
 	wg.Wait()
 }
 
-// TestFetchUsedContracts is a unit test that verifies the functionality of
-// fetchUsedContracts
-func TestFetchUsedContracts(t *testing.T) {
-	// create store
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// add test host
-	hk1 := types.PublicKey{1}
-	err := ss.addTestHost(hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// add test contract
-	fcid1 := types.FileContractID{1}
-	_, err = ss.addTestContract(fcid1, hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert empty map returns no contracts
-	usedContracts := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	contracts, err := fetchUsedContracts(ss.gormDB, usedContracts)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(contracts) != 0 {
-		t.Fatal("expected 0 contracts", len(contracts))
-	}
-
-	// add an entry for fcid1
-	usedContracts[hk1] = make(map[types.FileContractID]struct{})
-	usedContracts[hk1][types.FileContractID{1}] = struct{}{}
-
-	// assert we get the used contract
-	contracts, err = fetchUsedContracts(ss.gormDB, usedContracts)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
-	} else if _, ok := contracts[fcid1]; !ok {
-		t.Fatal("contract not found")
-	}
-
-	// renew the contract
-	fcid2 := types.FileContractID{2}
-	_, err = ss.addTestRenewedContract(fcid2, fcid1, hk1, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert used contracts contains one entry and it points to the renewal
-	contracts, err = fetchUsedContracts(ss.gormDB, usedContracts)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
-	} else if contract, ok := contracts[fcid1]; !ok {
-		t.Fatal("contract not found")
-	} else if contract.convert().ID != fcid2 {
-		t.Fatal("contract should point to the renewed contract")
-	}
-
-	// add an entry for fcid2
-	usedContracts[hk1][types.FileContractID{2}] = struct{}{}
-
-	// assert used contracts now contains an entry for both contracts and both
-	// point to the renewed contract
-	contracts, err = fetchUsedContracts(ss.gormDB, usedContracts)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(contracts) != 2 {
-		t.Fatal("expected 2 contracts", len(contracts))
-	} else if !reflect.DeepEqual(contracts[types.FileContractID{1}], contracts[types.FileContractID{2}]) {
-		t.Fatal("contracts should match")
-	} else if contracts[types.FileContractID{1}].convert().ID != fcid2 {
-		t.Fatal("contracts should point to the renewed contract")
-	}
-}
-
 func TestDirectories(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -4709,8 +4676,8 @@ func TestDirectories(t *testing.T) {
 
 	expectedDirs := []struct {
 		name     string
-		id       uint
-		parentID uint
+		id       int64
+		parentID int64
 	}{
 		{
 			name:     "/",
@@ -4734,24 +4701,36 @@ func TestDirectories(t *testing.T) {
 		},
 		{
 			name:     "/dir/",
-			id:       2,
+			id:       5,
 			parentID: 1,
 		},
 	}
 
-	var dbDirs []dbDirectory
-	if err := ss.gormDB.Find(&dbDirs).Error; err != nil {
-		t.Fatal(err)
-	} else if len(dbDirs) != len(expectedDirs) {
-		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), len(dbDirs))
+	type row struct {
+		ID       int64
+		ParentID int64
+		Name     string
 	}
-
-	for i, dbDir := range dbDirs {
-		if dbDir.ID != uint(i+1) {
-			t.Fatalf("unexpected id %v", dbDir.ID)
-		} else if dbDir.Name != expectedDirs[i].name {
-			t.Fatalf("unexpected name '%v' != '%v'", dbDir.Name, expectedDirs[i].name)
+	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nDirs int
+	for i := 0; rows.Next(); i++ {
+		var dir row
+		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
+			t.Fatal(err)
+		} else if dir.ID != expectedDirs[i].id {
+			t.Fatalf("unexpected id %v", dir.ID)
+		} else if dir.ParentID != expectedDirs[i].parentID {
+			t.Fatalf("unexpected parent id %v", dir.ParentID)
+		} else if dir.Name != expectedDirs[i].name {
+			t.Fatalf("unexpected name '%v' != '%v'", dir.Name, expectedDirs[i].name)
 		}
+		nDirs++
+	}
+	if len(expectedDirs) != nDirs {
+		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), nDirs)
 	}
 
 	now := time.Now()
@@ -4760,10 +4739,7 @@ func TestDirectories(t *testing.T) {
 		return ss.waitForPruneLoop(now)
 	})
 
-	var n int64
-	if err := ss.gormDB.Model(&dbDirectory{}).Count(&n).Error; err != nil {
-		t.Fatal(err)
-	} else if n != 1 {
+	if n := ss.Count("directories"); n != 1 {
 		t.Fatal("expected 1 dir, got", n)
 	}
 }

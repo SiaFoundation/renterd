@@ -3,15 +3,12 @@ package stores
 import (
 	"database/sql/driver"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
@@ -20,16 +17,12 @@ const (
 	secretKeySize = 32
 )
 
-var zeroCurrency = currency(types.ZeroCurrency)
-
 type (
 	unixTimeMS     time.Time
 	currency       types.Currency
 	bCurrency      types.Currency
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
-	hostSettings   rhpv2.HostSettings
-	hostPriceTable rhpv3.HostPriceTable
 	secretKey      []byte
 	setting        string
 
@@ -169,42 +162,6 @@ func (pk *publicKey) Scan(value interface{}) error {
 // Value returns a publicKey value, implements driver.Valuer interface.
 func (pk publicKey) Value() (driver.Value, error) {
 	return pk[:], nil
-}
-
-func (hostSettings) GormDataType() string {
-	return "string"
-}
-
-// Scan scan value into hostSettings, implements sql.Scanner interface.
-func (hs *hostSettings) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal hostSettings value:", value))
-	}
-	return json.Unmarshal(bytes, hs)
-}
-
-// Value returns a hostSettings value, implements driver.Valuer interface.
-func (hs hostSettings) Value() (driver.Value, error) {
-	return json.Marshal(hs)
-}
-
-func (hs hostPriceTable) GormDataType() string {
-	return "string"
-}
-
-// Scan scan value into hostPriceTable, implements sql.Scanner interface.
-func (hpt *hostPriceTable) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal hostPriceTable value:", value))
-	}
-	return json.Unmarshal(bytes, hpt)
-}
-
-// Value returns a hostPriceTable value, implements driver.Valuer interface.
-func (hs hostPriceTable) Value() (driver.Value, error) {
-	return json.Marshal(hs)
 }
 
 // SQLiteTimestampFormats were taken from github.com/mattn/go-sqlite3 and are

@@ -101,18 +101,23 @@ type (
 	// that has been moved to the archive either due to expiring or being renewed.
 	ArchivedContract struct {
 		ID        types.FileContractID `json:"id"`
+		HostIP    string               `json:"hostIP"`
 		HostKey   types.PublicKey      `json:"hostKey"`
 		RenewedTo types.FileContractID `json:"renewedTo"`
 		Spending  ContractSpending     `json:"spending"`
 
-		ProofHeight    uint64 `json:"proofHeight"`
-		RevisionHeight uint64 `json:"revisionHeight"`
-		RevisionNumber uint64 `json:"revisionNumber"`
-		Size           uint64 `json:"size"`
-		StartHeight    uint64 `json:"startHeight"`
-		State          string `json:"state"`
-		WindowStart    uint64 `json:"windowStart"`
-		WindowEnd      uint64 `json:"windowEnd"`
+		ArchivalReason string               `json:"archivalReason"`
+		ContractPrice  types.Currency       `json:"contractPrice"`
+		ProofHeight    uint64               `json:"proofHeight"`
+		RenewedFrom    types.FileContractID `json:"renewedFrom"`
+		RevisionHeight uint64               `json:"revisionHeight"`
+		RevisionNumber uint64               `json:"revisionNumber"`
+		Size           uint64               `json:"size"`
+		StartHeight    uint64               `json:"startHeight"`
+		State          string               `json:"state"`
+		TotalCost      types.Currency       `json:"totalCost"`
+		WindowStart    uint64               `json:"windowStart"`
+		WindowEnd      uint64               `json:"windowEnd"`
 	}
 )
 
