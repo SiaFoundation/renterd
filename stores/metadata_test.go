@@ -2539,7 +2539,10 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	err = test.Retry(100, 100*time.Millisecond, func() error {
-		if n := ss.Count("directories"); n != int64(len(expectedDirs)) {
+		var n int64
+		if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
+			return err
+		} else if n != int64(len(expectedDirs)) {
 			return fmt.Errorf("unexpected number of directories, %v != %v", n, len(expectedDirs))
 		}
 		return nil
