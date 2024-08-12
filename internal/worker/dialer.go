@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 )
 
 // Cache to store resolved IPs
@@ -40,16 +41,20 @@ func (hc *hostCache) Clear(hostname string) {
 	delete(hc.cache, hostname)
 }
 
-// fallbackDialer implements a custom net.Dialer with a fallback mechanism
-type fallbackDialer struct {
+type DialerBus interface {
+	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+}
+
+// FallbackDialer implements a custom net.Dialer with a fallback mechanism
+type FallbackDialer struct {
 	cache *hostCache
 
-	bus    Bus
+	bus    DialerBus
 	dialer net.Dialer
 }
 
-func newFallbackDialer(bus Bus, dialer net.Dialer) *fallbackDialer {
-	return &fallbackDialer{
+func NewFallbackDialer(bus DialerBus, dialer net.Dialer) *FallbackDialer {
+	return &FallbackDialer{
 		cache: newHostCache(),
 
 		bus:    bus,
@@ -57,7 +62,7 @@ func newFallbackDialer(bus Bus, dialer net.Dialer) *fallbackDialer {
 	}
 }
 
-func (d *fallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error) {
+func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err

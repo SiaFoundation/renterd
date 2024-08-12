@@ -215,7 +215,7 @@ type worker struct {
 	uploadManager   *uploadManager
 
 	accounts        *accounts
-	dialer          *fallbackDialer
+	dialer          *iworker.FallbackDialer
 	cache           iworker.WorkerCache
 	priceTables     *priceTables
 	transportPoolV3 *transportPoolV3
@@ -1307,7 +1307,7 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 		allowPrivateIPs:         allowPrivateIPs,
 		contractLockingDuration: contractLockingDuration,
 		cache:                   iworker.NewCache(b, l),
-		dialer:                  newFallbackDialer(b, net.Dialer{}),
+		dialer:                  iworker.NewFallbackDialer(b, net.Dialer{}),
 		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
 		id:                      id,
 		bus:                     b,

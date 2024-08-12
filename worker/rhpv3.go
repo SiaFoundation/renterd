@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	iworker "go.sia.tech/renterd/internal/worker"
+
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -135,7 +137,7 @@ type transportV3 struct {
 	mu         sync.Mutex
 	hostKey    types.PublicKey
 	siamuxAddr string
-	dialer     *fallbackDialer
+	dialer     *iworker.FallbackDialer
 	t          *rhpv3.Transport
 }
 
@@ -213,18 +215,18 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
 type transportPoolV3 struct {
 	mu     sync.Mutex
-	dialer *fallbackDialer
+	dialer *iworker.FallbackDialer
 	pool   map[string]*transportV3
 }
 
-func newTransportPoolV3(dialer *fallbackDialer) *transportPoolV3 {
+func newTransportPoolV3(dialer *iworker.FallbackDialer) *transportPoolV3 {
 	return &transportPoolV3{
 		dialer: dialer,
 		pool:   make(map[string]*transportV3),
 	}
 }
 
-func dialTransport(ctx context.Context, dialer *fallbackDialer, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+func dialTransport(ctx context.Context, dialer *iworker.FallbackDialer, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
 	// Dial host.
 	conn, err := dialer.Dial(ctx, hostKey, siamuxAddr)
 	if err != nil {
