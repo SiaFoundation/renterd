@@ -18,6 +18,7 @@ type Syncer interface {
 	io.Closer
 	Addr() string
 	BroadcastHeader(h gateway.BlockHeader)
+	BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 	BroadcastTransactionSet([]types.Transaction)
 	BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
 	Connect(ctx context.Context, addr string) (*syncer.Peer, error)

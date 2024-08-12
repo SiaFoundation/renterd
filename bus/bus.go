@@ -65,6 +65,7 @@ type (
 		Block(id types.BlockID) (types.Block, bool)
 		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
 		PoolTransactions() []types.Transaction
+		V2PoolTransactions() []types.V2Transaction
 		RecommendedFee() types.Currency
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
@@ -206,6 +207,7 @@ type (
 	Syncer interface {
 		Addr() string
 		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 		BroadcastTransactionSet([]types.Transaction)
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
 		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
@@ -456,6 +458,8 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 			Timestamp:  block.Timestamp,
 			MerkleRoot: block.MerkleRoot(),
 		})
+	} else {
+		b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))
 	}
 }
 
