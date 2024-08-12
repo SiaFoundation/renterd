@@ -12,9 +12,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/node"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -56,7 +56,7 @@ func TestClient(t *testing.T) {
 	// fetch redundancy settings and assert they're configured to the default values
 	if rs, err := c.RedundancySettings(ctx); err != nil {
 		t.Fatal(err)
-	} else if rs.MinShards != build.DefaultRedundancySettings.MinShards || rs.TotalShards != build.DefaultRedundancySettings.TotalShards {
+	} else if rs.MinShards != api.DefaultRedundancySettings.MinShards || rs.TotalShards != api.DefaultRedundancySettings.TotalShards {
 		t.Fatal("unexpected redundancy settings", rs)
 	}
 }
@@ -69,7 +69,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 	}
 
 	// create bus
-	network, genesis := build.Network()
+	network, genesis := chain.Mainnet()
 	b, _, shutdown, _, _, err := node.NewBus(node.BusConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year

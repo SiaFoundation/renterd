@@ -155,9 +155,9 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *worker) upload(ctx context.Context, bucket, path string, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
+func (w *worker) upload(ctx context.Context, bucket, path string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
 	// apply the options
-	up := defaultParameters(bucket, path)
+	up := defaultParameters(bucket, path, rs)
 	for _, opt := range opts {
 		opt(&up)
 	}
