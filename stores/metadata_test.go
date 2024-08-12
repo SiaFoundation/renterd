@@ -2159,13 +2159,9 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// helper to fetch a slab from the database
-	fetchSlab := func() (slab dbSlab) {
+	fetchSlab := func() (slab object.Slab) {
 		t.Helper()
-		if err = ss.gormDB.
-			Where(&dbSlab{Key: key}).
-			Preload("Shards").
-			Take(&slab).
-			Error; err != nil {
+		if slab, err = ss.Slab(ctx, obj.Slabs[0].Key); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -2202,7 +2198,7 @@ func TestUpdateSlab(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if cids := contractIds(types.Hash256(inserted.Shards[i].Root)); len(cids) != 1 {
 			t.Fatalf("sector %d was uploaded to unexpected amount of contracts, %v!=1", i+1, len(cids))
-		} else if inserted.Shards[i].LatestHost != publicKey(hks[i]) {
+		} else if inserted.Shards[i].LatestHost != hks[i] {
 			t.Fatalf("sector %d was uploaded to unexpected amount of hosts, %v!=1", i+1, len(hks))
 		}
 	}
@@ -2243,7 +2239,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
-	} else if updated.Shards[0].LatestHost != publicKey(hks[0]) {
+	} else if updated.Shards[0].LatestHost != hks[0] {
 		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, publicKey(hks[0]))
 	} else if hks[0] != hk1 {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
@@ -2254,7 +2250,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
-	} else if updated.Shards[0].LatestHost != publicKey(hks[0]) {
+	} else if updated.Shards[0].LatestHost != hks[0] {
 		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, publicKey(hks[0]))
 	}
 
@@ -2278,30 +2274,27 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := ss.dbObject(t.Name()); err != nil {
+	if obj, err := ss.Object(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
-	} else if obj.Slabs[0].ID != updated.ID {
-		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].ID, updated.ID)
+	} else if obj.Slabs[0].Key.String() != updated.Key.String() {
+		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].Key, updated.Key)
 	}
 
 	// update the slab to change its contract set.
 	if err := ss.SetContractSet(ctx, "other", nil); err != nil {
 		t.Fatal(err)
 	}
-	csID := ss.ContractSetID("other")
 	err = ss.UpdateSlab(ctx, slab, "other")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var s dbSlab
-	if err := ss.gormDB.Where(&dbSlab{Key: key}).
-		Preload("Shards").
-		Take(&s).
-		Error; err != nil {
+	var csID int64
+	if err := ss.DB().QueryRow(context.Background(), "SELECT db_contract_set_id FROM slabs WHERE `key` = ?", key).
+		Scan(&csID); err != nil {
 		t.Fatal(err)
-	} else if s.DBContractSetID != uint(csID) {
+	} else if csID != ss.ContractSetID("other") {
 		t.Fatal("contract set was not updated")
 	}
 }
@@ -3139,18 +3132,6 @@ func TestContractSizes(t *testing.T) {
 	if n := prunableData(nil); n != 0 {
 		t.Fatal("expected no prunable data", n)
 	}
-}
-
-// dbObject retrieves a dbObject from the store.
-func (s *SQLStore) dbObject(key string) (dbObject, error) {
-	var obj dbObject
-	tx := s.gormDB.Where(&dbObject{ObjectID: key}).
-		Preload("Slabs").
-		Take(&obj)
-	if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
-		return dbObject{}, api.ErrObjectNotFound
-	}
-	return obj, nil
 }
 
 func TestObjectsBySlabKey(t *testing.T) {
