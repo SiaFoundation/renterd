@@ -1,4 +1,4 @@
-package stats
+package utils
 
 import (
 	"math"
@@ -29,15 +29,7 @@ type (
 	Float64Data = stats.Float64Data
 )
 
-func Default() *DataPoints {
-	return New(statsDecayHalfTime)
-}
-
-func NoDecay() *DataPoints {
-	return New(0)
-}
-
-func New(halfLife time.Duration) *DataPoints {
+func NewDataPoints(halfLife time.Duration) *DataPoints {
 	return &DataPoints{
 		size:        1000,
 		Float64Data: make([]float64, 0),

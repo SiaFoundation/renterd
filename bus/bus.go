@@ -59,6 +59,15 @@ type (
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
 	}
 
+	// A TransactionPool can validate and relay unconfirmed transactions.
+	TransactionPool interface {
+		AcceptTransactionSet(txns []types.Transaction) error
+		Close() error
+		RecommendedFee() types.Currency
+		Transactions() []types.Transaction
+		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
+	}
+
 	// A HostDB stores information about hosts.
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)

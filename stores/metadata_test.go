@@ -163,17 +163,13 @@ func TestObjectBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(*got.Object, want) {
-		t.Fatal("object mismatch", cmp.Diff(got.Object, want))
+		t.Fatal("object mismatch", got.Object, want)
 	}
 
-	// delete a sector
-	var sectors []dbSector
-	if err := ss.gormDB.Find(&sectors).Error; err != nil {
-		t.Fatal(err)
-	} else if len(sectors) != 2 {
-		t.Fatal("unexpected number of sectors")
-	} else if tx := ss.gormDB.Delete(sectors[0]); tx.Error != nil || tx.RowsAffected != 1 {
-		t.Fatal("unexpected number of sectors deleted", tx.Error, tx.RowsAffected)
+	// update the sector to have a non-consecutive slab index
+	_, err = ss.DB().Exec(context.Background(), "UPDATE sectors SET slab_index = 100 WHERE slab_index = 1")
+	if err != nil {
+		t.Fatalf("failed to update sector: %v", err)
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
@@ -2328,9 +2324,10 @@ func TestRecordContractSpending(t *testing.T) {
 	cm, err := ss.addTestContract(fcid, hk)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cm.Spending != (api.ContractSpending{}) {
+	} else if cm.Spending != (api.ContractSpending{}) {
 		t.Fatal("spending should be all 0")
+	} else if cm.Size != 0 && cm.RevisionNumber != 0 {
+		t.Fatalf("unexpected size or revision number, %v %v", cm.Size, cm.RevisionNumber)
 	}
 
 	// Record some spending.
@@ -2350,6 +2347,8 @@ func TestRecordContractSpending(t *testing.T) {
 		{
 			ContractID:       fcid,
 			ContractSpending: expectedSpending,
+			RevisionNumber:   100,
+			Size:             200,
 		},
 	})
 	if err != nil {
@@ -2358,16 +2357,20 @@ func TestRecordContractSpending(t *testing.T) {
 	cm2, err := ss.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cm2.Spending != expectedSpending {
+	} else if cm2.Spending != expectedSpending {
 		t.Fatal("invalid spending", cm2.Spending, expectedSpending)
+	} else if cm2.Size != 200 && cm2.RevisionNumber != 100 {
+		t.Fatalf("unexpected size or revision number, %v %v", cm2.Size, cm2.RevisionNumber)
 	}
 
-	// Record the same spending again.
+	// Record the same spending again but with a lower revision number. This
+	// shouldn't update the size.
 	err = ss.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
 		{
 			ContractID:       fcid,
 			ContractSpending: expectedSpending,
+			RevisionNumber:   100,
+			Size:             200,
 		},
 	})
 	if err != nil {
@@ -2377,9 +2380,10 @@ func TestRecordContractSpending(t *testing.T) {
 	cm3, err := ss.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cm3.Spending != expectedSpending {
+	} else if cm3.Spending != expectedSpending {
 		t.Fatal("invalid spending")
+	} else if cm2.Size != 200 && cm2.RevisionNumber != 100 {
+		t.Fatalf("unexpected size or revision number, %v %v", cm2.Size, cm2.RevisionNumber)
 	}
 }
 

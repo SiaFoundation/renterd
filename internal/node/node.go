@@ -188,8 +188,17 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	}
 
+	// reset chain state if blockchain.db does not exist to make sure deleting
+	// it forces a resync
+	chainPath := filepath.Join(consensusDir, "blockchain.db")
+	if _, err := os.Stat(chainPath); os.IsNotExist(err) {
+		if err := sqlStore.ResetChainState(context.Background()); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	}
+
 	// create chain database
-	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(consensusDir, "blockchain.db"))
+	bdb, err := coreutils.OpenBoltChainDB(chainPath)
 	if err != nil {
 		return nil, nil, nil, nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 	}
@@ -201,14 +210,14 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	}
 	cm := chain.NewManager(store, state)
 
-	// create chain subscriber
-	cs, err := chain.NewChainSubscriber(wh, cm, sqlStore, types.StandardUnlockHash(seed.PublicKey()), time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger)
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	// create wallet
-	w, err := wallet.NewSingleAddressWallet(seed, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	// create chain subscriber
+	cs, err := chain.NewChainSubscriber(wh, cm, sqlStore, w, time.Duration(cfg.AnnouncementMaxAgeHours)*time.Hour, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

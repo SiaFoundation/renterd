@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -14,21 +15,12 @@ import (
 )
 
 type Syncer interface {
+	io.Closer
 	Addr() string
 	BroadcastHeader(h gateway.BlockHeader)
 	BroadcastTransactionSet([]types.Transaction)
-	Close() error
 	Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 	Peers() []*syncer.Peer
-}
-
-type nodeSyncer struct {
-	*syncer.Syncer
-	l net.Listener
-}
-
-func (s *nodeSyncer) Close() error {
-	return s.l.Close()
 }
 
 // NewSyncer creates a syncer using the given configuration. The syncer that is
@@ -75,9 +67,9 @@ func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logge
 
 	// start the syncer
 	s := syncer.New(l, cm, ps, header, options(cfg, logger)...)
-	go s.Run()
+	go s.Run(context.Background())
 
-	return &nodeSyncer{s, l}, nil
+	return s, nil
 }
 
 func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {

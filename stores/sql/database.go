@@ -186,6 +186,11 @@ type (
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
 
+		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
+		// database, causing the provided shards to be associated with the slab.
+		// The returned string contains the filename of the slab buffer on disk.
+		MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error)
+
 		// MultipartUpload returns the multipart upload with the given ID or
 		// api.ErrMultipartUploadNotFound if the upload doesn't exist.
 		MultipartUpload(ctx context.Context, uploadID string) (api.MultipartUpload, error)
@@ -197,11 +202,18 @@ type (
 		// MultipartUploads returns a list of all multipart uploads.
 		MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, limit int) (api.MultipartListUploadsResponse, error)
 
+		// Object returns an object from the database.
+		Object(ctx context.Context, bucket, key string) (api.Object, error)
+
 		// ObjectEntries queries the database for objects in a given dir.
 		ObjectEntries(ctx context.Context, bucket, key, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
+
+		// ObjectsBySlabKey returns all objects that contain a reference to the
+		// slab with the given slabKey.
+		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error)
 
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
@@ -225,6 +237,9 @@ type (
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
+
+		// RecordContractSpending records new spending for a contract
+		RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error
 
 		// RecordHostScans records the results of host scans in the database
 		// such as recording the settings and price table of a host in case of
@@ -293,6 +308,10 @@ type (
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
 		SetUncleanShutdown(ctx context.Context) error
+
+		// SetContractSet creates the contract set with the given name and
+		// associates it with the provided contract IDs.
+		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)

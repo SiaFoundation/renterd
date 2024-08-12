@@ -52,9 +52,7 @@ var (
 	pruneDirsAlertID  = frand.Entropy256()
 )
 
-var (
-	objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
-)
+var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
 type (
 	contractState uint8
@@ -234,16 +232,6 @@ type (
 		FCID    fileContractID
 		HostKey publicKey
 	}
-
-	// rawObjectMetadata is used for hydrating object metadata.
-	rawObjectMetadata struct {
-		ETag       string
-		Health     float64
-		MimeType   string
-		ModTime    datetime
-		ObjectName string
-		Size       int64
-	}
 )
 
 func (s *contractState) LoadString(state string) error {
@@ -352,74 +340,6 @@ func (c dbContract) convert() api.ContractMetadata {
 		WindowStart:    c.WindowStart,
 		WindowEnd:      c.WindowEnd,
 	}
-}
-
-func (raw rawObjectMetadata) convert() api.ObjectMetadata {
-	return newObjectMetadata(
-		raw.ObjectName,
-		raw.ETag,
-		raw.MimeType,
-		raw.Health,
-		time.Time(raw.ModTime),
-		raw.Size,
-	)
-}
-
-func (raw rawObject) toSlabSlice() (slice object.SlabSlice, _ error) {
-	if len(raw) == 0 {
-		return object.SlabSlice{}, errors.New("no sectors found")
-	} else if raw[0].SlabBuffered && len(raw) != 1 {
-		return object.SlabSlice{}, errors.New("buffered slab with multiple sectors")
-	}
-
-	// unmarshal key
-	if err := slice.Slab.Key.UnmarshalBinary(raw[0].SlabKey); err != nil {
-		return object.SlabSlice{}, err
-	}
-
-	// handle partial slab
-	if raw[0].SlabBuffered {
-		slice.Offset = raw[0].SliceOffset
-		slice.Length = raw[0].SliceLength
-		slice.Slab.MinShards = raw[0].SlabMinShards
-		slice.Slab.Health = raw[0].SlabHealth
-		return
-	}
-
-	// hydrate all sectors
-	slabID := raw[0].SlabID
-	sectors := make([]object.Sector, 0, len(raw))
-	secIdx := uint(0)
-	for _, sector := range raw {
-		if sector.SlabID != slabID {
-			return object.SlabSlice{}, errors.New("sectors from different slabs") // developer error
-		}
-		latestHost := types.PublicKey(sector.LatestHost)
-		fcid := types.FileContractID(sector.FCID)
-
-		// next sector
-		if sector.SectorIndex != secIdx {
-			sectors = append(sectors, object.Sector{
-				Contracts:  make(map[types.PublicKey][]types.FileContractID),
-				LatestHost: latestHost,
-				Root:       *(*types.Hash256)(sector.SectorRoot),
-			})
-			secIdx = sector.SectorIndex
-		}
-
-		// add host+contract to sector
-		if fcid != (types.FileContractID{}) {
-			sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)] = append(sectors[len(sectors)-1].Contracts[types.PublicKey(sector.HostKey)], fcid)
-		}
-	}
-
-	// hydrate all fields
-	slice.Slab.Health = raw[0].SlabHealth
-	slice.Slab.Shards = sectors
-	slice.Slab.MinShards = raw[0].SlabMinShards
-	slice.Offset = raw[0].SliceOffset
-	slice.Length = raw[0].SliceLength
-	return slice, nil
 }
 
 func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
@@ -615,57 +535,40 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (c
 }
 
 func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	var wantedIds []fileContractID
-	wanted := make(map[fileContractID]struct{})
+	wanted := make(map[types.FileContractID]struct{})
 	for _, fcid := range contractIds {
-		wantedIds = append(wantedIds, fileContractID(fcid))
-		wanted[fileContractID(fcid)] = struct{}{}
+		wanted[types.FileContractID(fcid)] = struct{}{}
 	}
 
 	var diff []types.FileContractID
 	var nContractsAfter int
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		// fetch contract set
-		var cs dbContractSet
-		err := tx.
-			Where(dbContractSet{Name: name}).
-			Preload("Contracts").
-			FirstOrCreate(&cs).
-			Error
-		if err != nil {
-			return err
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		// build diff
+		prevContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
+		if err != nil && !errors.Is(err, api.ErrContractSetNotFound) {
+			return fmt.Errorf("failed to fetch contracts: %w", err)
 		}
-
-		// fetch contracts
-		var dbContracts []dbContract
-		err = tx.
-			Model(&dbContract{}).
-			Where("fcid IN (?)", wantedIds).
-			Find(&dbContracts).
-			Error
-		if err != nil {
-			return err
-		}
-		nContractsAfter = len(dbContracts)
-
-		// add removals to the diff
-		for _, contract := range cs.Contracts {
-			if _, ok := wanted[contract.FCID]; !ok {
-				diff = append(diff, types.FileContractID(contract.FCID))
+		diff = nil // reset
+		for _, c := range prevContracts {
+			if _, exists := wanted[c.ID]; !exists {
+				diff = append(diff, c.ID) // removal
+			} else {
+				delete(wanted, c.ID)
 			}
-			delete(wanted, contract.FCID)
 		}
-
-		// add additions to the diff
 		for fcid := range wanted {
-			diff = append(diff, types.FileContractID(fcid))
+			diff = append(diff, fcid) // addition
 		}
-
-		// update the association
-		if err := tx.Model(&cs).Association("Contracts").Replace(&dbContracts); err != nil {
-			return err
+		// update contract set
+		if err := tx.SetContractSet(ctx, name, contractIds); err != nil {
+			return fmt.Errorf("failed to set contract set: %w", err)
 		}
-
+		// fetch contracts after update
+		afterContracts, err := tx.Contracts(ctx, api.ContractsOpts{ContractSet: name})
+		if err != nil {
+			return fmt.Errorf("failed to fetch contracts after update: %w", err)
+		}
+		nContractsAfter = len(afterContracts)
 		return nil
 	})
 	if err != nil {
@@ -721,8 +624,8 @@ func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sort
 }
 
 func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		obj, err = s.object(tx, bucket, path)
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		obj, err = tx.Object(ctx, bucket, path)
 		return err
 	})
 	return
@@ -753,16 +656,11 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	}
 	metrics := make([]api.ContractMetric, 0, len(squashedRecords))
 	for fcid, newSpending := range squashedRecords {
-		err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-			var contract dbContract
-			err := tx.Model(&dbContract{}).
-				Where("fcid", fileContractID(fcid)).
-				Joins("Host").
-				Take(&contract).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil // contract not found, continue with next one
+		err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			contract, err := tx.Contract(ctx, fcid)
+			if errors.Is(err, api.ErrContractNotFound) {
 			} else if err != nil {
-				return err
+				return fmt.Errorf("failed to fetch contract: %w", err)
 			}
 
 			remainingCollateral := types.ZeroCurrency
@@ -772,38 +670,35 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			m := api.ContractMetric{
 				Timestamp:           api.TimeNow(),
 				ContractID:          fcid,
-				HostKey:             types.PublicKey(contract.Host.PublicKey),
+				HostKey:             contract.HostKey,
 				RemainingCollateral: remainingCollateral,
 				RemainingFunds:      latestValues[fcid].validRenterPayout,
 				RevisionNumber:      latestValues[fcid].revision,
-				UploadSpending:      types.Currency(contract.UploadSpending).Add(newSpending.Uploads),
-				DownloadSpending:    types.Currency(contract.DownloadSpending).Add(newSpending.Downloads),
-				FundAccountSpending: types.Currency(contract.FundAccountSpending).Add(newSpending.FundAccount),
-				DeleteSpending:      types.Currency(contract.DeleteSpending).Add(newSpending.Deletions),
-				ListSpending:        types.Currency(contract.ListSpending).Add(newSpending.SectorRoots),
+				UploadSpending:      contract.Spending.Uploads.Add(newSpending.Uploads),
+				DownloadSpending:    contract.Spending.Downloads.Add(newSpending.Downloads),
+				FundAccountSpending: contract.Spending.FundAccount.Add(newSpending.FundAccount),
+				DeleteSpending:      contract.Spending.Deletions.Add(newSpending.Deletions),
+				ListSpending:        contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
 			}
 			metrics = append(metrics, m)
 
-			updates := make(map[string]interface{})
+			var updates api.ContractSpending
 			if !newSpending.Uploads.IsZero() {
-				updates["upload_spending"] = currency(m.UploadSpending)
+				updates.Uploads = m.UploadSpending
 			}
 			if !newSpending.Downloads.IsZero() {
-				updates["download_spending"] = currency(m.DownloadSpending)
+				updates.Downloads = m.DownloadSpending
 			}
 			if !newSpending.FundAccount.IsZero() {
-				updates["fund_account_spending"] = currency(m.FundAccountSpending)
+				updates.FundAccount = m.FundAccountSpending
 			}
 			if !newSpending.Deletions.IsZero() {
-				updates["delete_spending"] = currency(m.DeleteSpending)
+				updates.Deletions = m.DeleteSpending
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates["list_spending"] = currency(m.ListSpending)
+				updates.SectorRoots = m.ListSpending
 			}
-			updates["revision_number"] = latestValues[fcid].revision
-			updates["size"] = latestValues[fcid].size
-			err = tx.Model(&contract).Updates(updates).Error
-			return err
+			return tx.RecordContractSpending(ctx, fcid, latestValues[fcid].revision, latestValues[fcid].size, updates)
 		})
 		if err != nil {
 			return err
@@ -1079,99 +974,6 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 	return
 }
 
-// object retrieves an object from the store.
-func (s *SQLStore) object(tx *gorm.DB, bucket, path string) (api.Object, error) {
-	// fetch raw object data
-	raw, err := s.objectRaw(tx, bucket, path)
-	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && len(raw) == 0) {
-		return api.Object{}, api.ErrObjectNotFound
-	} else if err != nil {
-		return api.Object{}, err
-	}
-
-	// hydrate raw object data
-	return s.objectHydrate(tx, bucket, path, raw)
-}
-
-// objectHydrate hydrates a raw object and returns an api.Object.
-func (s *SQLStore) objectHydrate(tx *gorm.DB, bucket, path string, obj rawObject) (api.Object, error) {
-	// parse object key
-	var key object.EncryptionKey
-	if err := key.UnmarshalBinary(obj[0].ObjectKey); err != nil {
-		return api.Object{}, err
-	}
-
-	// filter out slabs without slab ID and buffered slabs - this is expected
-	// for an empty object or objects that end with a partial slab.
-	var filtered rawObject
-	minHealth := math.MaxFloat64
-	for _, sector := range obj {
-		if sector.SlabID != 0 {
-			filtered = append(filtered, sector)
-			if sector.SlabHealth < minHealth {
-				minHealth = sector.SlabHealth
-			}
-		}
-	}
-
-	// hydrate all slabs
-	slabs := make([]object.SlabSlice, 0, len(filtered))
-	if len(filtered) > 0 {
-		var start int
-		// create a helper function to add a slab and update the state
-		addSlab := func(end int) error {
-			if slab, err := filtered[start:end].toSlabSlice(); err != nil {
-				return err
-			} else {
-				slabs = append(slabs, slab)
-				start = end
-			}
-			return nil
-		}
-
-		curr := filtered[0]
-		for j, sector := range filtered {
-			if sector.ObjectIndex == 0 {
-				return api.Object{}, api.ErrObjectCorrupted
-			} else if sector.SectorIndex == 0 && !sector.SlabBuffered {
-				return api.Object{}, api.ErrObjectCorrupted
-			}
-			if sector.ObjectIndex != curr.ObjectIndex {
-				if err := addSlab(j); err != nil {
-					return api.Object{}, err
-				}
-				curr = sector
-			}
-		}
-		if err := addSlab(len(filtered)); err != nil {
-			return api.Object{}, err
-		}
-	}
-
-	// fetch object metadata
-	metadata, err := s.objectMetadata(tx, bucket, path)
-	if err != nil {
-		return api.Object{}, err
-	}
-
-	// return object
-	return api.Object{
-		Metadata: metadata,
-		ObjectMetadata: newObjectMetadata(
-			obj[0].ObjectName,
-			obj[0].ObjectETag,
-			obj[0].ObjectMimeType,
-			obj[0].ObjectHealth,
-			obj[0].ObjectModTime,
-			obj[0].ObjectSize,
-		),
-		Object: &object.Object{
-			Key:   key,
-			Slabs: slabs,
-		},
-	}, nil
-}
-
 // ObjectMetadata returns an object's metadata
 func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj api.Object, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
@@ -1179,37 +981,6 @@ func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj
 		return err
 	})
 	return
-}
-
-func (s *SQLStore) objectMetadata(tx *gorm.DB, bucket, path string) (api.ObjectUserMetadata, error) {
-	var rows []dbObjectUserMetadata
-	err := tx.
-		Model(&dbObjectUserMetadata{}).
-		Table("object_user_metadata oum").
-		Joins("INNER JOIN objects o ON oum.db_object_id = o.id").
-		Joins("INNER JOIN buckets b ON o.db_bucket_id = b.id").
-		Where("o.object_id = ? AND b.name = ?", path, bucket).
-		Find(&rows).
-		Error
-	if err != nil {
-		return nil, err
-	}
-	metadata := make(api.ObjectUserMetadata)
-	for _, row := range rows {
-		metadata[row.Key] = row.Value
-	}
-	return metadata, nil
-}
-
-func newObjectMetadata(name, etag, mimeType string, health float64, modTime time.Time, size int64) api.ObjectMetadata {
-	return api.ObjectMetadata{
-		ETag:     etag,
-		Health:   health,
-		ModTime:  api.TimeRFC3339(modTime.UTC()),
-		Name:     name,
-		Size:     size,
-		MimeType: mimeType,
-	}
 }
 
 func (s *SQLStore) objectRaw(txn *gorm.DB, bucket string, path string) (rows rawObject, err error) {
@@ -1245,32 +1016,10 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 }
 
 func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
-	var rows []rawObjectMetadata
-	key, err := slabKey.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Raw(`
-SELECT DISTINCT obj.object_id as ObjectName, obj.size as Size, obj.mime_type as MimeType, sla.health as Health
-FROM slabs sla
-INNER JOIN slices sli ON sli.db_slab_id = sla.id
-INNER JOIN objects obj ON sli.db_object_id = obj.id
-INNER JOIN buckets b ON obj.db_bucket_id = b.id AND b.name = ?
-WHERE sla.key = ?
-	`, bucket, key).
-			Scan(&rows).
-			Error
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		metadata, err = tx.ObjectsBySlabKey(ctx, bucket, slabKey)
+		return err
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	// convert rows
-	for _, row := range rows {
-		metadata = append(metadata, row.convert())
-	}
 	return
 }
 
@@ -1286,14 +1035,15 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 			}
 		}
 	}
-	var fileName string
-	err := s.retryTransaction(ctx, func(tx *gorm.DB) error {
-		for _, slab := range slabs {
-			var err error
-			fileName, err = s.markPackedSlabUploaded(tx, slab)
+	var fileNames []string
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		fileNames = make([]string, len(slabs))
+		for i, slab := range slabs {
+			fileName, err := tx.MarkPackedSlabUploaded(ctx, slab)
 			if err != nil {
 				return err
 			}
+			fileNames[i] = fileName
 		}
 		return nil
 	})
@@ -1302,66 +1052,8 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	}
 
 	// Delete buffer from disk.
-	s.slabBufferMgr.RemoveBuffers(fileName)
+	s.slabBufferMgr.RemoveBuffers(fileNames...)
 	return nil
-}
-
-func (s *SQLStore) markPackedSlabUploaded(tx *gorm.DB, slab api.UploadedPackedSlab) (string, error) {
-	// collect all used contracts
-	usedContracts := slab.Contracts()
-	contracts, err := fetchUsedContracts(tx, usedContracts)
-	if err != nil {
-		return "", err
-	}
-
-	// find the slab
-	var sla dbSlab
-	if err := tx.Where("db_buffered_slab_id", slab.BufferID).
-		Take(&sla).Error; err != nil {
-		return "", err
-	}
-
-	// update the slab
-	if err := tx.Model(&dbSlab{}).
-		Where("id", sla.ID).
-		Updates(map[string]interface{}{
-			"db_buffered_slab_id": nil,
-		}).Error; err != nil {
-		return "", fmt.Errorf("failed to set buffered slab NULL: %w", err)
-	}
-
-	// delete buffer
-	var fileName string
-	if err := tx.Raw("SELECT filename FROM buffered_slabs WHERE id = ?", slab.BufferID).
-		Scan(&fileName).Error; err != nil {
-		return "", err
-	}
-	if err := tx.Exec("DELETE FROM buffered_slabs WHERE id = ?", slab.BufferID).Error; err != nil {
-		return "", err
-	}
-
-	// add the shards to the slab
-	var shards []dbSector
-	for i := range slab.Shards {
-		sector := dbSector{
-			DBSlabID:   sla.ID,
-			SlabIndex:  i + 1,
-			LatestHost: publicKey(slab.Shards[i].LatestHost),
-			Root:       slab.Shards[i].Root[:],
-		}
-		for _, fcids := range slab.Shards[i].Contracts {
-			for _, fcid := range fcids {
-				if c, ok := contracts[fcid]; ok {
-					sector.Contracts = append(sector.Contracts, c)
-				}
-			}
-		}
-		shards = append(shards, sector)
-	}
-	if err := tx.Create(&shards).Error; err != nil {
-		return "", fmt.Errorf("failed to create shards: %w", err)
-	}
-	return fileName, nil
 }
 
 func (s *SQLStore) pruneSlabsLoop() {
