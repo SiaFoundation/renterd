@@ -188,6 +188,18 @@ func (s *testSQLStore) DB() *isql.DB {
 	panic("unreachable")
 }
 
+func (s *testSQLStore) ExecDBSpecific(sqliteQuery, mysqlQuery string) (dsql.Result, error) {
+	switch db := s.db.(type) {
+	case *sqlite.MainDatabase:
+		return db.DB().Exec(context.Background(), sqliteQuery)
+	case *mysql.MainDatabase:
+		return db.DB().Exec(context.Background(), mysqlQuery)
+	default:
+		s.t.Fatal("unknown db type", db)
+	}
+	panic("unreachable")
+}
+
 func (s *testSQLStore) DBMetrics() *isql.DB {
 	switch db := s.dbMetrics.(type) {
 	case *sqlite.MetricsDatabase:
@@ -267,11 +279,16 @@ func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, 
 	}
 }
 
-func (s *SQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
-	cnt, err := s.contractsCount()
-	if err != nil {
-		return nil, nil, err
+func (s *testSQLStore) Count(table string) (n int64) {
+	if err := s.DB().QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).
+		Scan(&n); err != nil {
+		s.t.Fatal(err)
 	}
+	return
+}
+
+func (s *testSQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.FileContractID, contracts []api.ContractMetadata, err error) {
+	cnt := s.Count("contracts")
 	for i, key := range keys {
 		fcids = append(fcids, types.FileContractID{byte(int(cnt) + i + 1)})
 		contract, err := s.addTestContract(fcids[len(fcids)-1], key)
@@ -291,14 +308,6 @@ func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
 	rev := testContractRevision(fcid, hk)
 	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, startHeight, renewedFrom, api.ContractStatePending)
-}
-
-func (s *SQLStore) contractsCount() (cnt int64, err error) {
-	err = s.gormDB.
-		Model(&dbContract{}).
-		Count(&cnt).
-		Error
-	return
 }
 
 func (s *SQLStore) overrideSlabHealth(objectID string, health float64) (err error) {
