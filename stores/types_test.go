@@ -1,9 +1,9 @@
 package stores
 
 import (
+	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 
 	"go.sia.tech/core/types"
@@ -23,15 +23,25 @@ func TestTypeCurrency(t *testing.T) {
 	}
 
 	// insert currencies in random order
-	if err := ss.gormDB.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", sql.BCurrency(types.MaxCurrency), sql.BCurrency(types.NewCurrency64(1)), sql.BCurrency(types.ZeroCurrency)).Error; err != nil {
+	if _, err := ss.DB().Exec(context.Background(), "INSERT INTO currencies (c) VALUES (?),(?),(?);", sql.BCurrency(types.MaxCurrency), sql.BCurrency(types.NewCurrency64(1)), sql.BCurrency(types.ZeroCurrency)); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch currencies and assert they're sorted
 	var currencies []sql.BCurrency
-	if err := ss.gormDB.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
+	rows, err := ss.DB().Query(context.Background(), "SELECT c FROM currencies ORDER BY c ASC;")
+	if err != nil {
 		t.Fatal(err)
-	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c sql.BCurrency
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		currencies = append(currencies, c)
+	}
+	if !sort.SliceIsSorted(currencies, func(i, j int) bool {
 		return types.Currency(currencies[i]).Cmp(types.Currency(currencies[j])) < 0
 	}) {
 		t.Fatal("currencies not sorted", currencies)
@@ -85,11 +95,12 @@ func TestTypeCurrency(t *testing.T) {
 	}
 	for i, test := range tests {
 		var result bool
-		query := fmt.Sprintf("SELECT ? %s ?", test.cmp)
-		if !isSQLite(ss.gormDB) {
-			query = strings.ReplaceAll(query, "?", "HEX(?)")
-		}
-		if err := ss.gormDB.Raw(query, test.a, test.b).Scan(&result).Error; err != nil {
+		if err := ss.QueryRowDBSpecific(
+			fmt.Sprintf("SELECT ? %s ?", test.cmp),
+			fmt.Sprintf("SELECT HEX(?) %s HEX(?)", test.cmp),
+			[]any{test.a, test.b},
+			[]any{test.a, test.b},
+		).Scan(&result); err != nil {
 			t.Fatal(err)
 		} else if !result {
 			t.Errorf("unexpected result in case %d/%d: expected %v %s %v to be true", i+1, len(tests), types.Currency(test.a).String(), test.cmp, types.Currency(test.b).String())
@@ -108,30 +119,21 @@ func TestTypeMerkleProof(t *testing.T) {
 	defer ss.Close()
 
 	// prepare the table
-	if isSQLite(ss.gormDB) {
-		if err := ss.gormDB.Exec("CREATE TABLE merkle_proofs (id INTEGER PRIMARY KEY AUTOINCREMENT,merkle_proof BLOB);").Error; err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		ss.gormDB.Exec("DROP TABLE IF EXISTS merkle_proofs;")
-		if err := ss.gormDB.Exec("CREATE TABLE merkle_proofs (id INT AUTO_INCREMENT PRIMARY KEY, merkle_proof BLOB);").Error; err != nil {
-			t.Fatal(err)
-		}
-	}
+	ss.ExecDBSpecific(
+		"CREATE TABLE merkle_proofs (id INTEGER PRIMARY KEY AUTOINCREMENT,merkle_proof BLOB);",
+		"CREATE TABLE merkle_proofs (id INT AUTO_INCREMENT PRIMARY KEY, merkle_proof BLOB);",
+	)
 
 	// insert merkle proof
 	mp1 := sql.MerkleProof{Hashes: []types.Hash256{{3}, {1}, {2}}}
 	mp2 := sql.MerkleProof{Hashes: []types.Hash256{{4}}}
-	if err := ss.gormDB.Exec("INSERT INTO merkle_proofs (merkle_proof) VALUES (?), (?);", mp1, mp2).Error; err != nil {
+	if _, err := ss.DB().Exec(context.Background(), "INSERT INTO merkle_proofs (merkle_proof) VALUES (?), (?);", mp1, mp2); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch first proof
 	var first sql.MerkleProof
-	if err := ss.gormDB.
-		Raw(`SELECT merkle_proof FROM merkle_proofs`).
-		Take(&first).
-		Error; err != nil {
+	if err := ss.DB().QueryRow(context.Background(), "SELECT merkle_proof FROM merkle_proofs").Scan(&first); err != nil {
 		t.Fatal(err)
 	} else if first.Hashes[0] != (types.Hash256{3}) || first.Hashes[1] != (types.Hash256{1}) || first.Hashes[2] != (types.Hash256{2}) {
 		t.Fatalf("unexpected proof %+v", first)
@@ -139,12 +141,19 @@ func TestTypeMerkleProof(t *testing.T) {
 
 	// fetch both proofs
 	var both []sql.MerkleProof
-	if err := ss.gormDB.
-		Raw(`SELECT merkle_proof FROM merkle_proofs`).
-		Scan(&both).
-		Error; err != nil {
+	rows, err := ss.DB().Query(context.Background(), "SELECT merkle_proof FROM merkle_proofs")
+	if err != nil {
 		t.Fatal(err)
-	} else if len(both) != 2 {
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var mp sql.MerkleProof
+		if err := rows.Scan(&mp); err != nil {
+			t.Fatal(err)
+		}
+		both = append(both, mp)
+	}
+	if len(both) != 2 {
 		t.Fatalf("unexpected number of proofs: %d", len(both))
 	} else if both[1].Hashes[0] != (types.Hash256{4}) {
 		t.Fatalf("unexpected proof %+v", both)

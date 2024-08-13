@@ -23,7 +23,6 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	sql "go.sia.tech/renterd/stores/sql"
-	"gorm.io/gorm"
 	"lukechampine.com/frand"
 )
 
@@ -115,15 +114,16 @@ func randomMultisigUC() types.UnlockConditions {
 	return uc
 }
 
-func updateAllObjectsHealth(tx *gorm.DB) error {
-	return tx.Exec(`
+func updateAllObjectsHealth(db *isql.DB) error {
+	_, err := db.Exec(context.Background(), `
 UPDATE objects
 SET health = (
 	SELECT COALESCE(MIN(slabs.health), 1)
 	FROM slabs
 	INNER JOIN slices sli ON sli.db_slab_id = slabs.id
 	WHERE sli.db_object_id = objects.id)
-`).Error
+`)
+	return err
 }
 
 // TestObjectBasic tests the hydration of raw objects works when we fetch
@@ -471,11 +471,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// Check join table count as well.
-	var count int64
-	if err := ss.gormDB.Table("contract_sectors").Count(&count).Error; err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
+	if count := ss.Count("contract_sectors"); count != 0 {
 		t.Fatalf("expected %v objects in contract_sectors but got %v", 0, count)
 	}
 }
@@ -1501,7 +1497,7 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// update health of objects to match the overridden health of the slabs
-	if err := updateAllObjectsHealth(ss.gormDB); err != nil {
+	if err := updateAllObjectsHealth(ss.DB()); err != nil {
 		t.Fatal()
 	}
 
@@ -3554,7 +3550,7 @@ func TestListObjects(t *testing.T) {
 	}
 
 	// update health of objects to match the overridden health of the slabs
-	if err := updateAllObjectsHealth(ss.gormDB); err != nil {
+	if err := updateAllObjectsHealth(ss.DB()); err != nil {
 		t.Fatal()
 	}
 
@@ -3983,7 +3979,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	// assert the health validity is always updated to a random time in the future that matches the boundaries
 	for i := 0; i < 1e3; i++ {
 		// reset health validity
-		if tx := ss.gormDB.Exec("UPDATE slabs SET health_valid_until = 0;"); tx.Error != nil {
+		if _, err := ss.DB().Exec(context.Background(), "UPDATE slabs SET health_valid_until = 0;"); err != nil {
 			t.Fatal(err)
 		}
 
@@ -4142,7 +4138,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create buffered slab
 	bsID := uint(1)
-	if err := ss.gormDB.Exec("INSERT INTO buffered_slabs (filename) VALUES ('foo');").Error; err != nil {
+	if _, err := ss.DB().Exec(context.Background(), "INSERT INTO buffered_slabs (filename) VALUES ('foo');"); err != nil {
 		t.Fatal(err)
 	}
 
