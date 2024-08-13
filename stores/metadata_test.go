@@ -2100,7 +2100,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Delete the sector.
-	if err := ss.gormDB.Delete(&dbSector{Model: Model{ID: 1}}).Error; err != nil {
+	if _, err := ss.DB().Exec(context.Background(), "DELETE FROM sectors WHERE id = ?", 1); err != nil {
 		t.Fatal(err)
 	} else if n := ss.Count("contract_sectors"); n != 0 {
 		t.Fatal("table should be empty", n)
@@ -3682,12 +3682,10 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// Find the slab. It should have an invalid health.
 	var s dbSlab
-	if err := ss.gormDB.Preload("Shards").Take(&s).Error; err != nil {
+	if err := ss.gormDB.Take(&s).Error; err != nil {
 		t.Fatal(err)
 	} else if s.HealthValid() {
 		t.Fatal("expected health to be invalid")
-	} else if s.Shards[0].LatestHost != publicKey(hk2) {
-		t.Fatal("expected hk2 to be latest host", types.PublicKey(s.Shards[0].LatestHost))
 	}
 
 	sectorContractCnt := func(root types.Hash256) (n int) {
@@ -3704,14 +3702,38 @@ func TestDeleteHostSector(t *testing.T) {
 		return
 	}
 
+	// helper to fetch sectors
+	type sector struct {
+		LatestHost types.PublicKey
+		Root       types.Hash256
+		SlabID     int64
+	}
+	fetchSectors := func() (sectors []sector) {
+		t.Helper()
+		rows, err := ss.DB().Query(context.Background(), "SELECT root, latest_host, db_slab_id FROM sectors")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s sector
+			if err := rows.Scan((*sql.PublicKey)(&s.Root), (*sql.Hash256)(&s.LatestHost), &s.SlabID); err != nil {
+				t.Fatal(err)
+			}
+			sectors = append(sectors, s)
+		}
+		return
+	}
+
 	// Fetch the sector and assert the contracts association.
-	var sectors []dbSector
-	if err := ss.gormDB.Model(&dbSector{}).Find(&sectors).Error; err != nil {
-		t.Fatal(err)
-	} else if len(sectors) != 1 {
+	if sectors := fetchSectors(); len(sectors) != 1 {
 		t.Fatal("expected 1 sector", len(sectors))
 	} else if cnt := sectorContractCnt(types.Hash256(sectors[0].Root)); cnt != 2 {
 		t.Fatal("expected 2 contracts", cnt)
+	} else if sectors[0].LatestHost != hk2 {
+		t.Fatalf("expected latest host to be hk2, got %v", sectors[0].LatestHost)
+	} else if sectors[0].SlabID != int64(s.ID) {
+		t.Fatalf("expected slab id to be %v, got %v", s.ID, sectors[0].SlabID)
 	}
 
 	hi, err := ss.Host(context.Background(), hk1)
@@ -3748,12 +3770,14 @@ func TestDeleteHostSector(t *testing.T) {
 	}
 
 	// Fetch the sector and check the public key has the default value
-	if err := ss.gormDB.Model(&dbSector{}).Find(&sectors).Error; err != nil {
-		t.Fatal(err)
-	} else if len(sectors) != 1 {
+	if sectors := fetchSectors(); len(sectors) != 1 {
 		t.Fatal("expected 1 sector", len(sectors))
+	} else if cnt := sectorContractCnt(types.Hash256(sectors[0].Root)); cnt != 0 {
+		t.Fatal("expected 0 contracts", cnt)
 	} else if sector := sectors[0]; sector.LatestHost != [32]byte{} {
 		t.Fatal("expected latest host to be empty", sector.LatestHost)
+	} else if sectors[0].SlabID != int64(s.ID) {
+		t.Fatalf("expected slab id to be %v, got %v", s.ID, sectors[0].SlabID)
 	}
 }
 func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) []object.Sector {
@@ -4349,6 +4373,31 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	} else if len(dbSlices) != 2 {
 		t.Fatal("invalid number of slices", len(dbSlices))
 	}
+
+	// helper to fetch sectors
+	type sector struct {
+		ID         int64
+		SlabID     int64
+		LatestHost types.PublicKey
+		Root       types.Hash256
+	}
+	fetchSectorsBySlabID := func(slabID int64) (sectors []sector) {
+		t.Helper()
+		rows, err := ss.DB().Query(context.Background(), "SELECT id, db_slab_id, root, latest_host FROM sectors WHERE db_slab_id = ?", slabID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s sector
+			if err := rows.Scan(&s.ID, &s.SlabID, (*sql.PublicKey)(&s.Root), (*sql.Hash256)(&s.LatestHost)); err != nil {
+				t.Fatal(err)
+			}
+			sectors = append(sectors, s)
+		}
+		return
+	}
+
 	for i, dbSlice := range dbSlices {
 		if dbSlice.ID != uint(i+1) {
 			t.Fatal("unexpected id", dbSlice.ID)
@@ -4380,20 +4429,18 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		}
 
 		// fetch the sectors
-		var dbSectors []dbSector
-		if err := ss.gormDB.Where("db_slab_id", dbSlab.ID).Find(&dbSectors).Error; err != nil {
-			t.Fatal(err)
-		} else if len(dbSectors) != totalShards {
-			t.Fatal("invalid number of sectors", len(dbSectors))
+		sectors := fetchSectorsBySlabID(int64(dbSlab.ID))
+		if len(sectors) != totalShards {
+			t.Fatal("invalid number of sectors", len(sectors))
 		}
-		for j, dbSector := range dbSectors {
-			if dbSector.ID != uint(i*totalShards+j+1) {
-				t.Fatal("invalid id", dbSector.ID)
-			} else if dbSector.DBSlabID != dbSlab.ID {
-				t.Fatal("invalid slab id", dbSector.DBSlabID)
-			} else if dbSector.LatestHost != publicKey(hks[i*totalShards+j]) {
+		for j, sector := range sectors {
+			if sector.ID != int64(i*totalShards+j+1) {
+				t.Fatal("invalid id", sector.ID)
+			} else if sector.SlabID != int64(dbSlab.ID) {
+				t.Fatal("invalid slab id", sector.SlabID)
+			} else if sector.LatestHost != hks[i*totalShards+j] {
 				t.Fatal("invalid host")
-			} else if !bytes.Equal(dbSector.Root, obj.Slabs[i].Shards[j].Root[:]) {
+			} else if sector.Root != obj.Slabs[i].Shards[j].Root {
 				t.Fatal("invalid root")
 			}
 		}
@@ -4478,20 +4525,18 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	// fetch the sectors
-	var dbSectors2 []dbSector
-	if err := ss.gormDB.Where("db_slab_id", dbSlab2.ID).Find(&dbSectors2).Error; err != nil {
-		t.Fatal(err)
-	} else if len(dbSectors2) != totalShards {
-		t.Fatal("invalid number of sectors", len(dbSectors2))
+	sectors2 := fetchSectorsBySlabID(int64(dbSlab2.ID))
+	if len(sectors2) != totalShards {
+		t.Fatal("invalid number of sectors", len(sectors2))
 	}
-	for j, dbSector := range dbSectors2 {
-		if dbSector.ID != uint((len(obj.Slabs))*totalShards+j+1) {
-			t.Fatal("invalid id", dbSector.ID)
-		} else if dbSector.DBSlabID != dbSlab2.ID {
-			t.Fatal("invalid slab id", dbSector.DBSlabID)
-		} else if dbSector.LatestHost != publicKey(hks[(len(obj.Slabs))*totalShards+j]) {
+	for j, sector := range sectors2 {
+		if sector.ID != int64((len(obj.Slabs))*totalShards+j+1) {
+			t.Fatal("invalid id", sector.ID)
+		} else if sector.SlabID != int64(dbSlab2.ID) {
+			t.Fatal("invalid slab id", sector.SlabID)
+		} else if sector.LatestHost != hks[(len(obj.Slabs))*totalShards+j] {
 			t.Fatal("invalid host")
-		} else if !bytes.Equal(dbSector.Root, obj2.Slabs[0].Shards[j].Root[:]) {
+		} else if sector.Root != obj2.Slabs[0].Shards[j].Root {
 			t.Fatal("invalid root")
 		}
 	}

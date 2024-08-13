@@ -70,26 +70,12 @@ type (
 		TotalShards      uint8     `gorm:"index"`
 
 		Slices []dbSlice
-		Shards []dbSector `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete shards too
-	}
-
-	dbSector struct {
-		Model
-
-		DBSlabID  uint `gorm:"index:idx_sectors_db_slab_id;uniqueIndex:idx_sectors_slab_id_slab_index;NOT NULL"`
-		SlabIndex int  `gorm:"index:idx_sectors_slab_index;uniqueIndex:idx_sectors_slab_id_slab_index;NOT NULL"`
-
-		LatestHost publicKey `gorm:"NOT NULL"`
-		Root       []byte    `gorm:"index;unique;NOT NULL;size:32"`
 	}
 )
 
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
 }
-
-// TableName implements the gorm.Tabler interface.
-func (dbSector) TableName() string { return "sectors" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
