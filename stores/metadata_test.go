@@ -3857,7 +3857,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		t.Helper()
 
 		var validUntil int64
-		if err := ss.DB().QueryRow(context.Background(), "SELECT health_valid_until FROM slabs WHERE key = ?", sql.EncryptionKey(slabKey)).Scan(&validUntil); err != nil {
+		if err := ss.DB().QueryRow(context.Background(), "SELECT health_valid_until FROM slabs WHERE `key` = ?", sql.EncryptionKey(slabKey)).Scan(&validUntil); err != nil {
 			t.Fatal(err)
 		} else if valid := time.Now().Before(time.Unix(validUntil, 0)); valid != expected {
 			t.Fatal("unexpected health valid", valid)
@@ -4172,7 +4172,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create a slab
 	var slabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, key, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
 		t.Fatal(err)
 	} else if slabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4213,7 +4213,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create another slab referencing the buffered slab
 	var bufferedSlabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, key, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
 		t.Fatal(err)
 	} else if bufferedSlabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4387,7 +4387,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		TotalShards      uint8
 		Key              object.EncryptionKey
 	}
-	fetchSlabStmt, err := ss.DB().Prepare(context.Background(), "SELECT id, db_contract_set_id, health, health_valid_until, min_shards, total_shards, key FROM slabs WHERE id = ?")
+	fetchSlabStmt, err := ss.DB().Prepare(context.Background(), "SELECT id, db_contract_set_id, health, health_valid_until, min_shards, total_shards, `key` FROM slabs WHERE id = ?")
 	if err != nil {
 		t.Fatal(err)
 	}
