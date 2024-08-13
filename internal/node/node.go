@@ -71,7 +71,16 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 	var dbMetrics sql.MetricsDatabase
 	if cfg.Database.MySQL.URI != "" {
 		// create MySQL connections
-		dbm, err := mysql.Open(
+		connMain, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.Database,
+		)
+		if err != nil {
+			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open MySQL main database: %w", err)
+		}
+		connMetrics, err := mysql.Open(
 			cfg.Database.MySQL.User,
 			cfg.Database.MySQL.Password,
 			cfg.Database.MySQL.URI,
@@ -80,11 +89,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(dbm, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
