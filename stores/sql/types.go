@@ -3,6 +3,7 @@ package sql
 import (
 	"database/sql"
 	"database/sql/driver"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ var (
 
 type (
 	AutopilotConfig api.AutopilotConfig
+	BCurrency       types.Currency
 	BigInt          big.Int
 	BusSetting      string
 	Currency        types.Currency
@@ -52,6 +54,7 @@ type scannerValuer interface {
 
 var (
 	_ scannerValuer = (*AutopilotConfig)(nil)
+	_ scannerValuer = (*BCurrency)(nil)
 	_ scannerValuer = (*BigInt)(nil)
 	_ scannerValuer = (*BusSetting)(nil)
 	_ scannerValuer = (*Currency)(nil)
@@ -84,6 +87,28 @@ func (cfg *AutopilotConfig) Scan(value interface{}) error {
 // Value returns a AutopilotConfig value, implements driver.Valuer interface.
 func (cfg AutopilotConfig) Value() (driver.Value, error) {
 	return json.Marshal(cfg)
+}
+
+// Scan implements the sql.Scanner interface.
+func (sc *BCurrency) Scan(src any) error {
+	buf, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot scan %T to Currency", src)
+	} else if len(buf) != 16 {
+		return fmt.Errorf("cannot scan %d bytes to Currency", len(buf))
+	}
+
+	sc.Hi = binary.BigEndian.Uint64(buf[:8])
+	sc.Lo = binary.BigEndian.Uint64(buf[8:])
+	return nil
+}
+
+// Value implements the driver.Valuer interface.
+func (sc BCurrency) Value() (driver.Value, error) {
+	buf := make([]byte, 16)
+	binary.BigEndian.PutUint64(buf[:8], sc.Hi)
+	binary.BigEndian.PutUint64(buf[8:], sc.Lo)
+	return buf, nil
 }
 
 // Scan scan value into BigInt, implements sql.Scanner interface.

@@ -903,9 +903,9 @@ func TestArchiveContracts(t *testing.T) {
 	}
 
 	// assert the two others were archived
-	ffcids := make([]fileContractID, 2)
-	ffcids[0] = fileContractID(fcids[1])
-	ffcids[1] = fileContractID(fcids[2])
+	ffcids := make([]sql.FileContractID, 2)
+	ffcids[0] = sql.FileContractID(fcids[1])
+	ffcids[1] = sql.FileContractID(fcids[2])
 	rows, err := ss.DB().Query(context.Background(), "SELECT reason FROM archived_contracts WHERE fcid IN (?, ?)",
 		sql.FileContractID(ffcids[0]), sql.FileContractID(ffcids[1]))
 	if err != nil {
@@ -2236,7 +2236,7 @@ func TestUpdateSlab(t *testing.T) {
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
 	} else if updated.Shards[0].LatestHost != hks[0] {
-		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, publicKey(hks[0]))
+		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, sql.PublicKey(hks[0]))
 	} else if hks[0] != hk1 {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
 	}
@@ -2247,7 +2247,7 @@ func TestUpdateSlab(t *testing.T) {
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
 	} else if updated.Shards[0].LatestHost != hks[0] {
-		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, publicKey(hks[0]))
+		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, sql.PublicKey(hks[0]))
 	}
 
 	// assert there's still only one entry in the dbslab table

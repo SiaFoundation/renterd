@@ -393,7 +393,7 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert cascade delete on host
-	err = ss.gormDB.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
+	err = ss.gormDB.Exec("DELETE FROM hosts WHERE public_key = ?", sql.PublicKey(types.PublicKey{1})).Error
 	if err != nil {
 		t.Fatal(err)
 	}

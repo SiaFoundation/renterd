@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/stores/sql"
 )
 
 func TestTypeCurrency(t *testing.T) {
@@ -22,12 +23,12 @@ func TestTypeCurrency(t *testing.T) {
 	}
 
 	// insert currencies in random order
-	if err := ss.gormDB.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", bCurrency(types.MaxCurrency), bCurrency(types.NewCurrency64(1)), bCurrency(types.ZeroCurrency)).Error; err != nil {
+	if err := ss.gormDB.Exec("INSERT INTO currencies (c) VALUES (?),(?),(?);", sql.BCurrency(types.MaxCurrency), sql.BCurrency(types.NewCurrency64(1)), sql.BCurrency(types.ZeroCurrency)).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch currencies and assert they're sorted
-	var currencies []bCurrency
+	var currencies []sql.BCurrency
 	if err := ss.gormDB.Raw(`SELECT c FROM currencies ORDER BY c ASC`).Scan(&currencies).Error; err != nil {
 		t.Fatal(err)
 	} else if !sort.SliceIsSorted(currencies, func(i, j int) bool {
@@ -42,8 +43,8 @@ func TestTypeCurrency(t *testing.T) {
 	cM := currencies[2]
 
 	tests := []struct {
-		a   bCurrency
-		b   bCurrency
+		a   sql.BCurrency
+		b   sql.BCurrency
 		cmp string
 	}{
 		{
@@ -119,25 +120,25 @@ func TestTypeMerkleProof(t *testing.T) {
 	}
 
 	// insert merkle proof
-	mp1 := merkleProof{proof: []types.Hash256{{3}, {1}, {2}}}
-	mp2 := merkleProof{proof: []types.Hash256{{4}}}
+	mp1 := sql.MerkleProof{Hashes: []types.Hash256{{3}, {1}, {2}}}
+	mp2 := sql.MerkleProof{Hashes: []types.Hash256{{4}}}
 	if err := ss.gormDB.Exec("INSERT INTO merkle_proofs (merkle_proof) VALUES (?), (?);", mp1, mp2).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch first proof
-	var first merkleProof
+	var first sql.MerkleProof
 	if err := ss.gormDB.
 		Raw(`SELECT merkle_proof FROM merkle_proofs`).
 		Take(&first).
 		Error; err != nil {
 		t.Fatal(err)
-	} else if first.proof[0] != (types.Hash256{3}) || first.proof[1] != (types.Hash256{1}) || first.proof[2] != (types.Hash256{2}) {
+	} else if first.Hashes[0] != (types.Hash256{3}) || first.Hashes[1] != (types.Hash256{1}) || first.Hashes[2] != (types.Hash256{2}) {
 		t.Fatalf("unexpected proof %+v", first)
 	}
 
 	// fetch both proofs
-	var both []merkleProof
+	var both []sql.MerkleProof
 	if err := ss.gormDB.
 		Raw(`SELECT merkle_proof FROM merkle_proofs`).
 		Scan(&both).
@@ -145,7 +146,7 @@ func TestTypeMerkleProof(t *testing.T) {
 		t.Fatal(err)
 	} else if len(both) != 2 {
 		t.Fatalf("unexpected number of proofs: %d", len(both))
-	} else if both[1].proof[0] != (types.Hash256{4}) {
+	} else if both[1].Hashes[0] != (types.Hash256{4}) {
 		t.Fatalf("unexpected proof %+v", both)
 	}
 }
