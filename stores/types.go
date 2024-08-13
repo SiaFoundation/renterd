@@ -22,7 +22,6 @@ type (
 	bCurrency      types.Currency
 	fileContractID types.FileContractID
 	publicKey      types.PublicKey
-	secretKey      []byte
 	setting        string
 
 	// NOTE: we have to wrap the proof here because Gorm can't scan bytes into
@@ -60,34 +59,6 @@ func (s *setting) Scan(value interface{}) error {
 // Value returns a setting value, implements driver.Valuer interface.
 func (s setting) Value() (driver.Value, error) {
 	return string(s), nil
-}
-
-// GormDataType implements gorm.GormDataTypeInterface.
-func (secretKey) GormDataType() string {
-	return "bytes"
-}
-
-// String implements fmt.Stringer to prevent the key from getting leaked in
-// logs.
-func (k secretKey) String() string {
-	return "*****"
-}
-
-// Scan scans value into key, implements sql.Scanner interface.
-func (k *secretKey) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal secretKey value:", value))
-	} else if len(bytes) != secretKeySize {
-		return fmt.Errorf("failed to unmarshal secretKey value due to invalid number of bytes %v != %v: %v", len(bytes), secretKeySize, value)
-	}
-	*k = append(secretKey{}, secretKey(bytes)...)
-	return nil
-}
-
-// Value returns an key value, implements driver.Valuer interface.
-func (k secretKey) Value() (driver.Value, error) {
-	return []byte(k), nil
 }
 
 // GormDataType implements gorm.GormDataTypeInterface.
