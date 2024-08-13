@@ -2540,6 +2540,7 @@ func TestRenameObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	var i int
 	for rows.Next() {
 		var dir row
@@ -4744,6 +4745,7 @@ func TestDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	var nDirs int
 	for i := 0; rows.Next(); i++ {
 		var dir row
