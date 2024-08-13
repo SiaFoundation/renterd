@@ -4152,22 +4152,20 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// create objects
-	obj1 := dbObject{
-		DBDirectoryID: uint(dirID),
-		ObjectID:      "1",
-		DBBucketID:    uint(ss.DefaultBucketID()),
-		Health:        1,
-	}
-	if err := ss.gormDB.Create(&obj1).Error; err != nil {
+	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health) VALUES (?, ?, ?, ?);")
+	if err != nil {
 		t.Fatal(err)
 	}
-	obj2 := dbObject{
-		DBDirectoryID: uint(dirID),
-		ObjectID:      "2",
-		DBBucketID:    uint(ss.DefaultBucketID()),
-		Health:        1,
-	}
-	if err := ss.gormDB.Create(&obj2).Error; err != nil {
+	defer insertObjStmt.Close()
+
+	var obj1ID, obj2ID int64
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1); err != nil {
+		t.Fatal(err)
+	} else if obj1ID, err = res.LastInsertId(); err != nil {
+		t.Fatal(err)
+	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1); err != nil {
+		t.Fatal(err)
+	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4184,15 +4182,16 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// reference the slab
+	obj1UID, obj2UID := uint(obj1ID), uint(obj2ID)
 	slice1 := dbSlice{
-		DBObjectID: &obj1.ID,
+		DBObjectID: &obj1UID,
 		DBSlabID:   slab.ID,
 	}
 	if err := ss.gormDB.Create(&slice1).Error; err != nil {
 		t.Fatal(err)
 	}
 	slice2 := dbSlice{
-		DBObjectID: &obj2.ID,
+		DBObjectID: &obj2UID,
 		DBSlabID:   slab.ID,
 	}
 	if err := ss.gormDB.Create(&slice2).Error; err != nil {
@@ -4200,12 +4199,12 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj1.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// check slice count
+	// check slab count
 	var slabCntr int64
 	if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
 		t.Fatal(err)
@@ -4214,7 +4213,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete second object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj2.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "2")
 	if err != nil {
 		t.Fatal(err)
 	} else if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
@@ -4235,17 +4234,15 @@ func TestSlabCleanup(t *testing.T) {
 	if err := ss.gormDB.Create(&bufferedSlab).Error; err != nil {
 		t.Fatal(err)
 	}
-	obj3 := dbObject{
-		DBDirectoryID: uint(dirID),
-		ObjectID:      "3",
-		DBBucketID:    uint(ss.DefaultBucketID()),
-		Health:        1,
-	}
-	if err := ss.gormDB.Create(&obj3).Error; err != nil {
+	var obj3ID int64
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1); err != nil {
+		t.Fatal(err)
+	} else if obj3ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
 	}
+	obj3UID := uint(obj3ID)
 	slice := dbSlice{
-		DBObjectID: &obj3.ID,
+		DBObjectID: &obj3UID,
 		DBSlabID:   bufferedSlab.ID,
 	}
 	if err := ss.gormDB.Create(&slice).Error; err != nil {
@@ -4258,7 +4255,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete third object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, obj3.ObjectID)
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "3")
 	if err != nil {
 		t.Fatal(err)
 	} else if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
@@ -4322,25 +4319,37 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// helper to fetch relevant fields from an object
+	fetchObj := func(bid int64, oid string) (id, bucketID int64, objectID string, health float64, size int64) {
+		t.Helper()
+		err := ss.DB().QueryRow(context.Background(), `
+			SELECT id, db_bucket_id, object_id, health, size
+			FROM objects
+			WHERE db_bucket_id = ? AND object_id = ?
+		`, bid, oid).Scan(&id, &bucketID, &objectID, &health, &size)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	// fetch the object
-	var dbObj dbObject
-	if err := ss.gormDB.Where("db_bucket_id", ss.DefaultBucketID()).Take(&dbObj).Error; err != nil {
-		t.Fatal(err)
-	} else if dbObj.ID != 1 {
-		t.Fatal("unexpected id", dbObj.ID)
-	} else if dbObj.DBBucketID != uint(ss.DefaultBucketID()) {
-		t.Fatal("bucket id mismatch", dbObj.DBBucketID)
-	} else if dbObj.ObjectID != "1" {
-		t.Fatal("object id mismatch", dbObj.ObjectID)
-	} else if dbObj.Health != 1 {
-		t.Fatal("health mismatch", dbObj.Health)
-	} else if dbObj.Size != obj.TotalSize() {
-		t.Fatal("size mismatch", dbObj.Size)
+	id, bid, oid, health, size := fetchObj(ss.DefaultBucketID(), "1")
+	if id != 1 {
+		t.Fatal("unexpected id", id)
+	} else if bid != ss.DefaultBucketID() {
+		t.Fatal("bucket id mismatch", bid)
+	} else if oid != "1" {
+		t.Fatal("object id mismatch", oid)
+	} else if health != 1 {
+		t.Fatal("health mismatch", health)
+	} else if size != obj.TotalSize() {
+		t.Fatal("size mismatch", size)
 	}
 
 	// fetch its slices
 	var dbSlices []dbSlice
-	if err := ss.gormDB.Where("db_object_id", dbObj.ID).Find(&dbSlices).Error; err != nil {
+	if err := ss.gormDB.Where("db_object_id", id).Find(&dbSlices).Error; err != nil {
 		t.Fatal(err)
 	} else if len(dbSlices) != 2 {
 		t.Fatal("invalid number of slices", len(dbSlices))
@@ -4429,20 +4438,22 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	// fetch the object
-	var dbObj2 dbObject
-	if err := ss.gormDB.Where("db_bucket_id", ss.DefaultBucketID()).
-		Where("object_id", "2").
-		Take(&dbObj2).Error; err != nil {
-		t.Fatal(err)
-	} else if dbObj2.ID != 2 {
-		t.Fatal("unexpected id", dbObj2.ID)
-	} else if dbObj.Size != obj2.TotalSize() {
-		t.Fatal("size mismatch", dbObj2.Size)
+	id2, bid2, oid2, health2, size2 := fetchObj(ss.DefaultBucketID(), "2")
+	if id2 != 2 {
+		t.Fatal("unexpected id", id)
+	} else if bid2 != ss.DefaultBucketID() {
+		t.Fatal("bucket id mismatch", bid)
+	} else if oid2 != "2" {
+		t.Fatal("object id mismatch", oid)
+	} else if health2 != 1 {
+		t.Fatal("health mismatch", health)
+	} else if size2 != obj.TotalSize() {
+		t.Fatal("size mismatch", size)
 	}
 
 	// fetch its slices
 	var dbSlices2 []dbSlice
-	if err := ss.gormDB.Where("db_object_id", dbObj2.ID).Find(&dbSlices2).Error; err != nil {
+	if err := ss.gormDB.Where("db_object_id", id2).Find(&dbSlices2).Error; err != nil {
 		t.Fatal(err)
 	} else if len(dbSlices2) != 2 {
 		t.Fatal("invalid number of slices", len(dbSlices))

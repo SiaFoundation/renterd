@@ -46,24 +46,6 @@ var (
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
 type (
-	dbObject struct {
-		Model
-
-		DBDirectoryID uint
-
-		DBBucketID uint   `gorm:"index;uniqueIndex:idx_object_bucket;NOT NULL"`
-		ObjectID   string `gorm:"index;uniqueIndex:idx_object_bucket"`
-
-		Key      secretKey
-		Slabs    []dbSlice              // no CASCADE, slices are deleted via trigger
-		Metadata []dbObjectUserMetadata `gorm:"constraint:OnDelete:CASCADE"` // CASCADE to delete metadata too
-		Health   float64                `gorm:"index;default:1.0; NOT NULL"`
-		Size     int64
-
-		MimeType string `json:"index"`
-		Etag     string `gorm:"index"`
-	}
-
 	dbObjectUserMetadata struct {
 		Model
 
@@ -114,9 +96,6 @@ type (
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
 }
-
-// TableName implements the gorm.Tabler interface.
-func (dbObject) TableName() string { return "objects" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbObjectUserMetadata) TableName() string { return "object_user_metadata" }
