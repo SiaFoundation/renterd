@@ -173,6 +173,18 @@ type (
 		SiamuxAddr string               `json:"siamuxAddr"`
 	}
 
+	// RHPBalanceRequest is the request type for the /rhp/balance endpoint.
+	RHPBalanceRequest struct {
+		ContractID types.FileContractID `json:"contractID"`
+		HostKey    types.PublicKey      `json:"hostKey"`
+		SiamuxAddr string               `json:"siamuxAddr"`
+	}
+
+	RHPBalanceResponse struct {
+		Renter types.Currency `json:"renter"`
+		Host   types.Currency `json:"host"`
+	}
+
 	// RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 	// endpoint.
 	RHPPreparePaymentRequest struct {

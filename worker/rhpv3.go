@@ -285,7 +285,7 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 }
 
 // FetchRevision tries to fetch a contract revision from the host.
-func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
+func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration, allowEA bool) (rev types.FileContractRevision, err error) {
 	timeoutCtx := func() (context.Context, context.CancelFunc) {
 		if fetchTimeout > 0 {
 			return context.WithTimeout(ctx, fetchTimeout)
@@ -293,14 +293,18 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 		return ctx, func() {}
 	}
 
+	var cancel context.CancelFunc
+
 	// Try to fetch the revision with an account first.
-	ctx, cancel := timeoutCtx()
-	defer cancel()
-	rev, err := h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, h.fcid)
-	if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err) || isPriceTableGouging(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
-		return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
-	} else if err == nil {
-		return rev, nil
+	if allowEA {
+		ctx, cancel = timeoutCtx()
+		defer cancel()
+		rev, err = h.fetchRevisionWithAccount(ctx, h.hk, h.siamuxAddr, h.fcid)
+		if err != nil && !(isBalanceInsufficient(err) || isWithdrawalsInactive(err) || isWithdrawalExpired(err) || isClosedStream(err) || isPriceTableGouging(err)) { // TODO: checking for a closed stream here can be removed once the withdrawal timeout on the host side is removed
+			return types.FileContractRevision{}, fmt.Errorf("unable to fetch revision with account: %v", err)
+		} else if err == nil {
+			return rev, nil
+		}
 	}
 
 	// Fall back to using the contract to pay for the revision.

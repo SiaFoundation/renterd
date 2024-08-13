@@ -103,7 +103,7 @@ func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, s
 	return nil
 }
 
-func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (rev types.FileContractRevision, _ error) {
+func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration, _ bool) (rev types.FileContractRevision, _ error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	rev = h.rev
@@ -116,6 +116,10 @@ func (h *testHost) FetchPriceTable(ctx context.Context, rev *types.FileContractR
 
 func (h *testHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	return nil
+}
+
+func (h *testHost) AccountBalance(ctx context.Context, rev *types.FileContractRevision) (types.Currency, types.Currency, error) {
+	return types.ZeroCurrency, types.ZeroCurrency, nil
 }
 
 func (h *testHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {

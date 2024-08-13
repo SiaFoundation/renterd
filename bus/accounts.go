@@ -290,7 +290,7 @@ func (a *accounts) account(id rhpv3.Account, hk types.PublicKey) *account {
 				HostKey:       hk,
 				Balance:       big.NewInt(0),
 				Drift:         big.NewInt(0),
-				RequiresSync:  false,
+				RequiresSync:  true, // initial sync
 			},
 			locks: map[uint64]*accountLock{},
 		}

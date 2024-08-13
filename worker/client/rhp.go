@@ -117,3 +117,18 @@ func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, h
 	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
 	return
 }
+
+func (c *Client) RHPBalance(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (resp api.RHPBalanceResponse, err error) {
+	req := api.RHPBalanceRequest{
+		ContractID: contractID,
+		HostKey:    hostKey,
+		SiamuxAddr: siamuxAddr,
+	}
+	err = c.c.WithContext(ctx).POST("/rhp/balance", req, &resp)
+	return
+}
+
+func (c *Client) RHPContractRevision(ctx context.Context, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/revision", contractID), &rev)
+	return
+}

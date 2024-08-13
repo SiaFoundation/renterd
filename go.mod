@@ -2,6 +2,8 @@ module go.sia.tech/renterd
 
 go 1.22.5
 
+replace go.sia.tech/hostd => /Users/peterjan/code/siafoundation/hostd
+
 require (
 	github.com/gabriel-vasile/mimetype v1.4.5
 	github.com/google/go-cmp v0.6.0

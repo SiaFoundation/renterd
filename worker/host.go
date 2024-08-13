@@ -27,8 +27,9 @@ type (
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
 		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error)
-		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
+		FetchRevision(ctx context.Context, fetchTimeout time.Duration, allowEA bool) (types.FileContractRevision, error)
 
+		AccountBalance(ctx context.Context, rev *types.FileContractRevision) (types.Currency, types.Currency, error)
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 
@@ -274,6 +275,40 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 		}
 		return deposit, nil
 	})
+}
+
+func (h *host) AccountBalance(ctx context.Context, rev *types.FileContractRevision) (renter, host types.Currency, err error) {
+	// fetch pricetable directly to bypass the gouging check
+	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
+	if err != nil {
+		return types.ZeroCurrency, types.ZeroCurrency, err
+	}
+
+	// check only the unused defaults
+	gc, err := GougingCheckerFromContext(ctx, false)
+	if err != nil {
+		return types.ZeroCurrency, types.ZeroCurrency, err
+	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("%w: %v", errPriceTableGouging, err)
+	}
+
+	// fetch host balance
+	if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
+		payment, err := payByContract(rev, types.NewCurrency64(1), h.acc.id, h.renterKey)
+		if err != nil {
+			return err
+		}
+		host, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
+		return err
+	}); err != nil {
+		return types.ZeroCurrency, types.ZeroCurrency, err
+	}
+
+	renter, err = h.acc.Balance(ctx)
+	if err != nil {
+		return types.ZeroCurrency, types.ZeroCurrency, err
+	}
+	return
 }
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {

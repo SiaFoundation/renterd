@@ -242,7 +242,7 @@ func (w *worker) isStopped() bool {
 func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
 		h := w.Host(hk, fcid, siamuxAddr)
-		rev, err := h.FetchRevision(ctx, fetchTimeout)
+		rev, err := h.FetchRevision(ctx, fetchTimeout, true)
 		if err != nil {
 			return err
 		}
@@ -735,6 +735,70 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	}))
+}
+
+func (w *worker) rhpBalanceHandler(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode the request
+	var rsr api.RHPBalanceRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	// attach gouging checker
+	up, err := w.bus.UploadParams(ctx)
+	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
+		return
+	}
+	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+
+	var res api.RHPBalanceResponse
+	// sync the account
+	h := w.Host(rsr.HostKey, rsr.ContractID, rsr.SiamuxAddr)
+	if jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+		res.Renter, res.Host, err = h.AccountBalance(ctx, &rev)
+		return err
+	})) == nil {
+		jc.Encode(res)
+	}
+}
+
+func (w *worker) rhpContractRevisionHandlerGET(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode fcid
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	// fetch the contract from the bus
+	c, err := w.bus.Contract(ctx, id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch gouging params
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
+		return
+	}
+
+	// attach gouging checker to the context
+	ctx = WithGougingChecker(ctx, w.bus, gp)
+
+	var rev types.FileContractRevision
+	if jc.Check("couldn't fetch revision", w.withContractLock(ctx, c.ID, 1, func() error {
+		h := w.Host(c.HostKey, c.ID, c.SiamuxAddr)
+		rev, err = h.FetchRevision(ctx, time.Minute, false)
+		return err
+	})) == nil {
+		jc.Encode(rev)
+	}
 }
 
 func (w *worker) slabMigrateHandler(jc jape.Context) {
@@ -1341,11 +1405,13 @@ func (w *worker) Handler() http.Handler {
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
 		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
 		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
+		"GET    /rhp/contract/:id/revision":  w.rhpContractRevisionHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/form":                   w.rhpFormHandler,
 		"POST   /rhp/renew":                  w.rhpRenewHandler,
 		"POST   /rhp/fund":                   w.rhpFundHandler,
 		"POST   /rhp/sync":                   w.rhpSyncHandler,
+		"POST   /rhp/balance":                w.rhpBalanceHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,

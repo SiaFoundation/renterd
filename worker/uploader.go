@@ -284,7 +284,7 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	defer cancel()
 
 	// fetch the revision
-	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout)
+	rev, err := host.FetchRevision(ctx, defaultRevisionFetchTimeout, true)
 	if err != nil {
 		return 0, fmt.Errorf("%w; %w", errFetchRevisionFailed, err)
 	} else if rev.RevisionNumber == math.MaxUint64 {
