@@ -4200,20 +4200,17 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// reference the slab
-	obj1UID, obj2UID := uint(obj1ID), uint(obj2ID)
-	slice1 := dbSlice{
-		DBObjectID: &obj1UID,
-		DBSlabID:   slab.ID,
-	}
-	if err := ss.gormDB.Create(&slice1).Error; err != nil {
+	// statement to reference slabs by inserting a slice for an object
+	insertSlabRefStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO slices (db_object_id, db_slab_id) VALUES (?, ?);")
+	if err != nil {
 		t.Fatal(err)
 	}
-	slice2 := dbSlice{
-		DBObjectID: &obj2UID,
-		DBSlabID:   slab.ID,
-	}
-	if err := ss.gormDB.Create(&slice2).Error; err != nil {
+	defer insertSlabRefStmt.Close()
+
+	// reference the slab
+	if _, err := insertSlabRefStmt.Exec(context.Background(), obj1ID, slab.ID); err != nil {
+		t.Fatal(err)
+	} else if _, err := insertSlabRefStmt.Exec(context.Background(), obj2ID, slab.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4258,13 +4255,7 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	} else if obj3ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	}
-	obj3UID := uint(obj3ID)
-	slice := dbSlice{
-		DBObjectID: &obj3UID,
-		DBSlabID:   bufferedSlab.ID,
-	}
-	if err := ss.gormDB.Create(&slice).Error; err != nil {
+	} else if _, err := insertSlabRefStmt.Exec(context.Background(), obj3ID, bufferedSlab.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.gormDB.Model(&dbSlab{}).Count(&slabCntr).Error; err != nil {
@@ -4366,12 +4357,35 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal("size mismatch", size)
 	}
 
+	// helper to fetch object's slices
+	type slice struct {
+		ID          int64
+		ObjectIndex int64
+		Offset      int64
+		Length      int64
+		SlabID      int64
+	}
+	fetchSlicesByObjectID := func(oid int64) (slices []slice) {
+		t.Helper()
+		rows, err := ss.DB().Query(context.Background(), "SELECT id, object_index, offset, length, db_slab_id FROM slices WHERE db_object_id = ?", oid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s slice
+			if err := rows.Scan(&s.ID, &s.ObjectIndex, &s.Offset, &s.Length, &s.SlabID); err != nil {
+				t.Fatal(err)
+			}
+			slices = append(slices, s)
+		}
+		return
+	}
+
 	// fetch its slices
-	var dbSlices []dbSlice
-	if err := ss.gormDB.Where("db_object_id", id).Find(&dbSlices).Error; err != nil {
-		t.Fatal(err)
-	} else if len(dbSlices) != 2 {
-		t.Fatal("invalid number of slices", len(dbSlices))
+	slices := fetchSlicesByObjectID(id)
+	if len(slices) != 2 {
+		t.Fatal("invalid number of slices", len(slices))
 	}
 
 	// helper to fetch sectors
@@ -4398,19 +4412,19 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		return
 	}
 
-	for i, dbSlice := range dbSlices {
-		if dbSlice.ID != uint(i+1) {
-			t.Fatal("unexpected id", dbSlice.ID)
-		} else if dbSlice.ObjectIndex != uint(i+1) {
-			t.Fatal("unexpected object index", dbSlice.ObjectIndex)
-		} else if dbSlice.Offset != 0 || dbSlice.Length != uint32(minShards)*rhpv2.SectorSize {
-			t.Fatal("invalid offset/length", dbSlice.Offset, dbSlice.Length)
+	for i, slice := range slices {
+		if slice.ID != int64(i+1) {
+			t.Fatal("unexpected id", slice.ID)
+		} else if slice.ObjectIndex != int64(i+1) {
+			t.Fatal("unexpected object index", slice.ObjectIndex)
+		} else if slice.Offset != 0 || slice.Length != int64(minShards)*rhpv2.SectorSize {
+			t.Fatal("invalid offset/length", slice.Offset, slice.Length)
 		}
 
 		// fetch the slab
 		var dbSlab dbSlab
 		key, _ := obj.Slabs[i].Key.MarshalBinary()
-		if err := ss.gormDB.Where("id", dbSlice.DBSlabID).Take(&dbSlab).Error; err != nil {
+		if err := ss.gormDB.Where("id", slice.SlabID).Take(&dbSlab).Error; err != nil {
 			t.Fatal(err)
 		} else if dbSlab.ID != uint(i+1) {
 			t.Fatal("unexpected id", dbSlab.ID)
@@ -4494,29 +4508,27 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	// fetch its slices
-	var dbSlices2 []dbSlice
-	if err := ss.gormDB.Where("db_object_id", id2).Find(&dbSlices2).Error; err != nil {
-		t.Fatal(err)
-	} else if len(dbSlices2) != 2 {
-		t.Fatal("invalid number of slices", len(dbSlices))
+	slices2 := fetchSlicesByObjectID(id2)
+	if len(slices2) != 2 {
+		t.Fatal("invalid number of slices", len(slices2))
 	}
 
 	// check the first one
-	dbSlice2 := dbSlices2[0]
-	if dbSlice2.ID != uint(len(dbSlices)+1) {
-		t.Fatal("unexpected id", dbSlice2.ID)
-	} else if dbSlice2.ObjectIndex != uint(1) {
-		t.Fatal("unexpected object index", dbSlice2.ObjectIndex)
-	} else if dbSlice2.Offset != 0 || dbSlice2.Length != uint32(minShards)*rhpv2.SectorSize {
-		t.Fatal("invalid offset/length", dbSlice2.Offset, dbSlice2.Length)
+	slice2 := slices2[0]
+	if slice2.ID != int64(len(slices)+1) {
+		t.Fatal("unexpected id", slice2.ID)
+	} else if slice2.ObjectIndex != 1 {
+		t.Fatal("unexpected object index", slice2.ObjectIndex)
+	} else if slice2.Offset != 0 || slice2.Length != int64(minShards)*rhpv2.SectorSize {
+		t.Fatal("invalid offset/length", slice2.Offset, slice2.Length)
 	}
 
 	// fetch the slab
 	var dbSlab2 dbSlab
 	key, _ := obj2.Slabs[0].Key.MarshalBinary()
-	if err := ss.gormDB.Where("id", dbSlice2.DBSlabID).Take(&dbSlab2).Error; err != nil {
+	if err := ss.gormDB.Where("id", slice2.SlabID).Take(&dbSlab2).Error; err != nil {
 		t.Fatal(err)
-	} else if dbSlab2.ID != uint(len(dbSlices)+1) {
+	} else if dbSlab2.ID != uint(len(slices)+1) {
 		t.Fatal("unexpected id", dbSlab2.ID)
 	} else if dbSlab2.DBContractSetID != 1 {
 		t.Fatal("invalid contract set id", dbSlab2.DBContractSetID)
@@ -4542,7 +4554,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	// the second slab of obj2 should be the same as the first in obj
-	if dbSlices2[1].DBSlabID != 2 {
+	if slices2[1].SlabID != 2 {
 		t.Fatal("wrong slab")
 	}
 

@@ -103,17 +103,11 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 
 	// Complete the upload. Check that the number of slices stays the same.
-	var nSlicesBefore int64
-	var nSlicesAfter int64
-	if err := ss.gormDB.Model(&dbSlice{}).Count(&nSlicesBefore).Error; err != nil {
-		t.Fatal(err)
-	} else if nSlicesBefore == 0 {
+	if nSlicesBefore := ss.Count("slices"); nSlicesBefore == 0 {
 		t.Fatal("expected some slices")
 	} else if _, err = ss.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts, api.CompleteMultipartOptions{}); err != nil {
 		t.Fatal(err)
-	} else if err := ss.gormDB.Model(&dbSlice{}).Count(&nSlicesAfter).Error; err != nil {
-		t.Fatal(err)
-	} else if nSlicesBefore != nSlicesAfter {
+	} else if nSlicesAfter := ss.Count("slices"); nSlicesAfter != nSlicesBefore {
 		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
 	}
 

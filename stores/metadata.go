@@ -46,18 +46,6 @@ var (
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
 type (
-	dbSlice struct {
-		Model
-		DBObjectID        *uint `gorm:"index"`
-		ObjectIndex       uint  `gorm:"index:idx_slices_object_index"`
-		DBMultipartPartID *uint `gorm:"index"`
-
-		// Slice related fields.
-		DBSlabID uint `gorm:"index"`
-		Offset   uint32
-		Length   uint32
-	}
-
 	dbSlab struct {
 		Model
 		DBContractSetID  uint `gorm:"index"`
@@ -68,8 +56,6 @@ type (
 		Key              secretKey `gorm:"unique;NOT NULL;size:32"`   // json string
 		MinShards        uint8     `gorm:"index"`
 		TotalShards      uint8     `gorm:"index"`
-
-		Slices []dbSlice
 	}
 )
 
@@ -79,9 +65,6 @@ func (s dbSlab) HealthValid() bool {
 
 // TableName implements the gorm.Tabler interface.
 func (dbSlab) TableName() string { return "slabs" }
-
-// TableName implements the gorm.Tabler interface.
-func (dbSlice) TableName() string { return "slices" }
 
 func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
