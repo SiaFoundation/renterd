@@ -271,10 +271,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert metadata CASCADE on object delete
-	var cnt int64
-	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
-		t.Fatal(err)
-	} else if cnt != 2 {
+	if cnt := ss.Count("object_user_metadata"); cnt != 2 {
 		t.Fatal("unexpected number of metadata entries", cnt)
 	}
 
@@ -284,9 +281,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// assert records are gone
-	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Count(&cnt).Error; err != nil {
-		t.Fatal(err)
-	} else if cnt != 0 {
+	if cnt := ss.Count("object_user_metadata"); cnt != 0 {
 		t.Fatal("unexpected number of metadata entries", cnt)
 	}
 }

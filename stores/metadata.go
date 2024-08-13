@@ -46,15 +46,6 @@ var (
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
 type (
-	dbObjectUserMetadata struct {
-		Model
-
-		DBObjectID          *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
-		DBMultipartUploadID *uint  `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
-		Key                 string `gorm:"index:uniqueIndex:idx_object_user_metadata_key"`
-		Value               string
-	}
-
 	dbSlice struct {
 		Model
 		DBObjectID        *uint `gorm:"index"`
@@ -96,9 +87,6 @@ type (
 func (s dbSlab) HealthValid() bool {
 	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
 }
-
-// TableName implements the gorm.Tabler interface.
-func (dbObjectUserMetadata) TableName() string { return "object_user_metadata" }
 
 // TableName implements the gorm.Tabler interface.
 func (dbSector) TableName() string { return "sectors" }

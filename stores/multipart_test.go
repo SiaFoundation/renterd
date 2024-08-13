@@ -71,15 +71,33 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		})
 	}
 
+	type oum struct {
+		MultipartUploadID *int64
+		ObjectID          *int64
+	}
+	fetchUserMD := func() (metadatas []oum) {
+		rows, err := ss.DB().Query(context.Background(), "SELECT db_multipart_upload_id, db_object_id FROM object_user_metadata")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var md oum
+			if err := rows.Scan(&md.MultipartUploadID, &md.ObjectID); err != nil {
+				t.Fatal(err)
+			}
+			metadatas = append(metadatas, md)
+		}
+		return
+	}
+
 	// Assert metadata was persisted and is linked to the multipart upload
-	var metadatas []dbObjectUserMetadata
-	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
-		t.Fatal(err)
-	} else if len(metadatas) != len(testMetadata) {
+	metadatas := fetchUserMD()
+	if len(metadatas) != len(testMetadata) {
 		t.Fatal("expected metadata to be persisted")
 	}
 	for _, m := range metadatas {
-		if m.DBMultipartUploadID == nil || m.DBObjectID != nil {
+		if m.MultipartUploadID == nil || m.ObjectID != nil {
 			t.Fatal("unexpected")
 		}
 	}
@@ -115,13 +133,12 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 
 	// Assert metadata was converted and the multipart upload id was nullified
-	if err := ss.gormDB.Model(&dbObjectUserMetadata{}).Find(&metadatas).Error; err != nil {
-		t.Fatal(err)
-	} else if len(metadatas) != len(testMetadata) {
+	metadatas = fetchUserMD()
+	if len(metadatas) != len(testMetadata) {
 		t.Fatal("expected metadata to be persisted")
 	}
 	for _, m := range metadatas {
-		if m.DBMultipartUploadID != nil || m.DBObjectID == nil {
+		if m.MultipartUploadID != nil || m.ObjectID == nil {
 			t.Fatal("unexpected")
 		}
 	}
