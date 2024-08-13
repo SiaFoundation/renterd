@@ -24,13 +24,6 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
-	// PinManager is a service that manages price pinning.
-	PinManager interface {
-		Close(context.Context) error
-		Run()
-		TriggerUpdate()
-	}
-
 	// A SettingStore stores settings.
 	SettingStore interface {
 		Setting(ctx context.Context, key string) (string, error)
@@ -70,7 +63,7 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as A
 		ss:          ss,
 		broadcaster: broadcaster,
 
-		logger: l.Sugar().Named("pricemanager"),
+		logger: l.Named("pricemanager").Sugar(),
 
 		updateInterval: updateInterval,
 		rateWindow:     rateWindow,
