@@ -45,27 +45,6 @@ var (
 
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
 
-type (
-	dbSlab struct {
-		Model
-		DBContractSetID  uint `gorm:"index"`
-		DBBufferedSlabID uint `gorm:"index;default: NULL"`
-
-		Health           float64   `gorm:"index;default:1.0; NOT NULL"`
-		HealthValidUntil int64     `gorm:"index;default:0; NOT NULL"` // unix timestamp
-		Key              secretKey `gorm:"unique;NOT NULL;size:32"`   // json string
-		MinShards        uint8     `gorm:"index"`
-		TotalShards      uint8     `gorm:"index"`
-	}
-)
-
-func (s dbSlab) HealthValid() bool {
-	return time.Now().Before(time.Unix(s.HealthValidUntil, 0))
-}
-
-// TableName implements the gorm.Tabler interface.
-func (dbSlab) TableName() string { return "slabs" }
-
 func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		b, err = tx.Bucket(ctx, bucket)
