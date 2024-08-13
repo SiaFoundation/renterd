@@ -1,5 +1,9 @@
 package bus
 
+// TODOs:
+// - add wallet metrics
+// - add UPNP support
+
 import (
 	"context"
 	"encoding/json"
@@ -9,11 +13,9 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
-	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -201,14 +203,6 @@ type (
 	PinManager interface {
 		Shutdown(context.Context) error
 		TriggerUpdate()
-	}
-
-	Syncer interface {
-		Addr() string
-		BroadcastHeader(h gateway.BlockHeader)
-		BroadcastTransactionSet([]types.Transaction)
-		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
-		Peers() []*syncer.Peer
 	}
 
 	Wallet interface {

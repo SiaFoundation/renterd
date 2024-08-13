@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,10 +24,8 @@ import (
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
-	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -161,9 +160,9 @@ type testClusterOptions struct {
 	skipRunningAutopilot bool
 	walletKey            *types.PrivateKey
 
-	autopilotCfg      *node.AutopilotConfig
+	autopilotCfg      *config.Autopilot
 	autopilotSettings *api.AutopilotConfig
-	busCfg            *node.BusConfig
+	busCfg            *bus.NodeConfig
 	workerCfg         *config.Worker
 }
 
@@ -308,7 +307,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, err := bus.NewNode(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -328,10 +327,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
-	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
+	w, s3Handler, wSetupFn, wShutdownFn, err := worker.NewNode(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
 	workerServer := http.Server{
-		Handler: iworker.Auth(workerPassword, false)(w),
+		Handler: auth(workerPassword, false)(w),
 	}
 
 	var workerShutdownFns []func(context.Context) error
@@ -347,7 +346,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, aStartFn, aStopFn, err := autopilot.NewNode(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
@@ -406,7 +405,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if !opts.skipRunningAutopilot {
 		cluster.wg.Add(1)
 		go func() {
-			_ = aStartFn()
+			aStartFn()
 			cluster.wg.Done()
 		}()
 	}
@@ -863,6 +862,18 @@ func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
 	return nil
 }
 
+func auth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
+				h.ServeHTTP(w, req)
+			} else {
+				jape.BasicAuth(password)(h).ServeHTTP(w, req)
+			}
+		})
+	}
+}
+
 // testNetwork returns a modified version of Zen used for testing
 func testNetwork() (*consensus.Network, types.Block) {
 	// use a modified version of Zen
@@ -888,10 +899,10 @@ func testNetwork() (*consensus.Network, types.Block) {
 	return n, genesis
 }
 
-func testBusCfg() node.BusConfig {
+func testBusCfg() bus.NodeConfig {
 	network, genesis := testNetwork()
 
-	return node.BusConfig{
+	return bus.NodeConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
@@ -936,18 +947,16 @@ func testWorkerCfg() config.Worker {
 	}
 }
 
-func testApCfg() node.AutopilotConfig {
-	return node.AutopilotConfig{
-		ID: api.DefaultAutopilotID,
-		Autopilot: config.Autopilot{
-			AccountsRefillInterval:         time.Second,
-			Heartbeat:                      time.Second,
-			MigrationHealthCutoff:          0.99,
-			MigratorParallelSlabsPerWorker: 1,
-			RevisionSubmissionBuffer:       0,
-			ScannerInterval:                time.Second,
-			ScannerBatchSize:               10,
-			ScannerNumThreads:              1,
-		},
+func testApCfg() config.Autopilot {
+	return config.Autopilot{
+		AccountsRefillInterval:         time.Second,
+		Heartbeat:                      time.Second,
+		ID:                             api.DefaultAutopilotID,
+		MigrationHealthCutoff:          0.99,
+		MigratorParallelSlabsPerWorker: 1,
+		RevisionSubmissionBuffer:       0,
+		ScannerInterval:                time.Second,
+		ScannerBatchSize:               10,
+		ScannerNumThreads:              1,
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
+	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 )
@@ -68,6 +69,8 @@ func NewClient(address, password string) *Client {
 
 type (
 	Bus interface {
+		s3.Bus
+
 		alerts.Alerter
 		ConsensusState
 		webhooks.Broadcaster

@@ -1,4 +1,4 @@
-package node
+package bus
 
 import (
 	"context"
@@ -17,8 +17,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/autopilot"
-	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
@@ -26,25 +24,13 @@ import (
 	"go.sia.tech/renterd/stores/sql/mysql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/renterd/webhooks"
-	"go.sia.tech/renterd/worker"
-	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"moul.io/zapgorm2"
 )
 
-// TODOs:
-// - add wallet metrics
-// - add UPNP support
-
-type Bus interface {
-	worker.Bus
-	s3.Bus
-}
-
-type BusConfig struct {
+type NodeConfig struct {
 	config.Bus
 	Database                    config.Database
 	DatabaseLog                 config.DatabaseLog
@@ -56,20 +42,7 @@ type BusConfig struct {
 	SyncerPeerDiscoveryInterval time.Duration
 }
 
-type AutopilotConfig struct {
-	config.Autopilot
-	ID string
-}
-
-type (
-	RunFn         = func() error
-	WorkerSetupFn = func(context.Context, string, string) error
-	ShutdownFn    = func(context.Context) error
-)
-
-var NoopFn = func(context.Context) error { return nil }
-
-func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, ShutdownFn, *chain.Manager, error) {
+func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logger) (http.Handler, func(context.Context) error, *chain.Manager, error) {
 	// ensure we don't hang indefinitely
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -223,7 +196,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, announcementMaxAgeHours, logger)
+	b, err := New(ctx, alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -238,28 +211,6 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		)
 	}
 	return b.Handler(), shutdownFn, cm, nil
-}
-
-func NewWorker(cfg config.Worker, s3Opts s3.Opts, b Bus, seed types.PrivateKey, l *zap.Logger) (http.Handler, http.Handler, WorkerSetupFn, ShutdownFn, error) {
-	workerKey := blake2b.Sum256(append([]byte("worker"), seed...))
-	w, err := worker.New(workerKey, cfg.ID, b, cfg.ContractLockTimeout, cfg.BusFlushInterval, cfg.DownloadOverdriveTimeout, cfg.UploadOverdriveTimeout, cfg.DownloadMaxOverdrive, cfg.UploadMaxOverdrive, cfg.DownloadMaxMemory, cfg.UploadMaxMemory, cfg.AllowPrivateIPs, l)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	s3Handler, err := s3.New(b, w, l.Named("s3").Sugar(), s3Opts)
-	if err != nil {
-		err = errors.Join(err, w.Shutdown(context.Background()))
-		return nil, nil, nil, nil, fmt.Errorf("failed to create s3 handler: %w", err)
-	}
-	return w.Handler(), s3Handler, w.Setup, w.Shutdown, nil
-}
-
-func NewAutopilot(cfg AutopilotConfig, b autopilot.Bus, workers []autopilot.Worker, l *zap.Logger) (http.Handler, RunFn, ShutdownFn, error) {
-	ap, err := autopilot.New(cfg.ID, b, workers, l, cfg.Heartbeat, cfg.ScannerInterval, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.MigrationHealthCutoff, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer, cfg.MigratorParallelSlabsPerWorker, cfg.RevisionBroadcastInterval)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return ap.Handler(), ap.Run, ap.Shutdown, nil
 }
 
 func gormLogLevel(cfg config.DatabaseLog) logger.LogLevel {

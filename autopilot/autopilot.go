@@ -209,11 +209,11 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	jc.Encode(res)
 }
 
-func (ap *Autopilot) Run() error {
+func (ap *Autopilot) Run() {
 	ap.startStopMu.Lock()
 	if ap.isRunning() {
 		ap.startStopMu.Unlock()
-		return errors.New("already running")
+		return
 	}
 	ap.startTime = time.Now()
 	ap.triggerChan = make(chan bool, 1)
@@ -226,7 +226,7 @@ func (ap *Autopilot) Run() error {
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
 		ap.logger.Error("autopilot stopped before it was able to come online")
-		return nil
+		return
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
@@ -234,7 +234,7 @@ func (ap *Autopilot) Run() error {
 		if !errors.Is(err, context.Canceled) {
 			ap.logger.Error(err)
 		}
-		return nil
+		return
 	}
 
 	var forceScan bool
@@ -342,7 +342,7 @@ func (ap *Autopilot) Run() error {
 
 		select {
 		case <-ap.shutdownCtx.Done():
-			return nil
+			return
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
@@ -350,7 +350,7 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
-	return nil
+	return
 }
 
 // Shutdown shuts down the autopilot.

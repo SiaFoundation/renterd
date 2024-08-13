@@ -1,4 +1,4 @@
-package node
+package bus
 
 import (
 	"context"
@@ -26,7 +26,7 @@ type Syncer interface {
 // NewSyncer creates a syncer using the given configuration. The syncer that is
 // returned is already running, closing it will close the underlying listener
 // causing the syncer to stop.
-func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (Syncer, error) {
+func NewSyncer(cfg NodeConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (Syncer, error) {
 	// validate config
 	if cfg.Bootstrap && cfg.Network == nil {
 		return nil, errors.New("cannot bootstrap without a network")
@@ -72,7 +72,7 @@ func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logge
 	return s, nil
 }
 
-func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {
+func options(cfg NodeConfig, logger *zap.Logger) (opts []syncer.Option) {
 	opts = append(opts,
 		syncer.WithLogger(logger.Named("syncer")),
 		syncer.WithSendBlocksTimeout(time.Minute),

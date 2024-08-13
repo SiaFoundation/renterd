@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/bus/client"
+
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/chain"
-	"go.sia.tech/renterd/internal/node"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -70,7 +71,7 @@ func newTestClient(dir string) (*client.Client, func() error, func(context.Conte
 
 	// create bus
 	network, genesis := chain.Mainnet()
-	b, shutdown, _, err := node.NewBus(node.BusConfig{
+	b, shutdown, _, err := bus.NewNode(bus.NodeConfig{
 		Bus: config.Bus{
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     false,
