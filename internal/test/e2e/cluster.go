@@ -464,11 +464,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	if nHosts > 0 {
-		cluster.AddHostsBlocking(nHosts)
+		cluster.AddHosts(nHosts)
 		cluster.WaitForPeers()
-		cluster.WaitForContracts()
-		cluster.WaitForContractSet(test.ContractSet, nHosts)
-		cluster.WaitForAccounts()
+		if !opts.skipRunningAutopilot && !opts.skipSettingAutopilot {
+			cluster.WaitForContracts()
+			cluster.WaitForContractSet(test.ContractSet, nHosts)
+			cluster.WaitForAccounts()
+		}
 	}
 
 	// Ping the UI

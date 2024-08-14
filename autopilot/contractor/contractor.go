@@ -528,6 +528,8 @@ func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract ap
 }
 
 func (c *Contractor) shouldArchive(contract api.Contract, bh uint64) error {
+	// TODO: check if a v1 contract still exists beyond the v2 require height.
+	// If so we archive it since we can't renew it.
 	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
 		return errContractExpired
 	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
