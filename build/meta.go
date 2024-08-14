@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	commit = "?"
-	version = "?"
+	commit    = "?"
+	version   = "?"
 	buildTime = 0
 )
 
