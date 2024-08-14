@@ -66,21 +66,16 @@ func NewFallbackDialer(bus DialerBus, logger *zap.Logger, dialer net.Dialer) *Fa
 }
 
 func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error) {
+	// Dial and cache the resolved IP if dial successful
+	conn, err := d.dialer.DialContext(ctx, "tcp", address)
+	if err == nil {
+		d.cache.Set(host, conn.RemoteAddr().String())
+		return conn, nil
+	}
+
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
-	}
-
-	// Try to resolve IP
-	ipAddr, err := net.ResolveIPAddr("ip", host)
-	if err == nil {
-		// Dial and cache the resolved IP
-		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(ipAddr.String(), port))
-		if err != nil {
-			return nil, err
-		}
-		d.cache.Set(host, ipAddr.String())
-		return conn, nil
 	}
 
 	// If resolution fails, check the cache
