@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 var ErrWebhookNotFound = errors.New("Webhook not found")
@@ -131,9 +130,7 @@ func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
 func (m *Manager) Delete(ctx context.Context, wh Webhook) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.store.DeleteWebhook(ctx, wh); errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrWebhookNotFound
-	} else if err != nil {
+	if err := m.store.DeleteWebhook(ctx, wh); err != nil {
 		return err
 	}
 	delete(m.webhooks, wh.String())
