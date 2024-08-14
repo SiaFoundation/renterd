@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
@@ -687,24 +686,10 @@ func (c *TestCluster) RemoveHost(host *Host) {
 func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 
-	pk := types.GeneratePrivateKey()
-
-	// Prepare syncer options
-	var opts []syncer.Option
-	opts = append(opts,
-		syncer.WithLogger(c.logger.Named(pk.PublicKey().String()).Named("syncer")),
-		syncer.WithSendBlocksTimeout(time.Minute),
-	)
-	if c.busCfg.SyncerPeerDiscoveryInterval > 0 {
-		opts = append(opts, syncer.WithPeerDiscoveryInterval(c.busCfg.SyncerPeerDiscoveryInterval))
-	}
-	if c.busCfg.SyncerSyncInterval > 0 {
-		opts = append(opts, syncer.WithSyncInterval(c.busCfg.SyncerSyncInterval))
-	}
-
 	// Create host.
+	pk := types.GeneratePrivateKey()
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(pk, hostDir, c.busCfg.Network, c.busCfg.Genesis, opts...)
+	h, err := NewHost(pk, hostDir, c.busCfg.Network, c.busCfg.Genesis)
 	c.tt.OK(err)
 
 	// Connect gateways.
