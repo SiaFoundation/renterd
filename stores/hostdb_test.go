@@ -393,7 +393,7 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert cascade delete on host
-	err = ss.gormDB.Exec("DELETE FROM hosts WHERE public_key = ?", publicKey(types.PublicKey{1})).Error
+	_, err = ss.DB().Exec(context.Background(), "DELETE FROM hosts WHERE public_key = ?", sql.PublicKey(types.PublicKey{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestSearchHosts(t *testing.T) {
 	}
 
 	// assert cascade delete on autopilot
-	err = ss.gormDB.Exec("DELETE FROM autopilots WHERE identifier IN (?,?)", ap1, ap2).Error
+	_, err = ss.DB().Exec(context.Background(), "DELETE FROM autopilots WHERE identifier IN (?,?)", ap1, ap2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,11 +694,7 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	numRelations := func() (cnt int64) {
 		t.Helper()
-		err := ss.gormDB.Table("host_allowlist_entry_hosts").Count(&cnt).Error
-		if err != nil {
-			t.Fatal(err)
-		}
-		return
+		return ss.Count("host_allowlist_entry_hosts")
 	}
 
 	isAllowed := func(hk types.PublicKey) bool {
@@ -866,20 +862,12 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	numAllowlistRelations := func() (cnt int64) {
 		t.Helper()
-		err := ss.gormDB.Table("host_allowlist_entry_hosts").Count(&cnt).Error
-		if err != nil {
-			t.Fatal(err)
-		}
-		return
+		return ss.Count("host_allowlist_entry_hosts")
 	}
 
 	numBlocklistRelations := func() (cnt int64) {
 		t.Helper()
-		err := ss.gormDB.Table("host_blocklist_entry_hosts").Count(&cnt).Error
-		if err != nil {
-			t.Fatal(err)
-		}
-		return
+		return ss.Count("host_blocklist_entry_hosts")
 	}
 
 	isBlocked := func(hk types.PublicKey) bool {
