@@ -1,4 +1,4 @@
-package worker
+package rhp
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -60,33 +59,7 @@ var (
 	ErrNoSectorsToPrune = errors.New("no sectors to prune")
 )
 
-// A HostErrorSet is a collection of errors from various hosts.
-type HostErrorSet map[types.PublicKey]error
-
-// NumGouging returns numbers of host that errored out due to price gouging.
-func (hes HostErrorSet) NumGouging() (n int) {
-	for _, he := range hes {
-		if errors.Is(he, errPriceTableGouging) {
-			n++
-		}
-	}
-	return
-}
-
-// Error implements error.
-func (hes HostErrorSet) Error() string {
-	if len(hes) == 0 {
-		return ""
-	}
-
-	var strs []string
-	for hk, he := range hes {
-		strs = append(strs, fmt.Sprintf("%x: %v", hk[:4], he.Error()))
-	}
-
-	// include a leading newline so that the first error isn't printed on the
-	// same line as the error context
-	return "\n" + strings.Join(strs, "\n")
+type Client struct {
 }
 
 func wrapErr(ctx context.Context, fnName string, err *error) {
@@ -245,7 +218,7 @@ func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.Pr
 
 // FetchSignedRevision fetches the latest signed revision for a contract from a host.
 // TODO: stop using rhpv2 and upgrade to newer protocol when possible.
-func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
+func (w *Client) FetchSignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
 	var rev rhpv2.ContractRevision
 	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		req := &rhpv2.RPCLockRequest{
@@ -289,7 +262,7 @@ func (w *worker) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 	return rev, err
 }
 
-func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
+func (w *Client) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
 	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
 		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 			return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
@@ -347,7 +320,7 @@ func (w *worker) PruneContract(ctx context.Context, hostIP string, hostKey types
 	return
 }
 
-func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
+func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
 	id := frand.Entropy128()
 	logger := w.logger.
 		With("id", hex.EncodeToString(id[:])).
@@ -529,7 +502,7 @@ func (w *worker) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 	return
 }
 
-func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
+func (w *Client) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			gc, err := GougingCheckerFromContext(ctx, false)
@@ -546,7 +519,7 @@ func (w *worker) FetchContractRoots(ctx context.Context, hostIP string, hostKey 
 	return
 }
 
-func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, _ error) {
+func (w *Client) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, _ error) {
 	// derive the renter key
 	renterKey := w.deriveRenterKey(rev.HostKey())
 
@@ -634,7 +607,7 @@ func (w *worker) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 	return
 }
 
-func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
+func (w *Client) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
 	conn, err := dial(ctx, hostIP)
 	if err != nil {
 		return err
@@ -667,7 +640,7 @@ func (w *worker) withTransportV2(ctx context.Context, hostKey types.PublicKey, h
 	return fn(t)
 }
 
-func (w *worker) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
+func (w *Client) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
 	renterKey := w.deriveRenterKey(hk)
 
 	// execute lock RPC
