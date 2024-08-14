@@ -81,7 +81,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 			cfg.Database.MySQL.Database,
 		)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open MySQL main database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to open MySQL main database: %w", err)
 		}
 		connMetrics, err := mysql.Open(
 			cfg.Database.MySQL.User,
@@ -94,7 +94,7 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		}
 		dbMain, err = mysql.NewMainDatabase(connMain, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
 		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
@@ -110,11 +110,11 @@ func NewBus(cfg BusConfig, dir string, seed types.PrivateKey, logger *zap.Logger
 		// create SQLite connections
 		db, err := sqlite.Open(filepath.Join(dbDir, "db.sqlite"))
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to open SQLite main database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
 		dbMain, err = sqlite.NewMainDatabase(db, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
 
 		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
