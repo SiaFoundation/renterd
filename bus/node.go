@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -25,9 +23,6 @@ import (
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-	"moul.io/zapgorm2"
 )
 
 type NodeConfig struct {
@@ -48,17 +43,20 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 	defer cancel()
 
 	// create database connections
-	var dbConn gorm.Dialector
+	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
 	if cfg.Database.MySQL.URI != "" {
 		// create MySQL connections
-		dbConn = stores.NewMySQLConnection(
+		connMain, err := mysql.Open(
 			cfg.Database.MySQL.User,
 			cfg.Database.MySQL.Password,
 			cfg.Database.MySQL.URI,
 			cfg.Database.MySQL.Database,
 		)
-		dbm, err := mysql.Open(
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open MySQL main database: %w", err)
+		}
+		connMetrics, err := mysql.Open(
 			cfg.Database.MySQL.User,
 			cfg.Database.MySQL.Password,
 			cfg.Database.MySQL.URI,
@@ -67,7 +65,11 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -79,7 +81,14 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 		}
 
 		// create SQLite connections
-		dbConn = stores.NewSQLiteConnection(filepath.Join(dbDir, "db.sqlite"))
+		db, err := sqlite.Open(filepath.Join(dbDir, "db.sqlite"))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to open SQLite main database: %w", err)
+		}
+		dbMain, err = sqlite.NewMainDatabase(db, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
+		}
 
 		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
 		if err != nil {
@@ -91,27 +100,16 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 		}
 	}
 
-	// create database logger
-	dbLogger := zapgorm2.Logger{
-		ZapLogger:                 cfg.Logger.Named("SQL"),
-		LogLevel:                  gormLogLevel(cfg.DatabaseLog),
-		SlowThreshold:             cfg.DatabaseLog.SlowThreshold,
-		SkipCallerLookup:          false,
-		IgnoreRecordNotFoundError: cfg.DatabaseLog.IgnoreRecordNotFoundError,
-		Context:                   nil,
-	}
-
 	alertsMgr := alerts.NewManager()
 	sqlStoreDir := filepath.Join(dir, "partial_slabs")
 	sqlStore, err := stores.NewSQLStore(stores.Config{
-		Conn:                          dbConn,
 		Alerts:                        alerts.WithOrigin(alertsMgr, "bus"),
+		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
 		PartialSlabDir:                sqlStoreDir,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: cfg.SlabBufferCompletionThreshold,
 		Logger:                        logger.Sugar(),
-		GormLogger:                    dbLogger,
 		RetryTransactionIntervals:     cfg.RetryTxIntervals,
 		WalletAddress:                 types.StandardUnlockHash(seed.PublicKey()),
 		LongQueryDuration:             cfg.DatabaseLog.SlowThreshold,
@@ -211,25 +209,4 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 		)
 	}
 	return b.Handler(), shutdownFn, cm, nil
-}
-
-func gormLogLevel(cfg config.DatabaseLog) logger.LogLevel {
-	level := logger.Silent
-	if cfg.Enabled {
-		switch strings.ToLower(cfg.Level) {
-		case "":
-			level = logger.Warn // default to 'warn' if not set
-		case "error":
-			level = logger.Error
-		case "warn":
-			level = logger.Warn
-		case "info":
-			level = logger.Info
-		case "debug":
-			level = logger.Info
-		default:
-			log.Fatalf("invalid log level %q, options are: silent, error, warn, info", cfg.Level)
-		}
-	}
-	return level
 }

@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 
+	_ "github.com/go-sql-driver/mysql"
 	"go.sia.tech/renterd/internal/sql"
 )
 
