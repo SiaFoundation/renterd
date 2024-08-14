@@ -192,7 +192,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 				fn:   shutdownFn,
 			})
 
-			mux.Sub["/api/worker"] = utils.TreeMux{Handler: authHandler(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
@@ -358,18 +358,6 @@ func (n *node) Shutdown() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-func authHandler(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
-	return func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
-				h.ServeHTTP(w, req)
-			} else {
-				jape.BasicAuth(password)(h).ServeHTTP(w, req)
-			}
-		})
-	}
 }
 
 func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {

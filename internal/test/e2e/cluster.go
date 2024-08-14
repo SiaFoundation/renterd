@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -330,7 +329,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	w, s3Handler, wSetupFn, wShutdownFn, err := worker.NewNode(workerCfg, s3.Opts{}, busClient, wk, logger)
 	tt.OK(err)
 	workerServer := http.Server{
-		Handler: auth(workerPassword, false)(w),
+		Handler: utils.Auth(workerPassword, false)(w),
 	}
 
 	var workerShutdownFns []func(context.Context) error
@@ -860,18 +859,6 @@ func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
 		}
 	}
 	return nil
-}
-
-func auth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
-	return func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
-				h.ServeHTTP(w, req)
-			} else {
-				jape.BasicAuth(password)(h).ServeHTTP(w, req)
-			}
-		})
-	}
 }
 
 // testNetwork returns a modified version of Zen used for testing
