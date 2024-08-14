@@ -218,7 +218,7 @@ func (h *Host) SyncerAddr() string {
 }
 
 // NewHost initializes a new test host.
-func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block, debugLogging bool) (*Host, error) {
+func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block, syncerOpts ...syncer.Option) (*Host, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create dir: %w", err)
 	}
@@ -240,7 +240,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
-	})
+	}, syncerOpts...)
 	syncErrChan := make(chan error, 1)
 	go func() { syncErrChan <- s.Run(context.Background()) }()
 
