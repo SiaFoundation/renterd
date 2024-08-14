@@ -260,7 +260,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		return nil, fmt.Errorf("failed to create storage manager: %w", err)
 	}
 
-	contracts, err := contracts.NewManager(db, storage, cm, s, wallet)
+	contracts, err := contracts.NewManager(db, storage, cm, s, wallet, contracts.WithRejectAfter(10), contracts.WithRevisionSubmissionBuffer(5))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract manager: %w", err)
 	}
