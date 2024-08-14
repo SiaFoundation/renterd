@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 var ErrWebhookNotFound = errors.New("Webhook not found")
@@ -128,18 +127,10 @@ func (m *Manager) BroadcastAction(_ context.Context, event Event) error {
 	return nil
 }
 
-func (m *Manager) Close() error {
-	m.shutdownCtxCancel()
-	m.wg.Wait()
-	return nil
-}
-
 func (m *Manager) Delete(ctx context.Context, wh Webhook) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.store.DeleteWebhook(ctx, wh); errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrWebhookNotFound
-	} else if err != nil {
+	if err := m.store.DeleteWebhook(ctx, wh); err != nil {
 		return err
 	}
 	delete(m.webhooks, wh.String())
@@ -188,6 +179,23 @@ func (m *Manager) Register(ctx context.Context, wh Webhook) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.webhooks[wh.String()] = wh
+	return nil
+}
+
+func (m *Manager) Shutdown(ctx context.Context) error {
+	m.shutdownCtxCancel()
+
+	waitChan := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(waitChan)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-waitChan:
+	}
 	return nil
 }
 

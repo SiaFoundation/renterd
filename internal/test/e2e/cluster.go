@@ -27,12 +27,11 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
-	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/stores/sql/mysql"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gorm.io/gorm"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
@@ -249,7 +248,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
-	if mysql := config.MySQLConfigFromEnv(); mysql.URI != "" {
+	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
 		// generate a random database name if none are set
 		if busCfg.Database.MySQL.Database == "" {
 			busCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
@@ -258,13 +257,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			busCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
 
-		tmpDB, err := gorm.Open(stores.NewMySQLConnection(mysql.User, mysql.Password, mysql.URI, ""))
+		tmpDB, err := mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, "")
 		tt.OK(err)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)).Error)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)).Error)
-		tmpDBB, err := tmpDB.DB()
-		tt.OK(err)
-		tt.OK(tmpDBB.Close())
+		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)))
+		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)))
+		tt.OK(tmpDB.Close())
 	}
 
 	// Prepare individual dirs.

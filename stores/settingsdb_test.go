@@ -55,7 +55,7 @@ func TestSQLSettingStore(t *testing.T) {
 	if err := ss.DeleteSetting(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	} else if _, err := ss.Setting(ctx, "foo"); !errors.Is(err, api.ErrSettingNotFound) {
-		t.Fatal("should fail with gorm.ErrRecordNotFound", err)
+		t.Fatal("should fail with api.ErrSettingNotFound", err)
 	} else if keys, err := ss.Settings(ctx); err != nil {
 		t.Fatal(err)
 	} else if len(keys) != 0 {

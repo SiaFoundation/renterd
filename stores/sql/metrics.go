@@ -206,6 +206,7 @@ func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.Contrac
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to delete contract metric: %w", err)
 	}
+	defer deleteStmt.Close()
 
 	for _, metric := range metrics {
 		// delete any existing metric for the same contract that has happened
