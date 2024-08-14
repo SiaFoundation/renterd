@@ -9,23 +9,25 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/chain"
 	isql "go.sia.tech/renterd/internal/sql"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"go.uber.org/zap"
 )
 
-var _ chain.ChainUpdateTx = (*ChainUpdateTx)(nil)
+var (
+	_ ssql.ChainUpdateTx = (*chainUpdateTx)(nil)
+)
 
-type ChainUpdateTx struct {
+type chainUpdateTx struct {
 	ctx context.Context
 	tx  isql.Tx
 	l   *zap.SugaredLogger
 }
 
-func (c ChainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
+func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
 	c.l.Debugw("applying index", "height", index.Height, "block_id", index.ID)
 
 	if len(spent) > 0 {
@@ -109,11 +111,11 @@ func (c ChainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 	return nil
 }
 
-func (c ChainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
+func (c chainUpdateTx) ContractState(fcid types.FileContractID) (api.ContractState, error) {
 	return ssql.GetContractState(c.ctx, c.tx, fcid)
 }
 
-func (c ChainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement, timestamp time.Time) error {
+func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []types.SiacoinElement, timestamp time.Time) error {
 	c.l.Debugw("reverting index", "height", index.Height, "block_id", index.ID)
 
 	if len(removed) > 0 {
@@ -174,27 +176,27 @@ func (c ChainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 	return nil
 }
 
-func (c ChainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
+func (c chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 	return ssql.UpdateChainIndex(c.ctx, c.tx, index, c.l)
 }
 
-func (c ChainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
+func (c chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
 	return ssql.UpdateContract(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
 }
 
-func (c ChainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
+func (c chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
 	return ssql.UpdateContractProofHeight(c.ctx, c.tx, fcid, proofHeight, c.l)
 }
 
-func (c ChainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {
+func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {
 	return ssql.UpdateContractState(c.ctx, c.tx, fcid, state, c.l)
 }
 
-func (c ChainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
+func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return ssql.UpdateFailedContracts(c.ctx, c.tx, blockHeight, c.l)
 }
 
-func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
+func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
 	c.l.Debugw("update host", "hk", hk, "netaddress", ha.NetAddress)
 
 	// create the announcement
@@ -322,10 +324,10 @@ func (c ChainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	return nil
 }
 
-func (c ChainUpdateTx) UpdateWalletStateElements(elements []types.StateElement) error {
+func (c chainUpdateTx) UpdateWalletStateElements(elements []types.StateElement) error {
 	return ssql.UpdateWalletStateElements(c.ctx, c.tx, elements)
 }
 
-func (c ChainUpdateTx) WalletStateElements() ([]types.StateElement, error) {
+func (c chainUpdateTx) WalletStateElements() ([]types.StateElement, error) {
 	return ssql.WalletStateElements(c.ctx, c.tx)
 }

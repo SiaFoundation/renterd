@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
@@ -19,8 +20,8 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
-	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -46,17 +47,28 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
-	// ChainManager tracks multiple blockchains and identifies the best valid
-	// chain.
 	ChainManager interface {
 		AddBlocks(blocks []types.Block) error
 		AddPoolTransactions(txns []types.Transaction) (bool, error)
 		Block(id types.BlockID) (types.Block, bool)
+		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
 		PoolTransactions() []types.Transaction
 		RecommendedFee() types.Currency
+		Tip() types.ChainIndex
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
+		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
+	}
+
+	ChainSubscriber interface {
+		ChainIndex(context.Context) (types.ChainIndex, error)
+		Shutdown(context.Context) error
+	}
+
+	ChainStore interface {
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
 	// A TransactionPool can validate and relay unconfirmed transactions.
@@ -153,11 +165,6 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
-	// A ChainStore stores chain information.
-	ChainStore interface {
-		ChainIndex(ctx context.Context) (types.ChainIndex, error)
-	}
-
 	// A SettingStore stores settings.
 	SettingStore interface {
 		DeleteSetting(ctx context.Context, key string) error
@@ -192,8 +199,7 @@ type (
 	}
 
 	PinManager interface {
-		Close(context.Context) error
-		Run()
+		Shutdown(context.Context) error
 		TriggerUpdate()
 	}
 
@@ -216,6 +222,7 @@ type (
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
 		UnconfirmedEvents() ([]wallet.Event, error)
+		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)
 	}
 
@@ -237,11 +244,11 @@ type bus struct {
 	webhooksMgr WebhooksManager
 
 	cm ChainManager
+	cs ChainSubscriber
 	s  Syncer
 	w  Wallet
 
 	as    AutopilotStore
-	cs    ChainStore
 	eas   EphemeralAccountStore
 	hdb   HostDB
 	ms    MetadataStore
@@ -255,13 +262,12 @@ type bus struct {
 	logger *zap.SugaredLogger
 }
 
-// New returns a new Bus.
-func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, l *zap.Logger) (*bus, error) {
+// New returns a new Bus
+func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*bus, error) {
 	l = l.Named("bus")
 	b := &bus{
 		s:                s,
 		cm:               cm,
-		cs:               cs,
 		w:                w,
 		hdb:              hdb,
 		as:               as,
@@ -280,8 +286,6 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 		startTime: time.Now(),
 	}
 
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
-
 	// init accounts
 	if err := b.initAccounts(ctx); err != nil {
 		return nil, err
@@ -291,6 +295,12 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
+
+	// create pin manager
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
+
+	// create chain subscriber
+	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w, announcementMaxAge, l)
 
 	return b, nil
 }
@@ -437,17 +447,13 @@ func (b *bus) Handler() http.Handler {
 	})
 }
 
-// Setup starts the pin manager.
-func (b *bus) Setup() {
-	b.pinMgr.Run()
-}
-
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
-		b.webhooksMgr.Shutdown(ctx),
 		b.saveAccounts(ctx),
-		b.pinMgr.Close(ctx),
+		b.webhooksMgr.Shutdown(ctx),
+		b.pinMgr.Shutdown(ctx),
+		b.cs.Shutdown(ctx),
 	)
 }
 

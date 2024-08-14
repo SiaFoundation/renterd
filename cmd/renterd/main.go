@@ -533,15 +533,10 @@ func main() {
 	}
 
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
-	setupBusFn := node.NoopFn
 	if cfg.Bus.RemoteAddr == "" {
-		b, setupFn, shutdownFn, _, _, err := node.NewBus(busCfg, cfg.Directory, pk, logger)
+		b, shutdownFn, _, err := node.NewBus(busCfg, cfg.Directory, pk, logger)
 		if err != nil {
 			logger.Fatal("failed to create bus, err: " + err.Error())
-		}
-		setupBusFn = func(_ context.Context) error {
-			setupFn()
-			return nil
 		}
 
 		shutdownFns = append(shutdownFns, shutdownFnEntry{
@@ -640,11 +635,6 @@ func main() {
 
 	// Start server.
 	go srv.Serve(l)
-
-	// Finish bus setup.
-	if err := setupBusFn(context.Background()); err != nil {
-		logger.Fatal("failed to setup bus: " + err.Error())
-	}
 
 	// Finish worker setup.
 	if err := setupWorkerFn(context.Background()); err != nil {

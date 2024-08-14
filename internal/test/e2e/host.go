@@ -15,6 +15,7 @@ import (
 	crhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/hostd/host/accounts"
@@ -26,7 +27,6 @@ import (
 	"go.sia.tech/hostd/persist/sqlite"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
-	"go.sia.tech/renterd/internal/chain"
 	"go.uber.org/zap"
 )
 

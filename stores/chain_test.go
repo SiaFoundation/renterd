@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/chain"
+	"go.sia.tech/renterd/stores/sql"
 )
 
 // TestProcessChainUpdate tests the ProcessChainUpdate method on the SQL store.
@@ -31,7 +32,7 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// assert contract state returns the correct state
 	var state api.ContractState
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) (err error) {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) (err error) {
 		state, err = tx.ContractState(fcid)
 		return
 	}); err != nil {
@@ -48,7 +49,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update chain index is successful
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		return tx.UpdateChainIndex(types.ChainIndex{Height: 1})
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -62,7 +63,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update contract is successful
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		if err := tx.UpdateContract(fcid, 1, 2, 3); err != nil {
 			return err
 		} else if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
@@ -93,7 +94,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert we only update revision height if the rev number doesn't increase
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		return tx.UpdateContract(fcid, 2, 2, 4)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -109,7 +110,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert update failed contracts is successful
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		return tx.UpdateFailedContracts(we + 1)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -127,7 +128,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert we can fetch the state of the archived contract
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) (err error) {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) (err error) {
 		state, err = tx.ContractState(fcid)
 		return
 	}); err != nil {
@@ -138,7 +139,7 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// assert update host is successful
 	ts := time.Now().Truncate(time.Second).Add(-time.Minute).UTC()
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "foo"}, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -166,7 +167,7 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// reannounce the host and make sure the uptime is the same
 	ts = ts.Add(time.Minute)
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "fooNew"}, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
@@ -182,12 +183,12 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert passing empty function is successful
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error { return nil }); err != nil {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error { return nil }); err != nil {
 		t.Fatal("unexpected error", err)
 	}
 
 	// assert we rollback on error
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		if err := tx.UpdateChainIndex(types.ChainIndex{Height: 2}); err != nil {
 			return err
 		}
@@ -204,7 +205,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert we recover from panic
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error { return nil }); err != nil {
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error { return nil }); err != nil {
 		panic("oh no")
 	}
 }

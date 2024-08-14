@@ -18,13 +18,11 @@ import (
 )
 
 type (
-	// An AutopilotStore stores autopilots.
 	AutopilotStore interface {
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
-	// A SettingStore stores settings.
 	SettingStore interface {
 		Setting(ctx context.Context, key string) (string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
@@ -54,10 +52,10 @@ type (
 )
 
 // NewPinManager returns a new PinManager, responsible for pinning prices to a
-// fixed value in an underlying currency. Note that the manager that is being
-// returned is not running, this can be done by calling Run().
+// fixed value in an underlying currency. The returned pin manager is already
+// running and can be stopped by calling Shutdown.
 func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as AutopilotStore, ss SettingStore, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
-	return &pinManager{
+	pm := &pinManager{
 		a:           alerts,
 		as:          as,
 		ss:          ss,
@@ -71,9 +69,14 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, as A
 		triggerChan: make(chan struct{}, 1),
 		closedChan:  make(chan struct{}),
 	}
+
+	// start the pin manager
+	pm.run()
+
+	return pm
 }
 
-func (pm *pinManager) Close(ctx context.Context) error {
+func (pm *pinManager) Shutdown(ctx context.Context) error {
 	close(pm.closedChan)
 
 	doneChan := make(chan struct{})
@@ -88,38 +91,6 @@ func (pm *pinManager) Close(ctx context.Context) error {
 	case <-ctx.Done():
 		return context.Cause(ctx)
 	}
-}
-
-func (pm *pinManager) Run() {
-	pm.wg.Add(1)
-	go func() {
-		defer pm.wg.Done()
-
-		t := time.NewTicker(pm.updateInterval)
-		defer t.Stop()
-
-		var forced bool
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			err := pm.updatePrices(ctx, forced)
-			if err != nil {
-				pm.logger.Warn("failed to update prices", zap.Error(err))
-				pm.a.RegisterAlert(ctx, newPricePinningFailedAlert(err))
-			} else {
-				pm.a.DismissAlerts(ctx, alertPricePinningID)
-			}
-			cancel()
-
-			forced = false
-			select {
-			case <-pm.closedChan:
-				return
-			case <-pm.triggerChan:
-				forced = true
-			case <-t.C:
-			}
-		}
-	}()
 }
 
 func (pm *pinManager) TriggerUpdate() {
@@ -177,6 +148,38 @@ func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
 		"exceeded", exceeded,
 	)
 	return exceeded
+}
+
+func (pm *pinManager) run() {
+	pm.wg.Add(1)
+	go func() {
+		defer pm.wg.Done()
+
+		t := time.NewTicker(pm.updateInterval)
+		defer t.Stop()
+
+		var forced bool
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			err := pm.updatePrices(ctx, forced)
+			if err != nil {
+				pm.logger.Warn("failed to update prices", zap.Error(err))
+				pm.a.RegisterAlert(ctx, newPricePinningFailedAlert(err))
+			} else {
+				pm.a.DismissAlerts(ctx, alertPricePinningID)
+			}
+			cancel()
+
+			forced = false
+			select {
+			case <-pm.closedChan:
+				return
+			case <-pm.triggerChan:
+				forced = true
+			case <-t.C:
+			}
+		}
+	}()
 }
 
 func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {

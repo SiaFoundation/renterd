@@ -26,7 +26,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/internal/chain"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -1545,7 +1545,7 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 	var synced bool
 	block, found := b.cm.Block(index.ID)
 	if found {
-		synced = chain.IsSynced(block)
+		synced = utils.IsSynced(block)
 	}
 
 	return api.ConsensusState{

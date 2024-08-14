@@ -17,12 +17,12 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -65,7 +65,6 @@ type TestCluster struct {
 	network      *consensus.Network
 	genesisBlock types.Block
 	cm           *chain.Manager
-	cs           *chain.ChainSubscriber
 	apID         string
 	dbName       string
 	dir          string
@@ -306,7 +305,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bSetupFn, bShutdownFn, cm, cs, err := node.NewBus(busCfg, busDir, wk, logger)
+	b, bShutdownFn, cm, err := node.NewBus(busCfg, busDir, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -365,7 +364,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		network:      busCfg.Network,
 		genesisBlock: busCfg.Genesis,
 		cm:           cm,
-		cs:           cs,
 		tt:           tt,
 		wk:           wk,
 
@@ -409,9 +407,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			cluster.wg.Done()
 		}()
 	}
-
-	// Finish bus setup.
-	bSetupFn()
 
 	// Finish worker setup.
 	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
