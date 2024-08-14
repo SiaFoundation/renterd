@@ -50,12 +50,7 @@ var (
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
-	dir string
-
 	hosts []*Host
-
-	apCfg  node.AutopilotConfig
-	busCfg node.BusConfig
 
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
@@ -68,12 +63,17 @@ type TestCluster struct {
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
 
-	cm     *chain.Manager
-	cs     *chain.ChainSubscriber
-	logger *zap.Logger
-	tt     test.TT
-	wk     types.PrivateKey
-	wg     sync.WaitGroup
+	network      *consensus.Network
+	genesisBlock types.Block
+	cm           *chain.Manager
+	cs           *chain.ChainSubscriber
+	apID         string
+	dbName       string
+	dir          string
+	logger       *zap.Logger
+	tt           test.TT
+	wk           types.PrivateKey
+	wg           sync.WaitGroup
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -124,12 +124,11 @@ func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 	c.Shutdown()
 
 	newCluster := newTestCluster(t, testClusterOptions{
-		dir:          c.dir,
-		autopilotCfg: &c.apCfg,
-		busCfg:       &c.busCfg,
-		logger:       c.logger,
-		funding:      &clusterOptNoFunding,
-		walletKey:    &c.wk,
+		dir:       c.dir,
+		dbName:    c.dbName,
+		logger:    c.logger,
+		funding:   &clusterOptNoFunding,
+		walletKey: &c.wk,
 	})
 	newCluster.hosts = hosts
 	return newCluster
@@ -138,7 +137,7 @@ func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 // AutopilotConfig returns the autopilot's config and current period.
 func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, uint64) {
 	c.tt.Helper()
-	ap, err := c.Bus.Autopilot(ctx, c.apCfg.ID)
+	ap, err := c.Bus.Autopilot(ctx, c.apID)
 	c.tt.OK(err)
 	return ap.Config, ap.CurrentPeriod
 }
@@ -147,12 +146,13 @@ func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig,
 func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) {
 	c.tt.Helper()
 	c.tt.OK(c.Bus.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     c.apCfg.ID,
+		ID:     c.apID,
 		Config: cfg,
 	}))
 }
 
 type testClusterOptions struct {
+	dbName               string
 	dir                  string
 	funding              *bool
 	hosts                int
@@ -242,6 +242,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 	if busCfg.Logger == nil {
 		busCfg.Logger = logger
+	}
+	if opts.dbName != "" {
+		busCfg.Database.MySQL.Database = opts.dbName
 	}
 
 	// Check if we are testing against an external database. If so, we create a
@@ -358,16 +361,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
 
 	cluster := &TestCluster{
-		dir: dir,
-
-		apCfg:  apCfg,
-		busCfg: busCfg,
-
-		logger: logger,
-		cm:     cm,
-		cs:     cs,
-		tt:     tt,
-		wk:     wk,
+		apID:         apCfg.ID,
+		dir:          dir,
+		dbName:       busCfg.Database.MySQL.Database,
+		logger:       logger,
+		network:      busCfg.Network,
+		genesisBlock: busCfg.Genesis,
+		cm:           cm,
+		cs:           cs,
+		tt:           tt,
+		wk:           wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,
@@ -519,7 +522,7 @@ func (c *TestCluster) MineToRenewWindow() {
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	ap, err := c.Bus.Autopilot(context.Background(), c.apCfg.ID)
+	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
 	c.tt.OK(err)
 
 	renewWindowStart := ap.CurrentPeriod + ap.Config.Contracts.Period
@@ -685,11 +688,9 @@ func (c *TestCluster) RemoveHost(host *Host) {
 
 func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
-
 	// Create host.
-	pk := types.GeneratePrivateKey()
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(pk, hostDir, c.busCfg.Network, c.busCfg.Genesis)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock)
 	c.tt.OK(err)
 
 	// Connect gateways.
