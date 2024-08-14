@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -13,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
@@ -22,6 +25,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
 )
+
+// TODO: handle RENTERD_S3_HOST_BUCKET_BASES correctly
 
 const (
 	// accountRefillInterval is the amount of time between refills of ephemeral
@@ -38,6 +43,11 @@ const (
 var (
 	disableStdin bool
 	enableANSI   = runtime.GOOS != "windows"
+
+	hostBasesStr         string
+	keyPairsV4           string
+	workerRemotePassStr  string
+	workerRemoteAddrsStr string
 )
 
 func defaultConfig() config.Config {
@@ -122,29 +132,88 @@ func defaultConfig() config.Config {
 	}
 }
 
-func loadConfig() config.Config {
-	cfg := defaultConfig()
-
+// loadConfig creates a default config and overrides it with the contents of the
+// YAML file (specified by the RENTERD_CONFIG_FILE), CLI flags, and environment
+// variables, in that order.
+func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.Block, err error) {
+	cfg = defaultConfig()
 	parseYamlConfig(&cfg)
 	parseCLIFlags(&cfg)
 	parseEnvironmentVariables(&cfg)
 
+	// check network
+	switch cfg.Network {
+	case "anagami":
+		network, genesis = chain.TestnetAnagami()
+	case "mainnet":
+		network, genesis = chain.Mainnet()
+	case "zen":
+		network, genesis = chain.TestnetZen()
+	default:
+		err = fmt.Errorf("unknown network '%s'", cfg.Network)
+		return
+	}
+
+	return
+}
+
+func sanitizeConfig(cfg *config.Config) error {
+	// parse remotes
+	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
+		cfg.Worker.Remotes = cfg.Worker.Remotes[:0]
+		for _, addr := range strings.Split(workerRemoteAddrsStr, ";") {
+			cfg.Worker.Remotes = append(cfg.Worker.Remotes, config.RemoteWorker{
+				Address:  addr,
+				Password: workerRemotePassStr,
+			})
+		}
+	}
+
+	// disable worker if remotes are set
+	if len(cfg.Worker.Remotes) > 0 {
+		cfg.Worker.Enabled = false
+	}
+
+	// combine host bucket bases
+	for _, base := range strings.Split(hostBasesStr, ",") {
+		if trimmed := strings.TrimSpace(base); trimmed != "" {
+			cfg.S3.HostBucketBases = append(cfg.S3.HostBucketBases, base)
+		}
+	}
+
 	// check that the API password is set
 	if cfg.HTTP.Password == "" {
 		if disableStdin {
-			stdoutFatalError("API password must be set via environment variable or config file when --env flag is set")
-			return config.Config{}
+			return errors.New("API password must be set via environment variable or config file when --env flag is set")
 		}
 	}
-	setAPIPassword(&cfg)
+	setAPIPassword(cfg)
 
 	// check that the seed is set
 	if cfg.Seed == "" && (cfg.Worker.Enabled || cfg.Bus.RemoteAddr == "") { // only worker & bus require a seed
 		if disableStdin {
-			stdoutFatalError("Seed must be set via environment variable or config file when --env flag is set")
-			return config.Config{}
+			return errors.New("Seed must be set via environment variable or config file when --env flag is set")
 		}
-		setSeedPhrase(&cfg)
+		setSeedPhrase(cfg)
+	}
+
+	// validate the seed is valid
+	if cfg.Seed != "" {
+		var rawSeed [32]byte
+		if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
+			return fmt.Errorf("failed to load wallet: %v", err)
+		}
+	}
+
+	// parse S3 auth keys
+	if cfg.S3.Enabled {
+		if !cfg.S3.DisableAuth && keyPairsV4 != "" {
+			var err error
+			cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
+			if err != nil {
+				return fmt.Errorf("failed to parse keypairs: %v", err)
+			}
+		}
 	}
 
 	// default log levels
@@ -155,12 +224,9 @@ func loadConfig() config.Config {
 		cfg.Log.Database.Level = cfg.Log.Level
 	}
 
-	return cfg
+	return nil
 }
 
-// parseYamlConfig loads the config file specified by the RENTERD_CONFIG_FILE
-// environment variable. If the config file does not exist, it will not be
-// loaded.
 func parseYamlConfig(cfg *config.Config) {
 	configPath := "renterd.yml"
 	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
@@ -254,24 +320,33 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "Timeout for node shutdown")
 
 	// s3
-	var hostBasesStr string
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")
 	flag.BoolVar(&cfg.S3.DisableAuth, "s3.disableAuth", cfg.S3.DisableAuth, "Disables authentication for S3 API (overrides with RENTERD_S3_DISABLE_AUTH)")
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
 	flag.StringVar(&hostBasesStr, "s3.hostBases", "", "Enables bucket rewriting in the router for specific hosts provided via comma-separated list (overrides with RENTERD_S3_HOST_BUCKET_BASES)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router for all hosts (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
-	// combine host bucket bases
-	for _, base := range strings.Split(hostBasesStr, ",") {
-		if trimmed := strings.TrimSpace(base); trimmed != "" {
-			cfg.S3.HostBucketBases = append(cfg.S3.HostBucketBases, base)
-		}
+	// custom usage
+	flag.Usage = func() {
+		log.Print(usageHeader)
+		flag.PrintDefaults()
+		log.Print(usageFooter)
 	}
 
 	flag.Parse()
 }
 
 func parseEnvironmentVariables(cfg *config.Config) {
+	// define helper function to parse environment variables
+	parseEnvVar := func(s string, v interface{}) {
+		if env, ok := os.LookupEnv(s); ok {
+			if _, err := fmt.Sscan(env, v); err != nil {
+				log.Fatalf("failed to parse %s: %v", s, err)
+			}
+			fmt.Printf("Using %s environment variable\n", s)
+		}
+	}
+
 	parseEnvVar("RENTERD_NETWORK", &cfg.Network)
 
 	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
@@ -319,48 +394,10 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
 
-	// parse remotes, we duplicate the old behavior of all workers sharing the
-	// same password
-	var workerRemotePassStr string
-	var workerRemoteAddrsStr string
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
-	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
-		cfg.Worker.Remotes = cfg.Worker.Remotes[:0]
-		for _, addr := range strings.Split(workerRemoteAddrsStr, ";") {
-			cfg.Worker.Remotes = append(cfg.Worker.Remotes, config.RemoteWorker{
-				Address:  addr,
-				Password: workerRemotePassStr,
-			})
-		}
-	}
 
-	// disable worker if remotes are set
-	if len(cfg.Worker.Remotes) > 0 {
-		cfg.Worker.Enabled = false
-	}
-
-	// parse S3 auth keys
-	if cfg.S3.Enabled {
-		var keyPairsV4 string
-		parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
-		if !cfg.S3.DisableAuth && keyPairsV4 != "" {
-			var err error
-			cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
-			if err != nil {
-				log.Fatalf("failed to parse keypairs: %v", err)
-			}
-		}
-	}
-}
-
-func parseEnvVar(s string, v interface{}) {
-	if env, ok := os.LookupEnv(s); ok {
-		if _, err := fmt.Sscan(env, v); err != nil {
-			log.Fatalf("failed to parse %s: %v", s, err)
-		}
-		fmt.Printf("Using %s environment variable\n", s)
-	}
+	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
 }
 
 // readPasswordInput reads a password from stdin.

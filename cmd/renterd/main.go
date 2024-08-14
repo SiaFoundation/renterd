@@ -6,10 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"go.sia.tech/core/consensus"
-	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 )
 
 const (
@@ -40,28 +36,10 @@ on how to configure and use renterd.
 func main() {
 	log.SetFlags(0)
 
-	// set usage
-	flag.Usage = func() {
-		log.Print(usageHeader)
-		flag.PrintDefaults()
-		log.Print(usageFooter)
-	}
-
 	// load the config
-	cfg := loadConfig()
-
-	// validate the network
-	var network *consensus.Network
-	var genesis types.Block
-	switch cfg.Network {
-	case "anagami":
-		network, genesis = chain.TestnetAnagami()
-	case "mainnet":
-		network, genesis = chain.Mainnet()
-	case "zen":
-		network, genesis = chain.TestnetZen()
-	default:
-		log.Fatalf("unknown network '%s'", cfg.Network)
+	cfg, network, genesis, err := loadConfig()
+	if err != nil {
+		stdoutFatalError("failed to load config: " + err.Error())
 	}
 
 	// NOTE: update the usage header when adding new commands
@@ -79,16 +57,21 @@ func main() {
 		return
 	}
 
+	// sanitize the config
+	if err := sanitizeConfig(&cfg); err != nil {
+		stdoutFatalError("failed to sanitize config: " + err.Error())
+	}
+
 	// create node
 	node, err := newNode(cfg, network, genesis)
 	if err != nil {
-		log.Fatal("failed to create node: " + err.Error())
+		stdoutFatalError("failed to create node: " + err.Error())
 	}
 
 	// start node
 	err = node.Run()
 	if err != nil {
-		log.Fatal("failed to run node: " + err.Error())
+		stdoutFatalError("failed to run node: " + err.Error())
 	}
 
 	// wait for interrupt signal

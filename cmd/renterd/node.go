@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -24,7 +23,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/utils"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -93,7 +92,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 
 	// initialise a listener and override the HTTP address, we have to do this
 	// first so we know the actual api address if the user specifies port :0
-	l, err := listenTCP(logger, cfg.HTTP.Address)
+	l, err := utils.ListenTCP(cfg.HTTP.Address, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
@@ -202,7 +201,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 					Addr:    cfg.S3.Address,
 					Handler: s3Handler,
 				}
-				s3Listener, err = listenTCP(logger, cfg.S3.Address)
+				s3Listener, err = utils.ListenTCP(cfg.S3.Address, logger)
 				if err != nil {
 					logger.Fatal("failed to create listener: " + err.Error())
 				}
@@ -328,7 +327,7 @@ func (n *node) Run() error {
 		_, port, err := net.SplitHostPort(n.apiListener.Addr().String())
 		if err != nil {
 			n.logger.Debug("failed to parse API address", zap.Error(err))
-		} else if err := openBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
+		} else if err := utils.OpenBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
 			n.logger.Debug("failed to open browser", zap.Error(err))
 		}
 	}
@@ -370,36 +369,6 @@ func authHandler(password string, unauthenticatedDownloads bool) func(http.Handl
 				jape.BasicAuth(password)(h).ServeHTTP(w, req)
 			}
 		})
-	}
-}
-
-func listenTCP(logger *zap.Logger, addr string) (net.Listener, error) {
-	l, err := net.Listen("tcp", addr)
-	if utils.IsErr(err, errors.New("no such host")) && strings.Contains(addr, "localhost") {
-		// fall back to 127.0.0.1 if 'localhost' doesn't work
-		_, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		fallbackAddr := fmt.Sprintf("127.0.0.1:%s", port)
-		logger.Sugar().Warnf("failed to listen on %s, falling back to %s", addr, fallbackAddr)
-		return net.Listen("tcp", fallbackAddr)
-	} else if err != nil {
-		return nil, err
-	}
-	return l, nil
-}
-
-func openBrowser(url string) error {
-	switch runtime.GOOS {
-	case "linux":
-		return exec.Command("xdg-open", url).Start()
-	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		return exec.Command("open", url).Start()
-	default:
-		return fmt.Errorf("unsupported platform %q", runtime.GOOS)
 	}
 }
 
