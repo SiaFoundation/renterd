@@ -18,7 +18,7 @@ const (
 )
 
 type (
-	uploadingSectorsCache struct {
+	sectorsCache struct {
 		mu        sync.Mutex
 		uploads   map[api.UploadID]*ongoingUpload
 		renewedTo map[types.FileContractID]types.FileContractID
@@ -29,13 +29,6 @@ type (
 		contractSectors map[types.FileContractID][]types.Hash256
 	}
 )
-
-func newUploadingSectorsCache() *uploadingSectorsCache {
-	return &uploadingSectorsCache{
-		uploads:   make(map[api.UploadID]*ongoingUpload),
-		renewedTo: make(map[types.FileContractID]types.FileContractID),
-	}
-}
 
 func (ou *ongoingUpload) addSector(fcid types.FileContractID, root types.Hash256) {
 	ou.contractSectors[fcid] = append(ou.contractSectors[fcid], root)
@@ -48,93 +41,100 @@ func (ou *ongoingUpload) sectors(fcid types.FileContractID) (roots []types.Hash2
 	return
 }
 
-func (usc *uploadingSectorsCache) AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
+func NewSectorsCache() *sectorsCache {
+	return &sectorsCache{
+		uploads:   make(map[api.UploadID]*ongoingUpload),
+		renewedTo: make(map[types.FileContractID]types.FileContractID),
+	}
+}
 
-	ongoing, ok := usc.uploads[uID]
+func (sc *sectorsCache) AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	ongoing, ok := sc.uploads[uID]
 	if !ok {
 		return fmt.Errorf("%w; id '%v'", api.ErrUnknownUpload, uID)
 	}
 
-	fcid = usc.latestFCID(fcid)
+	fcid = sc.latestFCID(fcid)
 	ongoing.addSector(fcid, root)
 	return nil
 }
 
-func (usc *uploadingSectorsCache) FinishUpload(uID api.UploadID) {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
-	delete(usc.uploads, uID)
+func (sc *sectorsCache) FinishUpload(uID api.UploadID) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	delete(sc.uploads, uID)
 
 	// prune expired uploads
-	for uID, ongoing := range usc.uploads {
+	for uID, ongoing := range sc.uploads {
 		if time.Since(ongoing.started) > cacheExpiry {
-			delete(usc.uploads, uID)
+			delete(sc.uploads, uID)
 		}
 	}
 
 	// prune renewed to map
-	for old, new := range usc.renewedTo {
-		if _, exists := usc.renewedTo[new]; exists {
-			delete(usc.renewedTo, old)
+	for old, new := range sc.renewedTo {
+		if _, exists := sc.renewedTo[new]; exists {
+			delete(sc.renewedTo, old)
 		}
 	}
 }
 
-func (usc *uploadingSectorsCache) HandleRenewal(fcid, renewedFrom types.FileContractID) {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
+func (sc *sectorsCache) HandleRenewal(fcid, renewedFrom types.FileContractID) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 
-	for _, upload := range usc.uploads {
+	for _, upload := range sc.uploads {
 		if _, exists := upload.contractSectors[renewedFrom]; exists {
 			upload.contractSectors[fcid] = upload.contractSectors[renewedFrom]
 			upload.contractSectors[renewedFrom] = nil
 		}
 	}
-	usc.renewedTo[renewedFrom] = fcid
+	sc.renewedTo[renewedFrom] = fcid
 }
 
-func (usc *uploadingSectorsCache) Pending(fcid types.FileContractID) (size uint64) {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
+func (sc *sectorsCache) Pending(fcid types.FileContractID) (size uint64) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 
-	fcid = usc.latestFCID(fcid)
-	for _, ongoing := range usc.uploads {
+	fcid = sc.latestFCID(fcid)
+	for _, ongoing := range sc.uploads {
 		size += uint64(len(ongoing.sectors(fcid))) * rhp.SectorSize
 	}
 	return
 }
 
-func (usc *uploadingSectorsCache) Sectors(fcid types.FileContractID) (roots []types.Hash256) {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
+func (sc *sectorsCache) Sectors(fcid types.FileContractID) (roots []types.Hash256) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 
-	fcid = usc.latestFCID(fcid)
-	for _, ongoing := range usc.uploads {
+	fcid = sc.latestFCID(fcid)
+	for _, ongoing := range sc.uploads {
 		roots = append(roots, ongoing.sectors(fcid)...)
 	}
 	return
 }
 
-func (usc *uploadingSectorsCache) StartUpload(uID api.UploadID) error {
-	usc.mu.Lock()
-	defer usc.mu.Unlock()
+func (sc *sectorsCache) StartUpload(uID api.UploadID) error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
 
 	// check if upload already exists
-	if _, exists := usc.uploads[uID]; exists {
+	if _, exists := sc.uploads[uID]; exists {
 		return fmt.Errorf("%w; id '%v'", api.ErrUploadAlreadyExists, uID)
 	}
 
-	usc.uploads[uID] = &ongoingUpload{
+	sc.uploads[uID] = &ongoingUpload{
 		started:         time.Now(),
 		contractSectors: make(map[types.FileContractID][]types.Hash256),
 	}
 	return nil
 }
 
-func (usc *uploadingSectorsCache) latestFCID(fcid types.FileContractID) types.FileContractID {
-	if latest, ok := usc.renewedTo[fcid]; ok {
+func (um *sectorsCache) latestFCID(fcid types.FileContractID) types.FileContractID {
+	if latest, ok := um.renewedTo[fcid]; ok {
 		return latest
 	}
 	return fcid

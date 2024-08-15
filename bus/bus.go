@@ -84,6 +84,15 @@ type (
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
+	UploadingSectorsCache interface {
+		AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error
+		FinishUpload(uID api.UploadID)
+		HandleRenewal(fcid, renewedFrom types.FileContractID)
+		Pending(fcid types.FileContractID) (size uint64)
+		Sectors(fcid types.FileContractID) (roots []types.Hash256)
+		StartUpload(uID api.UploadID) error
+	}
+
 	// A HostDB stores information about hosts.
 	HostDB interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -251,11 +260,10 @@ type bus struct {
 	alertMgr    *alerts.Manager
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
-
-	cm ChainManager
-	cs ChainSubscriber
-	s  Syncer
-	w  Wallet
+	cm          ChainManager
+	cs          ChainSubscriber
+	s           Syncer
+	w           Wallet
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
@@ -264,9 +272,9 @@ type bus struct {
 	ss    SettingStore
 	mtrcs MetricsStore
 
-	accounts         *accounts
-	contractLocks    *contractLocks
-	uploadingSectors *uploadingSectorsCache
+	accounts      *accounts
+	contractLocks *contractLocks
+	sectors       UploadingSectorsCache
 
 	logger *zap.SugaredLogger
 }
@@ -275,17 +283,16 @@ type bus struct {
 func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*bus, error) {
 	l = l.Named("bus")
 	b := &bus{
-		s:                s,
-		cm:               cm,
-		w:                w,
-		hdb:              hdb,
-		as:               as,
-		ms:               ms,
-		mtrcs:            mtrcs,
-		ss:               ss,
-		eas:              eas,
-		contractLocks:    newContractLocks(),
-		uploadingSectors: newUploadingSectorsCache(),
+		s:             s,
+		cm:            cm,
+		w:             w,
+		hdb:           hdb,
+		as:            as,
+		ms:            ms,
+		mtrcs:         mtrcs,
+		ss:            ss,
+		eas:           eas,
+		contractLocks: newContractLocks(),
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -304,6 +311,9 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
+
+	// create sectors cache
+	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
