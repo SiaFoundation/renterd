@@ -412,7 +412,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
 	renterKey := w.deriveRenterKey(hostKey)
 
-	contract, txnSet, err := w.rhp2Client.FormContract(ctx, renterAddress, renterKey, hostKey, hostIP, renterFunds, hostCollateral, endHeight, gc.CheckSettings, func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error) {
+	contract, txnSet, err := w.rhp2Client.FormContract(ctx, renterAddress, renterKey, hostKey, hostIP, renterFunds, hostCollateral, endHeight, gc, func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error) {
 		txns, err = w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
 			return nil, nil, err
@@ -551,7 +551,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 		if err != nil {
 			return fmt.Errorf("failed to fetch contract roots; %w", err)
 		}
-		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc.CheckSettings, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
+		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
 		return err
 	})
 	if rev != nil {
@@ -599,7 +599,7 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	// fetch the roots from the host
-	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc.CheckSettings, c.HostIP, c.HostKey, id, c.RevisionNumber)
+	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, id, c.RevisionNumber)
 	if jc.Check("couldn't fetch contract roots from host", err) != nil {
 		return
 	} else if rev != nil {

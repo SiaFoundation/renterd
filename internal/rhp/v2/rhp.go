@@ -13,7 +13,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -68,8 +68,6 @@ var (
 )
 
 type (
-	GougingCheckFn func(settings rhpv2.HostSettings) api.HostGougingBreakdown
-
 	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
 )
 
@@ -83,9 +81,9 @@ func New(logger *zap.Logger) *Client {
 	}
 }
 
-func (w *Client) ContractRoots(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, revision *types.FileContractRevision, cost types.Currency, err error) {
+func (w *Client) ContractRoots(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, revision *types.FileContractRevision, cost types.Currency, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return w.withRevisionV2(renterKey, gougingCheck, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+		return w.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			roots, cost, err = w.fetchContractRoots(t, renterKey, &rev, settings)
 			revision = &rev.Revision
 			return
@@ -153,14 +151,14 @@ func (c *Client) Settings(ctx context.Context, hostKey types.PublicKey, hostIP s
 	return
 }
 
-func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, checkGouging GougingCheckFn, prepareForm PrepareFormFn) (contract rhpv2.ContractRevision, txnSet []types.Transaction, err error) {
+func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, gougingChecker gouging.Checker, prepareForm PrepareFormFn) (contract rhpv2.ContractRevision, txnSet []types.Transaction, err error) {
 	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
 		settings, err := rpcSettings(ctx, t)
 		if err != nil {
 			return err
 		}
 
-		if breakdown := checkGouging(settings); breakdown.Gouging() {
+		if breakdown := gougingChecker.CheckSettings(settings); breakdown.Gouging() {
 			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown)
 		}
 
@@ -179,9 +177,9 @@ func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, 
 	return
 }
 
-func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, toKeep []types.Hash256) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
+func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, toKeep []types.Hash256) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
 	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return c.withRevisionV2(renterKey, gougingCheck, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			// fetch roots
 			got, fetchCost, err := c.fetchContractRoots(t, renterKey, &rev, settings)
 			if err != nil {
@@ -512,7 +510,7 @@ func (c *Client) fetchContractRoots(t *rhpv2.Transport, renterKey types.PrivateK
 	return
 }
 
-func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingCheck GougingCheckFn, t *rhpv2.Transport, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
+func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingChecker gouging.Checker, t *rhpv2.Transport, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
 	// execute lock RPC
 	var lockResp rhpv2.RPCLockResponse
 	err := t.Call(rhpv2.RPCLockID, &rhpv2.RPCLockRequest{
@@ -564,7 +562,7 @@ func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingCheck Gouging
 	}
 
 	// perform gouging checks on settings
-	if breakdown := gougingCheck(settings); breakdown.Gouging() {
+	if breakdown := gougingChecker.CheckSettings(settings); breakdown.Gouging() {
 		return fmt.Errorf("failed to prune contract: %v", breakdown)
 	}
 
