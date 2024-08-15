@@ -4,29 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"time"
 
 	"go.sia.tech/core/gateway"
-	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.uber.org/zap"
 )
 
-type Syncer interface {
-	io.Closer
-	Addr() string
-	BroadcastHeader(h gateway.BlockHeader)
-	BroadcastTransactionSet([]types.Transaction)
-	Connect(ctx context.Context, addr string) (*syncer.Peer, error)
-	Peers() []*syncer.Peer
-}
-
 // NewSyncer creates a syncer using the given configuration. The syncer that is
 // returned is already running, closing it will close the underlying listener
 // causing the syncer to stop.
-func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (Syncer, error) {
+func NewSyncer(cfg BusConfig, cm syncer.ChainManager, ps syncer.PeerStore, logger *zap.Logger) (*syncer.Syncer, error) {
 	// validate config
 	if cfg.Bootstrap && cfg.Network == nil {
 		return nil, errors.New("cannot bootstrap without a network")
@@ -83,10 +72,6 @@ func options(cfg BusConfig, logger *zap.Logger) (opts []syncer.Option) {
 	}
 	if cfg.SyncerSyncInterval > 0 {
 		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
-	}
-
-	if cfg.SyncerPeerDiscoveryInterval > 0 {
-		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
 	}
 
 	return

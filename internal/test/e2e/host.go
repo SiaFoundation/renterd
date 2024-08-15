@@ -218,7 +218,7 @@ func (h *Host) SyncerAddr() string {
 }
 
 // NewHost initializes a new test host.
-func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block, debugLogging bool) (*Host, error) {
+func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block) (*Host, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create dir: %w", err)
 	}
@@ -240,7 +240,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
-	})
+	}, syncer.WithPeerDiscoveryInterval(testBusCfg().SyncerPeerDiscoveryInterval), syncer.WithSyncInterval(testBusCfg().SyncerSyncInterval))
 	syncErrChan := make(chan error, 1)
 	go func() { syncErrChan <- s.Run(context.Background()) }()
 
@@ -260,7 +260,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		return nil, fmt.Errorf("failed to create storage manager: %w", err)
 	}
 
-	contracts, err := contracts.NewManager(db, storage, cm, s, wallet)
+	contracts, err := contracts.NewManager(db, storage, cm, s, wallet, contracts.WithRejectAfter(10), contracts.WithRevisionSubmissionBuffer(5))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract manager: %w", err)
 	}

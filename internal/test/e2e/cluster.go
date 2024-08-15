@@ -564,7 +564,7 @@ func (c *TestCluster) sync() {
 		}
 
 		for _, h := range c.hosts {
-			if hh := h.cm.Tip().Height; hh < cs.BlockHeight {
+			if hh := h.cm.Tip().Height; hh < tip.Height {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
 			}
 		}
@@ -682,7 +682,7 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock, false)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock)
 	c.tt.OK(err)
 
 	// Connect gateways.
@@ -697,14 +697,7 @@ func (c *TestCluster) AddHost(h *Host) {
 
 	// Fund host from bus.
 	fundAmt := types.Siacoins(25e3)
-	var scos []types.SiacoinOutput
-	for i := 0; i < 10; i++ {
-		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt.Div64(10),
-			Address: h.WalletAddress(),
-		})
-	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, true))
+	c.tt.OKAll(c.Bus.SendSiacoins(context.Background(), h.WalletAddress(), fundAmt, true))
 
 	// Mine transaction.
 	c.MineBlocks(1)
