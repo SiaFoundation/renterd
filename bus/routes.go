@@ -32,7 +32,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
+func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
 	if val, err := b.ss.Setting(ctx, key); err != nil {
 		return fmt.Errorf("could not get contract set settings: %w", err)
 	} else if err := json.Unmarshal([]byte(val), &value); err != nil {
@@ -41,7 +41,7 @@ func (b *bus) fetchSetting(ctx context.Context, key string, value interface{}) e
 	return nil
 }
 
-func (b *bus) consensusAcceptBlock(jc jape.Context) {
+func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 	var block types.Block
 	if jc.Decode(&block) != nil {
 		return
@@ -63,11 +63,11 @@ func (b *bus) consensusAcceptBlock(jc jape.Context) {
 	}
 }
 
-func (b *bus) syncerAddrHandler(jc jape.Context) {
+func (b *Bus) syncerAddrHandler(jc jape.Context) {
 	jc.Encode(b.s.Addr())
 }
 
-func (b *bus) syncerPeersHandler(jc jape.Context) {
+func (b *Bus) syncerPeersHandler(jc jape.Context) {
 	var peers []string
 	for _, p := range b.s.Peers() {
 		peers = append(peers, p.String())
@@ -75,7 +75,7 @@ func (b *bus) syncerPeersHandler(jc jape.Context) {
 	jc.Encode(peers)
 }
 
-func (b *bus) syncerConnectHandler(jc jape.Context) {
+func (b *Bus) syncerConnectHandler(jc jape.Context) {
 	var addr string
 	if jc.Decode(&addr) == nil {
 		_, err := b.s.Connect(jc.Request.Context(), addr)
@@ -83,7 +83,7 @@ func (b *bus) syncerConnectHandler(jc jape.Context) {
 	}
 }
 
-func (b *bus) consensusStateHandler(jc jape.Context) {
+func (b *Bus) consensusStateHandler(jc jape.Context) {
 	cs, err := b.consensusState(jc.Request.Context())
 	if jc.Check("couldn't fetch consensus state", err) != nil {
 		return
@@ -91,21 +91,21 @@ func (b *bus) consensusStateHandler(jc jape.Context) {
 	jc.Encode(cs)
 }
 
-func (b *bus) consensusNetworkHandler(jc jape.Context) {
+func (b *Bus) consensusNetworkHandler(jc jape.Context) {
 	jc.Encode(api.ConsensusNetwork{
 		Name: b.cm.TipState().Network.Name,
 	})
 }
 
-func (b *bus) txpoolFeeHandler(jc jape.Context) {
+func (b *Bus) txpoolFeeHandler(jc jape.Context) {
 	jc.Encode(b.cm.RecommendedFee())
 }
 
-func (b *bus) txpoolTransactionsHandler(jc jape.Context) {
+func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
 	jc.Encode(b.cm.PoolTransactions())
 }
 
-func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
+func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 	var txnSet []types.Transaction
 	if jc.Decode(&txnSet) != nil {
 		return
@@ -119,7 +119,7 @@ func (b *bus) txpoolBroadcastHandler(jc jape.Context) {
 	b.s.BroadcastTransactionSet(txnSet)
 }
 
-func (b *bus) bucketsHandlerGET(jc jape.Context) {
+func (b *Bus) bucketsHandlerGET(jc jape.Context) {
 	resp, err := b.ms.ListBuckets(jc.Request.Context())
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
@@ -127,7 +127,7 @@ func (b *bus) bucketsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) bucketsHandlerPOST(jc jape.Context) {
+func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
 	var bucket api.BucketCreateRequest
 	if jc.Decode(&bucket) != nil {
 		return
@@ -139,7 +139,7 @@ func (b *bus) bucketsHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) bucketsHandlerPolicyPUT(jc jape.Context) {
+func (b *Bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 	var req api.BucketUpdatePolicyRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -151,7 +151,7 @@ func (b *bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) bucketHandlerDELETE(jc jape.Context) {
+func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
 	var name string
 	if jc.DecodeParam("name", &name) != nil {
 		return
@@ -163,7 +163,7 @@ func (b *bus) bucketHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *bus) bucketHandlerGET(jc jape.Context) {
+func (b *Bus) bucketHandlerGET(jc jape.Context) {
 	var name string
 	if jc.DecodeParam("name", &name) != nil {
 		return
@@ -181,7 +181,7 @@ func (b *bus) bucketHandlerGET(jc jape.Context) {
 	jc.Encode(bucket)
 }
 
-func (b *bus) walletHandler(jc jape.Context) {
+func (b *Bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
 	balance, err := b.w.Balance()
 	if jc.Check("couldn't fetch wallet balance", err) != nil {
@@ -203,7 +203,7 @@ func (b *bus) walletHandler(jc jape.Context) {
 	})
 }
 
-func (b *bus) walletTransactionsHandler(jc jape.Context) {
+func (b *Bus) walletTransactionsHandler(jc jape.Context) {
 	offset := 0
 	limit := -1
 	if jc.DecodeForm("offset", &offset) != nil ||
@@ -289,7 +289,7 @@ func (b *bus) walletTransactionsHandler(jc jape.Context) {
 	}
 }
 
-func (b *bus) walletOutputsHandler(jc jape.Context) {
+func (b *Bus) walletOutputsHandler(jc jape.Context) {
 	utxos, err := b.w.SpendableOutputs()
 	if jc.Check("couldn't load outputs", err) == nil {
 		// convert to siacoin elements
@@ -308,7 +308,7 @@ func (b *bus) walletOutputsHandler(jc jape.Context) {
 	}
 }
 
-func (b *bus) walletFundHandler(jc jape.Context) {
+func (b *Bus) walletFundHandler(jc jape.Context) {
 	var wfr api.WalletFundRequest
 	if jc.Decode(&wfr) != nil {
 		return
@@ -333,7 +333,7 @@ func (b *bus) walletFundHandler(jc jape.Context) {
 	})
 }
 
-func (b *bus) walletSendSiacoinsHandler(jc jape.Context) {
+func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 	var req api.WalletSendRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -406,7 +406,7 @@ func (b *bus) walletSendSiacoinsHandler(jc jape.Context) {
 	}
 }
 
-func (b *bus) walletSignHandler(jc jape.Context) {
+func (b *Bus) walletSignHandler(jc jape.Context) {
 	var wsr api.WalletSignRequest
 	if jc.Decode(&wsr) != nil {
 		return
@@ -415,7 +415,7 @@ func (b *bus) walletSignHandler(jc jape.Context) {
 	jc.Encode(wsr.Transaction)
 }
 
-func (b *bus) walletRedistributeHandler(jc jape.Context) {
+func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	var wfr api.WalletRedistributeRequest
 	if jc.Decode(&wfr) != nil {
 		return
@@ -450,14 +450,14 @@ func (b *bus) walletRedistributeHandler(jc jape.Context) {
 	jc.Encode(ids)
 }
 
-func (b *bus) walletDiscardHandler(jc jape.Context) {
+func (b *Bus) walletDiscardHandler(jc jape.Context) {
 	var txn types.Transaction
 	if jc.Decode(&txn) == nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
 }
 
-func (b *bus) walletPrepareFormHandler(jc jape.Context) {
+func (b *Bus) walletPrepareFormHandler(jc jape.Context) {
 	var wpfr api.WalletPrepareFormRequest
 	if jc.Decode(&wpfr) != nil {
 		return
@@ -488,7 +488,7 @@ func (b *bus) walletPrepareFormHandler(jc jape.Context) {
 	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
 
-func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
+func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
 	var wprr api.WalletPrepareRenewRequest
 	if jc.Decode(&wprr) != nil {
 		return
@@ -545,7 +545,7 @@ func (b *bus) walletPrepareRenewHandler(jc jape.Context) {
 	})
 }
 
-func (b *bus) walletPendingHandler(jc jape.Context) {
+func (b *Bus) walletPendingHandler(jc jape.Context) {
 	isRelevant := func(txn types.Transaction) bool {
 		addr := b.w.Address()
 		for _, sci := range txn.SiacoinInputs {
@@ -571,7 +571,7 @@ func (b *bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *bus) hostsHandlerGETDeprecated(jc jape.Context) {
+func (b *Bus) hostsHandlerGETDeprecated(jc jape.Context) {
 	offset := 0
 	limit := -1
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
@@ -579,14 +579,14 @@ func (b *bus) hostsHandlerGETDeprecated(jc jape.Context) {
 	}
 
 	// fetch hosts
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
+	hosts, err := b.hs.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
 	jc.Encode(hosts)
 }
 
-func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
+func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 	var req api.SearchHostsRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -596,14 +596,14 @@ func (b *bus) searchHostsHandlerPOST(jc jape.Context) {
 	// - properly default search params (currently no defaults are set)
 	// - properly validate and return 400 (currently validation is done in autopilot and the store)
 
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	hosts, err := b.hs.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
 	jc.Encode(hosts)
 }
 
-func (b *bus) hostsRemoveHandlerPOST(jc jape.Context) {
+func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 	var hrr api.HostsRemoveRequest
 	if jc.Decode(&hrr) != nil {
 		return
@@ -616,70 +616,70 @@ func (b *bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("minRecentScanFailures must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hdb.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
+	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}
 	jc.Encode(removed)
 }
 
-func (b *bus) hostsScanningHandlerGET(jc jape.Context) {
+func (b *Bus) hostsScanningHandlerGET(jc jape.Context) {
 	offset := 0
 	limit := -1
 	maxLastScan := time.Now()
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
 		return
 	}
-	hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
+	hosts, err := b.hs.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
 	jc.Encode(hosts)
 }
 
-func (b *bus) hostsPubkeyHandlerGET(jc jape.Context) {
+func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	host, err := b.hdb.Host(jc.Request.Context(), hostKey)
+	host, err := b.hs.Host(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
 }
 
-func (b *bus) hostsResetLostSectorsPOST(jc jape.Context) {
+func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	err := b.hdb.ResetLostSectors(jc.Request.Context(), hostKey)
+	err := b.hs.ResetLostSectors(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't reset lost sectors", err) != nil {
 		return
 	}
 }
 
-func (b *bus) hostsScanHandlerPOST(jc jape.Context) {
+func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	var req api.HostsScanRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to record scans", b.hdb.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
+	if jc.Check("failed to record scans", b.hs.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
 		return
 	}
 }
 
-func (b *bus) hostsPricetableHandlerPOST(jc jape.Context) {
+func (b *Bus) hostsPricetableHandlerPOST(jc jape.Context) {
 	var req api.HostsPriceTablesRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.hdb.RecordPriceTables(jc.Request.Context(), req.PriceTableUpdates)) != nil {
+	if jc.Check("failed to record interactions", b.hs.RecordPriceTables(jc.Request.Context(), req.PriceTableUpdates)) != nil {
 		return
 	}
 }
 
-func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
+func (b *Bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	var records []api.ContractSpendingRecord
 	if jc.Decode(&records) != nil {
 		return
@@ -689,47 +689,47 @@ func (b *bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) hostsAllowlistHandlerGET(jc jape.Context) {
-	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
+func (b *Bus) hostsAllowlistHandlerGET(jc jape.Context) {
+	allowlist, err := b.hs.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
 		jc.Encode(allowlist)
 	}
 }
 
-func (b *bus) hostsAllowlistHandlerPUT(jc jape.Context) {
+func (b *Bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateAllowlistRequest
 	if jc.Decode(&req) == nil {
 		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
 			jc.Error(errors.New("cannot add or remove entries while clearing the allowlist"), http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
+		} else if jc.Check("couldn't update allowlist entries", b.hs.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
 }
 
-func (b *bus) hostsBlocklistHandlerGET(jc jape.Context) {
-	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
+func (b *Bus) hostsBlocklistHandlerGET(jc jape.Context) {
+	blocklist, err := b.hs.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
 		jc.Encode(blocklist)
 	}
 }
 
-func (b *bus) hostsBlocklistHandlerPUT(jc jape.Context) {
+func (b *Bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 	var req api.UpdateBlocklistRequest
 	if jc.Decode(&req) == nil {
 		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
 			jc.Error(errors.New("cannot add or remove entries while clearing the blocklist"), http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
+		} else if jc.Check("couldn't update blocklist entries", b.hs.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
 }
 
-func (b *bus) contractsHandlerGET(jc jape.Context) {
+func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	var cs string
 	if jc.DecodeForm("contractset", &cs) != nil {
 		return
@@ -742,7 +742,7 @@ func (b *bus) contractsHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsRenewedIDHandlerGET(jc jape.Context) {
+func (b *Bus) contractsRenewedIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -754,7 +754,7 @@ func (b *bus) contractsRenewedIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
+func (b *Bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	var toArchive api.ContractsArchiveRequest
 	if jc.Decode(&toArchive) != nil {
 		return
@@ -775,14 +775,14 @@ func (b *bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsSetsHandlerGET(jc jape.Context) {
+func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
 	sets, err := b.ms.ContractSets(jc.Request.Context())
 	if jc.Check("couldn't fetch contract sets", err) == nil {
 		jc.Encode(sets)
 	}
 }
 
-func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
+func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
 	var contractIds []types.FileContractID
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
@@ -804,13 +804,13 @@ func (b *bus) contractsSetHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsSetHandlerDELETE(jc jape.Context) {
+func (b *Bus) contractsSetHandlerDELETE(jc jape.Context) {
 	if set := jc.PathParam("set"); set != "" {
 		jc.Check("could not remove contract set", b.ms.RemoveContractSet(jc.Request.Context(), set))
 	}
 }
 
-func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
+func (b *Bus) contractAcquireHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -829,7 +829,7 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
+func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -845,7 +845,7 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
+func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 	sizes, err := b.ms.ContractSizes(jc.Request.Context())
 	if jc.Check("failed to fetch contract sizes", err) != nil {
 		return
@@ -890,7 +890,7 @@ func (b *bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 	})
 }
 
-func (b *bus) contractSizeHandlerGET(jc jape.Context) {
+func (b *Bus) contractSizeHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -917,7 +917,7 @@ func (b *bus) contractSizeHandlerGET(jc jape.Context) {
 	jc.Encode(size)
 }
 
-func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
+func (b *Bus) contractReleaseHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -931,7 +931,7 @@ func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractIDHandlerGET(jc jape.Context) {
+func (b *Bus) contractIDHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -942,7 +942,7 @@ func (b *bus) contractIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractIDHandlerPOST(jc jape.Context) {
+func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -963,7 +963,7 @@ func (b *bus) contractIDHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
+func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractRenewedRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
@@ -998,7 +998,7 @@ func (b *bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	jc.Encode(r)
 }
 
-func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
+func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1013,7 +1013,7 @@ func (b *bus) contractIDRootsHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
+func (b *Bus) contractIDHandlerDELETE(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1021,11 +1021,11 @@ func (b *bus) contractIDHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contract", b.ms.ArchiveContract(jc.Request.Context(), id, api.ContractArchivalReasonRemoved))
 }
 
-func (b *bus) contractsAllHandlerDELETE(jc jape.Context) {
+func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
-func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
+func (b *Bus) searchObjectsHandlerGET(jc jape.Context) {
 	offset := 0
 	limit := -1
 	var key string
@@ -1043,7 +1043,7 @@ func (b *bus) searchObjectsHandlerGET(jc jape.Context) {
 	jc.Encode(keys)
 }
 
-func (b *bus) objectsHandlerGET(jc jape.Context) {
+func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	var ignoreDelim bool
 	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
 		return
@@ -1078,7 +1078,7 @@ func (b *bus) objectsHandlerGET(jc jape.Context) {
 	jc.Encode(api.ObjectsResponse{Object: &o})
 }
 
-func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
+func (b *Bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
@@ -1122,7 +1122,7 @@ func (b *bus) objectEntriesHandlerGET(jc jape.Context, path string) {
 	jc.Encode(api.ObjectsResponse{Entries: entries, HasMore: hasMore})
 }
 
-func (b *bus) objectsHandlerPUT(jc jape.Context) {
+func (b *Bus) objectsHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) != nil {
 		return
@@ -1132,7 +1132,7 @@ func (b *bus) objectsHandlerPUT(jc jape.Context) {
 	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
 
-func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
+func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	var orr api.CopyObjectsRequest
 	if jc.Decode(&orr) != nil {
 		return
@@ -1147,7 +1147,7 @@ func (b *bus) objectsCopyHandlerPOST(jc jape.Context) {
 	jc.Encode(om)
 }
 
-func (b *bus) objectsListHandlerPOST(jc jape.Context) {
+func (b *Bus) objectsListHandlerPOST(jc jape.Context) {
 	var req api.ObjectsListRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -1165,7 +1165,7 @@ func (b *bus) objectsListHandlerPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
+func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 	var orr api.ObjectsRenameRequest
 	if jc.Decode(&orr) != nil {
 		return
@@ -1195,7 +1195,7 @@ func (b *bus) objectsRenameHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) objectsHandlerDELETE(jc jape.Context) {
+func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
 	var batch bool
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
@@ -1217,7 +1217,7 @@ func (b *bus) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", err)
 }
 
-func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
+func (b *Bus) slabbuffersHandlerGET(jc jape.Context) {
 	buffers, err := b.ms.SlabBuffers(jc.Request.Context())
 	if jc.Check("couldn't get slab buffers info", err) != nil {
 		return
@@ -1225,7 +1225,7 @@ func (b *bus) slabbuffersHandlerGET(jc jape.Context) {
 	jc.Encode(buffers)
 }
 
-func (b *bus) objectsStatshandlerGET(jc jape.Context) {
+func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
 	opts := api.ObjectsStatsOpts{}
 	if jc.DecodeForm("bucket", &opts.Bucket) != nil {
 		return
@@ -1237,7 +1237,7 @@ func (b *bus) objectsStatshandlerGET(jc jape.Context) {
 	jc.Encode(info)
 }
 
-func (b *bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
+func (b *Bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
 	var psrg api.PackedSlabsRequestGET
 	if jc.Decode(&psrg) != nil {
 		return
@@ -1261,7 +1261,7 @@ func (b *bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
 	jc.Encode(slabs)
 }
 
-func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
+func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	var psrp api.PackedSlabsRequestPOST
 	if jc.Decode(&psrp) != nil {
 		return
@@ -1269,7 +1269,7 @@ func (b *bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs))
 }
 
-func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
+func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	var hk types.PublicKey
 	var root types.Hash256
 	if jc.DecodeParam("hk", &hk) != nil {
@@ -1285,7 +1285,7 @@ func (b *bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
+func (b *Bus) slabObjectsHandlerGET(jc jape.Context) {
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {
 		return
@@ -1301,7 +1301,7 @@ func (b *bus) slabObjectsHandlerGET(jc jape.Context) {
 	jc.Encode(objects)
 }
 
-func (b *bus) slabHandlerGET(jc jape.Context) {
+func (b *Bus) slabHandlerGET(jc jape.Context) {
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {
 		return
@@ -1317,18 +1317,18 @@ func (b *bus) slabHandlerGET(jc jape.Context) {
 	jc.Encode(slab)
 }
 
-func (b *bus) slabHandlerPUT(jc jape.Context) {
+func (b *Bus) slabHandlerPUT(jc jape.Context) {
 	var usr api.UpdateSlabRequest
 	if jc.Decode(&usr) == nil {
 		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet))
 	}
 }
 
-func (b *bus) slabsRefreshHealthHandlerPOST(jc jape.Context) {
+func (b *Bus) slabsRefreshHealthHandlerPOST(jc jape.Context) {
 	jc.Check("failed to recompute health", b.ms.RefreshHealth(jc.Request.Context()))
 }
 
-func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
+func (b *Bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
 		if slabs, err := b.ms.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
@@ -1339,7 +1339,7 @@ func (b *bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
+func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []byte{})
 
 	var key object.EncryptionKey
@@ -1369,7 +1369,7 @@ func (b *bus) slabsPartialHandlerGET(jc jape.Context) {
 	jc.ResponseWriter.Write(data)
 }
 
-func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
+func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	var minShards int
 	if jc.DecodeForm("minShards", &minShards) != nil {
 		return
@@ -1413,13 +1413,13 @@ func (b *bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (b *bus) settingsHandlerGET(jc jape.Context) {
+func (b *Bus) settingsHandlerGET(jc jape.Context) {
 	if settings, err := b.ss.Settings(jc.Request.Context()); jc.Check("couldn't load settings", err) == nil {
 		jc.Encode(settings)
 	}
 }
 
-func (b *bus) settingKeyHandlerGET(jc jape.Context) {
+func (b *Bus) settingKeyHandlerGET(jc jape.Context) {
 	jc.Custom(nil, (any)(nil))
 
 	key := jc.PathParam("key")
@@ -1467,7 +1467,7 @@ func (b *bus) settingKeyHandlerGET(jc jape.Context) {
 	jc.ResponseWriter.Write(resp)
 }
 
-func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
+func (b *Bus) settingKeyHandlerPUT(jc jape.Context) {
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
@@ -1544,7 +1544,7 @@ func (b *bus) settingKeyHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
+func (b *Bus) settingKeyHandlerDELETE(jc jape.Context) {
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
@@ -1563,7 +1563,7 @@ func (b *bus) settingKeyHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
+func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
 		return
@@ -1579,7 +1579,7 @@ func (b *bus) contractIDAncestorsHandler(jc jape.Context) {
 	jc.Encode(ancestors)
 }
 
-func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
+func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
@@ -1611,7 +1611,7 @@ func (b *bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
-func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
+func (b *Bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 	index, err := b.cs.ChainIndex(ctx)
 	if err != nil {
 		return api.ConsensusState{}, err
@@ -1630,7 +1630,7 @@ func (b *bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 	}, nil
 }
 
-func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
+func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
@@ -1638,7 +1638,7 @@ func (b *bus) paramsHandlerGougingGET(jc jape.Context) {
 	jc.Encode(gp)
 }
 
-func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
+func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	var gs api.GougingSettings
 	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
 		return api.GougingParams{}, err
@@ -1666,7 +1666,7 @@ func (b *bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
+func (b *Bus) handleGETAlertsDeprecated(jc jape.Context) {
 	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
@@ -1674,7 +1674,7 @@ func (b *bus) handleGETAlertsDeprecated(jc jape.Context) {
 	jc.Encode(ar.Alerts)
 }
 
-func (b *bus) handleGETAlerts(jc jape.Context) {
+func (b *Bus) handleGETAlerts(jc jape.Context) {
 	if jc.Request.FormValue("offset") == "" && jc.Request.FormValue("limit") == "" {
 		b.handleGETAlertsDeprecated(jc)
 		return
@@ -1702,7 +1702,7 @@ func (b *bus) handleGETAlerts(jc jape.Context) {
 	jc.Encode(ar)
 }
 
-func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
+func (b *Bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	var ids []types.Hash256
 	if jc.Decode(&ids) != nil {
 		return
@@ -1710,7 +1710,7 @@ func (b *bus) handlePOSTAlertsDismiss(jc jape.Context) {
 	jc.Check("failed to dismiss alerts", b.alertMgr.DismissAlerts(jc.Request.Context(), ids...))
 }
 
-func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
+func (b *Bus) handlePOSTAlertsRegister(jc jape.Context) {
 	var alert alerts.Alert
 	if jc.Decode(&alert) != nil {
 		return
@@ -1718,11 +1718,11 @@ func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
 	jc.Check("failed to register alert", b.alertMgr.RegisterAlert(jc.Request.Context(), alert))
 }
 
-func (b *bus) accountsHandlerGET(jc jape.Context) {
+func (b *Bus) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(b.accountsMgr.Accounts())
 }
 
-func (b *bus) accountHandlerGET(jc jape.Context) {
+func (b *Bus) accountHandlerGET(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1738,7 +1738,7 @@ func (b *bus) accountHandlerGET(jc jape.Context) {
 	jc.Encode(acc)
 }
 
-func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
+func (b *Bus) accountsAddHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1758,7 +1758,7 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 	b.accountsMgr.AddAmount(id, req.HostKey, req.Amount)
 }
 
-func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
+func (b *Bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1773,7 +1773,7 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
+func (b *Bus) accountsUpdateHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1793,7 +1793,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 	b.accountsMgr.SetBalance(id, req.HostKey, req.Amount)
 }
 
-func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
+func (b *Bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1820,7 +1820,7 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) accountsLockHandlerPOST(jc jape.Context) {
+func (b *Bus) accountsLockHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1837,7 +1837,7 @@ func (b *bus) accountsLockHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
+func (b *Bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1853,13 +1853,13 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) autopilotsListHandlerGET(jc jape.Context) {
+func (b *Bus) autopilotsListHandlerGET(jc jape.Context) {
 	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
 		jc.Encode(autopilots)
 	}
 }
 
-func (b *bus) autopilotsHandlerGET(jc jape.Context) {
+func (b *Bus) autopilotsHandlerGET(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1876,7 +1876,7 @@ func (b *bus) autopilotsHandlerGET(jc jape.Context) {
 	jc.Encode(ap)
 }
 
-func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
+func (b *Bus) autopilotsHandlerPUT(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1897,7 +1897,7 @@ func (b *bus) autopilotsHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
+func (b *Bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 	var id string
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1911,7 +1911,7 @@ func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	err := b.hdb.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
+	err := b.hs.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
 	if errors.Is(err, api.ErrAutopilotNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1920,7 +1920,7 @@ func (b *bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) broadcastAction(e webhooks.Event) {
+func (b *Bus) broadcastAction(e webhooks.Event) {
 	log := b.logger.With("event", e.Event).With("module", e.Module)
 	err := b.webhooksMgr.BroadcastAction(context.Background(), e)
 	if err != nil {
@@ -1930,7 +1930,7 @@ func (b *bus) broadcastAction(e webhooks.Event) {
 	}
 }
 
-func (b *bus) contractTaxHandlerGET(jc jape.Context) {
+func (b *Bus) contractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
 		return
@@ -1939,7 +1939,7 @@ func (b *bus) contractTaxHandlerGET(jc jape.Context) {
 	jc.Encode(cs.FileContractTax(types.FileContract{Payout: payout}))
 }
 
-func (b *bus) stateHandlerGET(jc jape.Context) {
+func (b *Bus) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
@@ -1952,14 +1952,14 @@ func (b *bus) stateHandlerGET(jc jape.Context) {
 	})
 }
 
-func (b *bus) uploadTrackHandlerPOST(jc jape.Context) {
+func (b *Bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
 		jc.Check("failed to track upload", b.uploadingSectors.StartUpload(id))
 	}
 }
 
-func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
+func (b *Bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) != nil {
 		return
@@ -1971,14 +1971,14 @@ func (b *bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	jc.Check("failed to add sector", b.uploadingSectors.AddSector(id, req.ContractID, req.Root))
 }
 
-func (b *bus) uploadFinishedHandlerDELETE(jc jape.Context) {
+func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
 		b.uploadingSectors.FinishUpload(id)
 	}
 }
 
-func (b *bus) webhookActionHandlerPost(jc jape.Context) {
+func (b *Bus) webhookActionHandlerPost(jc jape.Context) {
 	var action webhooks.Event
 	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
 		return
@@ -1986,7 +1986,7 @@ func (b *bus) webhookActionHandlerPost(jc jape.Context) {
 	b.broadcastAction(action)
 }
 
-func (b *bus) webhookHandlerDelete(jc jape.Context) {
+func (b *Bus) webhookHandlerDelete(jc jape.Context) {
 	var wh webhooks.Webhook
 	if jc.Decode(&wh) != nil {
 		return
@@ -2000,7 +2000,7 @@ func (b *bus) webhookHandlerDelete(jc jape.Context) {
 	}
 }
 
-func (b *bus) webhookHandlerGet(jc jape.Context) {
+func (b *Bus) webhookHandlerGet(jc jape.Context) {
 	webhooks, queueInfos := b.webhooksMgr.Info()
 	jc.Encode(api.WebhookResponse{
 		Queues:   queueInfos,
@@ -2008,7 +2008,7 @@ func (b *bus) webhookHandlerGet(jc jape.Context) {
 	})
 }
 
-func (b *bus) webhookHandlerPost(jc jape.Context) {
+func (b *Bus) webhookHandlerPost(jc jape.Context) {
 	var req webhooks.Webhook
 	if jc.Decode(&req) != nil {
 		return
@@ -2026,7 +2026,7 @@ func (b *bus) webhookHandlerPost(jc jape.Context) {
 	}
 }
 
-func (b *bus) metricsHandlerDELETE(jc jape.Context) {
+func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
 	metric := jc.PathParam("key")
 	if metric == "" {
 		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
@@ -2047,7 +2047,7 @@ func (b *bus) metricsHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *bus) metricsHandlerPUT(jc jape.Context) {
+func (b *Bus) metricsHandlerPUT(jc jape.Context) {
 	jc.Custom((*interface{})(nil), nil)
 
 	key := jc.PathParam("key")
@@ -2076,7 +2076,7 @@ func (b *bus) metricsHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) metricsHandlerGET(jc jape.Context) {
+func (b *Bus) metricsHandlerGET(jc jape.Context) {
 	// parse mandatory query parameters
 	var start time.Time
 	if jc.DecodeForm("start", (*api.TimeRFC3339)(&start)) != nil {
@@ -2161,7 +2161,7 @@ func (b *bus) metricsHandlerGET(jc jape.Context) {
 	jc.Encode(metrics)
 }
 
-func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64, interval time.Duration, opts interface{}) (interface{}, error) {
+func (b *Bus) metrics(ctx context.Context, key string, start time.Time, n uint64, interval time.Duration, opts interface{}) (interface{}, error) {
 	switch key {
 	case api.MetricContract:
 		return b.mtrcs.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
@@ -2177,7 +2177,7 @@ func (b *bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 	return nil, fmt.Errorf("unknown metric '%s'", key)
 }
 
-func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
+func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 	var req api.MultipartCreateRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -2199,7 +2199,7 @@ func (b *bus) multipartHandlerCreatePOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
+func (b *Bus) multipartHandlerAbortPOST(jc jape.Context) {
 	var req api.MultipartAbortRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -2210,7 +2210,7 @@ func (b *bus) multipartHandlerAbortPOST(jc jape.Context) {
 	}
 }
 
-func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
+func (b *Bus) multipartHandlerCompletePOST(jc jape.Context) {
 	var req api.MultipartCompleteRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -2224,7 +2224,7 @@ func (b *bus) multipartHandlerCompletePOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
+func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	var req api.MultipartAddPartRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -2250,7 +2250,7 @@ func (b *bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	}
 }
 
-func (b *bus) multipartHandlerUploadGET(jc jape.Context) {
+func (b *Bus) multipartHandlerUploadGET(jc jape.Context) {
 	resp, err := b.ms.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
 	if jc.Check("failed to get multipart upload", err) != nil {
 		return
@@ -2258,7 +2258,7 @@ func (b *bus) multipartHandlerUploadGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
+func (b *Bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	var req api.MultipartListUploadsRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -2270,7 +2270,7 @@ func (b *bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *bus) multipartHandlerListPartsPOST(jc jape.Context) {
+func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	var req api.MultipartListPartsRequest
 	if jc.Decode(&req) != nil {
 		return

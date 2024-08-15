@@ -7,10 +7,11 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/config"
 	"gopkg.in/yaml.v3"
 )
 
-func cmdBuildConfig() {
+func cmdBuildConfig(cfg *config.Config) {
 	if _, err := os.Stat("renterd.yml"); err == nil {
 		if !promptYesNo("renterd.yml already exists. Would you like to overwrite it?") {
 			return
@@ -23,10 +24,10 @@ func cmdBuildConfig() {
 		fmt.Println("If you change your wallet seed phrase, your renter will not be able to access Siacoin associated with this wallet.")
 		fmt.Println("Ensure that you have backed up your wallet seed phrase before continuing.")
 		if promptYesNo("Would you like to change your wallet seed phrase?") {
-			setSeedPhrase()
+			setSeedPhrase(cfg)
 		}
 	} else {
-		setSeedPhrase()
+		setSeedPhrase(cfg)
 	}
 
 	fmt.Println("")
@@ -34,17 +35,17 @@ func cmdBuildConfig() {
 		fmt.Println(wrapANSI("\033[33m", "An admin password is already set.", "\033[0m"))
 		fmt.Println("If you change your admin password, you will need to update any scripts or applications that use the admin API.")
 		if promptYesNo("Would you like to change your admin password?") {
-			setAPIPassword()
+			setAPIPassword(cfg)
 		}
 	} else {
-		setAPIPassword()
+		setAPIPassword(cfg)
 	}
 
 	fmt.Println("")
-	setS3Config()
+	setS3Config(cfg)
 
 	fmt.Println("")
-	setAdvancedConfig()
+	setAdvancedConfig(cfg)
 
 	// write the config file
 	configPath := "renterd.yml"
