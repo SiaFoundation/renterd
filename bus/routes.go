@@ -504,7 +504,7 @@ func (b *Bus) hostsHandlerGETDeprecated(jc jape.Context) {
 	}
 
 	// fetch hosts
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
+	hosts, err := b.hs.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
@@ -521,7 +521,7 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 	// - properly default search params (currently no defaults are set)
 	// - properly validate and return 400 (currently validation is done in autopilot and the store)
 
-	hosts, err := b.hdb.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	hosts, err := b.hs.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
@@ -541,7 +541,7 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("minRecentScanFailures must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hdb.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
+	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}
@@ -555,7 +555,7 @@ func (b *Bus) hostsScanningHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
 		return
 	}
-	hosts, err := b.hdb.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
+	hosts, err := b.hs.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
 		return
 	}
@@ -567,7 +567,7 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	host, err := b.hdb.Host(jc.Request.Context(), hostKey)
+	host, err := b.hs.Host(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
@@ -578,7 +578,7 @@ func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	err := b.hdb.ResetLostSectors(jc.Request.Context(), hostKey)
+	err := b.hs.ResetLostSectors(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't reset lost sectors", err) != nil {
 		return
 	}
@@ -589,7 +589,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to record scans", b.hdb.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
+	if jc.Check("failed to record scans", b.hs.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
 		return
 	}
 }
@@ -599,7 +599,7 @@ func (b *Bus) hostsPricetableHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to record interactions", b.hdb.RecordPriceTables(jc.Request.Context(), req.PriceTableUpdates)) != nil {
+	if jc.Check("failed to record interactions", b.hs.RecordPriceTables(jc.Request.Context(), req.PriceTableUpdates)) != nil {
 		return
 	}
 }
@@ -615,7 +615,7 @@ func (b *Bus) contractsSpendingHandlerPOST(jc jape.Context) {
 }
 
 func (b *Bus) hostsAllowlistHandlerGET(jc jape.Context) {
-	allowlist, err := b.hdb.HostAllowlist(jc.Request.Context())
+	allowlist, err := b.hs.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
 		jc.Encode(allowlist)
 	}
@@ -628,14 +628,14 @@ func (b *Bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
 			jc.Error(errors.New("cannot add or remove entries while clearing the allowlist"), http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't update allowlist entries", b.hdb.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
+		} else if jc.Check("couldn't update allowlist entries", b.hs.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
 }
 
 func (b *Bus) hostsBlocklistHandlerGET(jc jape.Context) {
-	blocklist, err := b.hdb.HostBlocklist(jc.Request.Context())
+	blocklist, err := b.hs.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
 		jc.Encode(blocklist)
 	}
@@ -648,7 +648,7 @@ func (b *Bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
 			jc.Error(errors.New("cannot add or remove entries while clearing the blocklist"), http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't update blocklist entries", b.hdb.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
+		} else if jc.Check("couldn't update blocklist entries", b.hs.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
@@ -1836,7 +1836,7 @@ func (b *Bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	err := b.hdb.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
+	err := b.hs.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
 	if errors.Is(err, api.ErrAutopilotNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return

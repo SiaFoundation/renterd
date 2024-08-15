@@ -68,11 +68,6 @@ type (
 		Shutdown(context.Context) error
 	}
 
-	ChainStore interface {
-		ChainIndex(ctx context.Context) (types.ChainIndex, error)
-		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
-	}
-
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
@@ -82,8 +77,69 @@ type (
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
-	// A HostDB stores information about hosts.
-	HostDB interface {
+	PinManager interface {
+		Shutdown(context.Context) error
+		TriggerUpdate()
+	}
+
+	Wallet interface {
+		Address() types.Address
+		Balance() (wallet.Balance, error)
+		Close() error
+		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
+		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
+		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
+		SpendableOutputs() ([]types.SiacoinElement, error)
+		Tip() (types.ChainIndex, error)
+		UnconfirmedEvents() ([]wallet.Event, error)
+		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
+		Events(offset, limit int) ([]wallet.Event, error)
+	}
+
+	WebhooksManager interface {
+		webhooks.Broadcaster
+		Delete(context.Context, webhooks.Webhook) error
+		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
+		Register(context.Context, webhooks.Webhook) error
+		Shutdown(context.Context) error
+	}
+
+	// Store is a collection of stores used by the bus.
+	Store interface {
+		AutopilotStore
+		ChainStore
+		EphemeralAccountStore
+		HostStore
+		MetadataStore
+		MetricsStore
+		SettingStore
+	}
+
+	// An AutopilotStore stores autopilots.
+	AutopilotStore interface {
+		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
+		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+	}
+
+	// A ChainStore stores information about the chain.
+	ChainStore interface {
+		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
+	}
+
+	// EphemeralAccountStore persists information about accounts. Since accounts
+	// are rapidly updated and can be recovered, they are only loaded upon
+	// startup and persisted upon shutdown.
+	EphemeralAccountStore interface {
+		Accounts(context.Context) ([]api.Account, error)
+		SaveAccounts(context.Context, []api.Account) error
+		SetUncleanShutdown(context.Context) error
+	}
+
+	// A HostStore stores information about hosts.
+	HostStore interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
@@ -160,30 +216,7 @@ type (
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
 	}
 
-	// An AutopilotStore stores autopilots.
-	AutopilotStore interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
-	}
-
-	// A SettingStore stores settings.
-	SettingStore interface {
-		DeleteSetting(ctx context.Context, key string) error
-		Setting(ctx context.Context, key string) (string, error)
-		Settings(ctx context.Context) ([]string, error)
-		UpdateSetting(ctx context.Context, key, value string) error
-	}
-
-	// EphemeralAccountStore persists information about accounts. Since accounts
-	// are rapidly updated and can be recovered, they are only loaded upon
-	// startup and persisted upon shutdown.
-	EphemeralAccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
-		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
-	}
-
+	// A MetricsStore stores metrics.
 	MetricsStore interface {
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
@@ -200,32 +233,12 @@ type (
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 	}
 
-	PinManager interface {
-		Shutdown(context.Context) error
-		TriggerUpdate()
-	}
-
-	Wallet interface {
-		Address() types.Address
-		Balance() (wallet.Balance, error)
-		Close() error
-		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
-		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
-		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
-		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
-		SpendableOutputs() ([]types.SiacoinElement, error)
-		Tip() (types.ChainIndex, error)
-		UnconfirmedEvents() ([]wallet.Event, error)
-		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
-		Events(offset, limit int) ([]wallet.Event, error)
-	}
-
-	WebhooksManager interface {
-		webhooks.Broadcaster
-		Delete(context.Context, webhooks.Webhook) error
-		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
-		Register(context.Context, webhooks.Webhook) error
-		Shutdown(context.Context) error
+	// A SettingStore stores settings.
+	SettingStore interface {
+		DeleteSetting(ctx context.Context, key string) error
+		Setting(ctx context.Context, key string) (string, error)
+		Settings(ctx context.Context) ([]string, error)
+		UpdateSetting(ctx context.Context, key, value string) error
 	}
 )
 
@@ -244,10 +257,10 @@ type Bus struct {
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
-	hdb   HostDB
+	hs    HostStore
 	ms    MetadataStore
-	ss    SettingStore
 	mtrcs MetricsStore
+	ss    SettingStore
 
 	accounts         *accounts
 	contractLocks    *contractLocks
@@ -257,18 +270,18 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
+func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
 	l = l.Named("bus")
 	b := &Bus{
 		s:                s,
 		cm:               cm,
 		w:                w,
-		hdb:              hdb,
-		as:               as,
-		ms:               ms,
-		mtrcs:            mtrcs,
-		ss:               ss,
-		eas:              eas,
+		hs:               store,
+		as:               store,
+		ms:               store,
+		mtrcs:            store,
+		ss:               store,
+		eas:              store,
 		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
 
@@ -291,10 +304,10 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	}
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
-	b.cs = ibus.NewChainSubscriber(wm, cm, cs, w, announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
 
 	return b, nil
 }

@@ -194,7 +194,7 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := New(ctx, alertsMgr, wh, cm, s, w, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, sqlStore, announcementMaxAgeHours, logger)
+	b, err := New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
