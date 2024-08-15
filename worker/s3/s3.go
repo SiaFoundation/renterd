@@ -70,6 +70,7 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 }
 
 func New(b Bus, w Worker, logger *zap.Logger, opts Opts) (http.Handler, error) {
+	logger = logger.Named("s3")
 	s3Backend := &s3{
 		b:      b,
 		w:      w,

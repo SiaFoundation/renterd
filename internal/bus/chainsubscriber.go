@@ -94,12 +94,13 @@ type (
 // given chain manager and chain store. The returned subscriber is already
 // running and can be stopped by calling Shutdown.
 func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
+	logger = logger.Named("chainsubscriber")
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &chainSubscriber{
 		cm:     cm,
 		cs:     cs,
 		wm:     whm,
-		logger: logger.Sugar().Named("chainsubscriber"),
+		logger: logger.Sugar(),
 
 		announcementMaxAge: announcementMaxAge,
 		wallet:             w,

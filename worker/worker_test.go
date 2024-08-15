@@ -42,19 +42,8 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	dlmm := newMemoryManagerMock()
 	ulmm := newMemoryManagerMock()
 
-	// create cfg
-	cfg := config.Worker{
-		ID:                       "test",
-		ContractLockTimeout:      time.Second,
-		BusFlushInterval:         time.Second,
-		DownloadOverdriveTimeout: time.Second,
-		UploadOverdriveTimeout:   time.Second,
-		DownloadMaxMemory:        1 << 12, // 4 KiB
-		UploadMaxMemory:          1 << 12, // 4 KiB
-	}
-
 	// create worker
-	w, err := New(cfg, blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
+	w, err := New(newTestWorkerCfg(), blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +128,18 @@ func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
 		w.tt.Fatal(err)
 	}
 	return renewal
+}
+
+func newTestWorkerCfg() config.Worker {
+	return config.Worker{
+		ID:                       "test",
+		ContractLockTimeout:      time.Second,
+		BusFlushInterval:         time.Second,
+		DownloadOverdriveTimeout: time.Second,
+		UploadOverdriveTimeout:   time.Second,
+		DownloadMaxMemory:        1 << 12, // 4 KiB
+		UploadMaxMemory:          1 << 12, // 4 KiB
+	}
 }
 
 func newTestSector() (*[rhpv2.SectorSize]byte, types.Hash256) {

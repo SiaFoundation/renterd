@@ -125,12 +125,13 @@ type Autopilot struct {
 
 // New initializes an Autopilot.
 func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_ *Autopilot, err error) {
+	logger = logger.Named("autopilot").Named(cfg.ID)
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ap := &Autopilot{
 		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", cfg.ID)),
 		id:      cfg.ID,
 		bus:     bus,
-		logger:  logger.Sugar().Named("autopilot").Named(cfg.ID),
+		logger:  logger.Sugar(),
 		workers: newWorkerPool(workers),
 
 		shutdownCtx:       shutdownCtx,
@@ -141,7 +142,7 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 
-	ap.s, err = scanner.New(ap.bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, ap.logger)
+	ap.s, err = scanner.New(ap.bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
 	if err != nil {
 		return
 	}

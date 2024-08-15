@@ -334,7 +334,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create worker.
 	workerKey := blake2b.Sum256(append([]byte("worker"), wk...))
-	w, err := worker.New(workerCfg, workerKey, busClient, logger.Named("worker"))
+	w, err := worker.New(workerCfg, workerKey, busClient, logger)
 	tt.OK(err)
 
 	workerServer := http.Server{Handler: utils.Auth(workerPassword, false)(w.Handler())}
@@ -343,7 +343,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	workerShutdownFns = append(workerShutdownFns, w.Shutdown)
 
 	// Create S3 API.
-	s3Handler, err := s3.New(busClient, w, logger.Named("s3"), s3.Opts{})
+	s3Handler, err := s3.New(busClient, w, logger, s3.Opts{})
 	tt.OK(err)
 
 	s3Server := http.Server{Handler: s3Handler}
@@ -1060,11 +1060,11 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -1080,7 +1080,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1089,7 +1089,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
@@ -1102,7 +1102,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
-		Logger:                        logger.Sugar(),
+		Logger:                        logger,
 		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
 
 		RetryTransactionIntervals: cfg.RetryTxIntervals,
