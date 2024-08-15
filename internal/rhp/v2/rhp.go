@@ -351,7 +351,7 @@ func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.Private
 				RevisionNumber: rev.Revision.RevisionNumber,
 				ValidProofValues: []types.Currency{
 					newRevision.ValidProofOutputs[0].Value,
-					newRevision.ValidProofOutputs[0].Value,
+					newRevision.ValidProofOutputs[1].Value,
 				},
 				MissedProofValues: []types.Currency{
 					newRevision.MissedProofOutputs[0].Value,
@@ -468,8 +468,8 @@ func (c *Client) fetchContractRoots(t *rhpv2.Transport, renterKey types.PrivateK
 
 			RevisionNumber: rev.Revision.RevisionNumber,
 			ValidProofValues: []types.Currency{
-				newRevision.MissedProofOutputs[0].Value,
-				newRevision.MissedProofOutputs[1].Value,
+				newRevision.ValidProofOutputs[0].Value,
+				newRevision.ValidProofOutputs[1].Value,
 			},
 			MissedProofValues: []types.Currency{
 				newRevision.MissedProofOutputs[0].Value,
