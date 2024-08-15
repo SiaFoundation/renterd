@@ -2428,40 +2428,37 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Try renaming objects that don't exist.
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// Perform some renames.
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/foo", "/fileś/foo", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/foo", "/fileś/foo", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/bar", "/fileś/bar", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/bar", "/fileś/bar", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz", "/fileś/baz", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/baz", "/fileś/baz", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal(err)
-	} else if err := ss.RenameObjects(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
+	} else if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
-	}
-	if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
-		t.Fatal(err)
-	} else if err := ss.RenameObject(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
+	} else if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2518,17 +2515,11 @@ func TestRenameObjects(t *testing.T) {
 		},
 	}
 
-	err = test.Retry(100, 100*time.Millisecond, func() error {
-		var n int64
-		if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
-			return err
-		} else if n != int64(len(expectedDirs)) {
-			return fmt.Errorf("unexpected number of directories, %v != %v", n, len(expectedDirs))
-		}
-		return nil
-	})
-	if err != nil {
+	var n int64
+	if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
 		t.Fatal(err)
+	} else if n != int64(len(expectedDirs)) {
+		t.Fatalf("unexpected number of directories, %v != %v", n, len(expectedDirs))
 	}
 
 	type row struct {
