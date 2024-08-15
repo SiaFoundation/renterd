@@ -35,7 +35,7 @@ var (
 	_ ContractSpendingRecorder = (*contractSpendingRecorder)(nil)
 )
 
-func (w *worker) initContractSpendingRecorder(flushInterval time.Duration) {
+func (w *Worker) initContractSpendingRecorder(flushInterval time.Duration) {
 	if w.contractSpendingRecorder != nil {
 		panic("ContractSpendingRecorder already initialized") // developer error
 	}

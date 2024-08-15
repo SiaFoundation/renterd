@@ -396,7 +396,7 @@ type (
 	}
 )
 
-func (w *worker) initAccounts(as AccountStore) {
+func (w *Worker) initAccounts(as AccountStore) {
 	if w.accounts != nil {
 		panic("accounts already initialized") // developer error
 	}
@@ -406,7 +406,7 @@ func (w *worker) initAccounts(as AccountStore) {
 	}
 }
 
-func (w *worker) initTransportPool() {
+func (w *Worker) initTransportPool() {
 	if w.transportPoolV3 != nil {
 		panic("transport pool already initialized") // developer error
 	}

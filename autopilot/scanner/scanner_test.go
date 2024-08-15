@@ -88,7 +88,7 @@ func TestScanner(t *testing.T) {
 	hs := &mockHostStore{hosts: test.NewHosts(100)}
 
 	// create test scanner
-	s, err := New(hs, testBatchSize, testNumThreads, time.Minute, zap.NewNop().Sugar())
+	s, err := New(hs, testBatchSize, testNumThreads, time.Minute, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

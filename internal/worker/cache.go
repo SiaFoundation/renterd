@@ -96,11 +96,12 @@ type cache struct {
 }
 
 func NewCache(b Bus, logger *zap.Logger) WorkerCache {
+	logger = logger.Named("workercache")
 	return &cache{
 		b: b,
 
 		cache:  newMemoryCache(),
-		logger: logger.Sugar().Named("workercache"),
+		logger: logger.Sugar(),
 	}
 }
 
