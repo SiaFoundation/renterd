@@ -85,10 +85,6 @@ func options(cfg NodeConfig, logger *zap.Logger) (opts []syncer.Option) {
 		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
 	}
 
-	if cfg.SyncerPeerDiscoveryInterval > 0 {
-		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
-	}
-
 	return
 }
 

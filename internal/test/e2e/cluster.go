@@ -562,7 +562,7 @@ func (c *TestCluster) sync() {
 		}
 
 		for _, h := range c.hosts {
-			if hh := h.cm.Tip().Height; hh < cs.BlockHeight {
+			if hh := h.cm.Tip().Height; hh < tip.Height {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
 			}
 		}
@@ -680,7 +680,7 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock, false)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock)
 	c.tt.OK(err)
 
 	// Connect gateways.
