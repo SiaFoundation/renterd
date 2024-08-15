@@ -58,45 +58,14 @@ type (
 
 var _ Checker = checker{}
 
-func NewWorkerGougingChecker(ctx context.Context, cs ConsensusState, gp api.GougingParams, criticalMigration bool) (Checker, error) {
-	consensusState, err := cs.ConsensusState(ctx)
-	if err != nil {
-		return checker{}, fmt.Errorf("failed to get consensus state: %w", err)
-	}
-
-	// adjust the max download price if we are dealing with a critical
-	// migration that might be failing due to gouging checks
-	settings := gp.GougingSettings
-	if criticalMigration && gp.GougingSettings.MigrationSurchargeMultiplier > 0 {
-		if adjustedMaxDownloadPrice, overflow := gp.GougingSettings.MaxDownloadPrice.Mul64WithOverflow(gp.GougingSettings.MigrationSurchargeMultiplier); !overflow {
-			settings.MaxDownloadPrice = adjustedMaxDownloadPrice
-		}
-	}
-
-	return checker{
-		consensusState: consensusState,
-		settings:       settings,
-		txFee:          gp.TransactionFee,
-
-		// NOTE:
-		//
-		// period and renew window are nil here and that's fine, gouging
-		// checkers in the workers don't have easy access to these settings and
-		// thus ignore them when perform gouging checks, the autopilot however
-		// does have those and will pass them when performing gouging checks
-		period:      nil,
-		renewWindow: nil,
-	}, nil
-}
-
-func NewChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, period, renewWindow uint64) Checker {
+func NewChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, period, renewWindow *uint64) Checker {
 	return checker{
 		consensusState: cs,
 		settings:       gs,
 		txFee:          txnFee,
 
-		period:      &period,
-		renewWindow: &renewWindow,
+		period:      period,
+		renewWindow: renewWindow,
 	}
 }
 

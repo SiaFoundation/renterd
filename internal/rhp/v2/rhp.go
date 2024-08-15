@@ -83,7 +83,7 @@ func New(logger *zap.Logger) *Client {
 	}
 }
 
-func (w *Client) FetchContractRoots(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, revision *types.FileContractRevision, cost types.Currency, err error) {
+func (w *Client) ContractRoots(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, revision *types.FileContractRevision, cost types.Currency, err error) {
 	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return w.withRevisionV2(renterKey, gougingCheck, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			roots, cost, err = w.fetchContractRoots(t, renterKey, &rev, settings)
@@ -94,8 +94,8 @@ func (w *Client) FetchContractRoots(ctx context.Context, renterKey types.Private
 	return
 }
 
-// FetchSignedRevision fetches the latest signed revision for a contract from a host.
-func (w *Client) FetchSignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
+// SignedRevision fetches the latest signed revision for a contract from a host.
+func (w *Client) SignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
 	var rev rhpv2.ContractRevision
 	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		req := &rhpv2.RPCLockRequest{
@@ -139,7 +139,7 @@ func (w *Client) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 	return rev, err
 }
 
-func (c *Client) FetchSettings(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, err error) {
+func (c *Client) Settings(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, err error) {
 	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		var err error
 		if settings, err = rpcSettings(ctx, t); err != nil {

@@ -406,10 +406,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc, err := gouging.NewWorkerGougingChecker(ctx, w.bus, gp, false)
-	if jc.Check("could not create gouging checker", err) != nil {
-		return
-	}
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	hostIP, hostKey, renterFunds := rfr.HostIP, rfr.HostKey, rfr.RenterFunds
 	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
@@ -464,7 +461,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 	rk := w.deriveRenterKey(c.HostKey)
 
-	rev, err := w.rhp2Client.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	rev, err := w.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
 	if jc.Check("could not fetch revision", err) != nil {
 		return
 	}
@@ -543,11 +540,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("could not fetch gouging parameters", err) != nil {
 		return
 	}
-	gc, err := gouging.NewWorkerGougingChecker(ctx, w.bus, gp, false)
-	if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	// prune the contract
 	var pruned, remaining uint64
@@ -603,13 +596,10 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
 		return
 	}
-	gc, err := gouging.NewWorkerGougingChecker(ctx, w.bus, gp, false)
-	if jc.Check("couldn't create gouging checker", err) != nil {
-		return
-	}
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	// fetch the roots from the host
-	roots, rev, cost, err := w.rhp2Client.FetchContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc.CheckSettings, c.HostIP, c.HostKey, id, c.RevisionNumber)
+	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc.CheckSettings, c.HostIP, c.HostKey, id, c.RevisionNumber)
 	if jc.Check("couldn't fetch contract roots from host", err) != nil {
 		return
 	} else if rev != nil {
@@ -1401,7 +1391,7 @@ func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		// fetch the host settings
 		start := time.Now()
 		scanCtx, cancel := timeoutCtx()
-		settings, err := w.rhp2Client.FetchSettings(scanCtx, hostKey, hostIP)
+		settings, err := w.rhp2Client.Settings(scanCtx, hostKey, hostIP)
 		cancel()
 		if err != nil {
 			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
