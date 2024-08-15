@@ -39,11 +39,12 @@ type (
 )
 
 // NewMainDatabase creates a new MySQL backend.
-func NewMainDatabase(db *dsql.DB, log *zap.SugaredLogger, lqd, ltd time.Duration) (*MainDatabase, error) {
-	store, err := sql.NewDB(db, log.Desugar(), deadlockMsgs, lqd, ltd)
+func NewMainDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration) (*MainDatabase, error) {
+	log = log.Named("main")
+	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
 		db:  store,
-		log: log,
+		log: log.Sugar(),
 	}, err
 }
 

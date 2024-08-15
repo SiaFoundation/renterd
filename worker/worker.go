@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
 	clientV2 "go.sia.tech/renterd/internal/rhp/v2"
 	"go.sia.tech/renterd/internal/utils"
@@ -31,6 +32,7 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
+	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 )
@@ -66,6 +68,8 @@ func NewClient(address, password string) *Client {
 
 type (
 	Bus interface {
+		s3.Bus
+
 		alerts.Alerter
 		gouging.ConsensusState
 		webhooks.Broadcaster
@@ -162,7 +166,7 @@ type (
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
 // masterkey to use for a specific purpose. Such as deriving more keys for
 // ephemeral accounts.
-func (w *worker) deriveSubKey(purpose string) types.PrivateKey {
+func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
 	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
 	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
@@ -183,7 +187,7 @@ func (w *worker) deriveSubKey(purpose string) types.PrivateKey {
 //
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
-func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
+func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 	seed := blake2b.Sum256(append(w.deriveSubKey("renterkey"), hostKey[:]...))
 	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
@@ -194,7 +198,7 @@ func (w *worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
-type worker struct {
+type Worker struct {
 	alerts alerts.Alerter
 
 	rhp2Client *clientV2.Client
@@ -226,7 +230,7 @@ type worker struct {
 	logger *zap.SugaredLogger
 }
 
-func (w *worker) isStopped() bool {
+func (w *Worker) isStopped() bool {
 	select {
 	case <-w.shutdownCtx.Done():
 		return true
@@ -235,7 +239,7 @@ func (w *worker) isStopped() bool {
 	return false
 }
 
-func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
+func (w *Worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
 		h := w.Host(hk, fcid, siamuxAddr)
 		rev, err := h.FetchRevision(ctx, fetchTimeout)
@@ -246,7 +250,7 @@ func (w *worker) withRevision(ctx context.Context, fetchTimeout time.Duration, f
 	})
 }
 
-func (w *worker) registerAlert(a alerts.Alert) {
+func (w *Worker) registerAlert(a alerts.Alert) {
 	ctx, cancel := context.WithTimeout(w.shutdownCtx, time.Minute)
 	if err := w.alerts.RegisterAlert(ctx, a); err != nil {
 		w.logger.Errorf("failed to register alert, err: %v", err)
@@ -254,7 +258,7 @@ func (w *worker) registerAlert(a alerts.Alert) {
 	cancel()
 }
 
-func (w *worker) rhpScanHandler(jc jape.Context) {
+func (w *Worker) rhpScanHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode the request
@@ -288,7 +292,7 @@ func (w *worker) rhpScanHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
+func (w *Worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
 	errs = make(HostErrorSet)
 
 	// create requests channel
@@ -340,7 +344,7 @@ func (w *worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	return
 }
 
-func (w *worker) rhpPriceTableHandler(jc jape.Context) {
+func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 	// decode the request
 	var rptr api.RHPPriceTableRequest
 	if jc.Decode(&rptr) != nil {
@@ -383,7 +387,7 @@ func (w *worker) rhpPriceTableHandler(jc jape.Context) {
 	jc.Encode(hpt)
 }
 
-func (w *worker) rhpFormHandler(jc jape.Context) {
+func (w *Worker) rhpFormHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode the request
@@ -438,7 +442,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) rhpBroadcastHandler(jc jape.Context) {
+func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode the fcid
@@ -495,7 +499,7 @@ func (w *worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 }
 
-func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
+func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode fcid
@@ -573,7 +577,7 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	jc.Encode(res)
 }
 
-func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
+func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode fcid
@@ -608,7 +612,7 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	jc.Encode(roots)
 }
 
-func (w *worker) rhpRenewHandler(jc jape.Context) {
+func (w *Worker) rhpRenewHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode request
@@ -658,7 +662,7 @@ func (w *worker) rhpRenewHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) rhpFundHandler(jc jape.Context) {
+func (w *Worker) rhpFundHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode request
@@ -696,7 +700,7 @@ func (w *worker) rhpFundHandler(jc jape.Context) {
 	}))
 }
 
-func (w *worker) rhpSyncHandler(jc jape.Context) {
+func (w *Worker) rhpSyncHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode the request
@@ -719,7 +723,7 @@ func (w *worker) rhpSyncHandler(jc jape.Context) {
 	}))
 }
 
-func (w *worker) slabMigrateHandler(jc jape.Context) {
+func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode the slab
@@ -795,7 +799,7 @@ func (w *worker) slabMigrateHandler(jc jape.Context) {
 	})
 }
 
-func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
+func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 	stats := w.downloadManager.Stats()
 
 	// prepare downloaders stats
@@ -825,7 +829,7 @@ func (w *worker) downloadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
-func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
+func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 	stats := w.uploadManager.Stats()
 
 	// prepare upload stats
@@ -850,7 +854,7 @@ func (w *worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
-func (w *worker) objectsHandlerHEAD(jc jape.Context) {
+func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 	// parse bucket
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -909,7 +913,7 @@ func (w *worker) objectsHandlerHEAD(jc jape.Context) {
 	serveContent(jc.ResponseWriter, jc.Request, path, bytes.NewReader(nil), *hor)
 }
 
-func (w *worker) objectsHandlerGET(jc jape.Context) {
+func (w *Worker) objectsHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []api.ObjectMetadata{})
 
 	ctx := jc.Request.Context()
@@ -1002,7 +1006,7 @@ func (w *worker) objectsHandlerGET(jc jape.Context) {
 	serveContent(jc.ResponseWriter, jc.Request, path, gor.Content, gor.HeadObjectResponse)
 }
 
-func (w *worker) objectsHandlerPUT(jc jape.Context) {
+func (w *Worker) objectsHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
@@ -1073,7 +1077,7 @@ func (w *worker) objectsHandlerPUT(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
-func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
+func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
@@ -1161,7 +1165,7 @@ func (w *worker) multipartUploadHandlerPUT(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
-func (w *worker) objectsHandlerDELETE(jc jape.Context) {
+func (w *Worker) objectsHandlerDELETE(jc jape.Context) {
 	var batch bool
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
@@ -1178,7 +1182,7 @@ func (w *worker) objectsHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't delete object", err)
 }
 
-func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
+func (w *Worker) rhpContractsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// fetch contracts
@@ -1214,18 +1218,18 @@ func (w *worker) rhpContractsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (w *worker) idHandlerGET(jc jape.Context) {
+func (w *Worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
 
-func (w *worker) memoryGET(jc jape.Context) {
+func (w *Worker) memoryGET(jc jape.Context) {
 	jc.Encode(api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
 		Upload:   w.uploadManager.mm.Status(),
 	})
 }
 
-func (w *worker) accountHandlerGET(jc jape.Context) {
+func (w *Worker) accountHandlerGET(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
@@ -1234,7 +1238,7 @@ func (w *worker) accountHandlerGET(jc jape.Context) {
 	jc.Encode(account)
 }
 
-func (w *worker) eventsHandlerPOST(jc jape.Context) {
+func (w *Worker) eventsHandlerPOST(jc jape.Context) {
 	var event webhooks.Event
 	if jc.Decode(&event) != nil {
 		return
@@ -1245,7 +1249,7 @@ func (w *worker) eventsHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (w *worker) stateHandlerGET(jc jape.Context) {
+func (w *Worker) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.WorkerStateResponse{
 		ID:        w.id,
 		StartTime: api.TimeRFC3339(w.startTime),
@@ -1259,36 +1263,37 @@ func (w *worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, l *zap.Logger) (*worker, error) {
-	if contractLockingDuration == 0 {
+func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, error) {
+	l = l.Named("worker").Named(cfg.ID)
+
+	if cfg.ContractLockTimeout == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
-	if busFlushInterval == 0 {
+	if cfg.BusFlushInterval == 0 {
 		return nil, errors.New("bus flush interval must be positive")
 	}
-	if downloadOverdriveTimeout == 0 {
+	if cfg.DownloadOverdriveTimeout == 0 {
 		return nil, errors.New("download overdrive timeout must be positive")
 	}
-	if uploadOverdriveTimeout == 0 {
+	if cfg.UploadOverdriveTimeout == 0 {
 		return nil, errors.New("upload overdrive timeout must be positive")
 	}
-	if downloadMaxMemory == 0 {
+	if cfg.DownloadMaxMemory == 0 {
 		return nil, errors.New("downloadMaxMemory cannot be 0")
 	}
-	if uploadMaxMemory == 0 {
+	if cfg.UploadMaxMemory == 0 {
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
-	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id))
-	l = l.Named("worker").Named(id)
+	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	w := &worker{
+	w := &Worker{
 		alerts:                  a,
-		allowPrivateIPs:         allowPrivateIPs,
-		contractLockingDuration: contractLockingDuration,
+		allowPrivateIPs:         cfg.AllowPrivateIPs,
+		contractLockingDuration: cfg.ContractLockTimeout,
 		cache:                   iworker.NewCache(b, l),
 		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
-		id:                      id,
+		id:                      cfg.ID,
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
@@ -1303,15 +1308,15 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initPriceTables()
 	w.initTransportPool()
 
-	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Named("downloadmanager").Sugar())
-	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
+	w.initDownloadManager(cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
+	w.initUploadManager(cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
-	w.initContractSpendingRecorder(busFlushInterval)
+	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil
 }
 
 // Handler returns an HTTP handler that serves the worker API.
-func (w *worker) Handler() http.Handler {
+func (w *Worker) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
@@ -1347,7 +1352,7 @@ func (w *worker) Handler() http.Handler {
 }
 
 // Setup register event webhooks that enable the worker cache.
-func (w *worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
+func (w *Worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
 	go func() {
 		eventsURL := fmt.Sprintf("%s/events", apiURL)
 		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
@@ -1360,7 +1365,7 @@ func (w *worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
 }
 
 // Shutdown shuts down the worker.
-func (w *worker) Shutdown(ctx context.Context) error {
+func (w *Worker) Shutdown(ctx context.Context) error {
 	// cancel shutdown context
 	w.shutdownCtxCancel()
 
@@ -1375,7 +1380,7 @@ func (w *worker) Shutdown(ctx context.Context) error {
 	return w.eventSubscriber.Shutdown(ctx)
 }
 
-func (w *worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 	logger := w.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
 
 	// prepare a helper to create a context for scanning
@@ -1505,7 +1510,7 @@ func isErrHostUnreachable(err error) bool {
 		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
-func (w *worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.ObjectsResponse, error) {
+func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.ObjectsResponse, error) {
 	// fetch object
 	res, err := w.bus.Object(ctx, bucket, path, api.GetObjectOptions{
 		IgnoreDelim:  opts.IgnoreDelim,
@@ -1540,7 +1545,7 @@ func (w *worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 	}, res, nil
 }
 
-func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
+func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	// head object
 	hor, res, err := w.headObject(ctx, bucket, path, false, api.HeadObjectOptions{
 		IgnoreDelim: opts.IgnoreDelim,
@@ -1606,12 +1611,12 @@ func (w *worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	}, nil
 }
 
-func (w *worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
+func (w *Worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
 	res, _, err := w.headObject(ctx, bucket, path, true, opts)
 	return res, err
 }
 
-func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
+func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
 	// prepare upload params
 	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
 	if err != nil {
@@ -1647,7 +1652,7 @@ func (w *worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	}, nil
 }
 
-func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
+func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
 	// prepare upload params
 	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
 	if err != nil {
@@ -1702,7 +1707,7 @@ func (w *worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	}, nil
 }
 
-func (w *worker) prepareUploadParams(ctx context.Context, bucket string, contractSet string, minShards, totalShards int) (api.UploadParams, error) {
+func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, contractSet string, minShards, totalShards int) (api.UploadParams, error) {
 	// return early if the bucket does not exist
 	_, err := w.bus.Bucket(ctx, bucket)
 	if err != nil {
