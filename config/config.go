@@ -17,11 +17,12 @@ type (
 
 		Log Log `yaml:"log,omitempty"`
 
-		HTTP      HTTP      `yaml:"http,omitempty"`
+		HTTP HTTP `yaml:"http,omitempty"`
+
+		Autopilot Autopilot `yaml:"autopilot,omitempty"`
 		Bus       Bus       `yaml:"bus,omitempty"`
 		Worker    Worker    `yaml:"worker,omitempty"`
 		S3        S3        `yaml:"s3,omitempty"`
-		Autopilot Autopilot `yaml:"autopilot,omitempty"`
 
 		Database Database `yaml:"database,omitempty"`
 	}
@@ -132,6 +133,7 @@ type (
 	// Autopilot contains the configuration for an autopilot.
 	Autopilot struct {
 		Enabled                        bool          `yaml:"enabled,omitempty"`
+		ID                             string        `yaml:"id,omitempty"`
 		AccountsRefillInterval         time.Duration `yaml:"accountsRefillInterval,omitempty"`
 		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
 		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`

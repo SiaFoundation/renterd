@@ -10,7 +10,7 @@ import (
 	"go.sia.tech/renterd/object"
 )
 
-func (w *worker) migrate(ctx context.Context, s object.Slab, contractSet string, dlContracts, ulContracts []api.ContractMetadata, bh uint64) (int, bool, error) {
+func (w *Worker) migrate(ctx context.Context, s object.Slab, contractSet string, dlContracts, ulContracts []api.ContractMetadata, bh uint64) (int, bool, error) {
 	// make a map of good hosts
 	goodHosts := make(map[types.PublicKey]map[types.FileContractID]bool)
 	for _, c := range ulContracts {
