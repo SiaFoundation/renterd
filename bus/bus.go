@@ -52,6 +52,11 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
+	AlertManager interface {
+		alerts.Alerter
+		RegisterWebhookBroadcaster(b webhooks.Broadcaster)
+	}
+
 	ChainManager interface {
 		AddBlocks(blocks []types.Block) error
 		AddPoolTransactions(txns []types.Transaction) (bool, error)
@@ -258,7 +263,7 @@ type Bus struct {
 	startTime time.Time
 
 	alerts      alerts.Alerter
-	alertMgr    *alerts.Manager
+	alertMgr    AlertManager
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 
@@ -282,7 +287,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
+func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
 	l = l.Named("bus")
 	b := &Bus{
 		s:                s,
