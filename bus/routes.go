@@ -1719,7 +1719,7 @@ func (b *bus) handlePOSTAlertsRegister(jc jape.Context) {
 }
 
 func (b *bus) accountsHandlerGET(jc jape.Context) {
-	jc.Encode(b.accounts.Accounts())
+	jc.Encode(b.accountsMgr.Accounts())
 }
 
 func (b *bus) accountHandlerGET(jc jape.Context) {
@@ -1731,7 +1731,7 @@ func (b *bus) accountHandlerGET(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	acc, err := b.accounts.Account(id, req.HostKey)
+	acc, err := b.accountsMgr.Account(id, req.HostKey)
 	if jc.Check("failed to fetch account", err) != nil {
 		return
 	}
@@ -1755,7 +1755,7 @@ func (b *bus) accountsAddHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.AddAmount(id, req.HostKey, req.Amount)
+	b.accountsMgr.AddAmount(id, req.HostKey, req.Amount)
 }
 
 func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
@@ -1763,8 +1763,8 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	err := b.accounts.ResetDrift(id)
-	if errors.Is(err, errAccountsNotFound) {
+	err := b.accountsMgr.ResetDrift(id)
+	if errors.Is(err, ibus.ErrAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1790,7 +1790,7 @@ func (b *bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetBalance(id, req.HostKey, req.Amount)
+	b.accountsMgr.SetBalance(id, req.HostKey, req.Amount)
 }
 
 func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
@@ -1810,8 +1810,8 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	err := b.accounts.ScheduleSync(id, req.HostKey)
-	if errors.Is(err, errAccountsNotFound) {
+	err := b.accountsMgr.ScheduleSync(id, req.HostKey)
+	if errors.Is(err, ibus.ErrAccountsNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1830,7 +1830,7 @@ func (b *bus) accountsLockHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	acc, lockID := b.accounts.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
+	acc, lockID := b.accountsMgr.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
 	jc.Encode(api.AccountsLockHandlerResponse{
 		Account: acc,
 		LockID:  lockID,
@@ -1847,7 +1847,7 @@ func (b *bus) accountsUnlockHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	err := b.accounts.UnlockAccount(id, req.LockID)
+	err := b.accountsMgr.UnlockAccount(id, req.LockID)
 	if jc.Check("failed to unlock account", err) != nil {
 		return
 	}

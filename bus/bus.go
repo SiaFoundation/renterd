@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -48,6 +50,18 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
+	AccountManager interface {
+		Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error)
+		Accounts() []api.Account
+		AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
+		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64)
+		ResetDrift(id rhpv3.Account) error
+		SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int)
+		ScheduleSync(id rhpv3.Account, hk types.PublicKey) error
+		Shutdown(context.Context) error
+		UnlockAccount(id rhpv3.Account, lockID uint64) error
+	}
+
 	ChainManager interface {
 		AddBlocks(blocks []types.Block) error
 		AddPoolTransactions(txns []types.Transaction) (bool, error)
@@ -247,6 +261,7 @@ type (
 type bus struct {
 	startTime time.Time
 
+	accountsMgr AccountManager
 	alerts      alerts.Alerter
 	alertMgr    *alerts.Manager
 	pinMgr      PinManager
@@ -258,13 +273,11 @@ type bus struct {
 	w  Wallet
 
 	as    AutopilotStore
-	eas   EphemeralAccountStore
 	hdb   HostDB
 	ms    MetadataStore
 	ss    SettingStore
 	mtrcs MetricsStore
 
-	accounts         *accounts
 	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
@@ -272,7 +285,7 @@ type bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*bus, error) {
+func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (_ *bus, err error) {
 	l = l.Named("bus")
 	b := &bus{
 		s:                s,
@@ -283,7 +296,6 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 		ms:               ms,
 		mtrcs:            mtrcs,
 		ss:               ss,
-		eas:              eas,
 		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
 
@@ -295,13 +307,14 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 		startTime: time.Now(),
 	}
 
-	// init accounts
-	if err := b.initAccounts(ctx); err != nil {
+	// init settings
+	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
 
-	// init settings
-	if err := b.initSettings(ctx); err != nil {
+	// create account manager
+	b.accountsMgr, err = ibus.NewAccountManager(ctx, eas, l)
+	if err != nil {
 		return nil, err
 	}
 
@@ -460,28 +473,11 @@ func (b *bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
-		b.saveAccounts(ctx),
+		b.accountsMgr.Shutdown(ctx),
 		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Shutdown(ctx),
 		b.cs.Shutdown(ctx),
 	)
-}
-
-// initAccounts loads the accounts into memory
-func (b *bus) initAccounts(ctx context.Context) error {
-	accounts, err := b.eas.Accounts(ctx)
-	if err != nil {
-		return err
-	}
-	b.accounts = newAccounts(accounts, b.logger)
-
-	// mark the shutdown as unclean, this will be overwritten when/if the
-	// accounts are saved on shutdown
-	if err := b.eas.SetUncleanShutdown(ctx); err != nil {
-		return fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
-	}
-
-	return nil
 }
 
 // initSettings loads the default settings if the setting is not already set and
@@ -559,17 +555,5 @@ func (b *bus) initSettings(ctx context.Context) error {
 		}
 	}
 
-	return nil
-}
-
-// saveAccounts saves the accounts to the db when the bus is stopped
-func (b *bus) saveAccounts(ctx context.Context) error {
-	accounts := b.accounts.ToPersist()
-	if err := b.eas.SaveAccounts(ctx, accounts); err != nil {
-		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
-		return err
-	}
-
-	b.logger.Infof("successfully saved %v accounts", len(accounts))
 	return nil
 }
