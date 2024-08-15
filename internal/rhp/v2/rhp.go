@@ -68,8 +68,6 @@ var (
 )
 
 type (
-	ContractRootsFn func(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
-
 	GougingCheckFn func(settings rhpv2.HostSettings) api.HostGougingBreakdown
 
 	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
@@ -181,7 +179,7 @@ func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, 
 	return
 }
 
-func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, wantedRoots ContractRootsFn) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
+func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, toKeep []types.Hash256) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
 	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingCheck, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			// fetch roots
@@ -194,13 +192,8 @@ func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, 
 			cost = cost.Add(fetchCost)
 			revision = &rev.Revision
 
-			// fetch the roots from the bus
-			want, pending, err := wantedRoots(ctx, fcid)
-			if err != nil {
-				return err
-			}
 			keep := make(map[types.Hash256]struct{})
-			for _, root := range append(want, pending...) {
+			for _, root := range toKeep {
 				keep[root] = struct{}{}
 			}
 
@@ -214,7 +207,7 @@ func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, 
 				indices = append(indices, uint64(i))
 			}
 			if len(indices) == 0 {
-				return fmt.Errorf("%w: database holds %d (%d pending), contract contains %d", ErrNoSectorsToPrune, len(want)+len(pending), len(pending), len(got))
+				return fmt.Errorf("%w: database holds %d, contract contains %d", ErrNoSectorsToPrune, len(toKeep), len(got))
 			}
 
 			// delete the roots from the contract

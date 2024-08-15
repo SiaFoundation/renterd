@@ -546,6 +546,11 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("could not fetch gouging parameters", err) != nil {
 		return
 	}
+	gc, err := newGougingChecker(ctx, w.bus, gp, false)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
 
 	// attach gouging checker
 	ctx = WithGougingChecker(ctx, w.bus, gp)
@@ -555,7 +560,11 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	var rev *types.FileContractRevision
 	var cost types.Currency
 	err = w.withContractLock(ctx, contract.ID, lockingPriorityPruning, func() error {
-		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), nil, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, nil)
+		stored, pending, err := w.bus.ContractRoots(ctx, contract.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch contract roots; %w", err)
+		}
+		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc.CheckSettings, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
 		return err
 	})
 	if rev != nil {
