@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
@@ -1280,36 +1281,37 @@ func (w *Worker) stateHandlerGET(jc jape.Context) {
 }
 
 // New returns an HTTP handler that serves the worker API.
-func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlushInterval, downloadOverdriveTimeout, uploadOverdriveTimeout time.Duration, downloadMaxOverdrive, uploadMaxOverdrive, downloadMaxMemory, uploadMaxMemory uint64, allowPrivateIPs bool, l *zap.Logger) (*Worker, error) {
-	if contractLockingDuration == 0 {
+func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, error) {
+	l = l.Named("worker").Named(cfg.ID)
+
+	if cfg.ContractLockTimeout == 0 {
 		return nil, errors.New("contract lock duration must be positive")
 	}
-	if busFlushInterval == 0 {
+	if cfg.BusFlushInterval == 0 {
 		return nil, errors.New("bus flush interval must be positive")
 	}
-	if downloadOverdriveTimeout == 0 {
+	if cfg.DownloadOverdriveTimeout == 0 {
 		return nil, errors.New("download overdrive timeout must be positive")
 	}
-	if uploadOverdriveTimeout == 0 {
+	if cfg.UploadOverdriveTimeout == 0 {
 		return nil, errors.New("upload overdrive timeout must be positive")
 	}
-	if downloadMaxMemory == 0 {
+	if cfg.DownloadMaxMemory == 0 {
 		return nil, errors.New("downloadMaxMemory cannot be 0")
 	}
-	if uploadMaxMemory == 0 {
+	if cfg.UploadMaxMemory == 0 {
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
 
-	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", id))
-	l = l.Named("worker").Named(id)
+	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	w := &Worker{
 		alerts:                  a,
-		allowPrivateIPs:         allowPrivateIPs,
-		contractLockingDuration: contractLockingDuration,
+		allowPrivateIPs:         cfg.AllowPrivateIPs,
+		contractLockingDuration: cfg.ContractLockTimeout,
 		cache:                   iworker.NewCache(b, l),
 		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
-		id:                      id,
+		id:                      cfg.ID,
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
@@ -1323,10 +1325,10 @@ func New(masterKey [32]byte, id string, b Bus, contractLockingDuration, busFlush
 	w.initPriceTables()
 	w.initTransportPool()
 
-	w.initDownloadManager(downloadMaxMemory, downloadMaxOverdrive, downloadOverdriveTimeout, l.Named("downloadmanager").Sugar())
-	w.initUploadManager(uploadMaxMemory, uploadMaxOverdrive, uploadOverdriveTimeout, l.Named("uploadmanager").Sugar())
+	w.initDownloadManager(cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
+	w.initUploadManager(cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
-	w.initContractSpendingRecorder(busFlushInterval)
+	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil
 }
 

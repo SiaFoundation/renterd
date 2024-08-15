@@ -240,7 +240,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
-	}, syncer.WithPeerDiscoveryInterval(testBusCfg().SyncerPeerDiscoveryInterval), syncer.WithSyncInterval(testBusCfg().SyncerSyncInterval))
+	}, syncer.WithPeerDiscoveryInterval(100*time.Millisecond), syncer.WithSyncInterval(100*time.Millisecond))
 	syncErrChan := make(chan error, 1)
 	go func() { syncErrChan <- s.Run(context.Background()) }()
 

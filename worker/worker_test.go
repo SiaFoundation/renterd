@@ -8,6 +8,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -41,8 +42,19 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	dlmm := newMemoryManagerMock()
 	ulmm := newMemoryManagerMock()
 
+	// create cfg
+	cfg := config.Worker{
+		ID:                       "test",
+		ContractLockTimeout:      time.Second,
+		BusFlushInterval:         time.Second,
+		DownloadOverdriveTimeout: time.Second,
+		UploadOverdriveTimeout:   time.Second,
+		DownloadMaxMemory:        1 << 12, // 4 KiB
+		UploadMaxMemory:          1 << 12, // 4 KiB
+	}
+
 	// create worker
-	w, err := New(blake2b.Sum256([]byte("testwork")), "test", b, time.Second, time.Second, time.Second, time.Second, 0, 0, 1, 1, false, zap.NewNop())
+	w, err := New(cfg, blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

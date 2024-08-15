@@ -69,12 +69,11 @@ func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {
 	}
 }
 
-func New(b Bus, w Worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, error) {
-	namedLogger := logger.Named("s3")
+func New(b Bus, w Worker, logger *zap.Logger, opts Opts) (http.Handler, error) {
 	s3Backend := &s3{
 		b:      b,
 		w:      w,
-		logger: namedLogger,
+		logger: logger.Sugar(),
 	}
 	backend := gofakes3.Backend(s3Backend)
 	if !opts.AuthDisabled {
@@ -84,9 +83,7 @@ func New(b Bus, w Worker, logger *zap.SugaredLogger, opts Opts) (http.Handler, e
 		backend,
 		gofakes3.WithHostBucket(opts.HostBucketEnabled),
 		gofakes3.WithHostBucketBase(opts.HostBucketBases...),
-		gofakes3.WithLogger(&gofakes3Logger{
-			l: namedLogger,
-		}),
+		gofakes3.WithLogger(&gofakes3Logger{l: logger.Sugar()}),
 		gofakes3.WithRequestID(rand.Uint64()),
 		gofakes3.WithoutVersioning(),
 	)

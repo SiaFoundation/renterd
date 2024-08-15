@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -54,7 +53,7 @@ func Auth(password string, unauthenticatedDownloads bool) func(http.Handler) htt
 
 func ListenTCP(addr string, logger *zap.Logger) (net.Listener, error) {
 	l, err := net.Listen("tcp", addr)
-	if utils.IsErr(err, errors.New("no such host")) && strings.Contains(addr, "localhost") {
+	if IsErr(err, errors.New("no such host")) && strings.Contains(addr, "localhost") {
 		// fall back to 127.0.0.1 if 'localhost' doesn't work
 		_, port, err := net.SplitHostPort(addr)
 		if err != nil {

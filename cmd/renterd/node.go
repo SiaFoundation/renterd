@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -15,19 +13,30 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/utils"
+	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/blake2b"
 	"golang.org/x/sys/cpu"
 )
 
@@ -123,24 +132,14 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	// initialise bus
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		b, shutdownFn, _, err := bus.NewNode(bus.NodeConfig{
-			Bus:         cfg.Bus,
-			Database:    cfg.Database,
-			DatabaseLog: cfg.Log.Database,
-			Logger:      logger,
-			Network:     network,
-			Genesis:     genesis,
-			RetryTxIntervals: []time.Duration{
-				200 * time.Millisecond,
-				500 * time.Millisecond,
-				time.Second,
-				3 * time.Second,
-				10 * time.Second,
-				10 * time.Second,
-			},
-		}, cfg.Directory, pk, logger)
+		// ensure we don't hang indefinitely
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		// create bus
+		b, shutdownFn, err := newBus(ctx, cfg, pk, network, genesis, logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create bus: %w", err)
+			return nil, err
 		}
 
 		shutdownFns = append(shutdownFns, fn{
@@ -148,7 +147,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			fn:   shutdownFn,
 		})
 
-		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b)}
+		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b.Handler())}
 		busAddr = cfg.HTTP.Address + "/api/bus"
 		busPassword = cfg.HTTP.Password
 
@@ -166,14 +165,6 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
 			workerAddr := cfg.HTTP.Address + "/api/worker"
-			w, s3Handler, setupFn, shutdownFn, err := worker.NewNode(cfg.Worker, s3.Opts{
-				AuthDisabled:      cfg.S3.DisableAuth,
-				HostBucketBases:   cfg.S3.HostBucketBases,
-				HostBucketEnabled: cfg.S3.HostBucketEnabled,
-			}, bc, pk, logger)
-			if err != nil {
-				logger.Fatal("failed to create worker: " + err.Error())
-			}
 			var workerExternAddr string
 			if cfg.Bus.RemoteAddr != "" {
 				workerExternAddr = cfg.Worker.ExternalAddress
@@ -181,22 +172,37 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 				workerExternAddr = workerAddr
 			}
 
+			workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
+			w, err := worker.New(cfg.Worker, workerKey, bc, logger.Named("worker"))
+			if err != nil {
+				logger.Fatal("failed to create worker: " + err.Error())
+			}
 			setupFns = append(setupFns, fn{
 				name: "Worker",
 				fn: func(ctx context.Context) error {
-					return setupFn(ctx, workerExternAddr, cfg.HTTP.Password)
+					return w.Setup(ctx, workerExternAddr, cfg.HTTP.Password)
 				},
 			})
 			shutdownFns = append(shutdownFns, fn{
 				name: "Worker",
-				fn:   shutdownFn,
+				fn:   w.Shutdown,
 			})
 
-			mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w)}
+			mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
 			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
+				s3Handler, err := s3.New(bc, w, logger.Named("s3"), s3.Opts{
+					AuthDisabled:      cfg.S3.DisableAuth,
+					HostBucketBases:   cfg.S3.HostBucketBases,
+					HostBucketEnabled: cfg.S3.HostBucketEnabled,
+				})
+				if err != nil {
+					err = errors.Join(err, w.Shutdown(context.Background()))
+					logger.Fatal("failed to create s3 handler: " + err.Error())
+				}
+
 				s3Srv = &http.Server{
 					Addr:    cfg.S3.Address,
 					Handler: s3Handler,
@@ -220,25 +226,20 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 
 	// initialise autopilot
 	if cfg.Autopilot.Enabled {
-		ap, runFn, shutdownFn, err := autopilot.NewNode(cfg.Autopilot, bc, workers, logger)
+		ap, err := autopilot.New(cfg.Autopilot, bc, workers, logger)
 		if err != nil {
 			logger.Fatal("failed to create autopilot: " + err.Error())
 		}
-
 		setupFns = append(setupFns, fn{
 			name: "Autopilot",
-			fn:   func(_ context.Context) error { runFn(); return nil },
+			fn:   func(_ context.Context) error { ap.Run(); return nil },
 		})
-
-		// NOTE: shutdown functions are executed in reverse order, it's
-		// important the autopilot is shut down first so we don't needlessly
-		// make worker and bus calls while they're shutting down
 		shutdownFns = append(shutdownFns, fn{
 			name: "Autopilot",
-			fn:   shutdownFn,
+			fn:   ap.Shutdown,
 		})
 
-		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap)}
+		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap.Handler())}
 	}
 
 	return &node{
@@ -254,6 +255,142 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		cfg: cfg,
 
 		logger: logger.Sugar(),
+	}, nil
+}
+
+func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
+	// create store
+	alertsMgr := alerts.NewManager()
+	storeCfg, err := buildStoreConfig(alertsMgr, cfg, pk, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlStore, err := stores.NewSQLStore(storeCfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// create webhooks manager
+	wh, err := webhooks.NewManager(sqlStore, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// hookup webhooks <-> alerts
+	alertsMgr.RegisterWebhookBroadcaster(wh)
+
+	// create consensus directory
+	consensusDir := filepath.Join(cfg.Directory, "consensus")
+	if err := os.MkdirAll(consensusDir, 0700); err != nil {
+		return nil, nil, err
+	}
+
+	// migrate consensus database if necessary
+	migrateConsensusDatabase(ctx, sqlStore, consensusDir, logger)
+
+	// reset chain state if blockchain.db does not exist to make sure deleting
+	// it forces a resync
+	chainPath := filepath.Join(consensusDir, "blockchain.db")
+	if _, err := os.Stat(chainPath); os.IsNotExist(err) {
+		if err := sqlStore.ResetChainState(context.Background()); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// create chain database
+	bdb, err := coreutils.OpenBoltChainDB(chainPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+	}
+
+	// create chain manager
+	store, state, err := chain.NewDBStore(bdb, network, genesis)
+	if err != nil {
+		return nil, nil, err
+	}
+	cm := chain.NewManager(store, state)
+
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// bootstrap the syncer
+	if cfg.Bus.Bootstrap {
+		var peers []string
+		switch network.Name {
+		case "mainnet":
+			peers = syncer.MainnetBootstrapPeers
+		case "zen":
+			peers = syncer.ZenBootstrapPeers
+		case "anagami":
+			peers = syncer.AnagamiBootstrapPeers
+		default:
+			return nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", network.Name)
+		}
+		for _, addr := range peers {
+			if err := sqlStore.AddPeer(addr); err != nil {
+				return nil, nil, fmt.Errorf("%w: failed to add bootstrap peer '%s'", err, addr)
+			}
+		}
+	}
+
+	// create syncer, peers will reject us if our hostname is empty or
+	// unspecified, so use loopback
+	l, err := net.Listen("tcp", cfg.Bus.GatewayAddr)
+	if err != nil {
+		return nil, nil, err
+	}
+	syncerAddr := l.Addr().String()
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// create header
+	header := gateway.Header{
+		GenesisID:  genesis.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
+	}
+
+	// create the syncer
+	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
+
+	// start syncer
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- s.Run(context.Background())
+		close(errChan)
+	}()
+
+	// create a helper function to wait for syncer to wind down on shutdown
+	syncerShutdown := func(ctx context.Context) error {
+		select {
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
+	}
+
+	// create bus
+	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
+	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
+	}
+
+	return b, func(ctx context.Context) error {
+		return errors.Join(
+			s.Close(),
+			w.Close(),
+			b.Shutdown(ctx),
+			sqlStore.Close(),
+			bdb.Close(),
+			syncerShutdown(ctx),
+		)
 	}, nil
 }
 
@@ -311,16 +448,6 @@ func (n *node) Run() error {
 	}
 	n.logger.Info("bus: Listening on " + syncerAddress)
 
-	// run autopilot store migration
-	//
-	// TODO: we can safely remove this already
-	if n.cfg.Autopilot.Enabled {
-		autopilotDir := filepath.Join(n.cfg.Directory, n.cfg.Autopilot.ID)
-		if err := runCompatMigrateAutopilotJSONToStore(n.bus, "autopilot", autopilotDir); err != nil {
-			return fmt.Errorf("failed to migrate autopilot JSON: %w", err)
-		}
-	}
-
 	// open the web UI if enabled
 	if n.cfg.AutoOpenWebUI {
 		time.Sleep(time.Millisecond) // give the web server a chance to start
@@ -360,60 +487,113 @@ func (n *node) Shutdown() error {
 	return errors.Join(errs...)
 }
 
-func runCompatMigrateAutopilotJSONToStore(bc *bus.Client, id, dir string) (err error) {
-	// check if the file exists
-	path := filepath.Join(dir, "autopilot.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
-	}
-
-	// defer autopilot dir cleanup
-	defer func() {
-		if err == nil {
-			log.Println("migration: removing autopilot directory")
-			if err = os.RemoveAll(dir); err == nil {
-				log.Println("migration: done")
-			}
+// TODO: needs a better spot
+func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	// create database connections
+	var dbMain sql.Database
+	var dbMetrics sql.MetricsDatabase
+	if cfg.Database.MySQL.URI != "" {
+		// create MySQL connections
+		connMain, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.Database,
+		)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open MySQL main database: %w", err)
 		}
-	}()
+		connMetrics, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.MetricsDatabase,
+		)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+		}
+		dbMain, err = mysql.NewMainDatabase(connMain, logger.Named("main").Sugar(), cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger.Named("metrics").Sugar(), cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+		}
+	} else {
+		// create database directory
+		dbDir := filepath.Join(cfg.Directory, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return stores.Config{}, err
+		}
 
-	// read the json config
-	log.Println("migration: reading autopilot.json")
-	//nolint:tagliatelle
-	var cfg struct {
-		Config api.AutopilotConfig `json:"Config"`
+		// create SQLite connections
+		db, err := sqlite.Open(filepath.Join(dbDir, "db.sqlite"))
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
+		}
+		dbMain, err = sqlite.NewMainDatabase(db, logger.Named("main").Sugar(), cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
+		}
+
+		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+		}
 	}
-	if data, err := os.ReadFile(path); err != nil {
-		return err
-	} else if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
 
-	// make sure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	return stores.Config{
+		Alerts:                        alerts.WithOrigin(am, "bus"),
+		DB:                            dbMain,
+		DBMetrics:                     dbMetrics,
+		PartialSlabDir:                filepath.Join(cfg.Directory, "partial_slabs"),
+		Migrate:                       true,
+		SlabBufferCompletionThreshold: cfg.Bus.SlabBufferCompletionThreshold,
+		Logger:                        logger.Sugar(),
+		RetryTransactionIntervals: []time.Duration{
+			200 * time.Millisecond,
+			500 * time.Millisecond,
+			time.Second,
+			3 * time.Second,
+			10 * time.Second,
+			10 * time.Second,
+		},
+		WalletAddress:     types.StandardUnlockHash(pk.PublicKey()),
+		LongQueryDuration: cfg.Log.Database.SlowThreshold,
+		LongTxDuration:    cfg.Log.Database.SlowThreshold,
+	}, nil
+}
 
-	// check if the autopilot already exists, if so we don't need to migrate
-	_, err = bc.Autopilot(ctx, api.DefaultAutopilotID)
-	if err == nil {
-		log.Printf("migration: autopilot already exists in the bus, the autopilot.json won't be migrated\n old config: %+v\n", cfg.Config)
+func migrateConsensusDatabase(ctx context.Context, store *stores.SQLStore, consensusDir string, logger *zap.Logger) error {
+	oldConsensus, err := os.Stat(filepath.Join(consensusDir, "consensus.db"))
+	if os.IsNotExist(err) {
 		return nil
-	}
-
-	// create an autopilot entry
-	log.Println("migration: persisting autopilot to the bus")
-	if err := bc.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     id,
-		Config: cfg.Config,
-	}); err != nil {
+	} else if err != nil {
 		return err
 	}
 
-	// remove autopilot folder and config
-	log.Println("migration: cleaning up autopilot directory")
-	if err = os.RemoveAll(dir); err == nil {
-		log.Println("migration: done")
+	logger.Warn("found old consensus.db, indicating a migration is necessary")
+
+	// reset chain state
+	logger.Warn("Resetting chain state...")
+	if err := store.ResetChainState(ctx); err != nil {
+		return err
+	}
+	logger.Warn("Chain state was successfully reset.")
+
+	// remove consensus.db and consensus.log file
+	logger.Warn("Removing consensus database...")
+	_ = os.RemoveAll(filepath.Join(consensusDir, "consensus.log")) // ignore error
+	if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
+		return err
 	}
 
+	logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
+	logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	return nil
 }

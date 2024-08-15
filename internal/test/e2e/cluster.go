@@ -15,21 +15,30 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/stores/sql/mysql"
-	"go.sia.tech/renterd/utils"
+	"go.sia.tech/renterd/stores/sql/sqlite"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
@@ -70,6 +79,12 @@ type TestCluster struct {
 	tt           test.TT
 	wk           types.PrivateKey
 	wg           sync.WaitGroup
+}
+
+type dbConfig struct {
+	Database         config.Database
+	DatabaseLog      config.DatabaseLog
+	RetryTxIntervals []time.Duration
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -160,7 +175,7 @@ type testClusterOptions struct {
 
 	autopilotCfg      *config.Autopilot
 	autopilotSettings *api.AutopilotConfig
-	busCfg            *bus.NodeConfig
+	busCfg            *config.Bus
 	workerCfg         *config.Worker
 }
 
@@ -210,7 +225,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
-	busCfg, workerCfg, apCfg := testBusCfg(), testWorkerCfg(), testApCfg()
+	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
 	}
@@ -236,33 +251,27 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
 	}
-	if busCfg.Logger == nil {
-		busCfg.Logger = logger
-	}
 	if opts.dbName != "" {
-		busCfg.Database.MySQL.Database = opts.dbName
+		dbCfg.Database.MySQL.Database = opts.dbName
 	}
 
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
 	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
 		// generate a random database name if none are set
-		if busCfg.Database.MySQL.Database == "" {
-			busCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
+		if dbCfg.Database.MySQL.Database == "" {
+			dbCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
-		if busCfg.Database.MySQL.MetricsDatabase == "" {
-			busCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
+		if dbCfg.Database.MySQL.MetricsDatabase == "" {
+			dbCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
 
 		tmpDB, err := mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, "")
 		tt.OK(err)
-		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)))
-		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)))
+		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbCfg.Database.MySQL.Database)))
+		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbCfg.Database.MySQL.MetricsDatabase)))
 		tt.OK(tmpDB.Close())
 	}
-
-	// Prepare individual dirs.
-	busDir := filepath.Join(dir, "bus")
 
 	// Generate API passwords.
 	busPassword := randomPassword()
@@ -303,7 +312,8 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt.OK(err)
 
 	// Create bus.
-	b, bShutdownFn, cm, err := bus.NewNode(busCfg, busDir, wk, logger)
+	busDir := filepath.Join(dir, "bus")
+	b, bShutdownFn, cm, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -312,7 +322,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			Handler: renterd.Handler(), // ui
 			Sub: map[string]utils.TreeMux{
 				"/bus": {
-					Handler: busAuth(b),
+					Handler: busAuth(b.Handler()),
 				},
 			},
 		},
@@ -323,44 +333,44 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
-	w, s3Handler, wSetupFn, wShutdownFn, err := worker.NewNode(workerCfg, s3.Opts{}, busClient, wk, logger)
+	workerKey := blake2b.Sum256(append([]byte("worker"), wk...))
+	w, err := worker.New(workerCfg, workerKey, busClient, logger.Named("worker"))
 	tt.OK(err)
-	workerServer := http.Server{
-		Handler: utils.Auth(workerPassword, false)(w),
-	}
 
+	workerServer := http.Server{Handler: utils.Auth(workerPassword, false)(w.Handler())}
 	var workerShutdownFns []func(context.Context) error
 	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
-	workerShutdownFns = append(workerShutdownFns, wShutdownFn)
+	workerShutdownFns = append(workerShutdownFns, w.Shutdown)
 
 	// Create S3 API.
-	s3Server := http.Server{
-		Handler: s3Handler,
-	}
+	s3Handler, err := s3.New(busClient, w, logger.Named("s3"), s3.Opts{})
+	tt.OK(err)
 
+	s3Server := http.Server{Handler: s3Handler}
 	var s3ShutdownFns []func(context.Context) error
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := autopilot.NewNode(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, err := autopilot.New(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
-		Handler: autopilotAuth(ap),
+		Handler: autopilotAuth(ap.Handler()),
 	}
 
 	var autopilotShutdownFns []func(context.Context) error
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
-	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
+	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
+	network, genesis := testNetwork()
 	cluster := &TestCluster{
 		apID:         apCfg.ID,
 		dir:          dir,
-		dbName:       busCfg.Database.MySQL.Database,
+		dbName:       dbCfg.Database.MySQL.Database,
 		logger:       logger,
-		network:      busCfg.Network,
-		genesisBlock: busCfg.Genesis,
+		network:      network,
+		genesisBlock: genesis,
 		cm:           cm,
 		tt:           tt,
 		wk:           wk,
@@ -401,13 +411,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if !opts.skipRunningAutopilot {
 		cluster.wg.Add(1)
 		go func() {
-			aStartFn()
+			ap.Run()
 			cluster.wg.Done()
 		}()
 	}
 
 	// Finish worker setup.
-	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
+	if err := w.Setup(ctx, workerAddr, workerPassword); err != nil {
 		tt.Fatalf("failed to setup worker, err: %v", err)
 	}
 
@@ -438,7 +448,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(busCfg.Network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		cluster.MineBlocks(network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
 		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
@@ -472,6 +482,97 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	return cluster
+}
+
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, error) {
+	// create store
+	alertsMgr := alerts.NewManager()
+	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	sqlStore, err := stores.NewSQLStore(storeCfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create webhooks manager
+	wh, err := webhooks.NewManager(sqlStore, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// hookup webhooks <-> alerts
+	alertsMgr.RegisterWebhookBroadcaster(wh)
+
+	// create consensus directory
+	consensusDir := filepath.Join(dir, "consensus")
+	if err := os.MkdirAll(consensusDir, 0700); err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create chain database
+	chainPath := filepath.Join(consensusDir, "blockchain.db")
+	bdb, err := coreutils.OpenBoltChainDB(chainPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create chain manager
+	network, genesis := testNetwork()
+	store, state, err := chain.NewDBStore(bdb, network, genesis)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cm := chain.NewManager(store, state)
+
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create syncer, peers will reject us if our hostname is empty or
+	// unspecified, so use loopback
+	l, err := net.Listen("tcp", cfg.GatewayAddr)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	syncerAddr := l.Addr().String()
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// create header
+	header := gateway.Header{
+		GenesisID:  genesis.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
+	}
+
+	// create the syncer
+	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
+	go s.Run(context.Background())
+
+	// create bus
+	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
+	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	shutdownFn := func(ctx context.Context) error {
+		return errors.Join(
+			s.Close(),
+			w.Close(),
+			b.Shutdown(ctx),
+			sqlStore.Close(),
+			bdb.Close(),
+		)
+	}
+	return b, shutdownFn, cm, nil
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
@@ -883,17 +984,18 @@ func testNetwork() (*consensus.Network, types.Block) {
 	return n, genesis
 }
 
-func testBusCfg() bus.NodeConfig {
-	network, genesis := testNetwork()
+func testBusCfg() config.Bus {
+	return config.Bus{
+		AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
+		Bootstrap:                     false,
+		GatewayAddr:                   "127.0.0.1:0",
+		UsedUTXOExpiry:                time.Minute,
+		SlabBufferCompletionThreshold: 0,
+	}
+}
 
-	return bus.NodeConfig{
-		Bus: config.Bus{
-			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
-			Bootstrap:                     false,
-			GatewayAddr:                   "127.0.0.1:0",
-			UsedUTXOExpiry:                time.Minute,
-			SlabBufferCompletionThreshold: 0,
-		},
+func testDBCfg() dbConfig {
+	return dbConfig{
 		Database: config.Database{
 			MySQL: config.MySQLConfigFromEnv(),
 		},
@@ -902,10 +1004,6 @@ func testBusCfg() bus.NodeConfig {
 			IgnoreRecordNotFoundError: true,
 			SlowThreshold:             100 * time.Millisecond,
 		},
-		Network:                     network,
-		Genesis:                     genesis,
-		SyncerSyncInterval:          100 * time.Millisecond,
-		SyncerPeerDiscoveryInterval: 100 * time.Millisecond,
 		RetryTxIntervals: []time.Duration{
 			50 * time.Millisecond,
 			100 * time.Millisecond,
@@ -943,4 +1041,79 @@ func testApCfg() config.Autopilot {
 		ScannerBatchSize:               10,
 		ScannerNumThreads:              1,
 	}
+}
+
+func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	// create database connections
+	var dbMain sql.Database
+	var dbMetrics sql.MetricsDatabase
+	if cfg.Database.MySQL.URI != "" {
+		// create MySQL connections
+		connMain, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.Database,
+		)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open MySQL main database: %w", err)
+		}
+		connMetrics, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.MetricsDatabase,
+		)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+		}
+		dbMain, err = mysql.NewMainDatabase(connMain, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+		}
+	} else {
+		// create database directory
+		dbDir := filepath.Join(dir, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return stores.Config{}, err
+		}
+
+		// create SQLite connections
+		db, err := sqlite.Open(filepath.Join(dbDir, "db.sqlite"))
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
+		}
+		dbMain, err = sqlite.NewMainDatabase(db, logger.Named("main").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
+		}
+
+		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger.Named("metrics").Sugar(), cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+		}
+	}
+
+	return stores.Config{
+		Alerts:                        alerts.WithOrigin(am, "bus"),
+		DB:                            dbMain,
+		DBMetrics:                     dbMetrics,
+		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
+		Migrate:                       true,
+		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
+		Logger:                        logger.Sugar(),
+		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
+
+		RetryTransactionIntervals: cfg.RetryTxIntervals,
+		LongQueryDuration:         cfg.DatabaseLog.SlowThreshold,
+		LongTxDuration:            cfg.DatabaseLog.SlowThreshold,
+	}, nil
 }

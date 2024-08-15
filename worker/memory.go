@@ -41,9 +41,17 @@ type (
 
 var _ MemoryManager = (*memoryManager)(nil)
 
-func newMemoryManager(logger *zap.SugaredLogger, maxMemory uint64) MemoryManager {
+func newMemoryManager(maxMemory uint64, logger *zap.Logger) MemoryManager {
+	logger = logger.Named("memorymanager")
+	return newMemoryManagerCustom(maxMemory, logger)
+}
+
+// newMemoryManagerCustom is an internal constructor that doesn't name the
+// logger being passed in, this avoids that we chain the logger name for every
+// limit memory manager being created.
+func newMemoryManagerCustom(maxMemory uint64, logger *zap.Logger) MemoryManager {
 	mm := &memoryManager{
-		logger:         logger,
+		logger:         logger.Sugar(),
 		totalAvailable: maxMemory,
 	}
 	mm.available = mm.totalAvailable
@@ -57,7 +65,7 @@ func (mm *memoryManager) Limit(amt uint64) (MemoryManager, error) {
 	}
 	return &limitMemoryManager{
 		parent: mm,
-		child:  newMemoryManager(mm.logger, amt),
+		child:  newMemoryManagerCustom(amt, mm.logger.Desugar()),
 	}, nil
 }
 
