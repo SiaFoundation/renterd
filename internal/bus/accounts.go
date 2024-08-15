@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	ErrAccountsNotFound = errors.New("account doesn't exist")
+	ErrAccountNotFound = errors.New("account doesn't exist")
 )
 
 type (
@@ -179,7 +179,7 @@ func (a *mgr) ResetDrift(id rhpv3.Account) error {
 	account, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
-		return ErrAccountsNotFound
+		return ErrAccountNotFound
 	}
 	a.mu.Unlock()
 	account.resetDrift()
@@ -244,7 +244,7 @@ func (a *mgr) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 	account, exists := a.byID[id]
 	defer a.mu.Unlock()
 	if !exists {
-		return ErrAccountsNotFound
+		return ErrAccountNotFound
 	}
 	account.resetDrift()
 	return nil
@@ -268,7 +268,7 @@ func (a *mgr) UnlockAccount(id rhpv3.Account, lockID uint64) error {
 	acc, exists := a.byID[id]
 	if !exists {
 		a.mu.Unlock()
-		return ErrAccountsNotFound
+		return ErrAccountNotFound
 	}
 	a.mu.Unlock()
 

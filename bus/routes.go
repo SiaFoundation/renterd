@@ -1764,7 +1764,7 @@ func (b *bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 		return
 	}
 	err := b.accountsMgr.ResetDrift(id)
-	if errors.Is(err, ibus.ErrAccountsNotFound) {
+	if errors.Is(err, ibus.ErrAccountNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1811,7 +1811,7 @@ func (b *bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		return
 	}
 	err := b.accountsMgr.ScheduleSync(id, req.HostKey)
-	if errors.Is(err, ibus.ErrAccountsNotFound) {
+	if errors.Is(err, ibus.ErrAccountNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
