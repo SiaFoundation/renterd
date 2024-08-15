@@ -33,6 +33,7 @@ import (
 const (
 	defaultPinUpdateInterval = 5 * time.Minute
 	defaultPinRateWindow     = 6 * time.Hour
+	stdTxnSize               = 1200 // bytes
 )
 
 // Client re-exports the client from the client package.
@@ -59,15 +60,18 @@ type (
 	ChainManager interface {
 		AddBlocks(blocks []types.Block) error
 		AddPoolTransactions(txns []types.Transaction) (bool, error)
+		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		Block(id types.BlockID) (types.Block, bool)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
 		PoolTransactions() []types.Transaction
+		V2PoolTransactions() []types.V2Transaction
 		RecommendedFee() types.Currency
 		Tip() types.ChainIndex
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
+		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
 	}
 
 	ChainSubscriber interface {
@@ -92,7 +96,9 @@ type (
 	Syncer interface {
 		Addr() string
 		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 		BroadcastTransactionSet([]types.Transaction)
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
 		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 		Peers() []*syncer.Peer
 	}
@@ -102,9 +108,12 @@ type (
 		Balance() (wallet.Balance, error)
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
+		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (consensus.State, []int, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
+		RedistributeV2(outputs int, amount, feePerByte types.Currency) (txns []types.V2Transaction, toSign [][]int, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
+		SignV2Inputs(state consensus.State, txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)
 		Tip() (types.ChainIndex, error)
 		UnconfirmedEvents() ([]wallet.Event, error)
@@ -459,6 +468,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
+		"POST   /wallet/send":          b.walletSendSiacoinsHandler,
 		"POST   /wallet/sign":          b.walletSignHandler,
 		"GET    /wallet/transactions":  b.walletTransactionsHandler,
 
