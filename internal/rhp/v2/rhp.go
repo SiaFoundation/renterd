@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"sort"
 	"time"
 
@@ -14,10 +15,17 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 const (
+	batchSizeDeleteSectors = uint64(1000)  // 4GiB of contract data
+	batchSizeFetchSectors  = uint64(25600) // 100GiB of contract data
+
+	// default lock timeout
+	defaultLockTimeout = time.Minute
+
 	// minMessageSize is the minimum size of an RPC message
 	minMessageSize = 4096
 
@@ -28,13 +36,13 @@ const (
 )
 
 var (
-	// ErrInsufficientFunds is returned by various RPCs when the renter is
-	// unable to provide sufficient payment to the host.
-	ErrInsufficientFunds = errors.New("insufficient funds")
-
 	// ErrInsufficientCollateral is returned by various RPCs when the host is
 	// unable to provide sufficient collateral.
 	ErrInsufficientCollateral = errors.New("insufficient collateral")
+
+	// ErrInsufficientFunds is returned by various RPCs when the renter is
+	// unable to provide sufficient payment to the host.
+	ErrInsufficientFunds = errors.New("insufficient funds")
 
 	// ErrInvalidMerkleProof is returned by various RPCs when the host supplies
 	// an invalid Merkle proof.
@@ -59,165 +67,36 @@ var (
 	ErrNoSectorsToPrune = errors.New("no sectors to prune")
 )
 
+type (
+	ContractRootsFn func(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
+
+	GougingCheckFn func(settings rhpv2.HostSettings) api.HostGougingBreakdown
+
+	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
+)
+
 type Client struct {
+	logger *zap.SugaredLogger
 }
 
-func wrapErr(ctx context.Context, fnName string, err *error) {
-	if *err != nil {
-		*err = fmt.Errorf("%s: %w", fnName, *err)
-		if cause := context.Cause(ctx); cause != nil && !utils.IsErr(*err, cause) {
-			*err = fmt.Errorf("%w; %w", cause, *err)
-		}
+func New(logger *zap.Logger) *Client {
+	return &Client{
+		logger: logger.Sugar().Named("rhp2"),
 	}
 }
 
-func hashRevision(rev types.FileContractRevision) types.Hash256 {
-	h := types.NewHasher()
-	rev.EncodeTo(h.E)
-	return h.Sum()
-}
-
-func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral types.Currency) (valid, missed []types.Currency, err error) {
-	// allocate new slices; don't want to risk accidentally sharing memory
-	rev.ValidProofOutputs = append([]types.SiacoinOutput(nil), rev.ValidProofOutputs...)
-	rev.MissedProofOutputs = append([]types.SiacoinOutput(nil), rev.MissedProofOutputs...)
-
-	// move valid payout from renter to host
-	var underflow, overflow bool
-	rev.ValidProofOutputs[0].Value, underflow = rev.ValidProofOutputs[0].Value.SubWithUnderflow(cost)
-	rev.ValidProofOutputs[1].Value, overflow = rev.ValidProofOutputs[1].Value.AddWithOverflow(cost)
-	if underflow || overflow {
-		err = errors.New("insufficient funds to pay host")
-		return
-	}
-
-	// move missed payout from renter to void
-	rev.MissedProofOutputs[0].Value, underflow = rev.MissedProofOutputs[0].Value.SubWithUnderflow(cost)
-	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(cost)
-	if underflow || overflow {
-		err = errors.New("insufficient funds to move missed payout to void")
-		return
-	}
-
-	// move collateral from host to void
-	rev.MissedProofOutputs[1].Value, underflow = rev.MissedProofOutputs[1].Value.SubWithUnderflow(collateral)
-	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(collateral)
-	if underflow || overflow {
-		err = errors.New("insufficient collateral")
-		return
-	}
-
-	return []types.Currency{rev.ValidProofOutputs[0].Value, rev.ValidProofOutputs[1].Value},
-		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}, nil
-}
-
-// RPCSettings calls the Settings RPC, returning the host's reported settings.
-func RPCSettings(ctx context.Context, t *rhpv2.Transport) (settings rhpv2.HostSettings, err error) {
-	defer wrapErr(ctx, "Settings", &err)
-
-	var resp rhpv2.RPCSettingsResponse
-	if err := t.Call(rhpv2.RPCSettingsID, nil, &resp); err != nil {
-		return rhpv2.HostSettings{}, err
-	} else if err := json.Unmarshal(resp.Settings, &settings); err != nil {
-		return rhpv2.HostSettings{}, fmt.Errorf("couldn't unmarshal json: %w", err)
-	}
-
-	return settings, nil
-}
-
-// RPCFormContract forms a contract with a host.
-func RPCFormContract(ctx context.Context, t *rhpv2.Transport, renterKey types.PrivateKey, txnSet []types.Transaction) (_ rhpv2.ContractRevision, _ []types.Transaction, err error) {
-	defer wrapErr(ctx, "FormContract", &err)
-
-	// strip our signatures before sending
-	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
-	renterContractSignatures := txn.Signatures
-	txnSet[len(txnSet)-1].Signatures = nil
-
-	// create request
-	renterPubkey := renterKey.PublicKey()
-	req := &rhpv2.RPCFormContractRequest{
-		Transactions: txnSet,
-		RenterKey:    renterPubkey.UnlockKey(),
-	}
-	if err := t.WriteRequest(rhpv2.RPCFormContractID, req); err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-
-	// execute form contract RPC
-	var resp rhpv2.RPCFormContractAdditions
-	if err := t.ReadResponse(&resp, 65536); err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-
-	// merge host additions with txn
-	txn.SiacoinInputs = append(txn.SiacoinInputs, resp.Inputs...)
-	txn.SiacoinOutputs = append(txn.SiacoinOutputs, resp.Outputs...)
-
-	// create initial (no-op) revision, transaction, and signature
-	fc := txn.FileContracts[0]
-	initRevision := types.FileContractRevision{
-		ParentID: txn.FileContractID(0),
-		UnlockConditions: types.UnlockConditions{
-			PublicKeys: []types.UnlockKey{
-				renterPubkey.UnlockKey(),
-				t.HostKey().UnlockKey(),
-			},
-			SignaturesRequired: 2,
-		},
-		FileContract: types.FileContract{
-			RevisionNumber:     1,
-			Filesize:           fc.Filesize,
-			FileMerkleRoot:     fc.FileMerkleRoot,
-			WindowStart:        fc.WindowStart,
-			WindowEnd:          fc.WindowEnd,
-			ValidProofOutputs:  fc.ValidProofOutputs,
-			MissedProofOutputs: fc.MissedProofOutputs,
-			UnlockHash:         fc.UnlockHash,
-		},
-	}
-	revSig := renterKey.SignHash(hashRevision(initRevision))
-	renterRevisionSig := types.TransactionSignature{
-		ParentID:       types.Hash256(initRevision.ParentID),
-		CoveredFields:  types.CoveredFields{FileContractRevisions: []uint64{0}},
-		PublicKeyIndex: 0,
-		Signature:      revSig[:],
-	}
-
-	// write our signatures
-	renterSigs := &rhpv2.RPCFormContractSignatures{
-		ContractSignatures: renterContractSignatures,
-		RevisionSignature:  renterRevisionSig,
-	}
-	if err := t.WriteResponse(renterSigs); err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-
-	// read the host's signatures and merge them with our own
-	var hostSigs rhpv2.RPCFormContractSignatures
-	if err := t.ReadResponse(&hostSigs, minMessageSize); err != nil {
-		return rhpv2.ContractRevision{}, nil, err
-	}
-
-	txn.Signatures = make([]types.TransactionSignature, 0, len(renterContractSignatures)+len(hostSigs.ContractSignatures))
-	txn.Signatures = append(txn.Signatures, renterContractSignatures...)
-	txn.Signatures = append(txn.Signatures, hostSigs.ContractSignatures...)
-
-	signedTxnSet := make([]types.Transaction, 0, len(resp.Parents)+len(parents)+1)
-	signedTxnSet = append(signedTxnSet, resp.Parents...)
-	signedTxnSet = append(signedTxnSet, parents...)
-	signedTxnSet = append(signedTxnSet, txn)
-	return rhpv2.ContractRevision{
-		Revision: initRevision,
-		Signatures: [2]types.TransactionSignature{
-			renterRevisionSig,
-			hostSigs.RevisionSignature,
-		},
-	}, signedTxnSet, nil
+func (w *Client) FetchContractRoots(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, revision *types.FileContractRevision, cost types.Currency, err error) {
+	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		return w.withRevisionV2(renterKey, gougingCheck, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			roots, cost, err = w.fetchContractRoots(t, renterKey, &rev, settings)
+			revision = &rev.Revision
+			return
+		})
+	})
+	return
 }
 
 // FetchSignedRevision fetches the latest signed revision for a contract from a host.
-// TODO: stop using rhpv2 and upgrade to newer protocol when possible.
 func (w *Client) FetchSignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
 	var rev rhpv2.ContractRevision
 	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
@@ -262,67 +141,107 @@ func (w *Client) FetchSignedRevision(ctx context.Context, hostIP string, hostKey
 	return rev, err
 }
 
-func (w *Client) PruneContract(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (deleted, remaining uint64, err error) {
-	err = w.withContractLock(ctx, fcid, lockingPriorityPruning, func() error {
-		return w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-			return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
-				// perform gouging checks
-				gc, err := GougingCheckerFromContext(ctx, false)
-				if err != nil {
-					return err
-				}
-				if breakdown := gc.Check(&settings, nil); breakdown.Gouging() {
-					return fmt.Errorf("failed to prune contract: %v", breakdown)
-				}
+func (c *Client) FetchSettings(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, err error) {
+	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		var err error
+		if settings, err = rpcSettings(ctx, t); err != nil {
+			return err
+		}
+		// NOTE: we overwrite the NetAddress with the host address here
+		// since we just used it to dial the host we know it's valid
+		settings.NetAddress = hostIP
+		return nil
+	})
+	return
+}
 
-				// delete roots
-				got, err := w.fetchContractRoots(t, &rev, settings)
-				if err != nil {
-					return err
-				}
+func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, checkGouging GougingCheckFn, prepareForm PrepareFormFn) (contract rhpv2.ContractRevision, txnSet []types.Transaction, err error) {
+	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
+		settings, err := rpcSettings(ctx, t)
+		if err != nil {
+			return err
+		}
 
-				// fetch the roots from the bus
-				want, pending, err := w.bus.ContractRoots(ctx, fcid)
-				if err != nil {
-					return err
-				}
-				keep := make(map[types.Hash256]struct{})
-				for _, root := range append(want, pending...) {
-					keep[root] = struct{}{}
-				}
+		if breakdown := checkGouging(settings); breakdown.Gouging() {
+			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown)
+		}
 
-				// collect indices for roots we want to prune
-				var indices []uint64
-				for i, root := range got {
-					if _, wanted := keep[root]; wanted {
-						delete(keep, root) // prevent duplicates
-						continue
-					}
-					indices = append(indices, uint64(i))
-				}
-				if len(indices) == 0 {
-					return fmt.Errorf("%w: database holds %d (%d pending), contract contains %d", ErrNoSectorsToPrune, len(want)+len(pending), len(pending), len(got))
-				}
+		renterTxnSet, discardTxn, err := prepareForm(ctx, renterAddress, renterKey.PublicKey(), renterFunds, hostCollateral, hostKey, settings, endHeight)
+		if err != nil {
+			return err
+		}
 
-				// delete the roots from the contract
-				deleted, err = w.deleteContractRoots(t, &rev, settings, indices)
-				if deleted < uint64(len(indices)) {
-					remaining = uint64(len(indices)) - deleted
-				}
+		contract, txnSet, err = rpcFormContract(ctx, t, renterKey, renterTxnSet)
+		if err != nil {
+			discardTxn(renterTxnSet[len(renterTxnSet)-1])
+			return err
+		}
+		return
+	})
+	return
+}
 
-				// return sizes instead of number of roots
-				deleted *= rhpv2.SectorSize
-				remaining *= rhpv2.SectorSize
-				return
-			})
+func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingCheck GougingCheckFn, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, wantedRoots ContractRootsFn) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
+	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+		return c.withRevisionV2(renterKey, gougingCheck, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
+			// fetch roots
+			got, fetchCost, err := c.fetchContractRoots(t, renterKey, &rev, settings)
+			if err != nil {
+				return err
+			}
+
+			// update cost and revision
+			cost = cost.Add(fetchCost)
+			revision = &rev.Revision
+
+			// fetch the roots from the bus
+			want, pending, err := wantedRoots(ctx, fcid)
+			if err != nil {
+				return err
+			}
+			keep := make(map[types.Hash256]struct{})
+			for _, root := range append(want, pending...) {
+				keep[root] = struct{}{}
+			}
+
+			// collect indices for roots we want to prune
+			var indices []uint64
+			for i, root := range got {
+				if _, wanted := keep[root]; wanted {
+					delete(keep, root) // prevent duplicates
+					continue
+				}
+				indices = append(indices, uint64(i))
+			}
+			if len(indices) == 0 {
+				return fmt.Errorf("%w: database holds %d (%d pending), contract contains %d", ErrNoSectorsToPrune, len(want)+len(pending), len(pending), len(got))
+			}
+
+			// delete the roots from the contract
+			var deleteCost types.Currency
+			deleted, deleteCost, err = c.deleteContractRoots(t, renterKey, &rev, settings, indices)
+			if deleted < uint64(len(indices)) {
+				remaining = uint64(len(indices)) - deleted
+			}
+
+			// update cost and revision
+			if deleted > 0 {
+				cost = cost.Add(deleteCost)
+				revision = &rev.Revision
+			}
+
+			// return sizes instead of number of roots
+			deleted *= rhpv2.SectorSize
+			remaining *= rhpv2.SectorSize
+			return
 		})
 	})
 	return
 }
 
-func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, err error) {
+func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, indices []uint64) (deleted uint64, cost types.Currency, err error) {
 	id := frand.Entropy128()
-	logger := w.logger.
+	logger := c.logger.
 		With("id", hex.EncodeToString(id[:])).
 		With("hostKey", rev.HostKey()).
 		With("hostVersion", settings.Version).
@@ -333,7 +252,7 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 
 	// return early
 	if len(indices) == 0 {
-		return 0, nil
+		return 0, types.ZeroCurrency, nil
 	}
 
 	// sort in descending order so that we can use 'range'
@@ -362,17 +281,14 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 		}
 	}
 
-	// derive the renter key
-	renterKey := w.deriveRenterKey(rev.HostKey())
-
 	// range over the batches and delete the sectors batch per batch
 	for i, batch := range batches {
 		if err = func() error {
-			var cost types.Currency
+			var batchCost types.Currency
 			start := time.Now()
 			logger.Infow(fmt.Sprintf("starting batch %d/%d of size %d", i+1, len(batches), len(batch)))
 			defer func() {
-				logger.Infow(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", cost)
+				logger.Infow(fmt.Sprintf("processing batch %d/%d of size %d took %v", i+1, len(batches), len(batch), time.Since(start)), "cost", batchCost)
 			}()
 
 			numSectors := rev.NumSectors()
@@ -402,7 +318,7 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			if err != nil {
 				return err
 			}
-			cost, _ = rpcCost.Total()
+			batchCost, _ = rpcCost.Total()
 
 			// NOTE: we currently overpay hosts by quite a large margin (~10x)
 			// to ensure we cover both 1.5.9 and pre v0.2.1 hosts.
@@ -411,11 +327,11 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			// host release in the scoring and stop using old hosts
 			proofSize := (128 + uint64(len(actions))) * rhpv2.LeafSize
 			compatCost := settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(proofSize))
-			if cost.Cmp(compatCost) < 0 {
-				cost = compatCost
+			if batchCost.Cmp(compatCost) < 0 {
+				batchCost = compatCost
 			}
 
-			if rev.RenterFunds().Cmp(cost) < 0 {
+			if rev.RenterFunds().Cmp(batchCost) < 0 {
 				return ErrInsufficientFunds
 			}
 
@@ -429,7 +345,7 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			rev.Revision.Filesize -= rhpv2.SectorSize * actions[len(actions)-1].A
 
 			// update the revision outputs
-			newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
+			newRevision, err := updatedRevision(rev.Revision, batchCost, types.ZeroCurrency)
 			if err != nil {
 				return err
 			}
@@ -439,9 +355,16 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 				Actions:     actions,
 				MerkleProof: true,
 
-				RevisionNumber:    rev.Revision.RevisionNumber,
-				ValidProofValues:  newValid,
-				MissedProofValues: newMissed,
+				RevisionNumber: rev.Revision.RevisionNumber,
+				ValidProofValues: []types.Currency{
+					newRevision.ValidProofOutputs[0].Value,
+					newRevision.ValidProofOutputs[0].Value,
+				},
+				MissedProofValues: []types.Currency{
+					newRevision.MissedProofOutputs[0].Value,
+					newRevision.MissedProofOutputs[1].Value,
+					newRevision.MissedProofOutputs[2].Value,
+				},
 			}
 
 			// send request and read merkle proof
@@ -457,8 +380,8 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			// verify proof
 			proofHashes := merkleResp.OldSubtreeHashes
 			leafHashes := merkleResp.OldLeafHashes
-			oldRoot, newRoot := types.Hash256(rev.Revision.FileMerkleRoot), merkleResp.NewMerkleRoot
-			if rev.Revision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
+			oldRoot, newRoot := types.Hash256(newRevision.FileMerkleRoot), merkleResp.NewMerkleRoot
+			if newRevision.Filesize > 0 && !rhpv2.VerifyDiffProof(actions, numSectors, proofHashes, leafHashes, oldRoot, newRoot, nil) {
 				err := fmt.Errorf("couldn't verify delete proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
 				logger.Infow(fmt.Sprintf("processing batch %d/%d failed, err %v", i+1, len(batches), err))
 				t.WriteResponseErr(err)
@@ -466,10 +389,10 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			}
 
 			// update merkle root
-			copy(rev.Revision.FileMerkleRoot[:], newRoot[:])
+			copy(newRevision.FileMerkleRoot[:], newRoot[:])
 
 			// build the write response
-			revisionHash := hashRevision(rev.Revision)
+			revisionHash := hashRevision(newRevision)
 			renterSig := &rhpv2.RPCWriteResponse{
 				Signature: renterKey.SignHash(revisionHash),
 			}
@@ -492,8 +415,9 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 			// update deleted count
 			deleted += uint64(len(batch))
 
-			// record spending
-			w.contractSpendingRecorder.Record(rev.Revision, api.ContractSpending{Deletions: cost})
+			// update revision
+			rev.Revision = newRevision
+			cost = cost.Add(batchCost)
 			return nil
 		}(); err != nil {
 			return
@@ -502,27 +426,7 @@ func (w *Client) deleteContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevi
 	return
 }
 
-func (w *Client) FetchContractRoots(ctx context.Context, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, err error) {
-	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-		return w.withRevisionV2(defaultLockTimeout, t, hostKey, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
-			gc, err := GougingCheckerFromContext(ctx, false)
-			if err != nil {
-				return err
-			}
-			if breakdown := gc.Check(&settings, nil); breakdown.Gouging() {
-				return fmt.Errorf("failed to list contract roots: %v", breakdown)
-			}
-			roots, err = w.fetchContractRoots(t, &rev, settings)
-			return
-		})
-	})
-	return
-}
-
-func (w *Client) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, _ error) {
-	// derive the renter key
-	renterKey := w.deriveRenterKey(rev.HostKey())
-
+func (c *Client) fetchContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, cost types.Currency, _ error) {
 	// download the full set of SectorRoots
 	numsectors := rev.NumSectors()
 	for offset := uint64(0); offset < numsectors; {
@@ -532,7 +436,7 @@ func (w *Client) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 		}
 
 		// calculate the cost
-		cost, _ := settings.RPCSectorRootsCost(offset, n).Total()
+		batchCost, _ := settings.RPCSectorRootsCost(offset, n).Total()
 
 		// TODO: remove once host network is updated
 		if utils.VersionCmp(settings.Version, "1.6.0") < 0 {
@@ -542,113 +446,86 @@ func (w *Client) fetchContractRoots(t *rhpv2.Transport, rev *rhpv2.ContractRevis
 			if responseSize < minMessageSize {
 				responseSize = minMessageSize
 			}
-			cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
-			cost = cost.Mul64(2) // generous leeway
+			batchCost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
+			batchCost = batchCost.Mul64(2) // generous leeway
 		}
 
 		// check funds
-		if rev.RenterFunds().Cmp(cost) < 0 {
-			return nil, ErrInsufficientFunds
+		if rev.RenterFunds().Cmp(batchCost) < 0 {
+			return nil, types.ZeroCurrency, ErrInsufficientFunds
 		}
 
 		// update the revision number
 		if rev.Revision.RevisionNumber == math.MaxUint64 {
-			return nil, ErrContractFinalized
+			return nil, types.ZeroCurrency, ErrContractFinalized
 		}
 		rev.Revision.RevisionNumber++
 
 		// update the revision outputs
-		newValid, newMissed, err := updateRevisionOutputs(&rev.Revision, cost, types.ZeroCurrency)
+		newRevision, err := updatedRevision(rev.Revision, batchCost, types.ZeroCurrency)
 		if err != nil {
-			return nil, err
+			return nil, types.ZeroCurrency, err
 		}
 
 		// build the sector roots request
-		revisionHash := hashRevision(rev.Revision)
+		revisionHash := hashRevision(newRevision)
 		req := &rhpv2.RPCSectorRootsRequest{
 			RootOffset: uint64(offset),
 			NumRoots:   uint64(n),
 
-			RevisionNumber:    rev.Revision.RevisionNumber,
-			ValidProofValues:  newValid,
-			MissedProofValues: newMissed,
-			Signature:         renterKey.SignHash(revisionHash),
+			RevisionNumber: rev.Revision.RevisionNumber,
+			ValidProofValues: []types.Currency{
+				newRevision.MissedProofOutputs[0].Value,
+				newRevision.MissedProofOutputs[1].Value,
+			},
+			MissedProofValues: []types.Currency{
+				newRevision.MissedProofOutputs[0].Value,
+				newRevision.MissedProofOutputs[1].Value,
+				newRevision.MissedProofOutputs[2].Value,
+			},
+			Signature: renterKey.SignHash(revisionHash),
 		}
 
 		// execute the sector roots RPC
 		var rootsResp rhpv2.RPCSectorRootsResponse
 		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
-			return nil, err
+			return nil, types.ZeroCurrency, err
 		} else if err := t.ReadResponse(&rootsResp, maxMerkleProofResponseSize); err != nil {
-			return nil, fmt.Errorf("couldn't read sector roots response: %w", err)
+			return nil, types.ZeroCurrency, fmt.Errorf("couldn't read sector roots response: %w", err)
 		}
 
 		// verify the host signature
 		if !rev.HostKey().VerifyHash(revisionHash, rootsResp.Signature) {
-			return nil, errors.New("host's signature is invalid")
+			return nil, types.ZeroCurrency, errors.New("host's signature is invalid")
 		}
 		rev.Signatures[0].Signature = req.Signature[:]
 		rev.Signatures[1].Signature = rootsResp.Signature[:]
 
 		// verify the proof
 		if uint64(len(rootsResp.SectorRoots)) != n {
-			return nil, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v, err: number of roots does not match range %d != %d (num sectors: %d rev size: %d offset: %d)", rev.HostKey(), settings.Version, len(rootsResp.SectorRoots), n, numsectors, rev.Revision.Filesize, offset)
+			return nil, types.ZeroCurrency, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v, err: number of roots does not match range %d != %d (num sectors: %d rev size: %d offset: %d)", rev.HostKey(), settings.Version, len(rootsResp.SectorRoots), n, numsectors, rev.Revision.Filesize, offset)
 		} else if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
-			return nil, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
+			return nil, types.ZeroCurrency, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
 		}
 
 		// append roots
 		roots = append(roots, rootsResp.SectorRoots...)
 		offset += n
 
-		// record spending
-		w.contractSpendingRecorder.Record(rev.Revision, api.ContractSpending{SectorRoots: cost})
+		// update revision
+		rev.Revision = newRevision
+		cost = cost.Add(batchCost)
 	}
 	return
 }
 
-func (w *Client) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
-	conn, err := dial(ctx, hostIP)
-	if err != nil {
-		return err
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			conn.Close()
-		}
-	}()
-	defer func() {
-		close(done)
-		if context.Cause(ctx) != nil {
-			err = context.Cause(ctx)
-		}
-	}()
-	t, err := rhpv2.NewRenterTransport(conn, hostKey)
-	if err != nil {
-		return err
-	}
-	defer t.Close()
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic (withTransportV2): %v", r)
-		}
-	}()
-	return fn(t)
-}
-
-func (w *Client) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, hk types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
-	renterKey := w.deriveRenterKey(hk)
-
+func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingCheck GougingCheckFn, t *rhpv2.Transport, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
 	// execute lock RPC
 	var lockResp rhpv2.RPCLockResponse
 	err := t.Call(rhpv2.RPCLockID, &rhpv2.RPCLockRequest{
 		ContractID: fcid,
 		Signature:  t.SignChallenge(renterKey),
-		Timeout:    uint64(lockTimeout.Milliseconds()),
+		Timeout:    uint64(defaultLockTimeout.Milliseconds()),
 	}, &lockResp)
 	if err != nil {
 		return err
@@ -693,5 +570,78 @@ func (w *Client) withRevisionV2(lockTimeout time.Duration, t *rhpv2.Transport, h
 		return fmt.Errorf("couldn't unmarshal json: %w", err)
 	}
 
+	// perform gouging checks on settings
+	if breakdown := gougingCheck(settings); breakdown.Gouging() {
+		return fmt.Errorf("failed to prune contract: %v", breakdown)
+	}
+
 	return fn(t, rev, settings)
+}
+
+func (w *Client) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+	if err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			conn.Close()
+		}
+	}()
+	defer func() {
+		close(done)
+		if context.Cause(ctx) != nil {
+			err = context.Cause(ctx)
+		}
+	}()
+	t, err := rhpv2.NewRenterTransport(conn, hostKey)
+	if err != nil {
+		return err
+	}
+	defer t.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic (withTransportV2): %v", r)
+		}
+	}()
+	return fn(t)
+}
+
+func hashRevision(rev types.FileContractRevision) types.Hash256 {
+	h := types.NewHasher()
+	rev.EncodeTo(h.E)
+	return h.Sum()
+}
+
+func updatedRevision(rev types.FileContractRevision, cost, collateral types.Currency) (types.FileContractRevision, error) {
+	// allocate new slices; don't want to risk accidentally sharing memory
+	rev.ValidProofOutputs = append([]types.SiacoinOutput(nil), rev.ValidProofOutputs...)
+	rev.MissedProofOutputs = append([]types.SiacoinOutput(nil), rev.MissedProofOutputs...)
+
+	// move valid payout from renter to host
+	var underflow, overflow bool
+	rev.ValidProofOutputs[0].Value, underflow = rev.ValidProofOutputs[0].Value.SubWithUnderflow(cost)
+	rev.ValidProofOutputs[1].Value, overflow = rev.ValidProofOutputs[1].Value.AddWithOverflow(cost)
+	if underflow || overflow {
+		return types.FileContractRevision{}, errors.New("insufficient funds to pay host")
+	}
+
+	// move missed payout from renter to void
+	rev.MissedProofOutputs[0].Value, underflow = rev.MissedProofOutputs[0].Value.SubWithUnderflow(cost)
+	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(cost)
+	if underflow || overflow {
+		return types.FileContractRevision{}, errors.New("insufficient funds to move missed payout to void")
+	}
+
+	// move collateral from host to void
+	rev.MissedProofOutputs[1].Value, underflow = rev.MissedProofOutputs[1].Value.SubWithUnderflow(collateral)
+	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(collateral)
+	if underflow || overflow {
+		return types.FileContractRevision{}, errors.New("insufficient collateral")
+	}
+	return rev, nil
 }
