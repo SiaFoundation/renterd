@@ -229,7 +229,7 @@ type (
 	}
 )
 
-type bus struct {
+type Bus struct {
 	startTime time.Time
 
 	alerts      alerts.Alerter
@@ -257,9 +257,9 @@ type bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*bus, error) {
+func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, hdb HostDB, as AutopilotStore, cs ChainStore, ms MetadataStore, ss SettingStore, eas EphemeralAccountStore, mtrcs MetricsStore, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
 	l = l.Named("bus")
-	b := &bus{
+	b := &Bus{
 		s:                s,
 		cm:               cm,
 		w:                w,
@@ -300,7 +300,7 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 }
 
 // Handler returns an HTTP handler that serves the bus API.
-func (b *bus) Handler() http.Handler {
+func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts":                 b.accountsHandlerGET,
 		"POST   /account/:id":              b.accountHandlerGET,
@@ -442,7 +442,7 @@ func (b *bus) Handler() http.Handler {
 }
 
 // Shutdown shuts down the bus.
-func (b *bus) Shutdown(ctx context.Context) error {
+func (b *Bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
 		b.saveAccounts(ctx),
 		b.webhooksMgr.Shutdown(ctx),
@@ -452,7 +452,7 @@ func (b *bus) Shutdown(ctx context.Context) error {
 }
 
 // initAccounts loads the accounts into memory
-func (b *bus) initAccounts(ctx context.Context) error {
+func (b *Bus) initAccounts(ctx context.Context) error {
 	accounts, err := b.eas.Accounts(ctx)
 	if err != nil {
 		return err
@@ -470,7 +470,7 @@ func (b *bus) initAccounts(ctx context.Context) error {
 
 // initSettings loads the default settings if the setting is not already set and
 // ensures the settings are valid
-func (b *bus) initSettings(ctx context.Context) error {
+func (b *Bus) initSettings(ctx context.Context) error {
 	// testnets have different redundancy settings
 	defaultRedundancySettings := api.DefaultRedundancySettings
 	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
@@ -547,7 +547,7 @@ func (b *bus) initSettings(ctx context.Context) error {
 }
 
 // saveAccounts saves the accounts to the db when the bus is stopped
-func (b *bus) saveAccounts(ctx context.Context) error {
+func (b *Bus) saveAccounts(ctx context.Context) error {
 	accounts := b.accounts.ToPersist()
 	if err := b.eas.SaveAccounts(ctx, accounts); err != nil {
 		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)

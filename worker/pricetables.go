@@ -58,7 +58,7 @@ type (
 	}
 )
 
-func (w *worker) initPriceTables() {
+func (w *Worker) initPriceTables() {
 	if w.priceTables != nil {
 		panic("priceTables already initialized") // developer error
 	}
