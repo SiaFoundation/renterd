@@ -4,12 +4,7 @@ import (
 	"context"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/internal/chain"
 	"go.sia.tech/renterd/stores/sql"
-)
-
-var (
-	_ chain.ChainStore = (*SQLStore)(nil)
 )
 
 // ChainIndex returns the last stored chain index.
@@ -23,7 +18,7 @@ func (s *SQLStore) ChainIndex(ctx context.Context) (ci types.ChainIndex, err err
 
 // ProcessChainUpdate returns a callback function that process a chain update
 // inside a transaction.
-func (s *SQLStore) ProcessChainUpdate(ctx context.Context, applyFn chain.ApplyChainUpdateFn) error {
+func (s *SQLStore) ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(ctx, applyFn)
 	})

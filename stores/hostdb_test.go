@@ -1182,7 +1182,7 @@ func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 // announceHost adds a host announcement to the database.
 func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
 	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-		return tx.ProcessChainUpdate(context.Background(), func(tx chain.ChainUpdateTx) error {
+		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 			return tx.UpdateHost(hk, chain.HostAnnouncement{
 				NetAddress: na,
 			}, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))

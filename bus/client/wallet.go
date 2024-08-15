@@ -12,7 +12,7 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-// SendSiacoins is a helper method that sends siacoins to the given outputs.
+// SendSiacoins is a helper method that sends siacoins to the given address.
 func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types.Currency, useUnconfirmedTxns bool) (txnID types.TransactionID, err error) {
 	err = c.c.WithContext(ctx).POST("/wallet/send", api.WalletSendRequest{
 		Address:          addr,
