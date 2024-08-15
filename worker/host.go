@@ -59,10 +59,10 @@ type (
 
 var (
 	_ Host        = (*host)(nil)
-	_ HostManager = (*worker)(nil)
+	_ HostManager = (*Worker)(nil)
 )
 
-func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
+func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	return &host{
 		hk:                       hk,
 		acc:                      w.accounts.ForHost(hk),

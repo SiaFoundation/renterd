@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/autopilot/scanner"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -123,31 +124,32 @@ type Autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (_ *Autopilot, err error) {
+func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_ *Autopilot, err error) {
+	logger = logger.Named("autopilot").Named(cfg.ID)
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ap := &Autopilot{
-		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
-		id:      id,
+		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", cfg.ID)),
+		id:      cfg.ID,
 		bus:     bus,
-		logger:  logger.Sugar().Named("autopilot").Named(id),
+		logger:  logger.Sugar(),
 		workers: newWorkerPool(workers),
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
 
-		tickerDuration: heartbeat,
+		tickerDuration: cfg.Heartbeat,
 
 		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 
-	ap.s, err = scanner.New(ap.bus, scannerBatchSize, scannerNumThreads, scannerScanInterval, ap.logger)
+	ap.s, err = scanner.New(ap.bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
 	if err != nil {
 		return
 	}
 
-	ap.c = contractor.New(bus, bus, ap.logger, revisionSubmissionBuffer, revisionBroadcastInterval)
-	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval, revisionSubmissionBuffer)
+	ap.c = contractor.New(bus, bus, ap.logger, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval)
+	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
+	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer)
 
 	return ap, nil
 }
@@ -209,11 +211,11 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	jc.Encode(res)
 }
 
-func (ap *Autopilot) Run() error {
+func (ap *Autopilot) Run() {
 	ap.startStopMu.Lock()
 	if ap.isRunning() {
 		ap.startStopMu.Unlock()
-		return errors.New("already running")
+		return
 	}
 	ap.startTime = time.Now()
 	ap.triggerChan = make(chan bool, 1)
@@ -226,7 +228,7 @@ func (ap *Autopilot) Run() error {
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
 		ap.logger.Error("autopilot stopped before it was able to come online")
-		return nil
+		return
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
@@ -234,7 +236,7 @@ func (ap *Autopilot) Run() error {
 		if !errors.Is(err, context.Canceled) {
 			ap.logger.Error(err)
 		}
-		return nil
+		return
 	}
 
 	var forceScan bool
@@ -342,7 +344,7 @@ func (ap *Autopilot) Run() error {
 
 		select {
 		case <-ap.shutdownCtx.Done():
-			return nil
+			return
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
@@ -350,7 +352,7 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
-	return nil
+	return
 }
 
 // Shutdown shuts down the autopilot.
