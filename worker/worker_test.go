@@ -17,7 +17,7 @@ import (
 type (
 	testWorker struct {
 		tt test.TT
-		*worker
+		*Worker
 
 		cs *contractStoreMock
 		os *objectStoreMock

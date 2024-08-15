@@ -146,7 +146,7 @@ type (
 	}
 )
 
-func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *Worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
@@ -155,7 +155,7 @@ func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTime
 	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *worker) upload(ctx context.Context, bucket, path string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
+func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
 	// apply the options
 	up := defaultParameters(bucket, path, rs)
 	for _, opt := range opts {
@@ -212,7 +212,7 @@ func (w *worker) upload(ctx context.Context, bucket, path string, rs api.Redunda
 	return eTag, nil
 }
 
-func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string, lockPriority int) {
+func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string, lockPriority int) {
 	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
 	w.uploadsMu.Lock()
 	if _, ok := w.uploadingPackedSlabs[key]; ok {
@@ -278,7 +278,7 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	wg.Wait()
 }
 
-func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
+func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
