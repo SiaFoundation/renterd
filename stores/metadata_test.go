@@ -2465,6 +2465,13 @@ func TestRenameObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Wait for prune loop to run.
+	ts := time.Now()
+	ss.triggerSlabPruning()
+	if err := ss.waitForPruneLoop(ts); err != nil {
+		t.Fatal(err)
+	}
+
 	// Paths after.
 	objectsAfter := []string{
 		"/fileś/1a",
@@ -2518,17 +2525,11 @@ func TestRenameObjects(t *testing.T) {
 		},
 	}
 
-	err = test.Retry(100, 100*time.Millisecond, func() error {
-		var n int64
-		if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
-			return err
-		} else if n != int64(len(expectedDirs)) {
-			return fmt.Errorf("unexpected number of directories, %v != %v", n, len(expectedDirs))
-		}
-		return nil
-	})
-	if err != nil {
+	var n int64
+	if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
 		t.Fatal(err)
+	} else if n != int64(len(expectedDirs)) {
+		t.Fatalf("unexpected number of directories, %v != %v", n, len(expectedDirs))
 	}
 
 	type row struct {
