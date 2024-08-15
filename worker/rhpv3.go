@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -106,7 +107,7 @@ func isClosedStream(err error) bool {
 }
 func isInsufficientFunds(err error) bool  { return utils.IsErr(err, errInsufficientFunds) }
 func isPriceTableExpired(err error) bool  { return utils.IsErr(err, errPriceTableExpired) }
-func isPriceTableGouging(err error) bool  { return utils.IsErr(err, errPriceTableGouging) }
+func isPriceTableGouging(err error) bool  { return utils.IsErr(err, gouging.ErrPriceTableGouging) }
 func isPriceTableNotFound(err error) bool { return utils.IsErr(err, errPriceTableNotFound) }
 func isSectorNotFound(err error) bool {
 	return utils.IsErr(err, errSectorNotFound) || utils.IsErr(err, errSectorNotFoundOld)
@@ -549,7 +550,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 		return rhpv3.HostPriceTable{}, err
 	}
 	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
 	}
 	return pt.HostPriceTable, nil
 }

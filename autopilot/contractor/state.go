@@ -7,7 +7,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/internal/gouging"
 )
 
 type (
@@ -73,8 +73,8 @@ func (ctx *mCtx) Err() error {
 	return ctx.ctx.Err()
 }
 
-func (ctx *mCtx) GougingChecker(cs api.ConsensusState) worker.GougingChecker {
-	return worker.NewGougingChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.Period(), ctx.RenewWindow())
+func (ctx *mCtx) GougingChecker(cs api.ConsensusState) gouging.Checker {
+	return gouging.NewChecker(ctx.state.GS, cs, ctx.state.Fee, ctx.Period(), ctx.RenewWindow())
 }
 
 func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {

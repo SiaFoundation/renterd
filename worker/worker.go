@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/internal/gouging"
 	clientV2 "go.sia.tech/renterd/internal/rhp/v2"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
@@ -66,7 +67,7 @@ func NewClient(address, password string) *Client {
 type (
 	Bus interface {
 		alerts.Alerter
-		ConsensusState
+		gouging.ConsensusState
 		webhooks.Broadcaster
 
 		AccountStore
@@ -155,10 +156,6 @@ type (
 	WebhookStore interface {
 		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 		UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
-	}
-
-	ConsensusState interface {
-		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
 )
 
@@ -409,7 +406,7 @@ func (w *worker) rhpFormHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc, err := newGougingChecker(ctx, w.bus, gp, false)
+	gc, err := gouging.NewWorkerGougingChecker(ctx, w.bus, gp, false)
 	if jc.Check("could not create gouging checker", err) != nil {
 		return
 	}
@@ -546,14 +543,11 @@ func (w *worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("could not fetch gouging parameters", err) != nil {
 		return
 	}
-	gc, err := newGougingChecker(ctx, w.bus, gp, false)
+	gc, err := gouging.NewWorkerGougingChecker(ctx, w.bus, gp, false)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-
-	// attach gouging checker
-	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// prune the contract
 	var pruned, remaining uint64
@@ -609,12 +603,13 @@ func (w *worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
 		return
 	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, gp)
+	gc, err := gouging.NewWorkerGougingChecker(ctx, w.bus, gp, false)
+	if jc.Check("couldn't create gouging checker", err) != nil {
+		return
+	}
 
 	// fetch the roots from the host
-	roots, rev, cost, err := w.rhp2Client.FetchContractRoots(ctx, w.deriveRenterKey(c.HostKey), nil, c.HostIP, c.HostKey, id, c.RevisionNumber)
+	roots, rev, cost, err := w.rhp2Client.FetchContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc.CheckSettings, c.HostIP, c.HostKey, id, c.RevisionNumber)
 	if jc.Check("couldn't fetch contract roots from host", err) != nil {
 		return
 	} else if rev != nil {
@@ -1759,7 +1754,7 @@ type HostErrorSet map[types.PublicKey]error
 // NumGouging returns numbers of host that errored out due to price gouging.
 func (hes HostErrorSet) NumGouging() (n int) {
 	for _, he := range hes {
-		if errors.Is(he, errPriceTableGouging) {
+		if errors.Is(he, gouging.ErrPriceTableGouging) {
 			n++
 		}
 	}
