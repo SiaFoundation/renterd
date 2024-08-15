@@ -554,7 +554,23 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create the syncer
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
-	go s.Run(context.Background())
+
+	// start syncer
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- s.Run(context.Background())
+		close(errChan)
+	}()
+
+	// create a helper function to wait for syncer to wind down on shutdown
+	syncerShutdown := func(ctx context.Context) error {
+		select {
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
+	}
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
@@ -570,6 +586,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 			b.Shutdown(ctx),
 			sqlStore.Close(),
 			bdb.Close(),
+			syncerShutdown(ctx),
 		)
 	}
 	return b, shutdownFn, cm, nil
