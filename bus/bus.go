@@ -304,7 +304,7 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	}
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
