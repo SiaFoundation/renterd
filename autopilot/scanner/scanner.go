@@ -65,7 +65,8 @@ type (
 	}
 )
 
-func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.SugaredLogger) (Scanner, error) {
+func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (Scanner, error) {
+	logger = logger.Named("scanner")
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")
 	}
@@ -80,7 +81,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 		scanInterval:  scanMinInterval,
 
 		statsHostPingMS: utils.NewDataPoints(0),
-		logger:          logger.Named("scanner"),
+		logger:          logger.Sugar(),
 
 		interruptChan: make(chan struct{}),
 		shutdownChan:  make(chan struct{}),

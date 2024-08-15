@@ -25,7 +25,7 @@ type (
 		AnnouncementMaxAge            time.Duration
 		WalletAddress                 types.Address
 		SlabBufferCompletionThreshold int64
-		Logger                        *zap.SugaredLogger
+		Logger                        *zap.Logger
 		RetryTransactionIntervals     []time.Duration
 		LongQueryDuration             time.Duration
 		LongTxDuration                time.Duration
@@ -77,7 +77,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch db version: %v", err)
 	}
-	l.Infof("Using %s version %s", dbName, dbVersion)
+	l.Sugar().Infof("Using %s version %s", dbName, dbVersion)
 
 	// Perform migrations.
 	if cfg.Migrate {
@@ -93,7 +93,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		alerts:    cfg.Alerts,
 		db:        dbMain,
 		dbMetrics: dbMetrics,
-		logger:    l,
+		logger:    l.Sugar(),
 
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
@@ -106,7 +106,7 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		shutdownCtxCancel: shutdownCtxCancel,
 	}
 
-	ss.slabBufferMgr, err = newSlabBufferManager(shutdownCtx, cfg.Alerts, dbMain, l.Named("slabbuffers"), cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
+	ss.slabBufferMgr, err = newSlabBufferManager(shutdownCtx, cfg.Alerts, dbMain, l, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
 	if err != nil {
 		return nil, err
 	}

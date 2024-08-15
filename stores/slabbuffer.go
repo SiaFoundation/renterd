@@ -53,7 +53,8 @@ type SlabBufferManager struct {
 	buffersByKey      map[string]*SlabBuffer
 }
 
-func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database, logger *zap.SugaredLogger, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
+func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database, logger *zap.Logger, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
+	logger = logger.Named("slabbuffers")
 	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
 		return nil, fmt.Errorf("invalid slabBufferCompletionThreshold %v", slabBufferCompletionThreshold)
 	}
@@ -69,7 +70,7 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
 		db:                              db,
 		dir:                             partialSlabDir,
-		logger:                          logger,
+		logger:                          logger.Sugar(),
 
 		completeBuffers:   make(map[bufferGroupID][]*SlabBuffer),
 		incompleteBuffers: make(map[bufferGroupID][]*SlabBuffer),
@@ -98,7 +99,7 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 				},
 				Timestamp: time.Now(),
 			})
-			logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.Key, err)
+			logger.Sugar().Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.Key, err)
 			continue
 		}
 
