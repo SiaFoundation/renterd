@@ -2329,13 +2329,8 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	}
 
 	// send the full balance back to the weallet
-	toSend := wr.Confirmed.Sub(types.Siacoins(1).Div64(100)) // leave some for the fee
-	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
-		{
-			Address: wr.Address,
-			Value:   toSend,
-		},
-	}, false))
+	toSend := wr.Confirmed.Sub(types.Siacoins(1)) // leave some for the fee
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, false))
 
 	// the unconfirmed balance should have changed to slightly more than toSend
 	// since we paid a fee
@@ -2348,21 +2343,11 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	fmt.Println(wr.Confirmed, wr.Unconfirmed)
 
 	// try again - this should fail
-	err = b.SendSiacoins(context.Background(), []types.SiacoinOutput{
-		{
-			Address: wr.Address,
-			Value:   toSend,
-		},
-	}, false)
+	_, err = b.SendSiacoins(context.Background(), wr.Address, toSend, false)
 	tt.AssertIs(err, wallet.ErrNotEnoughFunds)
 
 	// try again - this time using unconfirmed transactions
-	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
-		{
-			Address: wr.Address,
-			Value:   toSend,
-		},
-	}, true))
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, true))
 
 	// the unconfirmed balance should be almost the same
 	wr, err = b.Wallet(context.Background())
@@ -2403,15 +2388,10 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	cluster.AddHosts(1)
 
 	// send all money to ourselves, making sure it's unconfirmed
-	feeReserve := types.Siacoins(1).Div64(100)
+	feeReserve := types.Siacoins(1)
 	wr, err := b.Wallet(context.Background())
 	tt.OK(err)
-	tt.OK(b.SendSiacoins(context.Background(), []types.SiacoinOutput{
-		{
-			Address: wr.Address,
-			Value:   wr.Confirmed.Sub(feeReserve), // leave some for the fee
-		},
-	}, false))
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, wr.Confirmed.Sub(feeReserve), false)) // leave some for the fee
 
 	// check wallet only has the reserve in the confirmed balance
 	wr, err = b.Wallet(context.Background())

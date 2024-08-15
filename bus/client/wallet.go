@@ -12,29 +12,15 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-// SendSiacoins is a helper method that sends siacoins to the given outputs.
-func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput, useUnconfirmedTxns bool) (err error) {
-	var value types.Currency
-	for _, sco := range scos {
-		value = value.Add(sco.Value)
-	}
-	txn := types.Transaction{
-		SiacoinOutputs: scos,
-	}
-	toSign, parents, err := c.WalletFund(ctx, &txn, value, useUnconfirmedTxns)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = c.WalletDiscard(ctx, txn)
-		}
-	}()
-	err = c.WalletSign(ctx, &txn, toSign, types.CoveredFields{WholeTransaction: true})
-	if err != nil {
-		return err
-	}
-	return c.BroadcastTransaction(ctx, append(parents, txn))
+// SendSiacoins is a helper method that sends siacoins to the given address.
+func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types.Currency, useUnconfirmedTxns bool) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST("/wallet/send", api.WalletSendRequest{
+		Address:          addr,
+		Amount:           amt,
+		SubtractMinerFee: false,
+		UseUnconfirmed:   useUnconfirmedTxns,
+	}, &txnID)
+	return
 }
 
 // Wallet calls the /wallet endpoint on the bus.
