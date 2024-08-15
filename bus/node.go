@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/config"
@@ -186,10 +189,78 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 		return nil, nil, nil, err
 	}
 
-	// create syncer
-	s, err := NewSyncer(cfg, cm, sqlStore, logger)
+	// bootstrap the peer store
+	if cfg.Bootstrap {
+		if cfg.Network == nil {
+			return nil, nil, nil, errors.New("cannot bootstrap without a network")
+		}
+		var peers []string
+		switch cfg.Network.Name {
+		case "mainnet":
+			peers = syncer.MainnetBootstrapPeers
+		case "zen":
+			peers = syncer.ZenBootstrapPeers
+		case "anagami":
+			peers = syncer.AnagamiBootstrapPeers
+		default:
+			return nil, nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", cfg.Network.Name)
+		}
+		for _, addr := range peers {
+			if err := sqlStore.AddPeer(addr); err != nil {
+				return nil, nil, nil, fmt.Errorf("%w: failed to add bootstrap peer '%s'", err, addr)
+			}
+		}
+	}
+
+	// create syncer, peers will reject us if our hostname is empty or
+	// unspecified, so use loopback
+	l, err := net.Listen("tcp", cfg.GatewayAddr)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	syncerAddr := l.Addr().String()
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// create header
+	header := gateway.Header{
+		GenesisID:  cfg.Genesis.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
+	}
+
+	// create syncer options
+	opts := []syncer.Option{
+		syncer.WithLogger(logger.Named("syncer")),
+		syncer.WithSendBlocksTimeout(time.Minute),
+	}
+	if cfg.SyncerPeerDiscoveryInterval > 0 {
+		opts = append(opts, syncer.WithPeerDiscoveryInterval(cfg.SyncerPeerDiscoveryInterval))
+	}
+	if cfg.SyncerSyncInterval > 0 {
+		opts = append(opts, syncer.WithSyncInterval(cfg.SyncerSyncInterval))
+	}
+
+	// create the syncer
+	s := syncer.New(l, cm, sqlStore, header, opts...)
+
+	// start syncer
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- s.Run(context.Background())
+		close(errChan)
+	}()
+
+	// create a helper function to wait for syncer to wind down on shutdown
+	syncerShutdown := func(ctx context.Context) error {
+		select {
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
 	}
 
 	// create bus
@@ -206,6 +277,7 @@ func NewNode(cfg NodeConfig, dir string, seed types.PrivateKey, logger *zap.Logg
 			b.Shutdown(ctx),
 			sqlStore.Close(),
 			bdb.Close(),
+			syncerShutdown(ctx),
 		)
 	}
 	return b.Handler(), shutdownFn, cm, nil
