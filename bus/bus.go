@@ -65,6 +65,12 @@ type (
 		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
 	}
 
+	ContractManager interface {
+		Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error)
+		KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error
+		Release(id types.FileContractID, lockID uint64) error
+	}
+
 	ChainSubscriber interface {
 		ChainIndex(context.Context) (types.ChainIndex, error)
 		Shutdown(context.Context) error
@@ -249,6 +255,7 @@ type bus struct {
 
 	alerts      alerts.Alerter
 	alertMgr    *alerts.Manager
+	contractMgr ContractManager
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 
@@ -265,7 +272,6 @@ type bus struct {
 	mtrcs MetricsStore
 
 	accounts         *accounts
-	contractLocks    *contractLocks
 	uploadingSectors *uploadingSectorsCache
 
 	logger *zap.SugaredLogger
@@ -284,7 +290,6 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 		mtrcs:            mtrcs,
 		ss:               ss,
 		eas:              eas,
-		contractLocks:    newContractLocks(),
 		uploadingSectors: newUploadingSectorsCache(),
 
 		alerts:      alerts.WithOrigin(am, "bus"),
@@ -304,6 +309,9 @@ func New(ctx context.Context, am *alerts.Manager, wm WebhooksManager, cm ChainMa
 	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
+
+	// create contract manager
+	b.contractMgr = ibus.NewContractManager()
 
 	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, as, ss, defaultPinUpdateInterval, defaultPinRateWindow, l)

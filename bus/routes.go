@@ -820,7 +820,7 @@ func (b *bus) contractAcquireHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), req.Priority, id, time.Duration(req.Duration))
+	lockID, err := b.contractMgr.Acquire(jc.Request.Context(), req.Priority, id, time.Duration(req.Duration))
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
@@ -839,7 +839,7 @@ func (b *bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	err := b.contractLocks.KeepAlive(id, req.LockID, time.Duration(req.Duration))
+	err := b.contractMgr.KeepAlive(id, req.LockID, time.Duration(req.Duration))
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
 	}
@@ -926,7 +926,7 @@ func (b *bus) contractReleaseHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to release contract", b.contractLocks.Release(id, req.LockID)) != nil {
+	if jc.Check("failed to release contract", b.contractMgr.Release(id, req.LockID)) != nil {
 		return
 	}
 }

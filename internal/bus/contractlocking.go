@@ -65,7 +65,7 @@ type lockCandidate struct {
 	timedOut <-chan struct{}
 }
 
-func newContractLocks() *contractLocks {
+func NewContractManager() *contractLocks {
 	return &contractLocks{
 		locks: make(map[types.FileContractID]*contractLock),
 	}
