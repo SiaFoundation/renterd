@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -61,7 +62,7 @@ func (*alerterMock) Alerts(_ context.Context, opts alerts.AlertsOpts) (resp aler
 func (*alerterMock) RegisterAlert(context.Context, alerts.Alert) error     { return nil }
 func (*alerterMock) DismissAlerts(context.Context, ...types.Hash256) error { return nil }
 
-var _ ConsensusState = (*chainMock)(nil)
+var _ gouging.ConsensusState = (*chainMock)(nil)
 
 type chainMock struct {
 	cs api.ConsensusState
