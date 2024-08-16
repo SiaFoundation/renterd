@@ -91,7 +91,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 
 	var amount types.Currency
 	return h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
-		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
+		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			pt, err := h.priceTables.fetch(ctx, h.hk, nil, &amount)
 			if err != nil {
 				return err
@@ -119,10 +119,8 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 			amount = amount.Add(cost)
 			amount = amount.Sub(refund)
 			return nil
-		}); err != nil {
-			return types.ZeroCurrency, err
-		}
-		return amount, nil
+		})
+		return amount, err
 	})
 }
 
