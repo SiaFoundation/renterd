@@ -126,10 +126,6 @@ func (h *testHost) SyncAccount(ctx context.Context, rev *types.FileContractRevis
 	return nil
 }
 
-func (h *testHost) AccountBalance(ctx context.Context, rev *types.FileContractRevision) (types.Currency, types.Currency, error) {
-	return types.ZeroCurrency, types.ZeroCurrency, nil
-}
-
 func TestHost(t *testing.T) {
 	// create test host
 	h := newTestHost(
