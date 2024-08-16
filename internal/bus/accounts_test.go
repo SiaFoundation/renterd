@@ -7,12 +7,23 @@ import (
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
+type mockAccStore struct{}
+
+func (m *mockAccStore) Accounts(context.Context) ([]api.Account, error)   { return nil, nil }
+func (m *mockAccStore) SaveAccounts(context.Context, []api.Account) error { return nil }
+func (m *mockAccStore) SetUncleanShutdown(context.Context) error          { return nil }
+
 func TestAccountLocking(t *testing.T) {
-	accounts := newAccounts(nil, zap.NewNop().Sugar())
+	eas := &mockAccStore{}
+	accounts, err := NewAccountManager(context.Background(), eas, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var accountID rhpv3.Account
 	frand.Read(accountID[:])
