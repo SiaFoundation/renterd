@@ -29,7 +29,7 @@ type (
 )
 
 type (
-	mgr struct {
+	AccountMgr struct {
 		s      AccountStore
 		logger *zap.SugaredLogger
 
@@ -56,7 +56,7 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) (*mgr, error) {
+func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) (*AccountMgr, error) {
 	logger = logger.Named("accounts")
 
 	// load saved accounts
@@ -81,7 +81,7 @@ func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) 
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
 
-	return &mgr{
+	return &AccountMgr{
 		s:      s,
 		logger: logger.Sugar(),
 
@@ -90,7 +90,7 @@ func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) 
 }
 
 // Account returns the account with the given id.
-func (a *mgr) Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error) {
+func (a *AccountMgr) Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error) {
 	acc := a.account(id, hostKey)
 	acc.mu.Lock()
 	defer acc.mu.Unlock()
@@ -98,7 +98,7 @@ func (a *mgr) Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, e
 }
 
 // Accounts returns all accounts.
-func (a *mgr) Accounts() []api.Account {
+func (a *AccountMgr) Accounts() []api.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	accounts := make([]api.Account, 0, len(a.byID))
@@ -114,7 +114,7 @@ func (a *mgr) Accounts() []api.Account {
 // input can be both a positive or negative number depending on whether a
 // withdrawal or deposit is recorded. If the account doesn't exist, it is
 // created.
-func (a *mgr) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int) {
+func (a *AccountMgr) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int) {
 	acc := a.account(id, hk)
 
 	// Update balance.
@@ -134,7 +134,7 @@ func (a *mgr) AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int) {
 	acc.mu.Unlock()
 }
 
-func (a *mgr) LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64) {
+func (a *AccountMgr) LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64) {
 	acc := a.account(id, hostKey)
 
 	// Try to lock the account.
@@ -174,7 +174,7 @@ func (a *mgr) LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.P
 }
 
 // ResetDrift resets the drift on an account.
-func (a *mgr) ResetDrift(id rhpv3.Account) error {
+func (a *AccountMgr) ResetDrift(id rhpv3.Account) error {
 	a.mu.Lock()
 	account, exists := a.byID[id]
 	if !exists {
@@ -190,7 +190,7 @@ func (a *mgr) ResetDrift(id rhpv3.Account) error {
 // account doesn't exist, it is created.
 // If an account hasn't been saved successfully upon the last shutdown, no drift
 // will be added upon the first call to SetBalance.
-func (a *mgr) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int) {
+func (a *AccountMgr) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int) {
 	acc := a.account(id, hk)
 
 	// Update balance and drift.
@@ -219,7 +219,7 @@ func (a *mgr) SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int)
 }
 
 // ScheduleSync sets the requiresSync flag of an account.
-func (a *mgr) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
+func (a *AccountMgr) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 	acc := a.account(id, hk)
 	acc.mu.Lock()
 	// Only update the sync flag to 'true' if some time has passed since the
@@ -250,7 +250,7 @@ func (a *mgr) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 	return nil
 }
 
-func (a *mgr) Shutdown(ctx context.Context) error {
+func (a *AccountMgr) Shutdown(ctx context.Context) error {
 	accounts := a.Accounts()
 	err := a.s.SaveAccounts(ctx, accounts)
 	if err != nil {
@@ -263,7 +263,7 @@ func (a *mgr) Shutdown(ctx context.Context) error {
 }
 
 // UnlockAccount unlocks an account with the given lock id.
-func (a *mgr) UnlockAccount(id rhpv3.Account, lockID uint64) error {
+func (a *AccountMgr) UnlockAccount(id rhpv3.Account, lockID uint64) error {
 	a.mu.Lock()
 	acc, exists := a.byID[id]
 	if !exists {
@@ -292,7 +292,7 @@ func (a *mgr) UnlockAccount(id rhpv3.Account, lockID uint64) error {
 	return nil
 }
 
-func (a *mgr) account(id rhpv3.Account, hk types.PublicKey) *account {
+func (a *AccountMgr) account(id rhpv3.Account, hk types.PublicKey) *account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
