@@ -263,18 +263,6 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 		}
 	}
 
-	// update max RPC price
-	if pins.MaxRPCPrice.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxRPCPrice.Value), rate)
-		if err != nil {
-			pm.logger.Warnw("failed to convert max RPC price to currency", zap.Error(err))
-		} else if !gs.MaxRPCPrice.Equals(update) {
-			pm.logger.Infow("updating max RPC price", "old", gs.MaxRPCPrice, "new", update, "rate", rate)
-			gs.MaxRPCPrice = update
-			updated = true
-		}
-	}
-
 	// update max storage price
 	if pins.MaxStorage.IsPinned() {
 		maxStorageCurr, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxStorage.Value), rate)
