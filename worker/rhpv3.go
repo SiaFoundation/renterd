@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/mux/v1"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -58,6 +59,10 @@ var (
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
+	// errInsufficientFunds is returned by various RPCs when the renter is
+	// unable to provide sufficient payment to the host.
+	errInsufficientFunds = errors.New("insufficient funds")
+
 	// errMaxRevisionReached occurs when trying to revise a contract that has
 	// already reached the highest possible revision number. Usually happens
 	// when trying to use a renewed contract.
@@ -95,9 +100,9 @@ func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceI
 func isClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
-func isInsufficientFunds(err error) bool  { return utils.IsErr(err, ErrInsufficientFunds) }
+func isInsufficientFunds(err error) bool  { return utils.IsErr(err, errInsufficientFunds) }
 func isPriceTableExpired(err error) bool  { return utils.IsErr(err, errPriceTableExpired) }
-func isPriceTableGouging(err error) bool  { return utils.IsErr(err, errPriceTableGouging) }
+func isPriceTableGouging(err error) bool  { return utils.IsErr(err, gouging.ErrPriceTableGouging) }
 func isPriceTableNotFound(err error) bool { return utils.IsErr(err, errPriceTableNotFound) }
 func isSectorNotFound(err error) bool {
 	return utils.IsErr(err, errSectorNotFound) || utils.IsErr(err, errSectorNotFoundOld)
@@ -542,7 +547,7 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision, 
 		return rhpv3.HostPriceTable{}, err
 	}
 	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", errPriceTableGouging, breakdown)
+		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
 	}
 	return pt.HostPriceTable, nil
 }
@@ -629,7 +634,7 @@ type PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, e
 
 // RPCPriceTable calls the UpdatePriceTable RPC.
 func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ api.HostPriceTable, err error) {
-	defer wrapErr(ctx, "PriceTable", &err)
+	defer utils.WrapErr(ctx, "PriceTable", &err)
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -666,7 +671,7 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 
 // RPCAccountBalance calls the AccountBalance RPC.
 func RPCAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
-	defer wrapErr(ctx, "AccountBalance", &err)
+	defer utils.WrapErr(ctx, "AccountBalance", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.ZeroCurrency, err
@@ -691,7 +696,7 @@ func RPCAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.Paymen
 
 // RPCFundAccount calls the FundAccount RPC.
 func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (err error) {
-	defer wrapErr(ctx, "FundAccount", &err)
+	defer utils.WrapErr(ctx, "FundAccount", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return err
@@ -718,7 +723,7 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 // fetching a pricetable using the fetched revision to pay for it. If
 // paymentFunc returns 'nil' as payment, the host is not paid.
 func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID, paymentFunc func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error)) (_ types.FileContractRevision, err error) {
-	defer wrapErr(ctx, "LatestRevision", &err)
+	defer utils.WrapErr(ctx, "LatestRevision", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.FileContractRevision{}, err
@@ -744,7 +749,7 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 
 // RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
 func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
-	defer wrapErr(ctx, "ReadSector", &err)
+	defer utils.WrapErr(ctx, "ReadSector", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
 		return types.ZeroCurrency, types.ZeroCurrency, err
@@ -808,7 +813,7 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 }
 
 func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) (cost types.Currency, err error) {
-	defer wrapErr(ctx, "AppendSector", &err)
+	defer utils.WrapErr(ctx, "AppendSector", &err)
 
 	// sanity check revision first
 	if rev.RevisionNumber == math.MaxUint64 {
@@ -946,7 +951,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 }
 
 func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transportV3, pt *rhpv3.HostPriceTable, rev types.FileContractRevision, renterKey types.PrivateKey, l *zap.SugaredLogger) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
-	defer wrapErr(ctx, "RPCRenew", &err)
+	defer utils.WrapErr(ctx, "RPCRenew", &err)
 
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -1094,6 +1099,12 @@ func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, bus Bus, t *transpor
 	}, txnSet, pt.ContractPrice, wprr.FundAmount, nil
 }
 
+func hashRevision(rev types.FileContractRevision) types.Hash256 {
+	h := types.NewHasher()
+	rev.EncodeTo(h.E)
+	return h.Sum()
+}
+
 // initialRevision returns the first revision of a file contract formation
 // transaction.
 func initialRevision(formationTxn types.Transaction, hostPubKey, renterPubKey types.UnlockKey) types.FileContractRevision {
@@ -1123,7 +1134,41 @@ func payByContract(rev *types.FileContractRevision, amount types.Currency, refun
 	}
 	payment, ok := rhpv3.PayByContract(rev, amount, refundAcct, sk)
 	if !ok {
-		return rhpv3.PayByContractRequest{}, ErrInsufficientFunds
+		return rhpv3.PayByContractRequest{}, errInsufficientFunds
 	}
 	return payment, nil
+}
+
+func updateRevisionOutputs(rev *types.FileContractRevision, cost, collateral types.Currency) (valid, missed []types.Currency, err error) {
+	// allocate new slices; don't want to risk accidentally sharing memory
+	rev.ValidProofOutputs = append([]types.SiacoinOutput(nil), rev.ValidProofOutputs...)
+	rev.MissedProofOutputs = append([]types.SiacoinOutput(nil), rev.MissedProofOutputs...)
+
+	// move valid payout from renter to host
+	var underflow, overflow bool
+	rev.ValidProofOutputs[0].Value, underflow = rev.ValidProofOutputs[0].Value.SubWithUnderflow(cost)
+	rev.ValidProofOutputs[1].Value, overflow = rev.ValidProofOutputs[1].Value.AddWithOverflow(cost)
+	if underflow || overflow {
+		err = errors.New("insufficient funds to pay host")
+		return
+	}
+
+	// move missed payout from renter to void
+	rev.MissedProofOutputs[0].Value, underflow = rev.MissedProofOutputs[0].Value.SubWithUnderflow(cost)
+	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(cost)
+	if underflow || overflow {
+		err = errors.New("insufficient funds to move missed payout to void")
+		return
+	}
+
+	// move collateral from host to void
+	rev.MissedProofOutputs[1].Value, underflow = rev.MissedProofOutputs[1].Value.SubWithUnderflow(collateral)
+	rev.MissedProofOutputs[2].Value, overflow = rev.MissedProofOutputs[2].Value.AddWithOverflow(collateral)
+	if underflow || overflow {
+		err = errors.New("insufficient collateral")
+		return
+	}
+
+	return []types.Currency{rev.ValidProofOutputs[0].Value, rev.ValidProofOutputs[1].Value},
+		[]types.Currency{rev.MissedProofOutputs[0].Value, rev.MissedProofOutputs[1].Value, rev.MissedProofOutputs[2].Value}, nil
 }

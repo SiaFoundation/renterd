@@ -12,6 +12,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.uber.org/zap"
 )
 
@@ -103,7 +104,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 				return err
 			}
 			if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
-				return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown.DownloadErr)
+				return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
 			}
 
 			cost, err := readSectorCost(hpt, uint64(length))
@@ -261,7 +262,7 @@ func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *typ
 			if err != nil {
 				return err
 			} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-				return fmt.Errorf("%w: %v", errPriceTableGouging, err)
+				return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 			}
 
 			// cap the deposit by what's left in the contract
@@ -312,7 +313,7 @@ func (h *host) AccountBalance(ctx context.Context, rev *types.FileContractRevisi
 	if err != nil {
 		return types.ZeroCurrency, types.ZeroCurrency, err
 	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("%w: %v", errPriceTableGouging, err)
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 	}
 	renterBalance, err := h.acc.Balance(ctx)
 	if err != nil {
@@ -343,7 +344,7 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	if err != nil {
 		return types.ZeroCurrency, err
 	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-		return types.ZeroCurrency, fmt.Errorf("%w: %v", errPriceTableGouging, err)
+		return types.ZeroCurrency, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 	}
 
 	// sync the account
