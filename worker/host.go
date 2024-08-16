@@ -110,13 +110,13 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 			if err != nil {
 				return err
 			}
+			amount = amount.Add(cost)
 
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 			cost, refund, err := RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
 			if err != nil {
 				return err
 			}
-			amount = amount.Add(cost)
 			amount = amount.Sub(refund)
 			return nil
 		})
