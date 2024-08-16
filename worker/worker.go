@@ -702,8 +702,7 @@ func (w *Worker) rhpSyncHandler(jc jape.Context) {
 	// sync the account
 	h := w.Host(rsr.HostKey, rsr.ContractID, rsr.SiamuxAddr)
 	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
-		_, err := h.SyncAccount(ctx, &rev)
-		return err
+		return h.SyncAccount(ctx, &rev)
 	}))
 }
 

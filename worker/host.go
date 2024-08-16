@@ -32,7 +32,7 @@ type (
 
 		AccountBalance(ctx context.Context, rev *types.FileContractRevision) (types.Currency, types.Currency, error)
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
-		SyncAccount(ctx context.Context, rev *types.FileContractRevision) (types.Currency, error)
+		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 
 		RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error)
 	}
@@ -237,14 +237,15 @@ func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *typ
 		return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2))
 	}
 
-	// sync account and return early if possible, we sync to ensure we
-	// effectively top up the account to the desired amount while keeping track
-	// of potential drift
-	balance, err := h.SyncAccount(ctx, rev)
-	if err == nil && balance.Cmp(desired) >= 0 {
+	// fetch current balance
+	balance, err := h.acc.Balance(ctx)
+	if err != nil {
+		return err
+	}
+
+	// return early if we have the desired balance
+	if balance.Cmp(desired) >= 0 {
 		return nil
-	} else if err != nil {
-		log.Errorw("failed to sync account", zap.Error(err))
 	}
 
 	// calculate the deposit amount
@@ -332,24 +333,23 @@ func (h *host) AccountBalance(ctx context.Context, rev *types.FileContractRevisi
 	return renterBalance, hostBalance, err
 }
 
-func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) (types.Currency, error) {
+func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
 	pt, err := h.priceTables.fetch(ctx, h.hk, rev, nil)
 	if err != nil {
-		return types.ZeroCurrency, err
+		return err
 	}
 
 	// check only the unused defaults
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return types.ZeroCurrency, err
+		return err
 	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-		return types.ZeroCurrency, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
+		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 	}
 
 	// sync the account
-	var balance types.Currency
-	return balance, h.acc.WithSync(ctx, func() (types.Currency, error) {
+	return h.acc.WithSync(ctx, func() (balance types.Currency, _ error) {
 		return balance, h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			payment, err := payByContract(rev, types.NewCurrency64(1), h.acc.id, h.renterKey)
 			if err != nil {

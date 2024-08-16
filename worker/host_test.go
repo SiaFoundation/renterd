@@ -122,8 +122,8 @@ func (h *testHost) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (
 	return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, nil
 }
 
-func (h *testHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) (types.Currency, error) {
-	return types.ZeroCurrency, nil
+func (h *testHost) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
+	return nil
 }
 
 func (h *testHost) AccountBalance(ctx context.Context, rev *types.FileContractRevision) (types.Currency, types.Currency, error) {
