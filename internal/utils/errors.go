@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -27,4 +29,16 @@ func IsErr(err error, target error) bool {
 	// TODO: we can get rid of the lower casing once siad is gone and
 	// renterd/hostd use the same error messages
 	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
+}
+
+// WrapErr can be used to defer wrapping an error which is then decorated with
+// the provided function name. If the context contains a cause error, it will
+// also be included in the wrapping.
+func WrapErr(ctx context.Context, fnName string, err *error) {
+	if *err != nil {
+		*err = fmt.Errorf("%s: %w", fnName, *err)
+		if cause := context.Cause(ctx); cause != nil && !IsErr(*err, cause) {
+			*err = fmt.Errorf("%w; %w", cause, *err)
+		}
+	}
 }

@@ -25,6 +25,8 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/gouging"
+	clientV2 "go.sia.tech/renterd/internal/rhp/v2"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
@@ -36,10 +38,6 @@ import (
 )
 
 const (
-	batchSizeDeleteSectors = uint64(1000)  // 4GiB of contract data
-	batchSizeFetchSectors  = uint64(25600) // 100GiB of contract data
-
-	defaultLockTimeout          = time.Minute
 	defaultRevisionFetchTimeout = 30 * time.Second
 
 	lockingPriorityActiveContractRevision = 100
@@ -73,7 +71,7 @@ type (
 		s3.Bus
 
 		alerts.Alerter
-		ConsensusState
+		gouging.ConsensusState
 		webhooks.Broadcaster
 
 		AccountStore
@@ -163,10 +161,6 @@ type (
 		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 		UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
-
-	ConsensusState interface {
-		ConsensusState(ctx context.Context) (api.ConsensusState, error)
-	}
 )
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
@@ -206,6 +200,8 @@ func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 // a renterd system.
 type Worker struct {
 	alerts alerts.Alerter
+
+	rhp2Client *clientV2.Client
 
 	allowPrivateIPs bool
 	id              string
@@ -391,10 +387,6 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 	jc.Encode(hpt)
 }
 
-func (w *Worker) discardTxnOnErr(txn types.Transaction, errContext string, err *error) {
-	discardTxnOnErr(w.shutdownCtx, w.bus, w.logger, txn, errContext, err)
-}
-
 func (w *Worker) rhpFormHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -418,42 +410,20 @@ func (w *Worker) rhpFormHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	hostIP, hostKey, renterFunds := rfr.HostIP, rfr.HostKey, rfr.RenterFunds
 	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
 	renterKey := w.deriveRenterKey(hostKey)
 
-	var contract rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-	err = w.withTransportV2(ctx, rfr.HostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-		hostSettings, err := RPCSettings(ctx, t)
+	contract, txnSet, err := w.rhp2Client.FormContract(ctx, renterAddress, renterKey, hostKey, hostIP, renterFunds, hostCollateral, endHeight, gc, func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error) {
+		txns, err = w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		// NOTE: we overwrite the NetAddress with the host address here since we
-		// just used it to dial the host we know it's valid
-		hostSettings.NetAddress = hostIP
-
-		gc, err := GougingCheckerFromContext(ctx, false)
-		if err != nil {
-			return err
-		}
-		if breakdown := gc.Check(&hostSettings, nil); breakdown.Gouging() {
-			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown)
-		}
-
-		renterTxnSet, err := w.bus.WalletPrepareForm(ctx, renterAddress, renterKey.PublicKey(), renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
-		if err != nil {
-			return err
-		}
-		defer w.discardTxnOnErr(renterTxnSet[len(renterTxnSet)-1], "rhpFormHandler", &err)
-
-		contract, txnSet, err = RPCFormContract(ctx, t, renterKey, renterTxnSet)
-		if err != nil {
-			return err
-		}
-		return
+		return txns, func(txn types.Transaction) {
+			_ = w.bus.WalletDiscard(ctx, txn)
+		}, nil
 	})
 	if jc.Check("couldn't form contract", err) != nil {
 		return
@@ -495,7 +465,7 @@ func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 	rk := w.deriveRenterKey(c.HostKey)
 
-	rev, err := w.FetchSignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	rev, err := w.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
 	if jc.Check("could not fetch revision", err) != nil {
 		return
 	}
@@ -574,13 +544,24 @@ func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if jc.Check("could not fetch gouging parameters", err) != nil {
 		return
 	}
-
-	// attach gouging checker
-	ctx = WithGougingChecker(ctx, w.bus, gp)
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	// prune the contract
-	pruned, remaining, err := w.PruneContract(ctx, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber)
-	if err != nil && !errors.Is(err, ErrNoSectorsToPrune) && pruned == 0 {
+	var pruned, remaining uint64
+	var rev *types.FileContractRevision
+	var cost types.Currency
+	err = w.withContractLock(ctx, contract.ID, lockingPriorityPruning, func() error {
+		stored, pending, err := w.bus.ContractRoots(ctx, contract.ID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch contract roots; %w", err)
+		}
+		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
+		return err
+	})
+	if rev != nil {
+		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{Deletions: cost})
+	}
+	if err != nil && !errors.Is(err, clientV2.ErrNoSectorsToPrune) && pruned == 0 {
 		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -619,15 +600,16 @@ func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
 		return
 	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, gp)
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
 
 	// fetch the roots from the host
-	roots, err := w.FetchContractRoots(ctx, c.HostIP, c.HostKey, id, c.RevisionNumber)
-	if jc.Check("couldn't fetch contract roots from host", err) == nil {
-		jc.Encode(roots)
+	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, id, c.RevisionNumber)
+	if jc.Check("couldn't fetch contract roots from host", err) != nil {
+		return
+	} else if rev != nil {
+		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{SectorRoots: cost})
 	}
+	jc.Encode(roots)
 }
 
 func (w *Worker) rhpRenewHandler(jc jape.Context) {
@@ -1315,6 +1297,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
+		rhp2Client:              clientV2.New(l),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             shutdownCtx,
@@ -1412,23 +1395,11 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 		// fetch the host settings
 		start := time.Now()
-		var settings rhpv2.HostSettings
-		{
-			scanCtx, cancel := timeoutCtx()
-			defer cancel()
-			err := w.withTransportV2(scanCtx, hostKey, hostIP, func(t *rhpv2.Transport) error {
-				var err error
-				if settings, err = RPCSettings(scanCtx, t); err != nil {
-					return fmt.Errorf("failed to fetch host settings: %w", err)
-				}
-				// NOTE: we overwrite the NetAddress with the host address here
-				// since we just used it to dial the host we know it's valid
-				settings.NetAddress = hostIP
-				return nil
-			})
-			if err != nil {
-				return settings, rhpv3.HostPriceTable{}, time.Since(start), err
-			}
+		scanCtx, cancel := timeoutCtx()
+		settings, err := w.rhp2Client.Settings(scanCtx, hostKey, hostIP)
+		cancel()
+		if err != nil {
+			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
 		}
 
 		// fetch the host pricetable
@@ -1770,4 +1741,33 @@ func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, contrac
 		return api.UploadParams{}, err
 	}
 	return up, nil
+}
+
+// A HostErrorSet is a collection of errors from various hosts.
+type HostErrorSet map[types.PublicKey]error
+
+// NumGouging returns numbers of host that errored out due to price gouging.
+func (hes HostErrorSet) NumGouging() (n int) {
+	for _, he := range hes {
+		if errors.Is(he, gouging.ErrPriceTableGouging) {
+			n++
+		}
+	}
+	return
+}
+
+// Error implements error.
+func (hes HostErrorSet) Error() string {
+	if len(hes) == 0 {
+		return ""
+	}
+
+	var strs []string
+	for hk, he := range hes {
+		strs = append(strs, fmt.Sprintf("%x: %v", hk[:4], he.Error()))
+	}
+
+	// include a leading newline so that the first error isn't printed on the
+	// same line as the error context
+	return "\n" + strings.Join(strs, "\n")
 }

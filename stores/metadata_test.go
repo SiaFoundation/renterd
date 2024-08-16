@@ -1579,6 +1579,67 @@ func TestObjectEntries(t *testing.T) {
 	}
 }
 
+func TestObjectEntriesExplicitDir(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	objects := []struct {
+		path string
+		size int64
+	}{
+		{"/dir/", 0},     // empty dir - created first
+		{"/dir/file", 1}, // file uploaded to dir
+		{"/dir2/", 2},    // empty dir - remains empty
+	}
+
+	ctx := context.Background()
+	for _, o := range objects {
+		obj := newTestObject(frand.Intn(9) + 1)
+		obj.Slabs = obj.Slabs[:1]
+		obj.Slabs[0].Length = uint32(o.size)
+		_, err := ss.addTestObject(o.path, obj)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// set file health to 0.5
+	if err := ss.overrideSlabHealth("/dir/file", 0.5); err != nil {
+		t.Fatal(err)
+	}
+
+	// update health of objects to match the overridden health of the slabs
+	if err := updateAllObjectsHealth(ss.DB()); err != nil {
+		t.Fatal()
+	}
+
+	tests := []struct {
+		path    string
+		prefix  string
+		sortBy  string
+		sortDir string
+		want    []api.ObjectMetadata
+	}{
+		{"/", "", "", "", []api.ObjectMetadata{
+			{Name: "/dir/", Size: 1, Health: 0.5},
+			{ETag: "d34db33f", Name: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
+		}},
+		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Name: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
+	}
+	for _, test := range tests {
+		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range got {
+			got[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+		}
+	}
+}
+
 // TestSearchObjects is a test for the SearchObjects method.
 func TestSearchObjects(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
