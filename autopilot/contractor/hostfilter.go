@@ -10,7 +10,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/internal/gouging"
 )
 
 const (
@@ -220,7 +220,7 @@ func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, block
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(gc worker.GougingChecker, sh scoredHost, minScore float64) *api.HostCheck {
+func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostCheck {
 	h := sh.host
 
 	// prepare host breakdown fields
