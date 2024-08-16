@@ -74,6 +74,12 @@ type (
 		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
 	}
 
+	ContractLocker interface {
+		Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error)
+		KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error
+		Release(id types.FileContractID, lockID uint64) error
+	}
+
 	ChainSubscriber interface {
 		ChainIndex(context.Context) (types.ChainIndex, error)
 		Shutdown(context.Context) error
@@ -294,9 +300,9 @@ type Bus struct {
 	mtrcs MetricsStore
 	ss    SettingStore
 
-	accounts      *accounts
-	contractLocks *contractLocks
-	sectors       UploadingSectorsCache
+	accounts       *accounts
+	contractLocker ContractLocker
+	sectors        UploadingSectorsCache
 
 	logger *zap.SugaredLogger
 }
@@ -306,16 +312,15 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 	l = l.Named("bus")
 
 	b := &Bus{
-		s:             s,
-		cm:            cm,
-		w:             w,
-		hs:            store,
-		as:            store,
-		ms:            store,
-		mtrcs:         store,
-		ss:            store,
-		eas:           store,
-		contractLocks: newContractLocks(),
+		s:     s,
+		cm:    cm,
+		w:     w,
+		hs:    store,
+		as:    store,
+		ms:    store,
+		mtrcs: store,
+		ss:    store,
+		eas:   store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -334,6 +339,9 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
+
+	// create contract locker
+	b.contractLocker = ibus.NewContractLocker()
 
 	// create sectors cache
 	b.sectors = ibus.NewSectorsCache()
