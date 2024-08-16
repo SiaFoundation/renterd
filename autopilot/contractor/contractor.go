@@ -1202,7 +1202,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		}
 		gc := ctx.GougingChecker(cs)
 
-		// prepare a gouging checker
+		// prepare a logger
 		logger := logger.With("hostKey", candidate.host.PublicKey).
 			With("remainingBudget", remainingFunds).
 			With("addresses", candidate.host.ResolvedAddresses)
