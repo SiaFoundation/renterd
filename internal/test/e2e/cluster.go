@@ -834,8 +834,8 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
 	c.tt.OK(announceHosts([]*Host{h}))
 
-	// Mine a few blocks. The host should show up eventually.
-	c.tt.Retry(10, time.Second, func() error {
+	// Mine until the host shows up.
+	c.tt.Retry(100, 100*time.Millisecond, func() error {
 		c.tt.Helper()
 
 		_, err := c.Bus.Host(context.Background(), h.PublicKey())
