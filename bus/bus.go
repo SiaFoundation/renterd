@@ -332,7 +332,7 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 		return nil, err
 	}
 
-	// create contract manager
+	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
 	// create pin manager
