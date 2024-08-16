@@ -812,8 +812,10 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	fundAmt := types.Siacoins(25e3)
-	c.tt.OKAll(c.Bus.SendSiacoins(context.Background(), h.WalletAddress(), fundAmt, true))
+	fundAmt := types.Siacoins(5e3)
+	for i := 0; i < 5; i++ {
+		c.tt.OKAll(c.Bus.SendSiacoins(context.Background(), h.WalletAddress(), fundAmt, true))
+	}
 
 	// Mine transaction.
 	c.MineBlocks(1)
