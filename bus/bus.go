@@ -94,6 +94,15 @@ type (
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
+	UploadingSectorsCache interface {
+		AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error
+		FinishUpload(uID api.UploadID)
+		HandleRenewal(fcid, renewedFrom types.FileContractID)
+		Pending(fcid types.FileContractID) (size uint64)
+		Sectors(fcid types.FileContractID) (roots []types.Hash256)
+		StartUpload(uID api.UploadID) error
+	}
+
 	PinManager interface {
 		Shutdown(context.Context) error
 		TriggerUpdate()
@@ -279,11 +288,10 @@ type Bus struct {
 	alertMgr    AlertManager
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
-
-	cm ChainManager
-	cs ChainSubscriber
-	s  Syncer
-	w  Wallet
+	cm          ChainManager
+	cs          ChainSubscriber
+	s           Syncer
+	w           Wallet
 
 	as    AutopilotStore
 	eas   EphemeralAccountStore
@@ -292,9 +300,9 @@ type Bus struct {
 	mtrcs MetricsStore
 	ss    SettingStore
 
-	accounts         *accounts
-	contractLocker   ContractLocker
-	uploadingSectors *uploadingSectorsCache
+	accounts       *accounts
+	contractLocker ContractLocker
+	sectors        UploadingSectorsCache
 
 	logger *zap.SugaredLogger
 }
@@ -302,17 +310,17 @@ type Bus struct {
 // New returns a new Bus
 func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
 	l = l.Named("bus")
+
 	b := &Bus{
-		s:                s,
-		cm:               cm,
-		w:                w,
-		hs:               store,
-		as:               store,
-		ms:               store,
-		mtrcs:            store,
-		ss:               store,
-		eas:              store,
-		uploadingSectors: newUploadingSectorsCache(),
+		s:     s,
+		cm:    cm,
+		w:     w,
+		hs:    store,
+		as:    store,
+		ms:    store,
+		mtrcs: store,
+		ss:    store,
+		eas:   store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -334,6 +342,9 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
+
+	// create sectors cache
+	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
