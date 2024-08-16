@@ -8,6 +8,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 )
 
 func TestUploaderStopped(t *testing.T) {
@@ -43,7 +44,7 @@ func TestHandleSectorUpload(t *testing.T) {
 	regular := false
 
 	errHostError := errors.New("some host error")
-	errSectorUploadFinishedAndDial := fmt.Errorf("%w;%w", errDialTransport, errSectorUploadFinished)
+	errSectorUploadFinishedAndDial := fmt.Errorf("%w;%w", rhp3.ErrDialTransport, errSectorUploadFinished)
 
 	cases := []struct {
 		// input
@@ -63,8 +64,8 @@ func TestHandleSectorUpload(t *testing.T) {
 		{nil, ms, ms, overdrive, true, false, 1, ss},
 
 		// renewed contract case
-		{errMaxRevisionReached, 0, ms, regular, false, false, 0, 0},
-		{errMaxRevisionReached, 0, ms, overdrive, false, false, 0, 0},
+		{rhp3.ErrMaxRevisionReached, 0, ms, regular, false, false, 0, 0},
+		{rhp3.ErrMaxRevisionReached, 0, ms, overdrive, false, false, 0, 0},
 
 		// context canceled case
 		{context.Canceled, 0, ms, regular, false, false, 0, 0},
@@ -77,8 +78,8 @@ func TestHandleSectorUpload(t *testing.T) {
 		{errSectorUploadFinishedAndDial, ms, 1001 * ms, overdrive, false, true, 10010, 0},
 
 		// payment failure case
-		{errFailedToCreatePayment, 0, ms, regular, false, false, 3600000, 0},
-		{errFailedToCreatePayment, 0, ms, overdrive, false, false, 3600000, 0},
+		{rhp3.ErrFailedToCreatePayment, 0, ms, regular, false, false, 3600000, 0},
+		{rhp3.ErrFailedToCreatePayment, 0, ms, overdrive, false, false, 3600000, 0},
 
 		// host failure
 		{errHostError, ms, ms, regular, false, true, 3600000, 0},
