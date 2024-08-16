@@ -182,13 +182,13 @@ type (
 	}
 
 	HostScan struct {
-		HostKey           types.PublicKey `json:"hostKey"`
-		PriceTable        rhpv3.HostPriceTable
-		Settings          rhpv2.HostSettings
-		ResolvedAddresses []string
-		Subnets           []string
-		Success           bool
-		Timestamp         time.Time
+		HostKey           types.PublicKey      `json:"hostKey"`
+		PriceTable        rhpv3.HostPriceTable `json:"priceTable"`
+		Settings          rhpv2.HostSettings   `json:"settings"`
+		ResolvedAddresses []string             `json:"resolvedAddresses"`
+		Subnets           []string             `json:"subnets"`
+		Success           bool                 `json:"success"`
+		Timestamp         time.Time            `json:"timestamp"`
 	}
 
 	HostPriceTable struct {
@@ -198,9 +198,9 @@ type (
 
 	HostPriceTableUpdate struct {
 		HostKey    types.PublicKey `json:"hostKey"`
-		Success    bool
-		Timestamp  time.Time
-		PriceTable HostPriceTable
+		Success    bool            `json:"success"`
+		Timestamp  time.Time       `json:"timestamp"`
+		PriceTable HostPriceTable  `json:"priceTable"`
 	}
 
 	HostCheck struct {
