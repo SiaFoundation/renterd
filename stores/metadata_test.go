@@ -1634,7 +1634,7 @@ func TestObjectEntriesExplicitDir(t *testing.T) {
 		for i := range got {
 			got[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
 		}
-		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
+		if !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 	}
