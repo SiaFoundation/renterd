@@ -21,7 +21,7 @@ var (
 )
 
 type (
-	EphemeralAccountStore interface {
+	AccountStore interface {
 		Accounts(context.Context) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
 		SetUncleanShutdown(context.Context) error
@@ -30,7 +30,7 @@ type (
 
 type (
 	mgr struct {
-		s      EphemeralAccountStore
+		s      AccountStore
 		logger *zap.SugaredLogger
 
 		mu   sync.Mutex
@@ -56,7 +56,7 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(ctx context.Context, s EphemeralAccountStore, logger *zap.Logger) (*mgr, error) {
+func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) (*mgr, error) {
 	logger = logger.Named("accounts")
 
 	// load saved accounts

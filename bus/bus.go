@@ -145,13 +145,22 @@ type (
 
 	// Store is a collection of stores used by the bus.
 	Store interface {
+		AccountStore
 		AutopilotStore
 		ChainStore
-		EphemeralAccountStore
 		HostStore
 		MetadataStore
 		MetricsStore
 		SettingStore
+	}
+
+	// AccountStore persists information about accounts. Since accounts
+	// are rapidly updated and can be recovered, they are only loaded upon
+	// startup and persisted upon shutdown.
+	AccountStore interface {
+		Accounts(context.Context) ([]api.Account, error)
+		SaveAccounts(context.Context, []api.Account) error
+		SetUncleanShutdown(context.Context) error
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -165,15 +174,6 @@ type (
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
-	}
-
-	// EphemeralAccountStore persists information about accounts. Since accounts
-	// are rapidly updated and can be recovered, they are only loaded upon
-	// startup and persisted upon shutdown.
-	EphemeralAccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
-		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
 	}
 
 	// A HostStore stores information about hosts.
