@@ -68,8 +68,9 @@ func NewFallbackDialer(bus DialerBus, logger *zap.Logger, dialer net.Dialer) *Fa
 func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to split host and port of host address '%v': %w", address, err)
 	}
+	logger := d.logger.With(zap.String("hostKey", hk.String()), zap.String("host", host))
 
 	// Dial and cache the resolved IP if dial successful
 	conn, err := d.dialer.DialContext(ctx, "tcp", address)
@@ -80,7 +81,7 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 
 	// If resolution fails, check the cache
 	if cachedIP, ok := d.cache.Get(host); ok {
-		d.logger.Warn("Failed to resolve host, using cached IP", zap.String("host", host))
+		logger.Warn("Failed to resolve host, using cached IP", zap.Error(err))
 		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(cachedIP, port))
 		if err == nil {
 			return conn, nil
@@ -90,7 +91,7 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 	}
 
 	// Attempt to resolve using the bus
-	d.logger.Warn("Cache not available or cached IP stale, retrieving host resolved addresses from bus", zap.String("host", host))
+	logger.Warn("Cache not available or cached IP stale, retrieving host resolved addresses from bus")
 	hostInfo, err := d.bus.Host(ctx, hk)
 	if err != nil {
 		return nil, err
