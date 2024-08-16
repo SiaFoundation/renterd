@@ -1459,6 +1459,7 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
 			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
+				AND NOT EXISTS (SELECT 1 FROM directories d WHERE d.name = o.object_id)
 			UNION ALL
 			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
