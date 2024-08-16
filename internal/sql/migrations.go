@@ -193,6 +193,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00013_coreutils_wallet", log)
 				},
 			},
+			{
+				ID: "00014_hosts_resolvedaddresses",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00014_hosts_resolvedaddresses", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
