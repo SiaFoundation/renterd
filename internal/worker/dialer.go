@@ -55,7 +55,7 @@ type FallbackDialer struct {
 	dialer net.Dialer
 }
 
-func NewFallbackDialer(bus DialerBus, logger *zap.Logger, dialer net.Dialer) *FallbackDialer {
+func NewFallbackDialer(bus DialerBus, dialer net.Dialer, logger *zap.Logger) *FallbackDialer {
 	return &FallbackDialer{
 		cache: newHostCache(),
 

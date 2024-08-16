@@ -1290,7 +1290,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
-	dialer := iworker.NewFallbackDialer(b, l, net.Dialer{})
+	dialer := iworker.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:                  a,
 		allowPrivateIPs:         cfg.AllowPrivateIPs,
