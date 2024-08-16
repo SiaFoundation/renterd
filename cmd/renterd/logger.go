@@ -11,11 +11,11 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func NewLogger(dir string, cfg config.Log) (*zap.Logger, func(context.Context) error, error) {
+func NewLogger(dir, filename string, cfg config.Log) (*zap.Logger, func(context.Context) error, error) {
 	// path
-	path := filepath.Join(dir, "renterd.log")
+	path := filepath.Join(dir, filename)
 	if cfg.Path != "" {
-		path = filepath.Join(cfg.Path, "renterd.log")
+		path = filepath.Join(cfg.Path, filename)
 	}
 
 	if cfg.File.Path != "" {

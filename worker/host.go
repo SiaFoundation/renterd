@@ -12,6 +12,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.uber.org/zap"
 )
 
@@ -59,10 +60,10 @@ type (
 
 var (
 	_ Host        = (*host)(nil)
-	_ HostManager = (*worker)(nil)
+	_ HostManager = (*Worker)(nil)
 )
 
-func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
+func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	return &host{
 		hk:                       hk,
 		acc:                      w.accounts.ForHost(hk),
@@ -93,7 +94,7 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 		return err
 	}
 	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
-		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown.DownloadErr)
+		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
 	}
 
 	// return errBalanceInsufficient if balance insufficient
@@ -239,7 +240,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 			if err != nil {
 				return err
 			} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-				return fmt.Errorf("%w: %v", errPriceTableGouging, err)
+				return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 			}
 
 			// check whether we have money left in the contract
@@ -288,7 +289,7 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 	if err != nil {
 		return err
 	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-		return fmt.Errorf("%w: %v", errPriceTableGouging, err)
+		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 	}
 
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {

@@ -90,17 +90,17 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		// create MySQL conns
 		connMain, err := mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, mysqlCfg.Database)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("failed to open MySQL main database: %w", err)
 		}
 		connMetrics, err := mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, mysqlCfg.MetricsDatabase)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -114,11 +114,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
@@ -132,11 +132,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open ephemeral SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite main database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop().Sugar(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite metrics database: %w", err)
 		}
@@ -175,7 +175,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		PartialSlabDir:                cfg.dir,
 		Migrate:                       !cfg.skipMigrate,
 		SlabBufferCompletionThreshold: 0,
-		Logger:                        zap.NewNop().Sugar(),
+		Logger:                        zap.NewNop(),
 		LongQueryDuration:             100 * time.Millisecond,
 		LongTxDuration:                100 * time.Millisecond,
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},

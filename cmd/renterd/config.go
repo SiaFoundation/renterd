@@ -3,21 +3,402 @@ package main
 import (
 	"bufio"
 	"encoding/hex"
+	"errors"
+	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/worker/s3"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
 )
 
-var enableANSI = runtime.GOOS != "windows"
+// TODO: handle RENTERD_S3_HOST_BUCKET_BASES correctly
+
+const (
+	// accountRefillInterval is the amount of time between refills of ephemeral
+	// accounts. If we conservatively assume that a good host charges 500 SC /
+	// TiB, we can pay for about 2.2 GiB with 1 SC. Since we want to refill
+	// ahead of time at 0.5 SC, that makes 1.1 GiB. Considering a 1 Gbps uplink
+	// that is shared across 30 uploads, we upload at around 33 Mbps to each
+	// host. That means uploading 1.1 GiB to drain 0.5 SC takes around 5
+	// minutes. That's why we assume 10 seconds to be more than frequent enough
+	// to refill an account when it's due for another refill.
+	defaultAccountRefillInterval = 10 * time.Second
+)
+
+var (
+	disableStdin bool
+	enableANSI   = runtime.GOOS != "windows"
+
+	hostBasesStr         string
+	keyPairsV4           string
+	workerRemotePassStr  string
+	workerRemoteAddrsStr string
+)
+
+func defaultConfig() config.Config {
+	return config.Config{
+		Directory:     ".",
+		Seed:          os.Getenv("RENTERD_SEED"),
+		AutoOpenWebUI: true,
+		Network:       "mainnet",
+		HTTP: config.HTTP{
+			Address:  "localhost:9980",
+			Password: os.Getenv("RENTERD_API_PASSWORD"),
+		},
+		ShutdownTimeout: 5 * time.Minute,
+		Database: config.Database{
+			MySQL: config.MySQL{
+				User:            "renterd",
+				Database:        "renterd",
+				MetricsDatabase: "renterd_metrics",
+			},
+		},
+		Log: config.Log{
+			Path:  "", // deprecated. included for compatibility.
+			Level: "",
+			File: config.LogFile{
+				Enabled: true,
+				Format:  "json",
+				Path:    os.Getenv("RENTERD_LOG_FILE"),
+			},
+			StdOut: config.StdOut{
+				Enabled:    true,
+				Format:     "human",
+				EnableANSI: runtime.GOOS != "windows",
+			},
+			Database: config.DatabaseLog{
+				Enabled:                   true,
+				IgnoreRecordNotFoundError: true,
+				SlowThreshold:             100 * time.Millisecond,
+			},
+		},
+		Bus: config.Bus{
+			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
+			Bootstrap:                     true,
+			GatewayAddr:                   ":9981",
+			UsedUTXOExpiry:                24 * time.Hour,
+			SlabBufferCompletionThreshold: 1 << 12,
+		},
+		Worker: config.Worker{
+			Enabled: true,
+
+			ID:                  "worker",
+			ContractLockTimeout: 30 * time.Second,
+			BusFlushInterval:    5 * time.Second,
+
+			DownloadMaxOverdrive:     5,
+			DownloadOverdriveTimeout: 3 * time.Second,
+
+			DownloadMaxMemory:      1 << 30, // 1 GiB
+			UploadMaxMemory:        1 << 30, // 1 GiB
+			UploadMaxOverdrive:     5,
+			UploadOverdriveTimeout: 3 * time.Second,
+		},
+		Autopilot: config.Autopilot{
+			Enabled: true,
+
+			ID:                             api.DefaultAutopilotID,
+			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
+			AccountsRefillInterval:         defaultAccountRefillInterval,
+			Heartbeat:                      30 * time.Minute,
+			MigrationHealthCutoff:          0.75,
+			RevisionBroadcastInterval:      7 * 24 * time.Hour,
+			ScannerBatchSize:               100,
+			ScannerInterval:                4 * time.Hour,
+			ScannerNumThreads:              10,
+			MigratorParallelSlabsPerWorker: 1,
+		},
+		S3: config.S3{
+			Address:     "localhost:8080",
+			Enabled:     true,
+			DisableAuth: false,
+			KeypairsV4:  nil,
+		},
+	}
+}
+
+// loadConfig creates a default config and overrides it with the contents of the
+// YAML file (specified by the RENTERD_CONFIG_FILE), CLI flags, and environment
+// variables, in that order.
+func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.Block, err error) {
+	cfg = defaultConfig()
+	parseYamlConfig(&cfg)
+	parseCLIFlags(&cfg)
+	parseEnvironmentVariables(&cfg)
+
+	// check network
+	switch cfg.Network {
+	case "anagami":
+		network, genesis = chain.TestnetAnagami()
+	case "mainnet":
+		network, genesis = chain.Mainnet()
+	case "zen":
+		network, genesis = chain.TestnetZen()
+	default:
+		err = fmt.Errorf("unknown network '%s'", cfg.Network)
+		return
+	}
+
+	return
+}
+
+func sanitizeConfig(cfg *config.Config) error {
+	// parse remotes
+	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
+		cfg.Worker.Remotes = cfg.Worker.Remotes[:0]
+		for _, addr := range strings.Split(workerRemoteAddrsStr, ";") {
+			cfg.Worker.Remotes = append(cfg.Worker.Remotes, config.RemoteWorker{
+				Address:  addr,
+				Password: workerRemotePassStr,
+			})
+		}
+	}
+
+	// disable worker if remotes are set
+	if len(cfg.Worker.Remotes) > 0 {
+		cfg.Worker.Enabled = false
+	}
+
+	// combine host bucket bases
+	for _, base := range strings.Split(hostBasesStr, ",") {
+		if trimmed := strings.TrimSpace(base); trimmed != "" {
+			cfg.S3.HostBucketBases = append(cfg.S3.HostBucketBases, base)
+		}
+	}
+
+	// check that the API password is set
+	if cfg.HTTP.Password == "" {
+		if disableStdin {
+			return errors.New("API password must be set via environment variable or config file when --env flag is set")
+		}
+	}
+	setAPIPassword(cfg)
+
+	// check that the seed is set
+	if cfg.Seed == "" && (cfg.Worker.Enabled || cfg.Bus.RemoteAddr == "") { // only worker & bus require a seed
+		if disableStdin {
+			return errors.New("Seed must be set via environment variable or config file when --env flag is set")
+		}
+		setSeedPhrase(cfg)
+	}
+
+	// validate the seed is valid
+	if cfg.Seed != "" {
+		var rawSeed [32]byte
+		if err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed); err != nil {
+			return fmt.Errorf("failed to load wallet: %v", err)
+		}
+	}
+
+	// parse S3 auth keys
+	if cfg.S3.Enabled {
+		if !cfg.S3.DisableAuth && keyPairsV4 != "" {
+			var err error
+			cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
+			if err != nil {
+				return fmt.Errorf("failed to parse keypairs: %v", err)
+			}
+		}
+	}
+
+	// default log levels
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info"
+	}
+	if cfg.Log.Database.Level == "" {
+		cfg.Log.Database.Level = cfg.Log.Level
+	}
+
+	return nil
+}
+
+func parseYamlConfig(cfg *config.Config) {
+	configPath := "renterd.yml"
+	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
+		configPath = str
+	}
+
+	// If the config file doesn't exist, don't try to load it.
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return
+	}
+
+	f, err := os.Open(configPath)
+	if err != nil {
+		log.Fatal("failed to open config file:", err)
+	}
+	defer f.Close()
+
+	dec := yaml.NewDecoder(f)
+	dec.KnownFields(true)
+
+	if err := dec.Decode(&cfg); err != nil {
+		log.Fatal("failed to decode config file:", err)
+	}
+}
+
+func parseCLIFlags(cfg *config.Config) {
+	// deprecated - these go first so that they can be overwritten by the non-deprecated flags
+	flag.StringVar(&cfg.Log.Database.Level, "db.logger.logLevel", cfg.Log.Database.Level, "(deprecated) Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
+	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "(deprecated) Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
+	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "(deprecated) Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
+	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "(deprecated) Path to directory for logs (overrides with RENTERD_LOG_PATH)")
+
+	// node
+	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
+	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
+	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
+	flag.BoolVar(&cfg.AutoOpenWebUI, "openui", cfg.AutoOpenWebUI, "automatically open the web UI on startup")
+	flag.StringVar(&cfg.Network, "network", cfg.Network, "Network to connect to (mainnet|zen|anagami). Defaults to 'mainnet' (overrides with RENTERD_NETWORK)")
+
+	// logger
+	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
+	flag.BoolVar(&cfg.Log.File.Enabled, "log.file.enabled", cfg.Log.File.Enabled, "Enables logging to disk. Defaults to 'true'. (overrides with RENTERD_LOG_FILE_ENABLED)")
+	flag.StringVar(&cfg.Log.File.Format, "log.file.format", cfg.Log.File.Format, "Format of log file (json|human). Defaults to 'json' (overrides with RENTERD_LOG_FILE_FORMAT)")
+	flag.StringVar(&cfg.Log.File.Path, "log.file.path", cfg.Log.File.Path, "Path of log file. Defaults to 'renterd.log' within the renterd directory. (overrides with RENTERD_LOG_FILE_PATH)")
+	flag.BoolVar(&cfg.Log.StdOut.Enabled, "log.stdout.enabled", cfg.Log.StdOut.Enabled, "Enables logging to stdout. Defaults to 'true'. (overrides with RENTERD_LOG_STDOUT_ENABLED)")
+	flag.StringVar(&cfg.Log.StdOut.Format, "log.stdout.format", cfg.Log.StdOut.Format, "Format of log output (json|human). Defaults to 'human' (overrides with RENTERD_LOG_STDOUT_FORMAT)")
+	flag.BoolVar(&cfg.Log.StdOut.EnableANSI, "log.stdout.enableANSI", cfg.Log.StdOut.EnableANSI, "Enables ANSI color codes in log output. Defaults to 'true' on non-Windows systems. (overrides with RENTERD_LOG_STDOUT_ENABLE_ANSI)")
+	flag.BoolVar(&cfg.Log.Database.Enabled, "log.database.enabled", cfg.Log.Database.Enabled, "Enable logging database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_ENABLED)")
+	flag.StringVar(&cfg.Log.Database.Level, "log.database.level", cfg.Log.Database.Level, "Logger level for database queries (info|warn|error). Defaults to 'warn' (overrides with RENTERD_LOG_LEVEL and RENTERD_LOG_DATABASE_LEVEL)")
+	flag.BoolVar(&cfg.Log.Database.IgnoreRecordNotFoundError, "log.database.ignoreRecordNotFoundError", cfg.Log.Database.IgnoreRecordNotFoundError, "Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR)")
+	flag.DurationVar(&cfg.Log.Database.SlowThreshold, "log.database.slowThreshold", cfg.Log.Database.SlowThreshold, "Threshold for slow queries in logger. Defaults to 100ms (overrides with RENTERD_LOG_DATABASE_SLOW_THRESHOLD)")
+
+	// db
+	flag.StringVar(&cfg.Database.MySQL.URI, "db.uri", cfg.Database.MySQL.URI, "Database URI for the bus (overrides with RENTERD_DB_URI)")
+	flag.StringVar(&cfg.Database.MySQL.User, "db.user", cfg.Database.MySQL.User, "Database username for the bus (overrides with RENTERD_DB_USER)")
+	flag.StringVar(&cfg.Database.MySQL.Database, "db.name", cfg.Database.MySQL.Database, "Database name for the bus (overrides with RENTERD_DB_NAME)")
+	flag.StringVar(&cfg.Database.MySQL.MetricsDatabase, "db.metricsName", cfg.Database.MySQL.MetricsDatabase, "Database for metrics (overrides with RENTERD_DB_METRICS_NAME)")
+
+	// bus
+	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
+	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "Bootstraps gateway and consensus modules")
+	flag.StringVar(&cfg.Bus.GatewayAddr, "bus.gatewayAddr", cfg.Bus.GatewayAddr, "Address for Sia peer connections (overrides with RENTERD_BUS_GATEWAY_ADDR)")
+	flag.DurationVar(&cfg.Bus.PersistInterval, "bus.persistInterval", cfg.Bus.PersistInterval, "(deprecated) Interval for persisting consensus updates")
+	flag.DurationVar(&cfg.Bus.UsedUTXOExpiry, "bus.usedUTXOExpiry", cfg.Bus.UsedUTXOExpiry, "Expiry for used UTXOs in transactions")
+	flag.Int64Var(&cfg.Bus.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", cfg.Bus.SlabBufferCompletionThreshold, "Threshold for slab buffer upload (overrides with RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD)")
+
+	// worker
+	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "Allows hosts with private IPs")
+	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
+	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
+	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
+	flag.StringVar(&cfg.Worker.ID, "worker.id", cfg.Worker.ID, "Unique ID for worker (overrides with RENTERD_WORKER_ID)")
+	flag.DurationVar(&cfg.Worker.DownloadOverdriveTimeout, "worker.downloadOverdriveTimeout", cfg.Worker.DownloadOverdriveTimeout, "Timeout for overdriving slab downloads")
+	flag.Uint64Var(&cfg.Worker.UploadMaxMemory, "worker.uploadMaxMemory", cfg.Worker.UploadMaxMemory, "Max amount of RAM the worker allocates for slabs when uploading (overrides with RENTERD_WORKER_UPLOAD_MAX_MEMORY)")
+	flag.Uint64Var(&cfg.Worker.UploadMaxOverdrive, "worker.uploadMaxOverdrive", cfg.Worker.UploadMaxOverdrive, "Max overdrive workers for uploads")
+	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
+	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
+	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
+	flag.StringVar(&cfg.Worker.ExternalAddress, "worker.externalAddress", cfg.Worker.ExternalAddress, "Address of the worker on the network, only necessary when the bus is remote (overrides with RENTERD_WORKER_EXTERNAL_ADDR)")
+
+	// autopilot
+	flag.DurationVar(&cfg.Autopilot.AccountsRefillInterval, "autopilot.accountRefillInterval", cfg.Autopilot.AccountsRefillInterval, "Interval for refilling workers' account balances")
+	flag.DurationVar(&cfg.Autopilot.Heartbeat, "autopilot.heartbeat", cfg.Autopilot.Heartbeat, "Interval for autopilot loop execution")
+	flag.Float64Var(&cfg.Autopilot.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", cfg.Autopilot.MigrationHealthCutoff, "Threshold for migrating slabs based on health")
+	flag.DurationVar(&cfg.Autopilot.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", cfg.Autopilot.RevisionBroadcastInterval, "Interval for broadcasting contract revisions (overrides with RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL)")
+	flag.Uint64Var(&cfg.Autopilot.ScannerBatchSize, "autopilot.scannerBatchSize", cfg.Autopilot.ScannerBatchSize, "Batch size for host scanning")
+	flag.DurationVar(&cfg.Autopilot.ScannerInterval, "autopilot.scannerInterval", cfg.Autopilot.ScannerInterval, "Interval for scanning hosts")
+	flag.Uint64Var(&cfg.Autopilot.ScannerNumThreads, "autopilot.scannerNumThreads", cfg.Autopilot.ScannerNumThreads, "Number of threads for scanning hosts")
+	flag.Uint64Var(&cfg.Autopilot.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", cfg.Autopilot.MigratorParallelSlabsPerWorker, "Parallel slab migrations per worker (overrides with RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER)")
+	flag.BoolVar(&cfg.Autopilot.Enabled, "autopilot.enabled", cfg.Autopilot.Enabled, "Enables/disables autopilot (overrides with RENTERD_AUTOPILOT_ENABLED)")
+	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "Timeout for node shutdown")
+
+	// s3
+	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")
+	flag.BoolVar(&cfg.S3.DisableAuth, "s3.disableAuth", cfg.S3.DisableAuth, "Disables authentication for S3 API (overrides with RENTERD_S3_DISABLE_AUTH)")
+	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
+	flag.StringVar(&hostBasesStr, "s3.hostBases", "", "Enables bucket rewriting in the router for specific hosts provided via comma-separated list (overrides with RENTERD_S3_HOST_BUCKET_BASES)")
+	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router for all hosts (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
+
+	// custom usage
+	flag.Usage = func() {
+		log.Print(usageHeader)
+		flag.PrintDefaults()
+		log.Print(usageFooter)
+	}
+
+	flag.Parse()
+}
+
+func parseEnvironmentVariables(cfg *config.Config) {
+	// define helper function to parse environment variables
+	parseEnvVar := func(s string, v interface{}) {
+		if env, ok := os.LookupEnv(s); ok {
+			if _, err := fmt.Sscan(env, v); err != nil {
+				log.Fatalf("failed to parse %s: %v", s, err)
+			}
+			fmt.Printf("Using %s environment variable\n", s)
+		}
+	}
+
+	parseEnvVar("RENTERD_NETWORK", &cfg.Network)
+
+	parseEnvVar("RENTERD_BUS_REMOTE_ADDR", &cfg.Bus.RemoteAddr)
+	parseEnvVar("RENTERD_BUS_API_PASSWORD", &cfg.Bus.RemotePassword)
+	parseEnvVar("RENTERD_BUS_GATEWAY_ADDR", &cfg.Bus.GatewayAddr)
+	parseEnvVar("RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD", &cfg.Bus.SlabBufferCompletionThreshold)
+
+	parseEnvVar("RENTERD_DB_URI", &cfg.Database.MySQL.URI)
+	parseEnvVar("RENTERD_DB_USER", &cfg.Database.MySQL.User)
+	parseEnvVar("RENTERD_DB_PASSWORD", &cfg.Database.MySQL.Password)
+	parseEnvVar("RENTERD_DB_NAME", &cfg.Database.MySQL.Database)
+	parseEnvVar("RENTERD_DB_METRICS_NAME", &cfg.Database.MySQL.MetricsDatabase)
+
+	parseEnvVar("RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR", &cfg.Database.Log.IgnoreRecordNotFoundError)
+	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
+	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
+
+	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
+	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
+	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
+	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
+	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
+	parseEnvVar("RENTERD_WORKER_EXTERNAL_ADDR", &cfg.Worker.ExternalAddress)
+
+	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
+	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
+	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
+
+	parseEnvVar("RENTERD_S3_ADDRESS", &cfg.S3.Address)
+	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
+	parseEnvVar("RENTERD_S3_DISABLE_AUTH", &cfg.S3.DisableAuth)
+	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
+	parseEnvVar("RENTERD_S3_HOST_BUCKET_BASES", &cfg.S3.HostBucketBases)
+
+	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
+	parseEnvVar("RENTERD_LOG_LEVEL", &cfg.Log.Level)
+	parseEnvVar("RENTERD_LOG_FILE_ENABLED", &cfg.Log.File.Enabled)
+	parseEnvVar("RENTERD_LOG_FILE_FORMAT", &cfg.Log.File.Format)
+	parseEnvVar("RENTERD_LOG_FILE_PATH", &cfg.Log.File.Path)
+	parseEnvVar("RENTERD_LOG_STDOUT_ENABLED", &cfg.Log.StdOut.Enabled)
+	parseEnvVar("RENTERD_LOG_STDOUT_FORMAT", &cfg.Log.StdOut.Format)
+	parseEnvVar("RENTERD_LOG_STDOUT_ENABLE_ANSI", &cfg.Log.StdOut.EnableANSI)
+	parseEnvVar("RENTERD_LOG_DATABASE_ENABLED", &cfg.Log.Database.Enabled)
+	parseEnvVar("RENTERD_LOG_DATABASE_LEVEL", &cfg.Log.Database.Level)
+	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
+	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
+
+	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
+	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
+
+	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
+}
 
 // readPasswordInput reads a password from stdin.
 func readPasswordInput(context string) string {
@@ -147,7 +528,7 @@ func setListenAddress(context string, value *string, allowEmpty bool) {
 
 // setSeedPhrase prompts the user to enter a seed phrase if one is not already
 // set via environment variable or config file.
-func setSeedPhrase() {
+func setSeedPhrase(cfg *config.Config) {
 	// retry until a valid seed phrase is entered
 	for {
 		fmt.Println("")
@@ -203,7 +584,7 @@ func setSeedPhrase() {
 
 // setAPIPassword prompts the user to enter an API password if one is not
 // already set via environment variable or config file.
-func setAPIPassword() {
+func setAPIPassword(cfg *config.Config) {
 	// return early if the password is already set
 	if len(cfg.HTTP.Password) >= 4 {
 		return
@@ -224,7 +605,7 @@ func setAPIPassword() {
 	}
 }
 
-func setAdvancedConfig() {
+func setAdvancedConfig(cfg *config.Config) {
 	if !promptYesNo("Would you like to configure advanced settings?") {
 		return
 	}
@@ -251,10 +632,10 @@ func setAdvancedConfig() {
 	fmt.Println("The database is used to store the renter's metadata.")
 	fmt.Println("The embedded SQLite database requires no additional configuration and is ideal for testing or demo purposes.")
 	fmt.Println("For production usage, we recommend MySQL, which requires a separate MySQL server.")
-	setStoreConfig()
+	setStoreConfig(cfg)
 }
 
-func setStoreConfig() {
+func setStoreConfig(cfg *config.Config) {
 	store := promptQuestion("Which data store would you like to use?", []string{"mysql", "sqlite"})
 	switch store {
 	case "mysql":
@@ -278,7 +659,7 @@ func setStoreConfig() {
 	}
 }
 
-func setS3Config() {
+func setS3Config(cfg *config.Config) {
 	if !promptYesNo("Would you like to configure S3 settings?") {
 		return
 	}
