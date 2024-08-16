@@ -74,7 +74,7 @@ type (
 		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
 	}
 
-	ContractManager interface {
+	ContractLocker interface {
 		Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error)
 		KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error
 		Release(id types.FileContractID, lockID uint64) error
@@ -277,7 +277,6 @@ type Bus struct {
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
-	contractMgr ContractManager
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 
@@ -294,6 +293,7 @@ type Bus struct {
 	ss    SettingStore
 
 	accounts         *accounts
+	contractLocker   ContractLocker
 	uploadingSectors *uploadingSectorsCache
 
 	logger *zap.SugaredLogger
@@ -333,7 +333,7 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 	}
 
 	// create contract manager
-	b.contractMgr = ibus.NewContractManager()
+	b.contractLocker = ibus.NewContractLocker()
 
 	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)

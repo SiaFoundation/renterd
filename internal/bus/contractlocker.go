@@ -46,7 +46,7 @@ func (h *lockCandidatePriorityHeap) Pop() interface{} {
 	return x
 }
 
-type contractLocks struct {
+type ContractLocker struct {
 	mu    sync.Mutex
 	locks map[types.FileContractID]*contractLock
 }
@@ -65,13 +65,13 @@ type lockCandidate struct {
 	timedOut <-chan struct{}
 }
 
-func NewContractManager() *contractLocks {
-	return &contractLocks{
+func NewContractLocker() *ContractLocker {
+	return &ContractLocker{
 		locks: make(map[types.FileContractID]*contractLock),
 	}
 }
 
-func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) *contractLock {
+func (l *ContractLocker) lockForContractID(id types.FileContractID, create bool) *contractLock {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	lock, exists := l.locks[id]
@@ -86,7 +86,7 @@ func (l *contractLocks) lockForContractID(id types.FileContractID, create bool) 
 	return lock
 }
 
-func (lock *contractLock) setTimer(l *contractLocks, lockID uint64, id types.FileContractID, d time.Duration) {
+func (lock *contractLock) setTimer(l *ContractLocker, lockID uint64, id types.FileContractID, d time.Duration) {
 	lock.wakeupTimer = time.AfterFunc(d, func() {
 		l.Release(id, lockID)
 	})
@@ -112,7 +112,7 @@ func (l *contractLock) stopTimer() {
 // TODO: Extend this with some sort of priority. e.g. migrations would acquire a
 // lock with a low priority but contract maintenance would have a very high one
 // to avoid being starved by low prio tasks.
-func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error) {
+func (l *ContractLocker) Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error) {
 	lock := l.lockForContractID(id, true)
 
 	// Prepare a random lockID for ourselves.
@@ -156,7 +156,7 @@ func (l *contractLocks) Acquire(ctx context.Context, priority int, id types.File
 
 // KeepAlive refreshes the timer on a contract lock for a given contract if the
 // lockID matches the one on the lock.
-func (l *contractLocks) KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error {
+func (l *ContractLocker) KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error {
 	lock := l.lockForContractID(id, false)
 	if lock == nil {
 		return errors.New("lock not found")
@@ -174,7 +174,7 @@ func (l *contractLocks) KeepAlive(id types.FileContractID, lockID uint64, d time
 }
 
 // Release releases the contract lock for a given contract and lock id.
-func (l *contractLocks) Release(id types.FileContractID, lockID uint64) error {
+func (l *ContractLocker) Release(id types.FileContractID, lockID uint64) error {
 	if lockID == 0 {
 		return errors.New("can't release lock with id 0")
 	}
