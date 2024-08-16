@@ -49,34 +49,34 @@ jobs:
           host port: 3800
           mysql version: '8'
           mysql root password: test
-      # - name: Test Stores
-      #   uses: n8maninger/action-golang-test@v1
-      #   with:
-      #     args: "-race;-short"
-      # - name: Test Stores - MySQL
-      #   if: matrix.os == 'ubuntu-latest'
-      #   uses: n8maninger/action-golang-test@v1
-      #   env:
-      #     RENTERD_DB_URI: 127.0.0.1:3800
-      #     RENTERD_DB_USER: root
-      #     RENTERD_DB_PASSWORD: test
-      #   with:
-      #     package: "./stores"
-      #     args: "-race;-short"
+      - name: Test Stores
+        uses: n8maninger/action-golang-test@v1
+        with:
+          args: "-race;-short"
+      - name: Test Stores - MySQL
+        if: matrix.os == 'ubuntu-latest'
+        uses: n8maninger/action-golang-test@v1
+        env:
+          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_USER: root
+          RENTERD_DB_PASSWORD: test
+        with:
+          package: "./stores"
+          args: "-race;-short"
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-tags=testing;-timeout=60m;-count=100;-run=TestContractApplyChainUpdates"
-      # - name: Test Integration - MySQL
-      #   if: matrix.os == 'ubuntu-latest'
-      #   uses: n8maninger/action-golang-test@v1
-      #   env:
-      #     RENTERD_DB_URI: 127.0.0.1:3800
-      #     RENTERD_DB_USER: root
-      #     RENTERD_DB_PASSWORD: test
-      #   with:
-      #     package: "./internal/test/e2e/..."
-      #     args: "-failfast;-race;-tags=testing;-timeout=60m"
+          args: "-failfast;-race;-tags=testing;-timeout=60m"
+      - name: Test Integration - MySQL
+        if: matrix.os == 'ubuntu-latest'
+        uses: n8maninger/action-golang-test@v1
+        env:
+          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_USER: root
+          RENTERD_DB_PASSWORD: test
+        with:
+          package: "./internal/test/e2e/..."
+          args: "-failfast;-race;-tags=testing;-timeout=60m"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
