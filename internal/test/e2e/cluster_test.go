@@ -1091,6 +1091,22 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
 	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	if err != nil {
+		sce, err := hosts[0].wallet.SpendableOutputs()
+		if err != nil {
+			panic(err)
+		}
+		t.Log("spendable outputs:")
+		for _, so := range sce {
+			t.Log(so)
+		}
+		bal, err := hosts[0].wallet.Balance()
+		if err != nil {
+			panic(err)
+		}
+		t.Log("balance:", bal)
+		t.Fatal(err)
+	}
 	tt.OK(err)
 	contract, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
 	tt.OK(err)
