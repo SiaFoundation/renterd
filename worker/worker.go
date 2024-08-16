@@ -637,7 +637,7 @@ func (w *Worker) rhpRenewHandler(jc jape.Context) {
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var contractPrice, fundAmount types.Currency
-	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, func(_ types.FileContractRevision) (err error) {
+	if jc.Check("couldn't renew contract", w.withContractLock(ctx, rrr.ContractID, lockingPriorityRenew, func() (err error) {
 		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
 		renewed, txnSet, contractPrice, fundAmount, err = h.RenewContract(ctx, rrr)
 		return err
