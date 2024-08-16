@@ -1437,11 +1437,6 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
 	}
 
-	subnets, err := utils.AddressesToSubnets(resolvedAddresses)
-	if err != nil {
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, fmt.Errorf("failed to convert addresses to subnets: %w", err)
-	}
-
 	// scan: first try
 	settings, pt, duration, err := scan()
 	if err != nil {
@@ -1480,7 +1475,6 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 			HostKey:           hostKey,
 			PriceTable:        pt,
 			ResolvedAddresses: resolvedAddresses,
-			Subnets:           subnets,
 
 			// NOTE: A scan is considered successful if both fetching the price
 			// table and the settings succeeded. Right now scanning can't fail
