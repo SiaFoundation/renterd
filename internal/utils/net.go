@@ -41,7 +41,7 @@ func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
 	for _, addr := range resolvedAddresses {
 		parsed := net.ParseIP(addr)
 		if parsed == nil {
-			return nil, errors.New("failed to parse address")
+			return nil, fmt.Errorf("failed to parse address: %s", addr)
 		}
 
 		// figure out the IP range
@@ -54,7 +54,7 @@ func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
 		cidr := fmt.Sprintf("%s/%d", parsed.String(), ipRange)
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to parse cidr: %w", err)
 		}
 
 		subnets = append(subnets, ipnet.String())
