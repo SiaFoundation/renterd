@@ -234,7 +234,6 @@ func TestPinManager(t *testing.T) {
 
 	// configure all pins but disable them for now
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MaxRPCPrice = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
 	ms.updatPinnedSettings(pps)
@@ -260,14 +259,12 @@ func TestPinManager(t *testing.T) {
 
 	// enable the rest of the pins
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	pps.GougingSettingsPins.MaxRPCPrice.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
 	ms.updatPinnedSettings(pps)
 
 	// assert they're all updated
 	if gss := ms.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
-		gss.MaxRPCPrice.Equals(gs.MaxRPCPrice) ||
 		gss.MaxStoragePrice.Equals(gs.MaxStoragePrice) ||
 		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss, gs)
