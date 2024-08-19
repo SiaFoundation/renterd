@@ -68,7 +68,11 @@ func (wmr *WalletMetricsRecorder) run(interval time.Duration) {
 				}); err != nil {
 					wmr.logger.Error("failed to record wallet metric", zap.Error(err))
 				} else {
-					wmr.logger.Debug("successfully recorded wallet metrics")
+					wmr.logger.Debugw("successfully recorded wallet metrics",
+						zap.Stringer("spendable", balance.Spendable),
+						zap.Stringer("confirmed", balance.Confirmed),
+						zap.Stringer("unconfirmed", balance.Unconfirmed),
+						zap.Stringer("immature", balance.Immature))
 				}
 				cancel()
 			}
