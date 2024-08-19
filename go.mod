@@ -9,7 +9,7 @@ require (
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.3
 	github.com/mattn/go-sqlite3 v1.14.22
-	github.com/minio/minio-go/v7 v7.0.74
+	github.com/minio/minio-go/v7 v7.0.75
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.4.3
