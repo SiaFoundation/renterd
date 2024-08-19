@@ -147,9 +147,9 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	prepareRenew := func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, func(context.Context, types.Transaction, *error), error) {
 		resp, err := h.bus.WalletPrepareRenew(ctx, revision, hostAddress, renterAddress, renterKey, renterFunds, minNewCollateral, maxFundAmount, pt, endHeight, windowSize, expectedStorage)
 		if err != nil {
-			return api.WalletPrepareRenewResponse{}, discardTxn, err
+			return api.WalletPrepareRenewResponse{}, nil, err
 		}
-		return resp, nil, nil
+		return resp, discardTxn, nil
 	}
 
 	// renew contract
