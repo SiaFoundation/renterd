@@ -30,6 +30,7 @@ func (p *transportPoolV3) withTransport(ctx context.Context, hostKey types.Publi
 	t, found := p.pool[siamuxAddr]
 	if !found {
 		t = &transportV3{
+			dialer:     p.dialer,
 			hostKey:    hostKey,
 			siamuxAddr: siamuxAddr,
 		}
