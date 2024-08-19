@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -52,6 +54,18 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
+	AccountManager interface {
+		Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error)
+		Accounts() []api.Account
+		AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
+		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64)
+		ResetDrift(id rhpv3.Account) error
+		SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int)
+		ScheduleSync(id rhpv3.Account, hk types.PublicKey) error
+		Shutdown(context.Context) error
+		UnlockAccount(id rhpv3.Account, lockID uint64) error
+	}
+
 	AlertManager interface {
 		alerts.Alerter
 		RegisterWebhookBroadcaster(b webhooks.Broadcaster)
@@ -74,6 +88,12 @@ type (
 		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
 	}
 
+	ContractLocker interface {
+		Acquire(ctx context.Context, priority int, id types.FileContractID, d time.Duration) (uint64, error)
+		KeepAlive(id types.FileContractID, lockID uint64, d time.Duration) error
+		Release(id types.FileContractID, lockID uint64) error
+	}
+
 	ChainSubscriber interface {
 		ChainIndex(context.Context) (types.ChainIndex, error)
 		Shutdown(context.Context) error
@@ -86,6 +106,15 @@ type (
 		RecommendedFee() types.Currency
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
+	}
+
+	UploadingSectorsCache interface {
+		AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error
+		FinishUpload(uID api.UploadID)
+		HandleRenewal(fcid, renewedFrom types.FileContractID)
+		Pending(fcid types.FileContractID) (size uint64)
+		Sectors(fcid types.FileContractID) (roots []types.Hash256)
+		StartUpload(uID api.UploadID) error
 	}
 
 	PinManager interface {
@@ -131,13 +160,22 @@ type (
 
 	// Store is a collection of stores used by the bus.
 	Store interface {
+		AccountStore
 		AutopilotStore
 		ChainStore
-		EphemeralAccountStore
 		HostStore
 		MetadataStore
 		MetricsStore
 		SettingStore
+	}
+
+	// AccountStore persists information about accounts. Since accounts
+	// are rapidly updated and can be recovered, they are only loaded upon
+	// startup and persisted upon shutdown.
+	AccountStore interface {
+		Accounts(context.Context) ([]api.Account, error)
+		SaveAccounts(context.Context, []api.Account) error
+		SetUncleanShutdown(context.Context) error
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -151,15 +189,6 @@ type (
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
-	}
-
-	// EphemeralAccountStore persists information about accounts. Since accounts
-	// are rapidly updated and can be recovered, they are only loaded upon
-	// startup and persisted upon shutdown.
-	EphemeralAccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
-		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
 	}
 
 	// A HostStore stores information about hosts.
@@ -269,45 +298,41 @@ type (
 type Bus struct {
 	startTime time.Time
 
+	accountsMgr AccountManager
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
-
-	cm ChainManager
-	cs ChainSubscriber
-	s  Syncer
-	w  Wallet
+	cm          ChainManager
+	cs          ChainSubscriber
+	s           Syncer
+	w           Wallet
 
 	as    AutopilotStore
-	eas   EphemeralAccountStore
 	hs    HostStore
 	ms    MetadataStore
 	mtrcs MetricsStore
 	ss    SettingStore
 
-	accounts         *accounts
-	contractLocks    *contractLocks
-	uploadingSectors *uploadingSectorsCache
+	contractLocker ContractLocker
+	sectors        UploadingSectorsCache
 
 	logger *zap.SugaredLogger
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (*Bus, error) {
+func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
+
 	b := &Bus{
-		s:                s,
-		cm:               cm,
-		w:                w,
-		hs:               store,
-		as:               store,
-		ms:               store,
-		mtrcs:            store,
-		ss:               store,
-		eas:              store,
-		contractLocks:    newContractLocks(),
-		uploadingSectors: newUploadingSectorsCache(),
+		s:     s,
+		cm:    cm,
+		w:     w,
+		hs:    store,
+		as:    store,
+		ms:    store,
+		mtrcs: store,
+		ss:    store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -317,15 +342,22 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 		startTime: time.Now(),
 	}
 
-	// init accounts
-	if err := b.initAccounts(ctx); err != nil {
-		return nil, err
-	}
-
 	// init settings
 	if err := b.initSettings(ctx); err != nil {
 		return nil, err
 	}
+
+	// create account manager
+	b.accountsMgr, err = ibus.NewAccountManager(ctx, store, l)
+	if err != nil {
+		return nil, err
+	}
+
+	// create contract locker
+	b.contractLocker = ibus.NewContractLocker()
+
+	// create sectors cache
+	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
@@ -482,28 +514,11 @@ func (b *Bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *Bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
-		b.saveAccounts(ctx),
+		b.accountsMgr.Shutdown(ctx),
 		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Shutdown(ctx),
 		b.cs.Shutdown(ctx),
 	)
-}
-
-// initAccounts loads the accounts into memory
-func (b *Bus) initAccounts(ctx context.Context) error {
-	accounts, err := b.eas.Accounts(ctx)
-	if err != nil {
-		return err
-	}
-	b.accounts = newAccounts(accounts, b.logger)
-
-	// mark the shutdown as unclean, this will be overwritten when/if the
-	// accounts are saved on shutdown
-	if err := b.eas.SetUncleanShutdown(ctx); err != nil {
-		return fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
-	}
-
-	return nil
 }
 
 // initSettings loads the default settings if the setting is not already set and
@@ -581,17 +596,5 @@ func (b *Bus) initSettings(ctx context.Context) error {
 		}
 	}
 
-	return nil
-}
-
-// saveAccounts saves the accounts to the db when the bus is stopped
-func (b *Bus) saveAccounts(ctx context.Context) error {
-	accounts := b.accounts.ToPersist()
-	if err := b.eas.SaveAccounts(ctx, accounts); err != nil {
-		b.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
-		return err
-	}
-
-	b.logger.Infof("successfully saved %v accounts", len(accounts))
 	return nil
 }

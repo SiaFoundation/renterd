@@ -9,7 +9,7 @@ require (
 	github.com/gotd/contrib v0.20.0
 	github.com/klauspost/reedsolomon v1.12.3
 	github.com/mattn/go-sqlite3 v1.14.22
-	github.com/minio/minio-go/v7 v7.0.74
+	github.com/minio/minio-go/v7 v7.0.75
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.4.3
@@ -18,7 +18,7 @@ require (
 	go.sia.tech/hostd v1.1.3-0.20240807214810-c2d8ed84dc45
 	go.sia.tech/jape v0.12.0
 	go.sia.tech/mux v1.2.0
-	go.sia.tech/web/renterd v0.58.0
+	go.sia.tech/web/renterd v0.59.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.26.0
 	golang.org/x/sys v0.24.0

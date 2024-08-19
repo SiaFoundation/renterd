@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	iworker "go.sia.tech/renterd/internal/worker"
+
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -135,6 +137,7 @@ type transportV3 struct {
 	mu         sync.Mutex
 	hostKey    types.PublicKey
 	siamuxAddr string
+	dialer     *iworker.FallbackDialer
 	t          *rhpv3.Transport
 }
 
@@ -174,7 +177,7 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
 	if t.t == nil {
 		start := time.Now()
-		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
+		newTransport, err := dialTransport(ctx, t.dialer, t.siamuxAddr, t.hostKey)
 		if err != nil {
 			t.mu.Unlock()
 			return nil, fmt.Errorf("DialStream: %w: %w (%v)", errDialTransport, err, time.Since(start))
@@ -211,19 +214,22 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
 type transportPoolV3 struct {
+	dialer *iworker.FallbackDialer
+
 	mu   sync.Mutex
 	pool map[string]*transportV3
 }
 
-func newTransportPoolV3() *transportPoolV3 {
+func newTransportPoolV3(dialer *iworker.FallbackDialer) *transportPoolV3 {
 	return &transportPoolV3{
-		pool: make(map[string]*transportV3),
+		dialer: dialer,
+		pool:   make(map[string]*transportV3),
 	}
 }
 
-func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+func dialTransport(ctx context.Context, dialer *iworker.FallbackDialer, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
 	// Dial host.
-	conn, err := dial(ctx, siamuxAddr)
+	conn, err := dialer.Dial(ctx, hostKey, siamuxAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -253,6 +259,7 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 		t = &transportV3{
 			hostKey:    hostKey,
 			siamuxAddr: siamuxAddr,
+			dialer:     p.dialer,
 		}
 		p.pool[siamuxAddr] = t
 	}
@@ -410,7 +417,7 @@ func (w *Worker) initTransportPool() {
 	if w.transportPoolV3 != nil {
 		panic("transport pool already initialized") // developer error
 	}
-	w.transportPoolV3 = newTransportPoolV3()
+	w.transportPoolV3 = newTransportPoolV3(w.dialer)
 }
 
 // ForHost returns an account to use for a given host. If the account

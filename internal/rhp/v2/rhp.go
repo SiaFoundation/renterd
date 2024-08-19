@@ -68,15 +68,21 @@ var (
 )
 
 type (
+	Dialer interface {
+		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
+	}
+
 	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
 )
 
 type Client struct {
+	dialer Dialer
 	logger *zap.SugaredLogger
 }
 
-func New(logger *zap.Logger) *Client {
+func New(dialer Dialer, logger *zap.Logger) *Client {
 	return &Client{
+		dialer: dialer,
 		logger: logger.Sugar().Named("rhp2"),
 	}
 }
@@ -569,8 +575,8 @@ func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingChecker gougi
 	return fn(t, rev, settings)
 }
 
-func (w *Client) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+func (c *Client) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
+	conn, err := c.dialer.Dial(ctx, hostKey, hostIP)
 	if err != nil {
 		return err
 	}

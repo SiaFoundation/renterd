@@ -820,7 +820,7 @@ func (b *Bus) contractAcquireHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	lockID, err := b.contractLocks.Acquire(jc.Request.Context(), req.Priority, id, time.Duration(req.Duration))
+	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), req.Priority, id, time.Duration(req.Duration))
 	if jc.Check("failed to acquire contract", err) != nil {
 		return
 	}
@@ -839,7 +839,7 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	err := b.contractLocks.KeepAlive(id, req.LockID, time.Duration(req.Duration))
+	err := b.contractLocker.KeepAlive(id, req.LockID, time.Duration(req.Duration))
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
 	}
@@ -860,7 +860,7 @@ func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		// adjust the amount of prunable data with the pending uploads, due to
 		// how we record contract spending a contract's size might already
 		// include pending sectors
-		pending := b.uploadingSectors.Pending(fcid)
+		pending := b.sectors.Pending(fcid)
 		if pending > size.Prunable {
 			size.Prunable = 0
 		} else {
@@ -907,7 +907,7 @@ func (b *Bus) contractSizeHandlerGET(jc jape.Context) {
 	// adjust the amount of prunable data with the pending uploads, due to how
 	// we record contract spending a contract's size might already include
 	// pending sectors
-	pending := b.uploadingSectors.Pending(id)
+	pending := b.sectors.Pending(id)
 	if pending > size.Prunable {
 		size.Prunable = 0
 	} else {
@@ -926,7 +926,7 @@ func (b *Bus) contractReleaseHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if jc.Check("failed to release contract", b.contractLocks.Release(id, req.LockID)) != nil {
+	if jc.Check("failed to release contract", b.contractLocker.Release(id, req.LockID)) != nil {
 		return
 	}
 }
@@ -985,7 +985,7 @@ func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	b.uploadingSectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
+	b.sectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
 	b.broadcastAction(webhooks.Event{
 		Module: api.ModuleContract,
 		Event:  api.EventRenew,
@@ -1008,7 +1008,7 @@ func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
 		jc.Encode(api.ContractRootsResponse{
 			Roots:     roots,
-			Uploading: b.uploadingSectors.Sectors(id),
+			Uploading: b.sectors.Sectors(id),
 		})
 	}
 }
@@ -1719,7 +1719,7 @@ func (b *Bus) handlePOSTAlertsRegister(jc jape.Context) {
 }
 
 func (b *Bus) accountsHandlerGET(jc jape.Context) {
-	jc.Encode(b.accounts.Accounts())
+	jc.Encode(b.accountsMgr.Accounts())
 }
 
 func (b *Bus) accountHandlerGET(jc jape.Context) {
@@ -1731,7 +1731,7 @@ func (b *Bus) accountHandlerGET(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	acc, err := b.accounts.Account(id, req.HostKey)
+	acc, err := b.accountsMgr.Account(id, req.HostKey)
 	if jc.Check("failed to fetch account", err) != nil {
 		return
 	}
@@ -1755,7 +1755,7 @@ func (b *Bus) accountsAddHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.AddAmount(id, req.HostKey, req.Amount)
+	b.accountsMgr.AddAmount(id, req.HostKey, req.Amount)
 }
 
 func (b *Bus) accountsResetDriftHandlerPOST(jc jape.Context) {
@@ -1763,8 +1763,8 @@ func (b *Bus) accountsResetDriftHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	err := b.accounts.ResetDrift(id)
-	if errors.Is(err, errAccountsNotFound) {
+	err := b.accountsMgr.ResetDrift(id)
+	if errors.Is(err, ibus.ErrAccountNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1790,7 +1790,7 @@ func (b *Bus) accountsUpdateHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	b.accounts.SetBalance(id, req.HostKey, req.Amount)
+	b.accountsMgr.SetBalance(id, req.HostKey, req.Amount)
 }
 
 func (b *Bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
@@ -1810,8 +1810,8 @@ func (b *Bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
 		return
 	}
-	err := b.accounts.ScheduleSync(id, req.HostKey)
-	if errors.Is(err, errAccountsNotFound) {
+	err := b.accountsMgr.ScheduleSync(id, req.HostKey)
+	if errors.Is(err, ibus.ErrAccountNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -1830,7 +1830,7 @@ func (b *Bus) accountsLockHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	acc, lockID := b.accounts.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
+	acc, lockID := b.accountsMgr.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
 	jc.Encode(api.AccountsLockHandlerResponse{
 		Account: acc,
 		LockID:  lockID,
@@ -1847,7 +1847,7 @@ func (b *Bus) accountsUnlockHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	err := b.accounts.UnlockAccount(id, req.LockID)
+	err := b.accountsMgr.UnlockAccount(id, req.LockID)
 	if jc.Check("failed to unlock account", err) != nil {
 		return
 	}
@@ -1955,7 +1955,7 @@ func (b *Bus) stateHandlerGET(jc jape.Context) {
 func (b *Bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		jc.Check("failed to track upload", b.uploadingSectors.StartUpload(id))
+		jc.Check("failed to track upload", b.sectors.StartUpload(id))
 	}
 }
 
@@ -1968,13 +1968,13 @@ func (b *Bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	jc.Check("failed to add sector", b.uploadingSectors.AddSector(id, req.ContractID, req.Root))
+	jc.Check("failed to add sector", b.sectors.AddSector(id, req.ContractID, req.Root))
 }
 
 func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		b.uploadingSectors.FinishUpload(id)
+		b.sectors.FinishUpload(id)
 	}
 }
 

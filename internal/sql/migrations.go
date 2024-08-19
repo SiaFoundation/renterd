@@ -194,9 +194,15 @@ var (
 				},
 			},
 			{
-				ID: "00014_reset_drift",
+				ID: "00014_hosts_resolvedaddresses",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00014_reset_drift", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00014_hosts_resolvedaddresses", log)
+				},
+			},
+			{
+				ID: "00015_reset_drift",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00015_reset_drift", log)
 				},
 			},
 		}
