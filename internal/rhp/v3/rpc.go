@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/utils"
-	"go.uber.org/zap"
 )
 
 type (
@@ -32,8 +31,8 @@ type (
 	SignFunc func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 )
 
-// RPCPriceTable calls the UpdatePriceTable RPC.
-func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ api.HostPriceTable, err error) {
+// rpcPriceTable calls the UpdatePriceTable RPC.
+func rpcPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePaymentFunc) (_ api.HostPriceTable, err error) {
 	defer utils.WrapErr(ctx, "PriceTable", &err)
 
 	s, err := t.DialStream(ctx)
@@ -69,8 +68,8 @@ func RPCPriceTable(ctx context.Context, t *transportV3, paymentFunc PriceTablePa
 	}
 }
 
-// RPCAccountBalance calls the AccountBalance RPC.
-func RPCAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
+// rpcAccountBalance calls the AccountBalance RPC.
+func rpcAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (bal types.Currency, err error) {
 	defer utils.WrapErr(ctx, "AccountBalance", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -94,8 +93,8 @@ func RPCAccountBalance(ctx context.Context, t *transportV3, payment rhpv3.Paymen
 	return resp.Balance, nil
 }
 
-// RPCFundAccount calls the FundAccount RPC.
-func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (err error) {
+// rpcFundAccount calls the FundAccount RPC.
+func rpcFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMethod, account rhpv3.Account, settingsID rhpv3.SettingsID) (err error) {
 	defer utils.WrapErr(ctx, "FundAccount", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -119,10 +118,10 @@ func RPCFundAccount(ctx context.Context, t *transportV3, payment rhpv3.PaymentMe
 	return nil
 }
 
-// RPCLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
+// rpcLatestRevision calls the LatestRevision RPC. The paymentFunc allows for
 // fetching a pricetable using the fetched revision to pay for it. If
 // paymentFunc returns 'nil' as payment, the host is not paid.
-func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID) (_ types.FileContractRevision, err error) {
+func rpcLatestRevision(ctx context.Context, t *transportV3, contractID types.FileContractID) (_ types.FileContractRevision, err error) {
 	defer utils.WrapErr(ctx, "LatestRevision", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -141,8 +140,8 @@ func RPCLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 	return resp.Revision, nil
 }
 
-// RPCReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
+// rpcReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
+func rpcReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
 	defer utils.WrapErr(ctx, "ReadSector", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -206,7 +205,7 @@ func RPCReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.Ho
 	return
 }
 
-func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) (cost types.Currency, err error) {
+func rpcAppendSector(ctx context.Context, t *transportV3, renterKey types.PrivateKey, pt rhpv3.HostPriceTable, rev *types.FileContractRevision, payment rhpv3.PaymentMethod, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) (cost types.Currency, err error) {
 	defer utils.WrapErr(ctx, "AppendSector", &err)
 
 	// sanity check revision first
@@ -344,7 +343,7 @@ func RPCAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	return
 }
 
-func RPCRenew(ctx context.Context, rrr api.RHPRenewRequest, gougingChecker gouging.Checker, prepareRenew PrepareRenewFunc, signTxn SignFunc, t *transportV3, rev types.FileContractRevision, renterKey types.PrivateKey, l *zap.SugaredLogger) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
+func rpcRenew(ctx context.Context, rrr api.RHPRenewRequest, gougingChecker gouging.Checker, prepareRenew PrepareRenewFunc, signTxn SignFunc, t *transportV3, rev types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
 	defer utils.WrapErr(ctx, "RPCRenew", &err)
 
 	s, err := t.DialStream(ctx)

@@ -133,7 +133,7 @@ func (c *Client) AppendSector(ctx context.Context, sectorRoot types.Hash256, sec
 
 	var cost types.Currency
 	err = c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		cost, err = RPCAppendSector(ctx, t, rk, pt, rev, &payment, sectorRoot, sector)
+		cost, err = rpcAppendSector(ctx, t, rk, pt, rev, &payment, sectorRoot, sector)
 		return err
 	})
 	return cost, err
@@ -145,13 +145,13 @@ func (c *Client) FundAccount(ctx context.Context, rev *types.FileContractRevisio
 		return fmt.Errorf("failed to create payment: %w", err)
 	}
 	return c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		return RPCFundAccount(ctx, t, &ppcr, accID, pt)
+		return rpcFundAccount(ctx, t, &ppcr, accID, pt)
 	})
 }
 
 func (c *Client) Renew(ctx context.Context, rrr api.RHPRenewRequest, gougingChecker gouging.Checker, renewer PrepareRenewFunc, signer SignFunc, rev types.FileContractRevision, renterKey types.PrivateKey) (newRev rhpv2.ContractRevision, txnSet []types.Transaction, contractPrice, fundAmount types.Currency, err error) {
 	err = c.tpool.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
-		newRev, txnSet, contractPrice, fundAmount, err = RPCRenew(ctx, rrr, gougingChecker, renewer, signer, t, rev, renterKey, c.logger)
+		newRev, txnSet, contractPrice, fundAmount, err = rpcRenew(ctx, rrr, gougingChecker, renewer, signer, t, rev, renterKey)
 		return err
 	})
 	return
@@ -164,7 +164,7 @@ func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevisio
 		if err != nil {
 			return err
 		}
-		balance, err = RPCAccountBalance(ctx, t, &payment, accID, pt)
+		balance, err = rpcAccountBalance(ctx, t, &payment, accID, pt)
 		return err
 	})
 	return balance, err
@@ -172,7 +172,7 @@ func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevisio
 
 func (c *Client) PriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, paymentFn PriceTablePaymentFunc) (pt api.HostPriceTable, err error) {
 	err = c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		pt, err = RPCPriceTable(ctx, t, paymentFn)
+		pt, err = rpcPriceTable(ctx, t, paymentFn)
 		return err
 	})
 	return
@@ -180,7 +180,7 @@ func (c *Client) PriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr 
 
 func (c *Client) PriceTableUnpaid(ctx context.Context, hk types.PublicKey, siamuxAddr string) (pt api.HostPriceTable, err error) {
 	err = c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		pt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
+		pt, err = rpcPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		if err != nil {
 			return fmt.Errorf("failed to fetch host price table: %w", err)
 		}
@@ -198,7 +198,7 @@ func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root typ
 		}
 
 		payment := rhpv3.PayByEphemeralAccount(accID, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, accKey)
-		cost, refund, err := RPCReadSector(ctx, t, w, pt, &payment, offset, length, root)
+		cost, refund, err := rpcReadSector(ctx, t, w, pt, &payment, offset, length, root)
 		if err != nil {
 			return err
 		}
@@ -211,7 +211,7 @@ func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root typ
 
 func (c *Client) Revision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) (rev types.FileContractRevision, err error) {
 	return rev, c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		rev, err = RPCLatestRevision(ctx, t, fcid)
+		rev, err = rpcLatestRevision(ctx, t, fcid)
 		return err
 	})
 }

@@ -1474,18 +1474,6 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	return settings, pt, duration, err
 }
 
-func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
-	if *err == nil {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	if dErr := bus.WalletDiscard(ctx, txn); dErr != nil {
-		l.Errorf("%v: %s, failed to discard txn: %v", *err, errContext, dErr)
-	}
-	cancel()
-}
-
 func isErrHostUnreachable(err error) bool {
 	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
 		utils.IsErr(err, context.DeadlineExceeded) ||

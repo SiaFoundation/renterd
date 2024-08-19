@@ -124,31 +124,40 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 		return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, types.ZeroCurrency, err
 	}
 
-	// Renew contract.
-	rev, txnSet, contractPrice, fundAmount, err := h.client.Renew(ctx, rrr, gc, func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, func(context.Context, types.Transaction, *error), error) {
-		// prepare renew
-		resp, err := h.bus.WalletPrepareRenew(ctx, revision, hostAddress, renterAddress, renterKey, renterFunds, minNewCollateral, maxFundAmount, pt, endHeight, windowSize, expectedStorage)
-		if err != nil {
-			return api.WalletPrepareRenewResponse{}, h.discardTxnOnError, err
+	// helper to discard txn on error
+	discardTxn := func(ctx context.Context, txn types.Transaction, err *error) {
+		if *err == nil {
+			return
 		}
-		return resp, nil, nil
-	}, func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
+
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if dErr := h.bus.WalletDiscard(ctx, txn); dErr != nil {
+			h.logger.Errorf("%v: %s, failed to discard txn: %v", *err, dErr)
+		}
+		cancel()
+	}
+
+	// helper to sign txn
+	signTxn := func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
 		// sign txn
 		return h.bus.WalletSign(ctx, txn, toSign, cf)
-	}, revision, h.renterKey)
+	}
+
+	// helper to prepare contract renewal
+	prepareRenew := func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, func(context.Context, types.Transaction, *error), error) {
+		resp, err := h.bus.WalletPrepareRenew(ctx, revision, hostAddress, renterAddress, renterKey, renterFunds, minNewCollateral, maxFundAmount, pt, endHeight, windowSize, expectedStorage)
+		if err != nil {
+			return api.WalletPrepareRenewResponse{}, discardTxn, err
+		}
+		return resp, nil, nil
+	}
+
+	// renew contract
+	rev, txnSet, contractPrice, fundAmount, err := h.client.Renew(ctx, rrr, gc, prepareRenew, signTxn, revision, h.renterKey)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, contractPrice, fundAmount, err
 	}
 	return rev, txnSet, contractPrice, fundAmount, err
-}
-
-func (h *host) discardTxnOnError(ctx context.Context, txn types.Transaction, err *error) {
-	if *err != nil {
-		h.logger.Error("discarding transaction due to error", zap.Error(*err))
-		if err := h.bus.WalletDiscard(ctx, txn); err != nil {
-			h.logger.Error("failed to discard transaction", zap.Error(err))
-		}
-	}
 }
 
 func (h *host) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {
