@@ -812,8 +812,10 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	fundAmt := types.Siacoins(25e3)
-	c.tt.OKAll(c.Bus.SendSiacoins(context.Background(), h.WalletAddress(), fundAmt, true))
+	fundAmt := types.Siacoins(5e3)
+	for i := 0; i < 5; i++ {
+		c.tt.OKAll(c.Bus.SendSiacoins(context.Background(), h.WalletAddress(), fundAmt, true))
+	}
 
 	// Mine transaction.
 	c.MineBlocks(1)
@@ -834,8 +836,8 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
 	c.tt.OK(announceHosts([]*Host{h}))
 
-	// Mine a few blocks. The host should show up eventually.
-	c.tt.Retry(10, time.Second, func() error {
+	// Mine until the host shows up.
+	c.tt.Retry(100, 100*time.Millisecond, func() error {
 		c.tt.Helper()
 
 		_, err := c.Bus.Host(context.Background(), h.PublicKey())

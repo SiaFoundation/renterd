@@ -36,7 +36,34 @@ func init() {
 	}
 }
 
-func ResolveHostIP(ctx context.Context, hostIP string) (subnets []string, private bool, _ error) {
+func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
+	var subnets []string
+	for _, addr := range resolvedAddresses {
+		parsed := net.ParseIP(addr)
+		if parsed == nil {
+			return nil, fmt.Errorf("failed to parse address: %s", addr)
+		}
+
+		// figure out the IP range
+		ipRange := ipv6FilterRange
+		if parsed.To4() != nil {
+			ipRange = ipv4FilterRange
+		}
+
+		// parse the subnet
+		cidr := fmt.Sprintf("%s/%d", parsed.String(), ipRange)
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse cidr: %w", err)
+		}
+
+		subnets = append(subnets, ipnet.String())
+	}
+
+	return subnets, nil
+}
+
+func ResolveHostIP(ctx context.Context, hostIP string) (ips []string, private bool, _ error) {
 	// resolve host address
 	host, _, err := net.SplitHostPort(hostIP)
 	if err != nil {
@@ -52,30 +79,17 @@ func ResolveHostIP(ctx context.Context, hostIP string) (subnets []string, privat
 		return nil, false, fmt.Errorf("%w: %+v", ErrHostTooManyAddresses, addrs)
 	}
 
-	// parse out subnets
+	// get ips
 	for _, address := range addrs {
 		private = private || isPrivateIP(address.IP)
 
-		// figure out the IP range
-		ipRange := ipv6FilterRange
-		if address.IP.To4() != nil {
-			ipRange = ipv4FilterRange
-		}
-
-		// parse the subnet
-		cidr := fmt.Sprintf("%s/%d", address.String(), ipRange)
-		_, ipnet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			continue
-		}
-
 		// add it
-		subnets = append(subnets, ipnet.String())
+		ips = append(ips, address.IP.String())
 	}
 
-	// sort the subnets
-	sort.Slice(subnets, func(i, j int) bool {
-		return subnets[i] < subnets[j]
+	// sort the ips
+	sort.Slice(ips, func(i, j int) bool {
+		return ips[i] < ips[j]
 	})
 	return
 }

@@ -167,7 +167,6 @@ type (
 	// pinned.
 	GougingSettingsPins struct {
 		MaxDownload Pin `json:"maxDownload"`
-		MaxRPCPrice Pin `json:"maxRPCPrice"`
 		MaxStorage  Pin `json:"maxStorage"`
 		MaxUpload   Pin `json:"maxUpload"`
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -216,6 +217,7 @@ type Worker struct {
 	uploadManager   *uploadManager
 
 	accounts    *accounts
+	dialer      *iworker.FallbackDialer
 	cache       iworker.WorkerCache
 	priceTables *priceTables
 
@@ -1284,18 +1286,21 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+
+	dialer := iworker.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:                  a,
 		allowPrivateIPs:         cfg.AllowPrivateIPs,
 		contractLockingDuration: cfg.ContractLockTimeout,
 		cache:                   iworker.NewCache(b, l),
+		dialer:                  dialer,
 		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
 		id:                      cfg.ID,
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
-		rhp2Client:              rhp2.New(l),
-		rhp3Client:              rhp3.New(l),
+		rhp2Client:              rhp2.New(dialer, l),
+		rhp3Client:              rhp3.New(dialer, l),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             shutdownCtx,
@@ -1412,7 +1417,7 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type, if it fails for
 	// another reason the host scan won't have subnets
-	subnets, private, err := utils.ResolveHostIP(ctx, hostIP)
+	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
 	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !w.allowPrivateIPs {
@@ -1454,9 +1459,9 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	// Otherwise scans that time out won't be recorded.
 	scanErr := w.bus.RecordHostScans(ctx, []api.HostScan{
 		{
-			HostKey:    hostKey,
-			PriceTable: pt,
-			Subnets:    subnets,
+			HostKey:           hostKey,
+			PriceTable:        pt,
+			ResolvedAddresses: resolvedAddresses,
 
 			// NOTE: A scan is considered successful if both fetching the price
 			// table and the settings succeeded. Right now scanning can't fail

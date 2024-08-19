@@ -109,15 +109,21 @@ func IsSectorNotFound(err error) bool {
 func IsWithdrawalsInactive(err error) bool { return utils.IsErr(err, errWithdrawalsInactive) }
 func IsWithdrawalExpired(err error) bool   { return utils.IsErr(err, errWithdrawalExpired) }
 
+type (
+	Dialer interface {
+		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
+	}
+)
+
 type Client struct {
 	logger *zap.SugaredLogger
 	tpool  *transportPoolV3
 }
 
-func New(logger *zap.Logger) *Client {
+func New(dialer Dialer, logger *zap.Logger) *Client {
 	return &Client{
-		logger: logger.Sugar().Named("rhp2"),
-		tpool:  newTransportPoolV3(),
+		logger: logger.Sugar().Named("rhp3"),
+		tpool:  newTransportPoolV3(dialer),
 	}
 }
 
@@ -132,7 +138,7 @@ func (c *Client) AppendSector(ctx context.Context, sectorRoot types.Hash256, sec
 	}
 
 	var cost types.Currency
-	err = c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	err = c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		cost, err = rpcAppendSector(ctx, t, rk, pt, rev, &payment, sectorRoot, sector)
 		return err
 	})
@@ -144,13 +150,13 @@ func (c *Client) FundAccount(ctx context.Context, rev *types.FileContractRevisio
 	if err != nil {
 		return fmt.Errorf("failed to create payment: %w", err)
 	}
-	return c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	return c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		return rpcFundAccount(ctx, t, &ppcr, accID, pt)
 	})
 }
 
 func (c *Client) Renew(ctx context.Context, rrr api.RHPRenewRequest, gougingChecker gouging.Checker, renewer PrepareRenewFunc, signer SignFunc, rev types.FileContractRevision, renterKey types.PrivateKey) (newRev rhpv2.ContractRevision, txnSet []types.Transaction, contractPrice, fundAmount types.Currency, err error) {
-	err = c.tpool.withTransportV3(ctx, rrr.HostKey, rrr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
+	err = c.tpool.withTransport(ctx, rrr.HostKey, rrr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
 		newRev, txnSet, contractPrice, fundAmount, err = rpcRenew(ctx, rrr, gougingChecker, renewer, signer, t, rev, renterKey)
 		return err
 	})
@@ -159,7 +165,7 @@ func (c *Client) Renew(ctx context.Context, rrr api.RHPRenewRequest, gougingChec
 
 func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.SettingsID, rk types.PrivateKey) (types.Currency, error) {
 	var balance types.Currency
-	err := c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	err := c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		payment, err := payByContract(rev, types.NewCurrency64(1), accID, rk)
 		if err != nil {
 			return err
@@ -171,7 +177,7 @@ func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevisio
 }
 
 func (c *Client) PriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, paymentFn PriceTablePaymentFunc) (pt api.HostPriceTable, err error) {
-	err = c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	err = c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		pt, err = rpcPriceTable(ctx, t, paymentFn)
 		return err
 	})
@@ -179,7 +185,7 @@ func (c *Client) PriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr 
 }
 
 func (c *Client) PriceTableUnpaid(ctx context.Context, hk types.PublicKey, siamuxAddr string) (pt api.HostPriceTable, err error) {
-	err = c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	err = c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		pt, err = rpcPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
 		if err != nil {
 			return fmt.Errorf("failed to fetch host price table: %w", err)
@@ -191,7 +197,7 @@ func (c *Client) PriceTableUnpaid(ctx context.Context, hk types.PublicKey, siamu
 
 func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root types.Hash256, w io.Writer, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, accKey types.PrivateKey, pt rhpv3.HostPriceTable) (types.Currency, error) {
 	var amount types.Currency
-	err := c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	err := c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		cost, err := readSectorCost(pt, uint64(length))
 		if err != nil {
 			return err
@@ -210,7 +216,7 @@ func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root typ
 }
 
 func (c *Client) Revision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) (rev types.FileContractRevision, err error) {
-	return rev, c.tpool.withTransportV3(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+	return rev, c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		rev, err = rpcLatestRevision(ctx, t, fcid)
 		return err
 	})

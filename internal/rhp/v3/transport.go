@@ -3,7 +3,6 @@ package rhp
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -12,17 +11,20 @@ import (
 )
 
 type transportPoolV3 struct {
+	dialer Dialer
+
 	mu   sync.Mutex
 	pool map[string]*transportV3
 }
 
-func newTransportPoolV3() *transportPoolV3 {
+func newTransportPoolV3(dialer Dialer) *transportPoolV3 {
 	return &transportPoolV3{
-		pool: make(map[string]*transportV3),
+		dialer: dialer,
+		pool:   make(map[string]*transportV3),
 	}
 }
 
-func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
+func (p *transportPoolV3) withTransport(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fn func(context.Context, *transportV3) error) (err error) {
 	// Create or fetch transport.
 	p.mu.Lock()
 	t, found := p.pool[siamuxAddr]
@@ -62,9 +64,9 @@ func (p *transportPoolV3) withTransportV3(ctx context.Context, hostKey types.Pub
 }
 
 // transportPoolV3 is a pool of rhpv3.Transports which allows for reusing them.
-func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
+func dialTransport(ctx context.Context, dialer Dialer, siamuxAddr string, hostKey types.PublicKey) (*rhpv3.Transport, error) {
 	// Dial host.
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", siamuxAddr)
+	conn, err := dialer.Dial(ctx, hostKey, siamuxAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +90,7 @@ func dialTransport(ctx context.Context, siamuxAddr string, hostKey types.PublicK
 
 // transportV3 is a reference-counted wrapper for rhpv3.Transport.
 type transportV3 struct {
+	dialer   Dialer
 	refCount uint64 // locked by pool
 
 	mu         sync.Mutex
@@ -101,7 +104,7 @@ func (t *transportV3) DialStream(ctx context.Context) (*streamV3, error) {
 	t.mu.Lock()
 	if t.t == nil {
 		start := time.Now()
-		newTransport, err := dialTransport(ctx, t.siamuxAddr, t.hostKey)
+		newTransport, err := dialTransport(ctx, t.dialer, t.siamuxAddr, t.hostKey)
 		if err != nil {
 			t.mu.Unlock()
 			return nil, fmt.Errorf("DialStream: %w: %w (%v)", ErrDialTransport, err, time.Since(start))
