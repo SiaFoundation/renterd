@@ -1,7 +1,6 @@
 package bus
 
 // TODOs:
-// - add wallet metrics
 // - add UPNP support
 
 import (
@@ -33,9 +32,10 @@ import (
 )
 
 const (
-	defaultPinUpdateInterval = 5 * time.Minute
-	defaultPinRateWindow     = 6 * time.Hour
-	stdTxnSize               = 1200 // bytes
+	defaultWalletRecordMetricInterval = 5 * time.Minute
+	defaultPinUpdateInterval          = 5 * time.Minute
+	defaultPinRateWindow              = 6 * time.Hour
+	stdTxnSize                        = 1200 // bytes
 )
 
 // Client re-exports the client from the client package.
@@ -284,6 +284,7 @@ type (
 		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
+		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
 	}
 
 	// A SettingStore stores settings.
@@ -292,6 +293,10 @@ type (
 		Setting(ctx context.Context, key string) (string, error)
 		Settings(ctx context.Context) ([]string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
+	}
+
+	WalletMetricsRecorder interface {
+		Shutdown(context.Context) error
 	}
 )
 
@@ -314,8 +319,9 @@ type Bus struct {
 	mtrcs MetricsStore
 	ss    SettingStore
 
-	contractLocker ContractLocker
-	sectors        UploadingSectorsCache
+	contractLocker        ContractLocker
+	sectors               UploadingSectorsCache
+	walletMetricsRecorder WalletMetricsRecorder
 
 	logger *zap.SugaredLogger
 }
@@ -364,6 +370,9 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
+
+	// create wallet metrics recorder
+	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
 
 	return b, nil
 }
@@ -514,6 +523,7 @@ func (b *Bus) Handler() http.Handler {
 // Shutdown shuts down the bus.
 func (b *Bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
+		b.walletMetricsRecorder.Shutdown(ctx),
 		b.accountsMgr.Shutdown(ctx),
 		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Shutdown(ctx),
