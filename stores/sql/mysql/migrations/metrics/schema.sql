@@ -114,9 +114,12 @@ CREATE TABLE `wallets` (
   `spendable_hi` bigint NOT NULL,
   `unconfirmed_lo` bigint NOT NULL,
   `unconfirmed_hi` bigint NOT NULL,
+  `immature_lo` bigint NOT NULL,
+  `immature_hi` bigint NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_wallets_timestamp` (`timestamp`),
   KEY `idx_confirmed` (`confirmed_lo`,`confirmed_hi`),
   KEY `idx_spendable` (`spendable_lo`,`spendable_hi`),
-  KEY `idx_unconfirmed` (`unconfirmed_lo`,`unconfirmed_hi`)
+  KEY `idx_unconfirmed` (`unconfirmed_lo`,`unconfirmed_hi`),
+  KEY `idx_wallets_immature` (`immature_lo`,`immature_hi`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

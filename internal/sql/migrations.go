@@ -214,6 +214,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00001_idx_contracts_fcid_timestamp", log)
 				},
 			},
+			{
+				ID: "00002_idx_wallet_metrics_immature",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00002_idx_wallet_metrics_immature", log)
+				},
+			},
 		}
 	}
 )
