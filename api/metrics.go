@@ -110,6 +110,7 @@ type (
 		Confirmed   types.Currency `json:"confirmed"`
 		Spendable   types.Currency `json:"spendable"`
 		Unconfirmed types.Currency `json:"unconfirmed"`
+		Immature    types.Currency `json:"immature"`
 	}
 
 	WalletMetricsQueryOpts struct{}
