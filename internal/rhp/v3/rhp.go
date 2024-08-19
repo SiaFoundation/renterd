@@ -145,13 +145,13 @@ func (c *Client) AppendSector(ctx context.Context, sectorRoot types.Hash256, sec
 	return cost, err
 }
 
-func (c *Client) FundAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, amount types.Currency, accID rhpv3.Account, pt rhpv3.SettingsID, renterKey types.PrivateKey) error {
-	ppcr, err := payByContract(rev, amount, rhpv3.ZeroAccount, renterKey)
+func (c *Client) FundAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, amount types.Currency, accID rhpv3.Account, pt rhpv3.HostPriceTable, renterKey types.PrivateKey) error {
+	ppcr, err := payByContract(rev, amount.Add(types.NewCurrency64(1)), rhpv3.ZeroAccount, renterKey)
 	if err != nil {
 		return fmt.Errorf("failed to create payment: %w", err)
 	}
 	return c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		return rpcFundAccount(ctx, t, &ppcr, accID, pt)
+		return rpcFundAccount(ctx, t, &ppcr, accID, pt.UID)
 	})
 }
 

@@ -204,6 +204,12 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 	deposit := balance.Sub(curr)
 
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
+		// fetch pricetable directly to bypass the gouging check
+		pt, err := h.priceTables.fetch(ctx, h.hk, rev)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+
 		// check whether we have money left in the contract
 		cost := types.NewCurrency64(1)
 		if cost.Cmp(rev.ValidRenterPayout()) >= 0 {
@@ -215,17 +221,11 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 		if deposit.Cmp(availableFunds) > 0 {
 			deposit = availableFunds
 		}
-		// fetch pricetable directly to bypass the gouging check
-		pt, err := h.priceTables.fetch(ctx, h.hk, rev)
-		if err != nil {
-			return types.ZeroCurrency, err
-		}
-		amount := deposit.Add(cost)
-		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, amount, h.acc.id, pt.UID, h.renterKey); err != nil {
+		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.id, pt.HostPriceTable, h.renterKey); err != nil {
 			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
 		}
 		// record the spend
-		h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: amount})
+		h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: deposit.Add(cost)})
 		return deposit, nil
 	})
 }
