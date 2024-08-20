@@ -61,6 +61,10 @@ var (
 	// account balance was insufficient.
 	errBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
+	// errBalanceMaxExceeded occurs when a deposit would push the account's
+	// balance over the maximum allowed ephemeral account balance.
+	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
+
 	// errInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
 	errInsufficientFunds = errors.New("insufficient funds")
@@ -99,6 +103,7 @@ func IsErrHost(err error) bool {
 }
 
 func isBalanceInsufficient(err error) bool { return utils.IsErr(err, errBalanceInsufficient) }
+func isBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
 func isClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
@@ -463,6 +468,9 @@ func (a *account) WithDeposit(ctx context.Context, amtFn func() (types.Currency,
 	return withAccountLock(ctx, a.as, a.id, a.host, false, func(_ api.Account) error {
 		amt, err := amtFn()
 		if err != nil {
+			if isBalanceMaxExceeded(err) {
+				err = errors.Join(err, a.as.ScheduleSync(ctx, a.id, a.host))
+			}
 			return err
 		}
 		return a.as.AddBalance(ctx, a.id, a.host, amt.Big())
