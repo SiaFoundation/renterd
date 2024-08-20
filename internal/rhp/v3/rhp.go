@@ -38,13 +38,8 @@ const (
 )
 
 var (
+	// ErrFailedToCreatePayment is returned when the client failed to pay using a contract.
 	ErrFailedToCreatePayment = errors.New("failed to create contract payment")
-
-	// errHost is used to wrap rpc errors returned by the host.
-	errHost = errors.New("host responded with error")
-
-	// errTransport is used to wrap rpc errors caused by the transport.
-	errTransport = errors.New("transport error")
 
 	// errDialTransport is returned when the worker could not dial the host.
 	ErrDialTransport = errors.New("could not dial transport")
@@ -53,6 +48,21 @@ var (
 	// account balance was insufficient.
 	ErrBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
+	// ErrMaxRevisionReached occurs when trying to revise a contract that has
+	// already reached the highest possible revision number. Usually happens
+	// when trying to use a renewed contract.
+	ErrMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
+
+	// ErrSectorNotFound is returned by a host when it can't find the requested
+	// sector.
+	ErrSectorNotFound = errors.New("sector not found")
+
+	// errHost is used to wrap rpc errors returned by the host.
+	errHost = errors.New("host responded with error")
+
+	// errTransport is used to wrap rpc errors caused by the transport.
+	errTransport = errors.New("transport error")
+
 	// errBalanceMaxExceeded occurs when a deposit would push the account's
 	// balance over the maximum allowed ephemeral account balance.
 	errBalanceMaxExceeded = errors.New("ephemeral account maximum balance exceeded")
@@ -60,11 +70,6 @@ var (
 	// errInsufficientFunds is returned by various RPCs when the renter is
 	// unable to provide sufficient payment to the host.
 	errInsufficientFunds = errors.New("insufficient funds")
-
-	// ErrMaxRevisionReached occurs when trying to revise a contract that has
-	// already reached the highest possible revision number. Usually happens
-	// when trying to use a renewed contract.
-	ErrMaxRevisionReached = errors.New("contract has reached the maximum number of revisions")
 
 	// errPriceTableExpired is returned by the host when the price table that
 	// corresponds to the id it was given is already expired and thus no longer
@@ -78,7 +83,6 @@ var (
 	// errSectorNotFound is returned by the host when it can not find the
 	// requested sector.
 	errSectorNotFoundOld = errors.New("could not find the desired sector")
-	ErrSectorNotFound    = errors.New("sector not found")
 
 	// errWithdrawalsInactive occurs when the host is (perhaps temporarily)
 	// unsynced and has disabled its account manager.
