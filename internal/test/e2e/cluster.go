@@ -572,9 +572,13 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 		}
 	}
 
+	// create master key - we currently derive the same key used by the workers
+	// to ensure contracts formed by the bus can be renewed by the autopilot
+	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
+
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}

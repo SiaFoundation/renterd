@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
@@ -217,7 +218,7 @@ type Worker struct {
 	uploadManager   *uploadManager
 
 	accounts    *accounts
-	dialer      *iworker.FallbackDialer
+	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
 	priceTables *priceTables
 
@@ -1287,7 +1288,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
-	dialer := iworker.NewFallbackDialer(b, net.Dialer{}, l)
+	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:                  a,
 		allowPrivateIPs:         cfg.AllowPrivateIPs,

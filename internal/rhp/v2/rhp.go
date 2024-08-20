@@ -72,7 +72,8 @@ type (
 		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
 	}
 
-	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
+	PrepareFormFn   func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
+	PrepareV2FormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.V2Transaction, discard func(types.V2Transaction), err error)
 )
 
 type Client struct {
@@ -180,6 +181,11 @@ func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, 
 		}
 		return
 	})
+	return
+}
+
+func (c *Client) FormV2Contract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, gougingChecker gouging.Checker, prepareForm PrepareV2FormFn) (contract rhpv2.ContractRevision, txnSet []types.V2Transaction, err error) {
+	err = fmt.Errorf("%w; forming contracts using V2 transactions is not supported yet", utils.ErrNotImplemented)
 	return
 }
 
