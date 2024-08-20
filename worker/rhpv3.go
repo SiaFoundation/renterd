@@ -338,7 +338,7 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, fcid types.FileContractID) (rev types.FileContractRevision, _ error) {
 	var amount types.Currency
 	return rev, h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
-		if err := h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
+		return amount, h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(ctx, t, fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
 				var pt rhpv3.HostPriceTable
 				pt, amount, err = h.priceTable(ctx, nil)
@@ -350,10 +350,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 				return pt, &payment, nil
 			})
 			return
-		}); err != nil {
-			return types.ZeroCurrency, err
-		}
-		return amount, nil
+		})
 	})
 }
 
@@ -392,19 +389,17 @@ type (
 	// accounts stores the balance and other metrics of accounts that the
 	// worker maintains with a host.
 	accounts struct {
-		as     AccountStore
-		key    types.PrivateKey
-		logger *zap.SugaredLogger
+		as  AccountStore
+		key types.PrivateKey
 	}
 
 	// account contains information regarding a specific account of the
 	// worker.
 	account struct {
-		as     AccountStore
-		id     rhpv3.Account
-		key    types.PrivateKey
-		host   types.PublicKey
-		logger *zap.SugaredLogger
+		as   AccountStore
+		id   rhpv3.Account
+		key  types.PrivateKey
+		host types.PublicKey
 	}
 )
 
@@ -413,9 +408,8 @@ func (w *Worker) initAccounts(as AccountStore) {
 		panic("accounts already initialized") // developer error
 	}
 	w.accounts = &accounts{
-		as:     as,
-		key:    w.deriveSubKey("accountkey"),
-		logger: w.logger.Named("accounts"),
+		as:  as,
+		key: w.deriveSubKey("accountkey"),
 	}
 }
 
@@ -431,11 +425,10 @@ func (w *Worker) initTransportPool() {
 func (a *accounts) ForHost(hk types.PublicKey) *account {
 	accountID := rhpv3.Account(a.deriveAccountKey(hk).PublicKey())
 	return &account{
-		as:     a.as,
-		id:     accountID,
-		key:    a.key,
-		host:   hk,
-		logger: a.logger.With("account", accountID).With("host", hk),
+		as:   a.as,
+		id:   accountID,
+		key:  a.key,
+		host: hk,
 	}
 }
 
