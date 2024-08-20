@@ -340,7 +340,8 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 	return rev, h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		if err := h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 			rev, err = RPCLatestRevision(ctx, t, fcid, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-				pt, err := h.priceTable(ctx, nil, &amount)
+				var pt rhpv3.HostPriceTable
+				pt, amount, err = h.priceTable(ctx, nil)
 				if err != nil {
 					return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %w", err)
 				}
@@ -361,7 +362,7 @@ func (h *host) fetchRevisionWithAccount(ctx context.Context, hostKey types.Publi
 func (h *host) fetchRevisionWithContract(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, contractID types.FileContractID) (rev types.FileContractRevision, err error) {
 	err = h.transportPool.withTransportV3(ctx, hostKey, siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
 		rev, err = RPCLatestRevision(ctx, t, contractID, func(rev *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-			pt, err := h.priceTable(ctx, rev, nil)
+			pt, _, err := h.priceTable(ctx, rev)
 			if err != nil {
 				return rhpv3.HostPriceTable{}, nil, fmt.Errorf("failed to fetch pricetable, err: %v", err)
 			}
@@ -552,19 +553,19 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 // will be used to pay for the price table. If not it will be paid for using an
 // ephemeral account, in which case the given amount parameter will get updated.
 // The returned price table is guaranteed to be safe to use.
-func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision, amount *types.Currency) (rhpv3.HostPriceTable, error) {
-	pt, err := h.priceTables.fetch(ctx, h.hk, rev, amount)
+func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
+	pt, cost, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
 	}
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, cost, err
 	}
 	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
+		return rhpv3.HostPriceTable{}, cost, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
 	}
-	return pt.HostPriceTable, nil
+	return pt.HostPriceTable, cost, nil
 }
 
 // padBandwitdh pads the bandwidth to the next multiple of 1460 bytes.  1460

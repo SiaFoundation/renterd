@@ -92,11 +92,12 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	var amount types.Currency
 	return h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
 		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			pt, err := h.priceTables.fetch(ctx, h.hk, nil, &amount)
+			pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
 			if err != nil {
 				return err
 			}
 			hpt := pt.HostPriceTable
+			amount = uptc
 
 			gc, err := GougingCheckerFromContext(ctx, overpay)
 			if err != nil {
@@ -110,14 +111,13 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 			if err != nil {
 				return err
 			}
-			amount = amount.Add(cost)
 
 			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
 			cost, refund, err := RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
 			if err != nil {
 				return err
 			}
-			amount = amount.Sub(refund)
+			amount = amount.Add(cost).Sub(refund)
 			return nil
 		})
 		return amount, err
@@ -128,7 +128,7 @@ func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 	// fetch price table
 	var pt rhpv3.HostPriceTable
 	if err := h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		pt, err = h.priceTable(ctx, nil, &amount)
+		pt, amount, err = h.priceTable(ctx, nil)
 		return
 	}); err != nil {
 		return err
@@ -168,12 +168,13 @@ func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rh
 	// try to get a valid pricetable.
 	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	var pt *rhpv3.HostPriceTable
-	if err := h.acc.WithWithdrawal(ptCtx, func() (amount types.Currency, _ error) {
-		hpt, err := h.priceTables.fetch(ptCtx, h.hk, nil, &amount)
+	if err := h.acc.WithWithdrawal(ptCtx, func() (amount types.Currency, err error) {
+		var hpt api.HostPriceTable
+		hpt, amount, err = h.priceTables.fetch(ptCtx, h.hk, nil)
 		if err == nil {
 			pt = &hpt.HostPriceTable
 		}
-		return amount, err
+		return
 	}); err != nil {
 		h.logger.Infof("unable to fetch price table for renew: %v", err)
 	}
@@ -206,7 +207,8 @@ func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevis
 		// pay by contract
 		if rev != nil {
 			hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
-				payment, err := payByContract(rev, pt.UpdatePriceTableCost, rhpv3.Account(h.accountKey.PublicKey()), h.renterKey)
+				cost = pt.UpdatePriceTableCost
+				payment, err := payByContract(rev, cost, rhpv3.Account(h.accountKey.PublicKey()), h.renterKey)
 				if err != nil {
 					return nil, err
 				}
@@ -252,7 +254,7 @@ func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *typ
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
 		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
 			// fetch pricetable directly to bypass the gouging check
-			pt, err := h.priceTables.fetch(ctx, h.hk, rev, nil)
+			pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
 			if err != nil {
 				return err
 			}
@@ -303,7 +305,7 @@ func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *typ
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
-	pt, err := h.priceTables.fetch(ctx, h.hk, rev, nil)
+	pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return err
 	}
