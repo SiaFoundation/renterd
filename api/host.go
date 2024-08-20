@@ -148,18 +148,19 @@ func (opts HostsForScanningOptions) Apply(values url.Values) {
 
 type (
 	Host struct {
-		KnownSince       time.Time            `json:"knownSince"`
-		LastAnnouncement time.Time            `json:"lastAnnouncement"`
-		PublicKey        types.PublicKey      `json:"publicKey"`
-		NetAddress       string               `json:"netAddress"`
-		PriceTable       HostPriceTable       `json:"priceTable"`
-		Settings         rhpv2.HostSettings   `json:"settings"`
-		Interactions     HostInteractions     `json:"interactions"`
-		Scanned          bool                 `json:"scanned"`
-		Blocked          bool                 `json:"blocked"`
-		Checks           map[string]HostCheck `json:"checks"`
-		StoredData       uint64               `json:"storedData"`
-		Subnets          []string             `json:"subnets"`
+		KnownSince        time.Time            `json:"knownSince"`
+		LastAnnouncement  time.Time            `json:"lastAnnouncement"`
+		PublicKey         types.PublicKey      `json:"publicKey"`
+		NetAddress        string               `json:"netAddress"`
+		PriceTable        HostPriceTable       `json:"priceTable"`
+		Settings          rhpv2.HostSettings   `json:"settings"`
+		Interactions      HostInteractions     `json:"interactions"`
+		Scanned           bool                 `json:"scanned"`
+		Blocked           bool                 `json:"blocked"`
+		Checks            map[string]HostCheck `json:"checks"`
+		StoredData        uint64               `json:"storedData"`
+		ResolvedAddresses []string             `json:"resolvedAddresses"`
+		Subnets           []string             `json:"subnets"`
 	}
 
 	HostAddress struct {
@@ -181,12 +182,13 @@ type (
 	}
 
 	HostScan struct {
-		HostKey    types.PublicKey `json:"hostKey"`
-		PriceTable rhpv3.HostPriceTable
-		Settings   rhpv2.HostSettings
-		Subnets    []string
-		Success    bool
-		Timestamp  time.Time
+		HostKey           types.PublicKey      `json:"hostKey"`
+		PriceTable        rhpv3.HostPriceTable `json:"priceTable"`
+		Settings          rhpv2.HostSettings   `json:"settings"`
+		ResolvedAddresses []string             `json:"resolvedAddresses"`
+		Subnets           []string             `json:"subnets"`
+		Success           bool                 `json:"success"`
+		Timestamp         time.Time            `json:"timestamp"`
 	}
 
 	HostPriceTable struct {
@@ -196,9 +198,9 @@ type (
 
 	HostPriceTableUpdate struct {
 		HostKey    types.PublicKey `json:"hostKey"`
-		Success    bool
-		Timestamp  time.Time
-		PriceTable HostPriceTable
+		Success    bool            `json:"success"`
+		Timestamp  time.Time       `json:"timestamp"`
+		PriceTable HostPriceTable  `json:"priceTable"`
 	}
 
 	HostCheck struct {

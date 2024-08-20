@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
@@ -1733,7 +1734,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
-		subnets = CASE WHEN ? THEN ? ELSE subnets END
+		resolved_addresses = CASE WHEN ? THEN ? ELSE resolved_addresses END
 		WHERE public_key = ?
 	`)
 	if err != nil {
@@ -1757,7 +1758,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
-			len(scan.Subnets) > 0, strings.Join(scan.Subnets, ","),
+			len(scan.ResolvedAddresses) > 0, strings.Join(scan.ResolvedAddresses, ","),
 			PublicKey(scan.HostKey),
 		)
 		if err != nil {
@@ -2108,7 +2109,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
 			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
-			h.scanned, h.subnets, %s
+			h.scanned, h.resolved_addresses, %s
 		FROM hosts h
 		%s
 		%s
@@ -2123,20 +2124,24 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var h api.Host
 		var hostID int64
 		var pte dsql.NullTime
-		var subnets string
+		var resolvedAddresses string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &subnets, &h.Blocked,
+			&h.Scanned, &resolvedAddresses, &h.Blocked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		if subnets != "" {
-			h.Subnets = strings.Split(subnets, ",")
+		if resolvedAddresses != "" {
+			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
+			h.Subnets, err = utils.AddressesToSubnets(h.ResolvedAddresses)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert addresses to subnets: %w", err)
+			}
 		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[hostID]

@@ -174,7 +174,7 @@ func (h *Host) RHPv3Addr() string {
 
 // AddVolume adds a new volume to the host
 func (h *Host) AddVolume(ctx context.Context, path string, size uint64) error {
-	result := make(chan error)
+	result := make(chan error, 1)
 	_, err := h.storage.AddVolume(ctx, path, size, result)
 	if err != nil {
 		return err

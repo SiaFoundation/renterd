@@ -1090,7 +1090,8 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	rev, _, _ := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	tt.OK(err)
 	contract, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
 	tt.OK(err)
 

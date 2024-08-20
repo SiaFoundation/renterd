@@ -13,6 +13,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
@@ -82,7 +83,7 @@ func (h *testHost) PublicKey() types.PublicKey {
 func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
 	sector, exist := h.Sector(root)
 	if !exist {
-		return errSectorNotFound
+		return rhp3.ErrSectorNotFound
 	}
 	if offset+length > rhpv2.SectorSize {
 		return errSectorOutOfBounds
@@ -110,7 +111,11 @@ func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 	return rev, nil
 }
 
-func (h *testHost) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, error) {
+func (h *testHost) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, error) {
+	return h.hptFn(), nil
+}
+
+func (h *testHost) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {
 	return h.hptFn(), nil
 }
 

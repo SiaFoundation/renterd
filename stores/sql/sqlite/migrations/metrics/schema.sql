@@ -46,8 +46,9 @@ CREATE INDEX `idx_performance_action` ON `performance`(`action`);
 CREATE INDEX `idx_performance_timestamp` ON `performance`(`timestamp`);
 
 -- dbWalletMetric
-CREATE TABLE `wallets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`confirmed_lo` BIGINT NOT NULL,`confirmed_hi` BIGINT NOT NULL,`spendable_lo` BIGINT NOT NULL,`spendable_hi` BIGINT NOT NULL,`unconfirmed_lo` BIGINT NOT NULL,`unconfirmed_hi` BIGINT NOT NULL);
+CREATE TABLE `wallets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`confirmed_lo` BIGINT NOT NULL,`confirmed_hi` BIGINT NOT NULL,`spendable_lo` BIGINT NOT NULL,`spendable_hi` BIGINT NOT NULL,`unconfirmed_lo` BIGINT NOT NULL,`unconfirmed_hi` BIGINT NOT NULL,`immature_lo` BIGINT NOT NULL,`immature_hi` BIGINT NOT NULL);
 CREATE INDEX `idx_unconfirmed` ON `wallets`(`unconfirmed_lo`,`unconfirmed_hi`);
 CREATE INDEX `idx_spendable` ON `wallets`(`spendable_lo`,`spendable_hi`);
 CREATE INDEX `idx_confirmed` ON `wallets`(`confirmed_lo`,`confirmed_hi`);
+CREATE INDEX `idx_wallets_immature` ON `wallets`(`immature_lo`,`immature_hi`);
 CREATE INDEX `idx_wallets_timestamp` ON `wallets`(`timestamp`);

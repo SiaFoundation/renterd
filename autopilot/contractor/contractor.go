@@ -17,8 +17,8 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/worker"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -340,7 +340,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 			return api.ContractMetadata{}, true, err
 		}
 		logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !rhp3.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -418,7 +418,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !worker.IsErrHost(err) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !rhp3.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -982,7 +982,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		}
 
 		// extend logger
-		logger = logger.With("subnets", host.Subnets).
+		logger = logger.With("addresses", host.ResolvedAddresses).
 			With("blocked", host.Blocked)
 
 		// check if host is blocked
@@ -1054,7 +1054,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 
 				// don't register an alert for hosts that are out of funds since the
 				// user can't do anything about it
-				if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+				if !(rhp3.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
 					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
 				}
 				logger.Error("failed to renew contract")
@@ -1073,7 +1073,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 
 				// don't register an alert for hosts that are out of funds since the
 				// user can't do anything about it
-				if !(worker.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+				if !(rhp3.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
 					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
 				}
 				logger.Error("failed to refresh contract")
@@ -1204,10 +1204,10 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		}
 		gc := ctx.GougingChecker(cs)
 
-		// prepare a gouging checker
+		// prepare a logger
 		logger := logger.With("hostKey", candidate.host.PublicKey).
 			With("remainingBudget", remainingFunds).
-			With("subnets", candidate.host.Subnets)
+			With("addresses", candidate.host.ResolvedAddresses)
 
 		// perform gouging checks on the fly to ensure the host is not gouging its prices
 		if breakdown := gc.Check(nil, &candidate.host.PriceTable.HostPriceTable); breakdown.Gouging() {
@@ -1215,7 +1215,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 			continue
 		}
 
-		// check if we already have a contract with a host on that subnet
+		// check if we already have a contract with a host on that address
 		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
 			logger.Info("host has redundant IP")
 			continue

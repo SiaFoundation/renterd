@@ -68,21 +68,27 @@ var (
 )
 
 type (
+	Dialer interface {
+		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
+	}
+
 	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
 )
 
 type Client struct {
+	dialer Dialer
 	logger *zap.SugaredLogger
 }
 
-func New(logger *zap.Logger) *Client {
+func New(dialer Dialer, logger *zap.Logger) *Client {
 	return &Client{
+		dialer: dialer,
 		logger: logger.Sugar().Named("rhp2"),
 	}
 }
 
 func (w *Client) ContractRoots(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64) (roots []types.Hash256, revision *types.FileContractRevision, cost types.Currency, err error) {
-	err = w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+	err = w.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return w.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			roots, cost, err = w.fetchContractRoots(t, renterKey, &rev, settings)
 			revision = &rev.Revision
@@ -95,7 +101,7 @@ func (w *Client) ContractRoots(ctx context.Context, renterKey types.PrivateKey, 
 // SignedRevision fetches the latest signed revision for a contract from a host.
 func (w *Client) SignedRevision(ctx context.Context, hostIP string, hostKey types.PublicKey, renterKey types.PrivateKey, contractID types.FileContractID, timeout time.Duration) (rhpv2.ContractRevision, error) {
 	var rev rhpv2.ContractRevision
-	err := w.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+	err := w.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		req := &rhpv2.RPCLockRequest{
 			ContractID: contractID,
 			Signature:  t.SignChallenge(renterKey),
@@ -138,7 +144,7 @@ func (w *Client) SignedRevision(ctx context.Context, hostIP string, hostKey type
 }
 
 func (c *Client) Settings(ctx context.Context, hostKey types.PublicKey, hostIP string) (settings rhpv2.HostSettings, err error) {
-	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		var err error
 		if settings, err = rpcSettings(ctx, t); err != nil {
 			return err
@@ -152,7 +158,7 @@ func (c *Client) Settings(ctx context.Context, hostKey types.PublicKey, hostIP s
 }
 
 func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, gougingChecker gouging.Checker, prepareForm PrepareFormFn) (contract rhpv2.ContractRevision, txnSet []types.Transaction, err error) {
-	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
+	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
 		settings, err := rpcSettings(ctx, t)
 		if err != nil {
 			return err
@@ -178,7 +184,7 @@ func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, 
 }
 
 func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, toKeep []types.Hash256) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
-	err = c.withTransportV2(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
+	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			// fetch roots
 			got, fetchCost, err := c.fetchContractRoots(t, renterKey, &rev, settings)
@@ -569,8 +575,8 @@ func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingChecker gougi
 	return fn(t, rev, settings)
 }
 
-func (w *Client) withTransportV2(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", hostIP)
+func (c *Client) withTransport(ctx context.Context, hostKey types.PublicKey, hostIP string, fn func(*rhpv2.Transport) error) (err error) {
+	conn, err := c.dialer.Dial(ctx, hostKey, hostIP)
 	if err != nil {
 		return err
 	}

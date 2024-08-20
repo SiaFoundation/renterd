@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -120,7 +121,7 @@ outer:
 			start := time.Now()
 			duration, err := u.execute(req)
 			elapsed := time.Since(start)
-			if errors.Is(err, errMaxRevisionReached) {
+			if errors.Is(err, rhp3.ErrMaxRevisionReached) {
 				if u.tryRefresh(req.sector.ctx) {
 					u.enqueue(req)
 					continue outer
@@ -153,7 +154,7 @@ outer:
 
 func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
 	// no-op cases
-	if utils.IsErr(uploadErr, errMaxRevisionReached) {
+	if utils.IsErr(uploadErr, rhp3.ErrMaxRevisionReached) {
 		return false, false, 0, 0
 	} else if utils.IsErr(uploadErr, context.Canceled) {
 		return false, false, 0, 0
@@ -171,7 +172,7 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	// upload failed because we weren't able to create a payment, in this case
 	// we want to punish the host but only to ensure we stop using it, meaning
 	// we don't increment consecutive failures
-	if utils.IsErr(uploadErr, errFailedToCreatePayment) {
+	if utils.IsErr(uploadErr, rhp3.ErrFailedToCreatePayment) {
 		return false, false, float64(time.Hour.Milliseconds()), 0
 	}
 
@@ -179,7 +180,7 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	// this case we want to punish the host for being too slow but only when we
 	// weren't overdriving or when it took too long to dial
 	if utils.IsErr(uploadErr, errSectorUploadFinished) {
-		slowDial := utils.IsErr(uploadErr, errDialTransport) && totalDuration > time.Second
+		slowDial := utils.IsErr(uploadErr, rhp3.ErrDialTransport) && totalDuration > time.Second
 		slowLock := utils.IsErr(uploadErr, errAcquireContractFailed) && totalDuration > time.Second
 		slowFetchRev := utils.IsErr(uploadErr, errFetchRevisionFailed) && totalDuration > time.Second
 		if !overdrive || slowDial || slowLock || slowFetchRev {
@@ -288,7 +289,7 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	if err != nil {
 		return 0, fmt.Errorf("%w; %w", errFetchRevisionFailed, err)
 	} else if rev.RevisionNumber == math.MaxUint64 {
-		return 0, errMaxRevisionReached
+		return 0, rhp3.ErrMaxRevisionReached
 	}
 
 	// update the bus

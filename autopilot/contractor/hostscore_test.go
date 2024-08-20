@@ -19,9 +19,9 @@ var cfg = api.AutopilotConfig{
 		Period:      144 * 7 * 6,
 		RenewWindow: 144 * 7 * 2,
 
-		Download: 1 << 40, // 1 TiB
-		Upload:   1 << 40, // 1 TiB
-		Storage:  1 << 42, // 4 TiB
+		Download: 1e12, // 1 TB
+		Upload:   1e12, // 1 TB
+		Storage:  4e12, // 4 TB
 
 		Set: api.DefaultAutopilotID,
 	},

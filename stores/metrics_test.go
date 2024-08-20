@@ -528,6 +528,7 @@ func TestWalletMetrics(t *testing.T) {
 			Confirmed:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Unconfirmed: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Spendable:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			Immature:    types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 		}
 		if err := ss.RecordWalletMetric(context.Background(), metric); err != nil {
 			t.Fatal(err)

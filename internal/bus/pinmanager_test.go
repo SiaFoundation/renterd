@@ -109,14 +109,14 @@ func (api *mockForexAPI) setUnreachable(unreachable bool) {
 	api.unreachable = unreachable
 }
 
-type mockStore struct {
+type mockPinStore struct {
 	mu         sync.Mutex
 	settings   map[string]string
 	autopilots map[string]api.Autopilot
 }
 
-func newTestStore() *mockStore {
-	s := &mockStore{
+func newTestStore() *mockPinStore {
+	s := &mockPinStore{
 		autopilots: make(map[string]api.Autopilot),
 		settings:   make(map[string]string),
 	}
@@ -140,7 +140,7 @@ func newTestStore() *mockStore {
 	return s
 }
 
-func (ms *mockStore) gougingSettings() api.GougingSettings {
+func (ms *mockPinStore) gougingSettings() api.GougingSettings {
 	val, err := ms.Setting(context.Background(), api.SettingGouging)
 	if err != nil {
 		panic(err)
@@ -152,32 +152,32 @@ func (ms *mockStore) gougingSettings() api.GougingSettings {
 	return gs
 }
 
-func (ms *mockStore) updatPinnedSettings(pps api.PricePinSettings) {
+func (ms *mockPinStore) updatPinnedSettings(pps api.PricePinSettings) {
 	b, _ := json.Marshal(pps)
 	ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
 	time.Sleep(2 * testUpdateInterval)
 }
 
-func (ms *mockStore) Setting(ctx context.Context, key string) (string, error) {
+func (ms *mockPinStore) Setting(ctx context.Context, key string) (string, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.settings[key], nil
 }
 
-func (ms *mockStore) UpdateSetting(ctx context.Context, key, value string) error {
+func (ms *mockPinStore) UpdateSetting(ctx context.Context, key, value string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.settings[key] = value
 	return nil
 }
 
-func (ms *mockStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+func (ms *mockPinStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.autopilots[id], nil
 }
 
-func (ms *mockStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
+func (ms *mockPinStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.autopilots[autopilot.ID] = autopilot
@@ -234,7 +234,6 @@ func TestPinManager(t *testing.T) {
 
 	// configure all pins but disable them for now
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MaxRPCPrice = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
 	ms.updatPinnedSettings(pps)
@@ -260,14 +259,12 @@ func TestPinManager(t *testing.T) {
 
 	// enable the rest of the pins
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	pps.GougingSettingsPins.MaxRPCPrice.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
 	ms.updatPinnedSettings(pps)
 
 	// assert they're all updated
 	if gss := ms.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
-		gss.MaxRPCPrice.Equals(gs.MaxRPCPrice) ||
 		gss.MaxStoragePrice.Equals(gs.MaxStoragePrice) ||
 		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss, gs)

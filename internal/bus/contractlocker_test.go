@@ -13,7 +13,7 @@ import (
 
 // TestContractAcquire is a unit test for contractLocks.Acquire.
 func TestContractAcquire(t *testing.T) {
-	locks := newContractLocks()
+	locks := NewContractLocker()
 
 	verify := func(fcid types.FileContractID, lockID uint64) {
 		t.Helper()
@@ -117,7 +117,7 @@ func TestContractKeepalive(t *testing.T) {
 	t.Parallel()
 
 	// Create a contractLocks object.
-	locks := newContractLocks()
+	locks := NewContractLocker()
 
 	// Acquire a contract.
 	fcid := types.FileContractID{1}
@@ -152,7 +152,7 @@ func TestContractKeepalive(t *testing.T) {
 
 // TestContractRelease is a unit test for contractLocks.Release.
 func TestContractRelease(t *testing.T) {
-	locks := newContractLocks()
+	locks := NewContractLocker()
 
 	verify := func(fcid types.FileContractID, lockID uint64) {
 		t.Helper()

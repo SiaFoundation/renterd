@@ -1,14 +1,12 @@
-package autopilot
+package test
 
 import (
 	"testing"
-
-	"go.sia.tech/renterd/internal/test"
 )
 
 func TestHost(t *testing.T) {
-	hk := test.RandomHostKey()
-	h := test.NewHost(hk, test.NewHostPriceTable(), test.NewHostSettings())
+	hk := RandomHostKey()
+	h := NewHost(hk, NewHostPriceTable(), NewHostSettings())
 
 	// assert host is online
 	if !h.IsOnline() {
