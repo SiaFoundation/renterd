@@ -550,9 +550,10 @@ func (a *accounts) deriveAccountKey(hostKey types.PublicKey) types.PrivateKey {
 }
 
 // priceTable fetches a price table from the host. If a revision is provided, it
-// will be used to pay for the price table. If not it will be paid for using an
-// ephemeral account, in which case the given amount parameter will get updated.
-// The returned price table is guaranteed to be safe to use.
+// will be used to pay for the price table. The currency being returned is the
+// cost of fetching the price table, depending on whether a revision was
+// provided it was spent from the contract or from the ephemeral account. The
+// returned price table is guaranteed to be safe to use.
 func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
 	pt, cost, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
