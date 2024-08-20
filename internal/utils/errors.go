@@ -17,6 +17,11 @@ var (
 	ErrIOTimeout             = errors.New("i/o timeout")
 )
 
+var (
+	// ErrNotImplemented is returned when a function is not implemented.
+	ErrNotImplemented = errors.New("not implemented")
+)
+
 // IsErr can be used to compare an error to a target and also works when used on
 // errors that haven't been wrapped since it will fall back to a string
 // comparison. Useful to check errors returned over the network.

@@ -17,6 +17,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/gouging"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -354,10 +355,30 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 		}
 	}
 
-	state := b.cm.TipState()
-	// if the current height is below the v2 hardfork height, send a v1
-	// transaction
-	if state.Index.Height < state.Network.HardforkV2.AllowHeight {
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	if b.isPassedV2AllowHeight() {
+		txn := types.V2Transaction{
+			MinerFee: minerFee,
+			SiacoinOutputs: []types.SiacoinOutput{
+				{Address: req.Address, Value: req.Amount},
+			},
+		}
+		// fund and sign transaction
+		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
+		if jc.Check("failed to fund transaction", err) != nil {
+			return
+		}
+		b.w.SignV2Inputs(state, &txn, toSign)
+		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
+		// verify the transaction and add it to the transaction pool
+		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return
+		}
+		// broadcast the transaction
+		b.s.BroadcastV2TransactionSet(state.Index, txnset)
+		jc.Encode(txn.ID())
+	} else {
 		// build transaction
 		txn := types.Transaction{
 			MinerFees: []types.Currency{minerFee},
@@ -380,28 +401,6 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 		}
 		// broadcast the transaction
 		b.s.BroadcastTransactionSet(txnset)
-		jc.Encode(txn.ID())
-	} else {
-		txn := types.V2Transaction{
-			MinerFee: minerFee,
-			SiacoinOutputs: []types.SiacoinOutput{
-				{Address: req.Address, Value: req.Amount},
-			},
-		}
-		// fund and sign transaction
-		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
-		if jc.Check("failed to fund transaction", err) != nil {
-			return
-		}
-		b.w.SignV2Inputs(state, &txn, toSign)
-		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
-		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
-			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-			return
-		}
-		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(state.Index, txnset)
 		jc.Encode(txn.ID())
 	}
 }
@@ -495,22 +494,22 @@ func (b *Bus) walletPrepareFormHandler(jc jape.Context) {
 		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
 		return
 	}
-	cs := b.cm.TipState()
 
-	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(cs, fc, wpfr.HostSettings.ContractPrice)
-	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
-	}
-	txn.MinerFees = []types.Currency{b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
-	toSign, err := b.w.FundTransaction(&txn, cost.Add(txn.MinerFees[0]), true)
-	if jc.Check("couldn't fund transaction", err) != nil {
+	if txns, _, err := b.prepareForm(
+		jc.Request.Context(),
+		wpfr.RenterAddress,
+		wpfr.RenterKey,
+		wpfr.RenterFunds,
+		wpfr.HostCollateral,
+		wpfr.HostKey,
+		wpfr.HostSettings,
+		wpfr.EndHeight,
+	); err != nil {
+		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else {
+		jc.Encode(txns)
 	}
-
-	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
-
-	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
 
 func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
@@ -2314,4 +2313,199 @@ func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(resp)
+}
+
+func (b *Bus) rhpFormHandler(jc jape.Context) {
+	// apply pessimistic timeout
+	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
+	defer cancel()
+
+	// decode the request
+	var rfr api.RHPFormRequest
+	if jc.Decode(&rfr) != nil {
+		return
+	}
+
+	// validate the request
+	if rfr.EndHeight == 0 {
+		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+		return
+	} else if rfr.HostKey == (types.PublicKey{}) {
+		http.Error(jc.ResponseWriter, "HostKey must be provided", http.StatusBadRequest)
+		return
+	} else if rfr.HostCollateral.IsZero() {
+		http.Error(jc.ResponseWriter, "HostCollateral can not be zero", http.StatusBadRequest)
+		return
+	} else if rfr.HostIP == "" {
+		http.Error(jc.ResponseWriter, "HostIP must be provided", http.StatusBadRequest)
+		return
+	} else if rfr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	} else if rfr.RenterAddress == (types.Address{}) {
+		http.Error(jc.ResponseWriter, "RenterAddress must be provided", http.StatusBadRequest)
+		return
+	}
+
+	// fetch gouging parameters
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	var contract rhpv2.ContractRevision
+	if b.isPassedV2AllowHeight() {
+		// form the contract
+		var txnSet []types.V2Transaction
+		contract, txnSet, err = b.rhp2.FormV2Contract(
+			ctx,
+			rfr.RenterAddress,
+			b.deriveRenterKey(rfr.HostKey),
+			rfr.HostKey,
+			rfr.HostIP,
+			rfr.RenterFunds,
+			rfr.HostCollateral,
+			rfr.EndHeight,
+			gc,
+			b.prepareFormV2,
+		)
+		if errors.Is(err, utils.ErrNotImplemented) {
+			jc.Error(err, http.StatusNotImplemented) // TODO: remove once rhp4 is implemented
+			return
+		} else if jc.Check("couldn't form contract", err) != nil {
+			return
+		}
+
+		// fetch state
+		state := b.cm.TipState()
+
+		// add transaction set to the pool
+		_, err := b.cm.AddV2PoolTransactions(state.Index, txnSet)
+		if jc.Check("couldn't broadcast transaction set", err) != nil {
+			b.w.ReleaseInputs(nil, txnSet)
+			return
+		}
+
+		// broadcast the transaction set
+		b.s.BroadcastV2TransactionSet(state.Index, txnSet)
+	} else {
+		// form the contract
+		var txnSet []types.Transaction
+		contract, txnSet, err = b.rhp2.FormContract(
+			ctx,
+			rfr.RenterAddress,
+			b.deriveRenterKey(rfr.HostKey),
+			rfr.HostKey,
+			rfr.HostIP,
+			rfr.RenterFunds,
+			rfr.HostCollateral,
+			rfr.EndHeight,
+			gc,
+			b.prepareForm,
+		)
+		if jc.Check("couldn't form contract", err) != nil {
+			return
+		}
+
+		// add transaction set to the pool
+		_, err := b.cm.AddPoolTransactions(txnSet)
+		if jc.Check("couldn't broadcast transaction set", err) != nil {
+			b.w.ReleaseInputs(txnSet, nil)
+			return
+		}
+
+		// broadcast the transaction set
+		b.s.BroadcastTransactionSet(txnSet)
+	}
+
+	// store the contract
+	_, err = b.ms.AddContract(
+		ctx,
+		contract,
+		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
+		rfr.RenterFunds,
+		b.cm.Tip().Height,
+		api.ContractStatePending,
+	)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
+	}
+
+	// return the contract ID
+	jc.Encode(contract.ID())
+}
+
+func (b *Bus) prepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, func(types.Transaction), error) {
+	// prepare the transaction
+	cs := b.cm.TipState()
+	fc := rhpv2.PrepareContractFormation(renterKey, hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
+	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
+
+	// calculate the miner fee
+	fee := b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))
+	txn.MinerFees = []types.Currency{fee}
+
+	// fund the transaction
+	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
+	toSign, err := b.w.FundTransaction(&txn, cost, true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+	}
+
+	// sign the transaction
+	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
+
+	txns := append(b.cm.UnconfirmedParents(txn), txn)
+	return txns, func(txn types.Transaction) { b.w.ReleaseInputs(txns, nil) }, nil
+}
+
+func (b *Bus) prepareFormV2(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.V2Transaction, func(types.V2Transaction), error) {
+	hostFunds := hostSettings.ContractPrice.Add(hostCollateral)
+
+	// prepare the transaction
+	cs := b.cm.TipState()
+	fc := types.V2FileContract{
+		RevisionNumber:   0,
+		Filesize:         0,
+		FileMerkleRoot:   types.Hash256{},
+		ProofHeight:      endHeight + hostSettings.WindowSize,
+		ExpirationHeight: endHeight + hostSettings.WindowSize + 10,
+		RenterOutput: types.SiacoinOutput{
+			Value:   renterFunds,
+			Address: renterAddress,
+		},
+		HostOutput: types.SiacoinOutput{
+			Value:   hostFunds,
+			Address: hostSettings.Address,
+		},
+		MissedHostValue: hostFunds,
+		TotalCollateral: hostFunds,
+		RenterPublicKey: renterKey,
+		HostPublicKey:   hostKey,
+	}
+	txn := types.V2Transaction{FileContracts: []types.V2FileContract{fc}}
+
+	// calculate the miner fee
+	fee := b.cm.RecommendedFee().Mul64(cs.V2TransactionWeight(txn))
+	txn.MinerFee = fee
+
+	// fund the transaction
+	fundAmount := cs.V2FileContractTax(fc).Add(hostFunds).Add(renterFunds).Add(fee)
+	cs, toSign, err := b.w.FundV2Transaction(&txn, fundAmount, false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+	}
+
+	// sign the transaction
+	b.w.SignV2Inputs(cs, &txn, toSign)
+
+	txns := append(b.cm.V2UnconfirmedParents(txn), txn)
+	return txns, func(txn types.V2Transaction) { b.w.ReleaseInputs(nil, txns) }, nil
+}
+
+func (b *Bus) isPassedV2AllowHeight() bool {
+	cs := b.cm.TipState()
+	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
 }
