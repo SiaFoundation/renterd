@@ -10,6 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 )
 
@@ -295,10 +296,10 @@ func (d *downloader) trackFailure(err error) {
 		return
 	}
 
-	if isBalanceInsufficient(err) ||
-		isPriceTableExpired(err) ||
-		isPriceTableNotFound(err) ||
-		isSectorNotFound(err) {
+	if rhp3.IsBalanceInsufficient(err) ||
+		rhp3.IsPriceTableExpired(err) ||
+		rhp3.IsPriceTableNotFound(err) ||
+		rhp3.IsSectorNotFound(err) {
 		return // host is not to blame for these errors
 	}
 

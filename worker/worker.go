@@ -27,7 +27,8 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
-	clientV2 "go.sia.tech/renterd/internal/rhp/v2"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
@@ -202,7 +203,8 @@ func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 type Worker struct {
 	alerts alerts.Alerter
 
-	rhp2Client *clientV2.Client
+	rhp2Client *rhp2.Client
+	rhp3Client *rhp3.Client
 
 	allowPrivateIPs bool
 	id              string
@@ -214,11 +216,10 @@ type Worker struct {
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
 
-	accounts        *accounts
-	dialer          *iworker.FallbackDialer
-	cache           iworker.WorkerCache
-	priceTables     *priceTables
-	transportPoolV3 *transportPoolV3
+	accounts    *accounts
+	dialer      *iworker.FallbackDialer
+	cache       iworker.WorkerCache
+	priceTables *priceTables
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
@@ -378,11 +379,7 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 		defer cancel()
 	}
 
-	err = w.transportPoolV3.withTransportV3(ctx, rptr.HostKey, rptr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
-		hpt, err = RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil })
-		return err
-	})
-
+	hpt, err = w.Host(rptr.HostKey, types.FileContractID{}, rptr.SiamuxAddr).PriceTableUnpaid(ctx)
 	if jc.Check("could not get price table", err) != nil {
 		return
 	}
@@ -563,7 +560,7 @@ func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	if rev != nil {
 		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{Deletions: cost})
 	}
-	if err != nil && !errors.Is(err, clientV2.ErrNoSectorsToPrune) && pruned == 0 {
+	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) && pruned == 0 {
 		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -684,7 +681,7 @@ func (w *Worker) rhpFundHandler(jc jape.Context) {
 	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) (err error) {
 		h := w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr)
 		err = h.FundAccount(ctx, rfr.Balance, &rev)
-		if isBalanceMaxExceeded(err) {
+		if rhp3.IsBalanceMaxExceeded(err) {
 			// sync the account
 			err = h.SyncAccount(ctx, &rev)
 			if err != nil {
@@ -1302,7 +1299,8 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                     b,
 		masterKey:               masterKey,
 		logger:                  l.Sugar(),
-		rhp2Client:              clientV2.New(dialer, l),
+		rhp2Client:              rhp2.New(dialer, l),
+		rhp3Client:              rhp3.New(dialer, l),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             shutdownCtx,
@@ -1311,7 +1309,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	w.initAccounts(b)
 	w.initPriceTables()
-	w.initTransportPool()
 
 	w.initDownloadManager(cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
 	w.initUploadManager(cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
@@ -1408,23 +1405,13 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 		}
 
 		// fetch the host pricetable
-		var pt rhpv3.HostPriceTable
-		{
-			scanCtx, cancel := timeoutCtx()
-			defer cancel()
-			err := w.transportPoolV3.withTransportV3(scanCtx, hostKey, settings.SiamuxAddr(), func(ctx context.Context, t *transportV3) error {
-				if hpt, err := RPCPriceTable(ctx, t, func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) { return nil, nil }); err != nil {
-					return fmt.Errorf("failed to fetch host price table: %w", err)
-				} else {
-					pt = hpt.HostPriceTable
-					return nil
-				}
-			})
-			if err != nil {
-				return settings, rhpv3.HostPriceTable{}, time.Since(start), err
-			}
+		scanCtx, cancel = timeoutCtx()
+		pt, err := w.rhp3Client.PriceTableUnpaid(ctx, hostKey, settings.SiamuxAddr())
+		cancel()
+		if err != nil {
+			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
 		}
-		return settings, pt, time.Since(start), nil
+		return settings, pt.HostPriceTable, time.Since(start), nil
 	}
 
 	// resolve host ip, don't scan if the host is on a private network or if it
@@ -1490,18 +1477,6 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 	}
 	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
 	return settings, pt, duration, err
-}
-
-func discardTxnOnErr(ctx context.Context, bus Bus, l *zap.SugaredLogger, txn types.Transaction, errContext string, err *error) {
-	if *err == nil {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	if dErr := bus.WalletDiscard(ctx, txn); dErr != nil {
-		l.Errorf("%v: %s, failed to discard txn: %v", *err, errContext, dErr)
-	}
-	cancel()
 }
 
 func isErrHostUnreachable(err error) bool {
