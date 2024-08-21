@@ -205,6 +205,7 @@ func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root typ
 			return err
 		}
 
+		amount = cost // pessimistic cost estimate in case rpc fails
 		payment := rhpv3.PayByEphemeralAccount(accID, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, accKey)
 		cost, refund, err := rpcReadSector(ctx, t, w, pt, &payment, offset, length, root)
 		if err != nil {
