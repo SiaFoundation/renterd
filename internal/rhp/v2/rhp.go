@@ -184,11 +184,6 @@ func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, 
 	return
 }
 
-func (c *Client) FormV2Contract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, gougingChecker gouging.Checker, prepareForm PrepareV2FormFn) (contract rhpv2.ContractRevision, txnSet []types.V2Transaction, err error) {
-	err = fmt.Errorf("%w; forming contracts using V2 transactions is not supported yet", utils.ErrNotImplemented)
-	return
-}
-
 func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, toKeep []types.Hash256) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
 	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
