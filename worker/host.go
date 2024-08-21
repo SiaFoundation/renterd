@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -244,6 +245,9 @@ func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *typ
 
 		// fund the account
 		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.id, pt.HostPriceTable, h.renterKey); err != nil {
+			if rhp3.IsBalanceMaxExceeded(err) {
+				err = errors.Join(err, h.acc.as.ScheduleSync(ctx, h.acc.id, h.hk))
+			}
 			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
 		}
 
