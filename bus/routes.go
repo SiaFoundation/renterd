@@ -961,6 +961,15 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't store contract", err) == nil {
 		jc.Encode(a)
 	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventAdd,
+		Payload: api.EventContractAdd{
+			Added:     a,
+			Timestamp: time.Now().UTC(),
+		},
+	})
 }
 
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
