@@ -425,26 +425,51 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
-	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
-		return
-	}
-
 	var ids []types.TransactionID
-	if len(txns) == 0 {
-		jc.Encode(ids)
-		return
-	}
+	if state := b.cm.TipState(); state.Index.Height < state.Network.HardforkV2.AllowHeight {
+		// v1 redistribution
+		txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
+			return
+		}
 
-	for i := 0; i < len(txns); i++ {
-		b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
-		ids = append(ids, txns[i].ID())
-	}
+		if len(txns) == 0 {
+			jc.Encode(ids)
+			return
+		}
 
-	_, err = b.cm.AddPoolTransactions(txns)
-	if jc.Check("couldn't broadcast the transaction", err) != nil {
-		b.w.ReleaseInputs(txns, nil)
-		return
+		for i := 0; i < len(txns); i++ {
+			b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
+			ids = append(ids, txns[i].ID())
+		}
+
+		_, err = b.cm.AddPoolTransactions(txns)
+		if jc.Check("couldn't broadcast the transaction", err) != nil {
+			b.w.ReleaseInputs(txns, nil)
+			return
+		}
+	} else {
+		// v2 redistribution
+		txns, toSign, err := b.w.RedistributeV2(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
+			return
+		}
+
+		if len(txns) == 0 {
+			jc.Encode(ids)
+			return
+		}
+
+		for i := 0; i < len(txns); i++ {
+			b.w.SignV2Inputs(state, &txns[i], toSign[i])
+			ids = append(ids, txns[i].ID())
+		}
+
+		_, err = b.cm.AddV2PoolTransactions(state.Index, txns)
+		if jc.Check("couldn't broadcast the transaction", err) != nil {
+			b.w.ReleaseInputs(nil, txns)
+			return
+		}
 	}
 
 	jc.Encode(ids)
