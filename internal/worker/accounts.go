@@ -146,10 +146,14 @@ func (a *AccountMgr) ResetDrift(id rhpv3.Account) error {
 	}
 	a.mu.Unlock()
 
-	a.mu.Lock()
-	account.acc.Drift.SetInt64(0)
-	a.mu.Unlock()
+	account.resetDrift()
 	return nil
+}
+
+func (a *Account) resetDrift() {
+	a.mu.Lock()
+	a.acc.Drift.SetInt64(0)
+	a.mu.Unlock()
 }
 
 func (a *AccountMgr) Shutdown(ctx context.Context) error {
@@ -399,13 +403,11 @@ func (a *Account) WithSync(balanceFn func() (types.Currency, error)) error {
 	a.rwmu.Lock()
 	defer a.rwmu.Unlock()
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	balance, err := balanceFn()
 	if err != nil {
 		return err
 	}
+
 	a.setBalance(balance.Big())
 	return nil
 }
@@ -425,9 +427,9 @@ func (a *Account) WithDeposit(amtFn func(types.Currency) (types.Currency, error)
 	defer a.rwmu.RUnlock()
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	balance := types.NewCurrency(a.acc.Balance.Uint64(), new(big.Int).Rsh(a.acc.Balance, 64).Uint64())
+	a.mu.Unlock()
+
 	amt, err := amtFn(balance)
 	if err != nil {
 		return err
@@ -443,18 +445,19 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	a.rwmu.RLock()
 	defer a.rwmu.RUnlock()
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	// return early if the account needs to sync
+	a.mu.Lock()
 	if a.acc.RequiresSync {
+		a.mu.Unlock()
 		return fmt.Errorf("%w; account requires resync", rhp3.ErrBalanceInsufficient)
 	}
 
 	// return early if our account is not funded
 	if a.acc.Balance.Cmp(big.NewInt(0)) <= 0 {
+		a.mu.Unlock()
 		return rhp3.ErrBalanceInsufficient
 	}
+	a.mu.Unlock()
 
 	// execute amtFn
 	amt, err := amtFn()
@@ -476,6 +479,9 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 // withdrawal or deposit is recorded. If the account doesn't exist, it is
 // created.
 func (a *Account) addAmount(amt *big.Int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	// Update balance.
 	balanceBefore := a.acc.Balance
 	a.acc.Balance.Add(a.acc.Balance, amt)
@@ -500,7 +506,6 @@ func (a *Account) scheduleSync() {
 	// last time it was set. That way we avoid multiple workers setting it after
 	// failing at the same time, causing multiple syncs in the process.
 	if time.Since(a.requiresSyncTime) < 30*time.Second {
-		a.mu.Unlock()
 		a.logger.Warn("not scheduling account sync since it was scheduled too recently", zap.Stringer("account", a.acc.ID))
 		return
 	}
@@ -520,8 +525,10 @@ func (a *Account) scheduleSync() {
 // If an account hasn't been saved successfully upon the last shutdown, no drift
 // will be added upon the first call to SetBalance.
 func (a *Account) setBalance(balance *big.Int) {
-	// Update balance and drift.
 	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Update balance and drift.
 	delta := new(big.Int).Sub(balance, a.acc.Balance)
 	balanceBefore := a.acc.Balance.String()
 	driftBefore := a.acc.Drift.String()
@@ -532,7 +539,6 @@ func (a *Account) setBalance(balance *big.Int) {
 	a.acc.CleanShutdown = true
 	a.acc.RequiresSync = false // resetting the balance resets the sync field
 	balanceAfter := a.acc.Balance.String()
-	a.mu.Unlock()
 
 	// Log resets.
 	a.logger.Infow("account balance was reset",
