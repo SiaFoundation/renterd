@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -603,6 +604,42 @@ func (b *Bus) initSettings(ctx context.Context) error {
 					return err
 				}
 			}
+		}
+	}
+
+	// compat: default price pin settings
+	var pps api.PricePinSettings
+	if pss, err := b.ss.Setting(ctx, api.SettingPricePinning); err != nil {
+		return err
+	} else if err := json.Unmarshal([]byte(pss), &pps); err != nil {
+		return err
+	} else if err := pps.Validate(); err != nil {
+		// overwrite values with defaults
+		var updates []string
+		if pps.ForexEndpointURL == "" {
+			pps.ForexEndpointURL = api.DefaultPricePinSettings.ForexEndpointURL
+			updates = append(updates, fmt.Sprintf("set PricePinSettings.ForexEndpointURL to %v", pps.ForexEndpointURL))
+		}
+		if pps.Currency == "" {
+			pps.Currency = api.DefaultPricePinSettings.Currency
+			updates = append(updates, fmt.Sprintf("set PricePinSettings.Currency to %v", pps.Currency))
+		}
+		if pps.Threshold == 0 {
+			pps.Threshold = api.DefaultPricePinSettings.Threshold
+			updates = append(updates, fmt.Sprintf("set PricePinSettings.Threshold to %v", pps.Threshold))
+		}
+
+		var updated []byte
+		if err := pps.Validate(); err == nil {
+			b.logger.Info(fmt.Sprintf("updating price pinning settings with default values: %v", strings.Join(updates, ", ")))
+			updated, _ = json.Marshal(pps)
+		} else {
+			b.logger.Warn(fmt.Sprintf("updated price pinning settings are invalid (%v), they have been overwritten with the default settings", err))
+			updated, _ = json.Marshal(api.DefaultPricePinSettings)
+		}
+
+		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
+			return err
 		}
 	}
 

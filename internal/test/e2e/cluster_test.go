@@ -184,9 +184,18 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
 
-	// Autopilot shouldn't have its prices pinned
+	// PricePinningSettings should have default values
 	pps, err := b.PricePinningSettings(context.Background())
 	tt.OK(err)
+	if pps.ForexEndpointURL == "" {
+		t.Fatal("expected default value for ForexEndpointURL")
+	} else if pps.Currency == "" {
+		t.Fatal("expected default value for Currency")
+	} else if pps.Threshold == 0 {
+		t.Fatal("expected default value for Threshold")
+	}
+
+	// Autopilot shouldn't have its prices pinned
 	if len(pps.Autopilots) != 1 {
 		t.Fatalf("expected 1 autopilot, got %v", len(pps.Autopilots))
 	} else if pin, exists := pps.Autopilots[api.DefaultAutopilotID]; !exists {
