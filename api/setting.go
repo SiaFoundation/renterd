@@ -54,7 +54,10 @@ var (
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
 	DefaultPricePinSettings = PricePinSettings{
-		Enabled: false,
+		Enabled:          false,
+		Currency:         "usd",
+		ForexEndpointURL: "https://api.siascan.com/exchange-rate/siacoin",
+		Threshold:        0.05,
 	}
 
 	// DefaultUploadPackingSettings define the default upload packing settings
@@ -202,9 +205,6 @@ func (p Pin) IsPinned() bool {
 
 // Validate returns an error if the price pin settings are not considered valid.
 func (pps PricePinSettings) Validate() error {
-	if !pps.Enabled {
-		return nil
-	}
 	if pps.ForexEndpointURL == "" {
 		return fmt.Errorf("price pin settings must have a forex endpoint URL")
 	}
