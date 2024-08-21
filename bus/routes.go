@@ -2323,39 +2323,7 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	var contract rhpv2.ContractRevision
 	if b.isPassedV2AllowHeight() {
-		// form the contract
-		var txnSet []types.V2Transaction
-		contract, txnSet, err = b.rhp2.FormV2Contract(
-			ctx,
-			rfr.RenterAddress,
-			b.deriveRenterKey(rfr.HostKey),
-			rfr.HostKey,
-			rfr.HostIP,
-			rfr.RenterFunds,
-			rfr.HostCollateral,
-			rfr.EndHeight,
-			gc,
-			b.prepareFormV2,
-		)
-		if errors.Is(err, utils.ErrNotImplemented) {
-			jc.Error(err, http.StatusNotImplemented) // TODO: remove once rhp4 is implemented
-			return
-		} else if jc.Check("couldn't form contract", err) != nil {
-			return
-		}
-
-		// fetch state
-		state := b.cm.TipState()
-
-		// add transaction set to the pool
-		_, err := b.cm.AddV2PoolTransactions(state.Index, txnSet)
-		if jc.Check("couldn't broadcast transaction set", err) != nil {
-			b.w.ReleaseInputs(nil, txnSet)
-			return
-		}
-
-		// broadcast the transaction set
-		b.s.BroadcastV2TransactionSet(state.Index, txnSet)
+		panic("not implemented")
 	} else {
 		// form the contract
 		var txnSet []types.Transaction
@@ -2427,7 +2395,8 @@ func (b *Bus) prepareForm(ctx context.Context, renterAddress types.Address, rent
 	return txns, func(txn types.Transaction) { b.w.ReleaseInputs(txns, nil) }, nil
 }
 
-func (b *Bus) prepareFormV2(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.V2Transaction, func(types.V2Transaction), error) {
+// nolint: unused
+func (b *Bus) prepareFormV2(_ context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.V2Transaction, func(types.V2Transaction), error) {
 	hostFunds := hostSettings.ContractPrice.Add(hostCollateral)
 
 	// prepare the transaction
