@@ -1728,10 +1728,10 @@ func (b *Bus) accountsHandlerGET(jc jape.Context) {
 
 func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 	var req api.AccountsSaveRequest
-	if req.Owner == "" {
-		jc.Error(errors.New("owner is required"), http.StatusBadRequest)
+	if jc.Decode(&req) != nil {
 		return
-	} else if jc.Decode(&req) != nil {
+	} else if req.Owner == "" {
+		jc.Error(errors.New("owner is required"), http.StatusBadRequest)
 		return
 	} else if b.accounts.SaveAccounts(jc.Request.Context(), req.Owner, req.Accounts) != nil {
 		return
