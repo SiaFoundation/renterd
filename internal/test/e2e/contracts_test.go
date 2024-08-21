@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func TestRHPForm(t *testing.T) {
+func TestFormContract(t *testing.T) {
 	// configure the autopilot not to form any contracts
 	apSettings := test.AutopilotConfig
 	apSettings.Contracts.Amount = 0
