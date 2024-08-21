@@ -144,6 +144,16 @@ type (
 		TotalCost     types.Currency         `json:"totalCost"`
 	}
 
+	// ContractFormRequest is the request type for the POST /contracts endpoint.
+	ContractFormRequest struct {
+		EndHeight      uint64          `json:"endHeight"`
+		HostCollateral types.Currency  `json:"hostCollateral"`
+		HostKey        types.PublicKey `json:"hostKey"`
+		HostIP         string          `json:"hostIP"`
+		RenterFunds    types.Currency  `json:"renterFunds"`
+		RenterAddress  types.Address   `json:"renterAddress"`
+	}
+
 	// ContractKeepaliveRequest is the request type for the /contract/:id/keepalive
 	// endpoint.
 	ContractKeepaliveRequest struct {

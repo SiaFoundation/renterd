@@ -2250,13 +2250,13 @@ func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *Bus) rhpFormHandler(jc jape.Context) {
+func (b *Bus) contractsFormHandler(jc jape.Context) {
 	// apply pessimistic timeout
 	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
 	defer cancel()
 
 	// decode the request
-	var rfr api.RHPFormRequest
+	var rfr api.ContractFormRequest
 	if jc.Decode(&rfr) != nil {
 		return
 	}
@@ -2303,12 +2303,11 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 	}
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
-	var revision rhpv2.ContractRevision
+	var contract rhpv2.ContractRevision
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		var txnSet []types.Transaction
-		revision, txnSet, err = b.formContract(
+		contract, err = b.formContract(
 			ctx,
 			settings,
 			rfr.RenterAddress,
@@ -2319,26 +2318,15 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 			rfr.EndHeight,
 		)
 		if jc.Check("couldn't form contract", err) != nil {
-			b.w.ReleaseInputs(txnSet, nil)
 			return
 		}
-
-		// add transaction set to the pool
-		_, err := b.cm.AddPoolTransactions(txnSet)
-		if jc.Check("couldn't broadcast transaction set", err) != nil {
-			b.w.ReleaseInputs(txnSet, nil)
-			return
-		}
-
-		// broadcast the transaction set
-		b.s.BroadcastTransactionSet(txnSet)
 	}
 
 	// store the contract
-	contract, err := b.ms.AddContract(
+	metadata, err := b.ms.AddContract(
 		ctx,
-		revision,
-		revision.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
+		contract,
+		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
 		rfr.RenterFunds,
 		b.cm.Tip().Height,
 		api.ContractStatePending,
@@ -2348,10 +2336,10 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 	}
 
 	// return the contract
-	jc.Encode(contract)
+	jc.Encode(metadata)
 }
 
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, []types.Transaction, error) {
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
 	// derive the renter key
 	renterKey := b.deriveRenterKey(hostKey)
 
@@ -2368,15 +2356,30 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
 	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if err != nil {
-		return rhpv2.ContractRevision{}, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
 	}
 
 	// sign the transaction
 	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 
 	// form the contract
-	txnSet := append(b.cm.UnconfirmedParents(txn), txn)
-	return b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, txnSet)
+	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
+	if err != nil {
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		return rhpv2.ContractRevision{}, err
+	}
+
+	// add transaction set to the pool
+	_, err = b.cm.AddPoolTransactions(txnSet)
+	if err != nil {
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
+	}
+
+	// broadcast the transaction set
+	go b.s.BroadcastTransactionSet(txnSet)
+
+	return contract, nil
 }
 
 func (b *Bus) isPassedV2AllowHeight() bool {

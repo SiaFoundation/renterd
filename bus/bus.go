@@ -420,6 +420,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
+		"POST   /contracts":              b.contractsFormHandler,
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
@@ -477,8 +478,6 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-
-		"POST /rhp/form": b.rhpFormHandler,
 
 		"POST   /search/hosts":   b.searchHostsHandlerPOST,
 		"GET    /search/objects": b.searchObjectsHandlerGET,
