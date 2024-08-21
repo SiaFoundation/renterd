@@ -25,7 +25,7 @@ func (*accountsMock) Accounts(context.Context, string) ([]api.Account, error) {
 	return nil, nil
 }
 
-func (*accountsMock) SaveAccounts(context.Context, string, []api.Account, bool) error {
+func (*accountsMock) UpdateAccounts(context.Context, string, []api.Account, bool) error {
 	return nil
 }
 
@@ -52,8 +52,6 @@ type chainMock struct {
 func (c *chainMock) ConsensusState(ctx context.Context) (api.ConsensusState, error) {
 	return c.cs, nil
 }
-
-var _ Bus = (*busMock)(nil)
 
 type busMock struct {
 	*alerterMock

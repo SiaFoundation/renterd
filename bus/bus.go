@@ -366,12 +366,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		return nil, err
 	}
 
-	// create account manager
-	b.accountsMgr, err = ibus.NewAccountManager(ctx, store, l)
-	if err != nil {
-		return nil, err
-	}
-
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
@@ -393,15 +387,8 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 // Handler returns an HTTP handler that serves the bus API.
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts":                 b.accountsHandlerGET,
-		"POST   /accounts":                 b.accountsHandlerPOST,
-		"POST   /account/:id":              b.accountHandlerGET,               // deprecated
-		"POST   /account/:id/add":          b.accountsAddHandlerPOST,          // deprecated
-		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,         // deprecated
-		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,       // deprecated
-		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,       // deprecated
-		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST, // deprecated
-		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,   // deprecated
+		"GET    /accounts": b.accountsHandlerGET,
+		"POST   /accounts": b.accountsHandlerPOST,
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
