@@ -120,7 +120,14 @@ func (a *AccountMgr) Account(hostKey types.PublicKey) api.Account {
 	acc := a.account(hostKey)
 	acc.mu.Lock()
 	defer acc.mu.Unlock()
-	return acc.acc
+	return api.Account{
+		ID:            acc.acc.ID,
+		CleanShutdown: acc.acc.CleanShutdown,
+		HostKey:       acc.acc.HostKey,
+		Balance:       new(big.Int).Set(acc.acc.Balance),
+		Drift:         new(big.Int).Set(acc.acc.Drift),
+		RequiresSync:  acc.acc.RequiresSync,
+	}
 }
 
 // Accounts returns all accounts.
