@@ -11,6 +11,18 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
+// AddContract adds the provided contract to the metadata store.
+func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
+		Contract:      contract,
+		StartHeight:   startHeight,
+		ContractPrice: contractPrice,
+		State:         state,
+		TotalCost:     totalCost,
+	}, &added)
+	return
+}
+
 // AddRenewedContract adds the provided contract to the metadata store.
 func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractRenewedRequest{
