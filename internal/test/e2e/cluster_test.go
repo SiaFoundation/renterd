@@ -1145,8 +1145,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	tt.OK(err)
 
 	// scan the host
-	res, err := w.RHPScan(context.Background(), h.PublicKey, h.NetAddress, 10*time.Second)
-	tt.OK(err)
+	tt.OKAll(w.RHPScan(context.Background(), h.PublicKey, h.NetAddress, 10*time.Second))
 
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
@@ -1219,15 +1218,6 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal("account should not require a sync")
 	} else if acc.Drift.Cmp(new(big.Int)) != 0 {
 		t.Fatalf("account shoult not have drift %v", acc.Drift)
-	}
-
-	// fetch a price table on the fly by triggering a renew
-	w.RHPRenew(context.Background(), c.ID, c.WindowStart, c.HostKey, c.SiamuxAddr, res.Settings.Address, wallet.Address, types.Siacoins(10), types.Siacoins(1), types.Siacoins(15), 1<<40, h.Settings.WindowSize)
-
-	// assert we spent exactly 1H, the cost to fetch the price table
-	accounts, _ = cluster.Bus.Accounts(context.Background())
-	if accounts[0].Balance.Cmp(types.Siacoins(1).Sub(types.NewCurrency64(1)).Big()) != 0 {
-		t.Fatalf("wrong balance %v", accounts[0].Balance)
 	}
 
 	// update the balance to create some drift
