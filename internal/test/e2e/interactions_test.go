@@ -51,8 +51,8 @@ func TestInteractions(t *testing.T) {
 	// assert price table gets updated
 	var ptUpdates int
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		// fetch contracts (this registers host interactions)
-		tt.OKAll(w.Contracts(context.Background(), time.Minute))
+		// fetch pricetable (this registers host interactions)
+		tt.OKAll(w.RHPPriceTable(context.Background(), h1.PublicKey(), h.Settings.SiamuxAddr(), 0))
 
 		// fetch the host
 		h, err := b.Host(context.Background(), h1.PublicKey())

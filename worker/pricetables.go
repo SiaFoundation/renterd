@@ -11,6 +11,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"lukechampine.com/frand"
 )
 
@@ -171,7 +172,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// otherwise fetch it
 	h := p.hm.Host(p.hk, types.FileContractID{}, host.Settings.SiamuxAddr())
-	hpt, cost, err = h.FetchPriceTable(ctx, rev)
+	hpt, cost, err = h.PriceTable(ctx, rev)
 
 	// record it in the background
 	if shouldRecordPriceTable(err) {
@@ -198,10 +199,10 @@ func shouldRecordPriceTable(err error) bool {
 	// List of errors that are considered 'successful' failures. Meaning that
 	// the host was reachable but we were unable to obtain a price table due to
 	// reasons out of the host's control.
-	if isInsufficientFunds(err) {
+	if rhp3.IsInsufficientFunds(err) {
 		return false
 	}
-	if isBalanceInsufficient(err) {
+	if rhp3.IsBalanceInsufficient(err) {
 		return false
 	}
 	return true

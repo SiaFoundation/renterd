@@ -38,16 +38,16 @@ var (
 	// settings API.
 	//
 	DefaultGougingSettings = GougingSettings{
-		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                       // 1mS per RPC
-		MaxContractPrice:              types.Siacoins(15),                                  // 15 SC per contract
-		MaxDownloadPrice:              types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxUploadPrice:                types.Siacoins(3000),                                // 3000 SC per 1 TiB
-		MaxStoragePrice:               types.Siacoins(3000).Div64(1 << 40).Div64(144 * 30), // 3000 SC per TiB per month
-		HostBlockHeightLeeway:         6,                                                   // 6 blocks
-		MinPriceTableValidity:         5 * time.Minute,                                     // 5 minutes
-		MinAccountExpiry:              24 * time.Hour,                                      // 1 day
-		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                   // 1 SC
-		MigrationSurchargeMultiplier:  10,                                                  // 10x
+		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                    // 1mS per RPC
+		MaxContractPrice:              types.Siacoins(15),                               // 15 SC per contract
+		MaxDownloadPrice:              types.Siacoins(3000),                             // 3000 SC per 1 TB
+		MaxUploadPrice:                types.Siacoins(3000),                             // 3000 SC per 1 TB
+		MaxStoragePrice:               types.Siacoins(3000).Div64(1e12).Div64(144 * 30), // 3000 SC per TB per month
+		HostBlockHeightLeeway:         6,                                                // 6 blocks
+		MinPriceTableValidity:         5 * time.Minute,                                  // 5 minutes
+		MinAccountExpiry:              24 * time.Hour,                                   // 1 day
+		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                // 1 SC
+		MigrationSurchargeMultiplier:  10,                                               // 10x
 	}
 
 	// DefaultPricePinSettings define the default price pin settings the bus is
@@ -97,10 +97,10 @@ type (
 		// MaxContractPrice is the maximum allowed price to form a contract
 		MaxContractPrice types.Currency `json:"maxContractPrice"`
 
-		// MaxDownloadPrice is the maximum allowed price to download 1TiB of data
+		// MaxDownloadPrice is the maximum allowed price to download 1TB of data
 		MaxDownloadPrice types.Currency `json:"maxDownloadPrice"`
 
-		// MaxUploadPrice is the maximum allowed price to upload 1TiB of data
+		// MaxUploadPrice is the maximum allowed price to upload 1TB of data
 		MaxUploadPrice types.Currency `json:"maxUploadPrice"`
 
 		// MaxStoragePrice is the maximum allowed price to store 1 byte per block
