@@ -118,16 +118,7 @@ func NewAccountManager(key types.PrivateKey, owner string, w AccountMgrWorker, c
 // Account returns the account with the given id.
 func (a *AccountMgr) Account(hostKey types.PublicKey) api.Account {
 	acc := a.account(hostKey)
-	acc.mu.Lock()
-	defer acc.mu.Unlock()
-	return api.Account{
-		ID:            acc.acc.ID,
-		CleanShutdown: acc.acc.CleanShutdown,
-		HostKey:       acc.acc.HostKey,
-		Balance:       new(big.Int).Set(acc.acc.Balance),
-		Drift:         new(big.Int).Set(acc.acc.Drift),
-		RequiresSync:  acc.acc.RequiresSync,
-	}
+	return acc.convert()
 }
 
 // Accounts returns all accounts.
@@ -136,9 +127,7 @@ func (a *AccountMgr) Accounts() []api.Account {
 	defer a.mu.Unlock()
 	accounts := make([]api.Account, 0, len(a.byID))
 	for _, acc := range a.byID {
-		acc.mu.Lock()
-		accounts = append(accounts, acc.acc)
-		acc.mu.Unlock()
+		accounts = append(accounts, acc.convert())
 	}
 	return accounts
 }
@@ -155,12 +144,6 @@ func (a *AccountMgr) ResetDrift(id rhpv3.Account) error {
 
 	account.resetDrift()
 	return nil
-}
-
-func (a *Account) resetDrift() {
-	a.mu.Lock()
-	a.acc.Drift.SetInt64(0)
-	a.mu.Unlock()
 }
 
 func (a *AccountMgr) Shutdown(ctx context.Context) error {
@@ -502,6 +485,25 @@ func (a *Account) addAmount(amt *big.Int) {
 			"balanceBefore", balanceBefore,
 			"balanceAfter", a.acc.Balance.String())
 	}
+}
+
+func (a *Account) convert() api.Account {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return api.Account{
+		ID:            a.acc.ID,
+		CleanShutdown: a.acc.CleanShutdown,
+		HostKey:       a.acc.HostKey,
+		Balance:       new(big.Int).Set(a.acc.Balance),
+		Drift:         new(big.Int).Set(a.acc.Drift),
+		RequiresSync:  a.acc.RequiresSync,
+	}
+}
+
+func (a *Account) resetDrift() {
+	a.mu.Lock()
+	a.acc.Drift.SetInt64(0)
+	a.mu.Unlock()
 }
 
 // scheduleSync sets the requiresSync flag of an account.
