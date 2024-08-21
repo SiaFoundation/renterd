@@ -518,7 +518,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /wallet/fund":          b.walletFundHandler,
 		"GET    /wallet/outputs":       b.walletOutputsHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
-		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
 		"POST   /wallet/send":          b.walletSendSiacoinsHandler,

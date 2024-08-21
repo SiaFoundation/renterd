@@ -37,11 +37,12 @@ func TestRHPForm(t *testing.T) {
 	// form a contract using the bus
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	fcid, err := b.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
+	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
 	tt.OK(err)
 
-	// assert the contract is added to the bus
-	_, err = b.Contract(context.Background(), fcid)
+	// assert the contract was added to the bus
+	_, err = b.Contract(context.Background(), contract.ID)
 	tt.OK(err)
 
 	// mine to the renew window
@@ -63,8 +64,8 @@ func TestRHPForm(t *testing.T) {
 		if len(contracts) != 1 {
 			return fmt.Errorf("unexpected number of contracts %d != 1", len(contracts))
 		}
-		if contracts[0].RenewedFrom != fcid {
-			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, fcid)
+		if contracts[0].RenewedFrom != contract.ID {
+			return fmt.Errorf("contract wasn't renewed %v != %v", contracts[0].RenewedFrom, contract.ID)
 		}
 		renewalID = contracts[0].ID
 		return nil
@@ -76,6 +77,6 @@ func TestRHPForm(t *testing.T) {
 	if len(contracts) != 1 {
 		t.Fatalf("expected 1 contract, got %v", len(contracts))
 	} else if contracts[0].ID != renewalID {
-		t.Fatalf("expected contract %v, got %v", fcid, contracts[0].ID)
+		t.Fatalf("expected contract %v, got %v", contract.ID, contracts[0].ID)
 	}
 }
