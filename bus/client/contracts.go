@@ -11,18 +11,6 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-// AddContract adds the provided contract to the metadata store.
-func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
-		Contract:      contract,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &added)
-	return
-}
-
 // AddRenewedContract adds the provided contract to the metadata store.
 func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractRenewedRequest{
@@ -127,6 +115,19 @@ func (c *Client) DeleteAllContracts(ctx context.Context) (err error) {
 // DeleteContractSet removes the contract set from the bus.
 func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) {
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/contracts/set/%s", set))
+	return
+}
+
+// FormContract forms a contract with a host and adds it to the bus.
+func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).POST("/rhp/form", api.RHPFormRequest{
+		EndHeight:      endHeight,
+		HostCollateral: hostCollateral,
+		HostKey:        hostKey,
+		HostIP:         hostIP,
+		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
+	}, &contract)
 	return
 }
 

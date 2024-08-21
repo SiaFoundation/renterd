@@ -481,37 +481,6 @@ func (b *Bus) walletDiscardHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletPrepareFormHandler(jc jape.Context) {
-	var wpfr api.WalletPrepareFormRequest
-	if jc.Decode(&wpfr) != nil {
-		return
-	}
-	if wpfr.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
-		return
-	}
-	if wpfr.RenterKey == (types.PublicKey{}) {
-		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
-		return
-	}
-
-	if txns, _, err := b.prepareForm(
-		jc.Request.Context(),
-		wpfr.RenterAddress,
-		wpfr.RenterKey,
-		wpfr.RenterFunds,
-		wpfr.HostCollateral,
-		wpfr.HostKey,
-		wpfr.HostSettings,
-		wpfr.EndHeight,
-	); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else {
-		jc.Encode(txns)
-	}
-}
-
 func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
 	var wprr api.WalletPrepareRenewRequest
 	if jc.Decode(&wprr) != nil {
@@ -2354,26 +2323,37 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
 
+	// fetch host settings
+	settings, err := b.rhp2.Settings(ctx, rfr.HostKey, rfr.HostIP)
+	if jc.Check("couldn't fetch host settings", err) != nil {
+		return
+	}
+
+	// check gouging
+	breakdown := gc.CheckSettings(settings)
+	if breakdown.Gouging() {
+		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+		return
+	}
+
 	// send V2 transaction if we're passed the V2 hardfork allow height
-	var contract rhpv2.ContractRevision
+	var revision rhpv2.ContractRevision
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		// form the contract
 		var txnSet []types.Transaction
-		contract, txnSet, err = b.rhp2.FormContract(
+		revision, txnSet, err = b.formContract(
 			ctx,
+			settings,
 			rfr.RenterAddress,
-			b.deriveRenterKey(rfr.HostKey),
-			rfr.HostKey,
-			rfr.HostIP,
 			rfr.RenterFunds,
 			rfr.HostCollateral,
+			rfr.HostKey,
+			rfr.HostIP,
 			rfr.EndHeight,
-			gc,
-			b.prepareForm,
 		)
 		if jc.Check("couldn't form contract", err) != nil {
+			b.w.ReleaseInputs(txnSet, nil)
 			return
 		}
 
@@ -2389,10 +2369,10 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 	}
 
 	// store the contract
-	_, err = b.ms.AddContract(
+	contract, err := b.ms.AddContract(
 		ctx,
-		contract,
-		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
+		revision,
+		revision.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
 		rfr.RenterFunds,
 		b.cm.Tip().Height,
 		api.ContractStatePending,
@@ -2401,14 +2381,17 @@ func (b *Bus) rhpFormHandler(jc jape.Context) {
 		return
 	}
 
-	// return the contract ID
-	jc.Encode(contract.ID())
+	// return the contract
+	jc.Encode(contract)
 }
 
-func (b *Bus) prepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.Transaction, func(types.Transaction), error) {
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, []types.Transaction, error) {
+	// derive the renter key
+	renterKey := b.deriveRenterKey(hostKey)
+
 	// prepare the transaction
 	cs := b.cm.TipState()
-	fc := rhpv2.PrepareContractFormation(renterKey, hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
+	fc := rhpv2.PrepareContractFormation(renterKey.PublicKey(), hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
 	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
 
 	// calculate the miner fee
@@ -2419,59 +2402,15 @@ func (b *Bus) prepareForm(ctx context.Context, renterAddress types.Address, rent
 	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
 	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+		return rhpv2.ContractRevision{}, nil, fmt.Errorf("couldn't fund transaction: %w", err)
 	}
 
 	// sign the transaction
 	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 
-	txns := append(b.cm.UnconfirmedParents(txn), txn)
-	return txns, func(txn types.Transaction) { b.w.ReleaseInputs(txns, nil) }, nil
-}
-
-// nolint: unused
-func (b *Bus) prepareFormV2(_ context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) ([]types.V2Transaction, func(types.V2Transaction), error) {
-	hostFunds := hostSettings.ContractPrice.Add(hostCollateral)
-
-	// prepare the transaction
-	cs := b.cm.TipState()
-	fc := types.V2FileContract{
-		RevisionNumber:   0,
-		Filesize:         0,
-		FileMerkleRoot:   types.Hash256{},
-		ProofHeight:      endHeight + hostSettings.WindowSize,
-		ExpirationHeight: endHeight + hostSettings.WindowSize + 10,
-		RenterOutput: types.SiacoinOutput{
-			Value:   renterFunds,
-			Address: renterAddress,
-		},
-		HostOutput: types.SiacoinOutput{
-			Value:   hostFunds,
-			Address: hostSettings.Address,
-		},
-		MissedHostValue: hostFunds,
-		TotalCollateral: hostFunds,
-		RenterPublicKey: renterKey,
-		HostPublicKey:   hostKey,
-	}
-	txn := types.V2Transaction{FileContracts: []types.V2FileContract{fc}}
-
-	// calculate the miner fee
-	fee := b.cm.RecommendedFee().Mul64(cs.V2TransactionWeight(txn))
-	txn.MinerFee = fee
-
-	// fund the transaction
-	fundAmount := cs.V2FileContractTax(fc).Add(hostFunds).Add(renterFunds).Add(fee)
-	cs, toSign, err := b.w.FundV2Transaction(&txn, fundAmount, false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("couldn't fund transaction: %w", err)
-	}
-
-	// sign the transaction
-	b.w.SignV2Inputs(cs, &txn, toSign)
-
-	txns := append(b.cm.V2UnconfirmedParents(txn), txn)
-	return txns, func(txn types.V2Transaction) { b.w.ReleaseInputs(nil, txns) }, nil
+	// form the contract
+	txnSet := append(b.cm.UnconfirmedParents(txn), txn)
+	return b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, txnSet)
 }
 
 func (b *Bus) isPassedV2AllowHeight() bool {
