@@ -948,20 +948,10 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
+	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
-
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventAdd,
-		Payload: api.EventContractAdd{
-			Added:     a,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-
 	jc.Encode(a)
 }
 
@@ -2357,7 +2347,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 
 	// store the contract
-	metadata, err := b.ms.AddContract(
+	metadata, err := b.addContract(
 		ctx,
 		contract,
 		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
@@ -2371,52 +2361,4 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 
 	// return the contract
 	jc.Encode(metadata)
-}
-
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
-	// derive the renter key
-	renterKey := b.deriveRenterKey(hostKey)
-
-	// prepare the transaction
-	cs := b.cm.TipState()
-	fc := rhpv2.PrepareContractFormation(renterKey.PublicKey(), hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-
-	// calculate the miner fee
-	fee := b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))
-	txn.MinerFees = []types.Currency{fee}
-
-	// fund the transaction
-	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
-	toSign, err := b.w.FundTransaction(&txn, cost, true)
-	if err != nil {
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
-	}
-
-	// sign the transaction
-	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
-
-	// form the contract
-	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
-	if err != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// add transaction set to the pool
-	_, err = b.cm.AddPoolTransactions(txnSet)
-	if err != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
-	}
-
-	// broadcast the transaction set
-	go b.s.BroadcastTransactionSet(txnSet)
-
-	return contract, nil
-}
-
-func (b *Bus) isPassedV2AllowHeight() bool {
-	cs := b.cm.TipState()
-	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
 }
