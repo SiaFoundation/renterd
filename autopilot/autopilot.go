@@ -236,7 +236,6 @@ func (ap *Autopilot) Run() {
 	}
 
 	var forceScan bool
-	var launchAccountRefillsOnce sync.Once
 	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
@@ -319,13 +318,6 @@ func (ap *Autopilot) Run() {
 				ap.m.SignalMaintenanceFinished()
 			}
 
-			// launch account refills after successful contract maintenance.
-			if maintenanceSuccess {
-				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Info("account refills loop launched")
-				})
-			}
-
 			// migration
 			ap.m.tryPerformMigrations(ap.workers)
 
@@ -347,7 +339,6 @@ func (ap *Autopilot) Run() {
 		case <-tickerFired:
 		}
 	}
-	return
 }
 
 // Shutdown shuts down the autopilot.
