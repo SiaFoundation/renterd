@@ -1310,8 +1310,12 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// Fetch the account balance before setting the balance
 	accounts := cluster.Accounts()
-	if len(accounts) != 1 || accounts[0].RequiresSync {
-		t.Fatal("account shouldn't require a sync")
+	if len(accounts) != 1 {
+		t.Fatal("account should exist")
+	} else if accounts[0].Balance.Cmp(types.ZeroCurrency.Big()) == 0 {
+		t.Fatal("account isn't funded")
+	} else if accounts[0].RequiresSync {
+		t.Fatalf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
 	}
 	acc := accounts[0]
 
