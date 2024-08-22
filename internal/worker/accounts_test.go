@@ -64,12 +64,12 @@ func TestAccounts(t *testing.T) {
 		return i1.Cmp(i2) == 0
 	})
 
-	// Newly created accounts are !cleanShutdown. Simulate a sync to change
-	// that.
+	// Newly created accounts are !cleanShutdown and require a sync. Simulate a
+	// sync to change that.
 	for _, acc := range accounts {
 		if expected := (api.Account{
 			CleanShutdown: false,
-			RequiresSync:  false,
+			RequiresSync:  true,
 			ID:            account.ID(),
 			HostKey:       hk,
 			Balance:       types.ZeroCurrency.Big(),
@@ -79,10 +79,25 @@ func TestAccounts(t *testing.T) {
 		}
 	}
 
-	// set balance to 1SC
-	account.setBalance(types.Siacoins(1).Big())
+	// set balance to 0SC to simulate a sync
+	account.setBalance(types.ZeroCurrency.Big())
 
 	acc := mgr.Account(hk)
+	if expected := (api.Account{
+		CleanShutdown: true,
+		RequiresSync:  false,
+		ID:            account.ID(),
+		HostKey:       hk,
+		Balance:       types.ZeroCurrency.Big(),
+		Drift:         types.ZeroCurrency.Big(),
+	}); !cmp.Equal(acc, expected, comparer) {
+		t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
+	}
+
+	// fund with 1 SC
+	account.addAmount(types.Siacoins(1).Big())
+
+	acc = mgr.Account(hk)
 	if expected := (api.Account{
 		CleanShutdown: true,
 		RequiresSync:  false,
