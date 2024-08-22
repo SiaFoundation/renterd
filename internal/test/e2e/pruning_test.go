@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -179,15 +180,15 @@ func TestSectorPruning(t *testing.T) {
 		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
 	}
 
-	// sleep to ensure slabs were pruned
-	time.Sleep(time.Second)
-
 	// assert amount of prunable data
-	res, err = b.PrunableData(context.Background())
-	tt.OK(err)
-	if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
-		t.Fatalf("unexpected prunable data %v", n)
-	}
+	tt.Retry(30, time.Second, func() error {
+		res, err = b.PrunableData(context.Background())
+		tt.OK(err)
+		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
+			return fmt.Errorf("unexpected prunable data %v", n)
+		}
+		return nil
+	})
 
 	// prune all contracts
 	for _, c := range contracts {
@@ -219,15 +220,16 @@ func TestSectorPruning(t *testing.T) {
 		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
 	}
 
-	// sleep to ensure slabs were pruned
-	time.Sleep(time.Second)
-
 	// assert amount of prunable data
-	res, err = b.PrunableData(context.Background())
-	tt.OK(err)
-	if res.TotalPrunable == 0 {
-		t.Fatal("expected prunable data")
-	}
+	tt.Retry(30, time.Second, func() error {
+		res, err = b.PrunableData(context.Background())
+		tt.OK(err)
+
+		if res.TotalPrunable == 0 {
+			return errors.New(("expected prunable data"))
+		}
+		return nil
+	})
 
 	// update the host settings so it's gouging
 	host := hosts[0]
