@@ -1249,6 +1249,9 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	w.downloadManager.Stop()
 	w.uploadManager.Stop()
 
+	// stop account manager
+	w.accounts.Shutdown(ctx)
+
 	// stop recorders
 	w.contractSpendingRecorder.Stop(ctx)
 

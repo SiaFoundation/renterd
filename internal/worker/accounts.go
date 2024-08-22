@@ -180,7 +180,7 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 				HostKey:       hk,
 				Balance:       big.NewInt(0),
 				Drift:         big.NewInt(0),
-				RequiresSync:  false,
+				RequiresSync:  true, // force sync on new account
 			},
 		}
 		a.byID[accID] = acc
@@ -231,10 +231,12 @@ func (a *AccountMgr) run() {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
 		}
+		acc.RequiresSync = true // force sync on reboot
 		account := &Account{
-			acc:    acc,
-			key:    accKey,
-			logger: a.logger.Named(acc.ID.String()),
+			acc:              acc,
+			key:              accKey,
+			logger:           a.logger.Named(acc.ID.String()),
+			requiresSyncTime: time.Now(),
 		}
 		accounts[account.acc.ID] = account
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
@@ -1122,123 +1123,53 @@ func TestContractApplyChainUpdates(t *testing.T) {
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
-// func TestEphemeralAccounts(t *testing.T) {
-//	if testing.Short() {
-//		t.SkipNow()
-//	}
-//
-//	// Create cluster
-//	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
-//	defer cluster.Shutdown()
-//	tt := cluster.tt
-//
-//	// Shut down the autopilot to prevent it from interfering.
-//	cluster.ShutdownAutopilot(context.Background())
-//
-//	// Wait for contract and accounts.
-//	contract := cluster.WaitForContracts()[0]
-//	accounts := cluster.WaitForAccounts()
-//
-//	// Shut down the autopilot to prevent it from interfering with the test.
-//	cluster.ShutdownAutopilot(context.Background())
-//
-//	// Newly created accounts are !cleanShutdown. Simulate a sync to change
-//	// that.
-//	for _, acc := range accounts {
-//		if acc.CleanShutdown {
-//			t.Fatal("new account should indicate an unclean shutdown")
-//		} else if acc.RequiresSync {
-//			t.Fatal("new account should not require a sync")
-//		}
-//		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, types.Siacoins(1).Big()); err != nil {
-//			t.Fatal(err)
-//		}
-//	}
-//
-//	// Fetch accounts again.
-//	accounts = cluster.Accounts()
-//
-//	acc := accounts[0]
-//	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
-//		t.Fatalf("wrong balance %v", acc.Balance)
-//	}
-//	if acc.ID == (rhpv3.Account{}) {
-//		t.Fatal("account id not set")
-//	}
-//	host := cluster.hosts[0]
-//	if acc.HostKey != types.PublicKey(host.PublicKey()) {
-//		t.Fatal("wrong host")
-//	}
-//	if !acc.CleanShutdown {
-//		t.Fatal("account should indicate a clean shutdown")
-//	}
-//
-//	// Fetch account from bus directly.
-//	busAccounts := cluster.Accounts()
-//	if len(busAccounts) != 1 {
-//		t.Fatal("expected one account but got", len(busAccounts))
-//	}
-//	busAcc := busAccounts[0]
-//	if !reflect.DeepEqual(busAcc, acc) {
-//		t.Fatal("bus account doesn't match worker account")
-//	}
-//
-//	// Check that the spending was recorded for the contract. The recorded
-//	// spending should be > the fundAmt since it consists of the fundAmt plus
-//	// fee.
-//	fundAmt := types.Siacoins(1)
-//	tt.Retry(10, testBusFlushInterval, func() error {
-//		cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
-//		tt.OK(err)
-//
-//		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
-//			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
-//		}
-//		return nil
-//	})
-//
-//	// Update the balance to create some drift.
-//	newBalance := fundAmt.Div64(2)
-//	newDrift := new(big.Int).Sub(newBalance.Big(), fundAmt.Big())
-//	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, acc.HostKey, newBalance.Big()); err != nil {
-//		t.Fatal(err)
-//	}
-//	busAccounts = cluster.Accounts()
-//	busAcc = busAccounts[0]
-//	maxNewDrift := newDrift.Add(newDrift, types.NewCurrency64(2).Big()) // forgive 2H
-//	if busAcc.Drift.Cmp(maxNewDrift) > 0 {
-//		t.Fatalf("drift was %v but should be %v", busAcc.Drift, maxNewDrift)
-//	}
-//
-//	// Reboot cluster.
-//	cluster2 := cluster.Reboot(t)
-//	defer cluster2.Shutdown()
-//
-//	// Check that accounts were loaded from the bus.
-//	accounts2 := cluster2.Accounts()
-//	for _, acc := range accounts2 {
-//		if acc.Balance.Cmp(big.NewInt(0)) == 0 {
-//			t.Fatal("account balance wasn't loaded")
-//		} else if acc.Drift.Cmp(big.NewInt(0)) == 0 {
-//			t.Fatal("account drift wasn't loaded")
-//		} else if !acc.CleanShutdown {
-//			t.Fatal("account should indicate a clean shutdown")
-//		}
-//	}
-//
-//	// Reset drift again.
-//	if err := cluster2.Bus.ResetDrift(context.Background(), acc.ID); err != nil {
-//		t.Fatal(err)
-//	}
-//	accounts2 = cluster2.Accounts()
-//	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
-//		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
-//	}
-//	accounts2 = cluster2.Accounts()
-//	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
-//		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
-//	}
-//}
+func TestEphemeralAccounts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// Create cluster
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	// Shut down the autopilot to prevent it from interfering.
+	cluster.ShutdownAutopilot(context.Background())
+
+	// Accounts should exist for the host
+	accounts := cluster.Accounts()
+
+	acc := accounts[0]
+	host := cluster.hosts[0]
+	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
+		t.Fatalf("wrong balance %v", acc.Balance)
+	} else if acc.ID == (rhpv3.Account{}) {
+		t.Fatal("account id not set")
+	} else if acc.HostKey != types.PublicKey(host.PublicKey()) {
+		t.Fatal("wrong host")
+	} else if !acc.CleanShutdown {
+		t.Fatal("account should indicate a clean shutdown")
+	}
+
+	// Check that the spending was recorded for the contract. The recorded
+	// spending should be > the fundAmt since it consists of the fundAmt plus
+	// fee.
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	tt.OK(err)
+	if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, got %v", len(contracts))
+	}
+	tt.Retry(10, testBusFlushInterval, func() error {
+		cm, err := cluster.Bus.Contract(context.Background(), contracts[0].ID)
+		tt.OK(err)
+
+		fundAmt := types.Siacoins(1)
+		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
+			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+		}
+		return nil
+	})
+}
 
 // TestParallelUpload tests uploading multiple files in parallel.
 func TestParallelUpload(t *testing.T) {
