@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -1293,69 +1295,70 @@ func TestParallelDownload(t *testing.T) {
 
 // TestEphemeralAccountSync verifies that setting the requiresSync flag makes
 // the autopilot resync the balance between renter and host.
-// func TestEphemeralAccountSync(t *testing.T) {
-//	if testing.Short() {
-//		t.SkipNow()
-//	}
-//
-//	dir := t.TempDir()
-//	cluster := newTestCluster(t, testClusterOptions{
-//		dir:   dir,
-//		hosts: 1,
-//	})
-//	tt := cluster.tt
-//
-//	// Shut down the autopilot to prevent it from manipulating the account.
-//	cluster.ShutdownAutopilot(context.Background())
-//
-//	// Fetch the account balance before setting the balance
-//	accounts := cluster.Accounts()
-//	if len(accounts) != 1 || accounts[0].RequiresSync {
-//		t.Fatal("account shouldn't require a sync")
-//	}
-//	acc := accounts[0]
-//
-//	// Set requiresSync flag on bus and balance to 0.
-//	if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, new(big.Int)); err != nil {
-//		t.Fatal(err)
-//	}
-//	if err := cluster.Bus.ScheduleSync(context.Background(), acc.ID, acc.HostKey); err != nil {
-//		t.Fatal(err)
-//	}
-//	accounts = cluster.Accounts()
-//	if len(accounts) != 1 || !accounts[0].RequiresSync {
-//		t.Fatal("account wasn't updated")
-//	}
-//
-//	// Restart cluster to have worker fetch the account from the bus again.
-//	cluster2 := cluster.Reboot(t)
-//	defer cluster2.Shutdown()
-//
-//	// Account should need a sync.
-//	account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.HostKey)
-//	tt.OK(err)
-//	if !account.RequiresSync {
-//		t.Fatal("flag wasn't persisted")
-//	}
-//
-//	// Wait for autopilot to sync and reset flag.
-//	tt.Retry(100, 100*time.Millisecond, func() error {
-//		account, err := cluster2.Bus.Account(context.Background(), acc.ID, acc.HostKey)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		if account.RequiresSync {
-//			return errors.New("account wasn't synced")
-//		}
-//		return nil
-//	})
-//
-//	// Flag should also be reset on bus now.
-//	accounts = cluster2.Accounts()
-//	if len(accounts) != 1 || accounts[0].RequiresSync {
-//		t.Fatal("account wasn't updated")
-//	}
-//}
+func TestEphemeralAccountSync(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	dir := t.TempDir()
+	cluster := newTestCluster(t, testClusterOptions{
+		dir:   dir,
+		hosts: 1,
+	})
+	tt := cluster.tt
+	hk := cluster.hosts[0].PublicKey()
+
+	// Fetch the account balance before setting the balance
+	accounts := cluster.Accounts()
+	if len(accounts) != 1 || accounts[0].RequiresSync {
+		t.Fatal("account shouldn't require a sync")
+	}
+	acc := accounts[0]
+
+	// stop the cluster
+	host := cluster.hosts[0]
+	cluster.hosts = nil // exclude hosts from shutdown
+	cluster.Shutdown()
+
+	// remove the cluster's database
+	tt.OK(os.Remove(filepath.Join(dir, "bus", "db", "db.sqlite")))
+
+	// start the cluster again
+	cluster = newTestCluster(t, testClusterOptions{
+		dir:       cluster.dir,
+		dbName:    cluster.dbName,
+		logger:    cluster.logger,
+		walletKey: &cluster.wk,
+	})
+	cluster.hosts = append(cluster.hosts, host)
+	defer cluster.Shutdown()
+
+	// connect to the host again
+	tt.OK(cluster.Bus.SyncerConnect(context.Background(), host.SyncerAddr()))
+	cluster.sync()
+
+	// ask for the account, this should trigger its creation
+	tt.OKAll(cluster.Worker.Account(context.Background(), hk))
+
+	accounts = cluster.Accounts()
+	if len(accounts) != 1 || accounts[0].ID != acc.ID {
+		t.Fatal("account should exist")
+	} else if accounts[0].CleanShutdown || !accounts[0].RequiresSync {
+		t.Fatalf("account shouldn't be marked as clean shutdown or not require a sync, got %v", accounts[0])
+	}
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		accounts = cluster.Accounts()
+		if len(accounts) != 1 || accounts[0].ID != acc.ID {
+			return errors.New("account should exist")
+		} else if accounts[0].Balance.Cmp(types.ZeroCurrency.Big()) == 0 {
+			return errors.New("account isn't funded")
+		} else if accounts[0].RequiresSync {
+			return fmt.Errorf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
+		}
+		return nil
+	})
+}
 
 // TestUploadDownloadSameHost uploads a file to the same host through different
 // contracts and tries downloading the file again.
