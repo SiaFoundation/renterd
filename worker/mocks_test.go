@@ -134,13 +134,12 @@ func newContractLockerMock() *contractLockerMock {
 
 func (cs *contractLockerMock) AcquireContract(_ context.Context, fcid types.FileContractID, _ int, _ time.Duration) (uint64, error) {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	lock, exists := cs.locks[fcid]
 	if !exists {
 		cs.locks[fcid] = new(sync.Mutex)
 		lock = cs.locks[fcid]
 	}
+	cs.mu.Unlock()
 
 	lock.Lock()
 	return 0, nil
@@ -151,7 +150,6 @@ func (cs *contractLockerMock) ReleaseContract(_ context.Context, fcid types.File
 	defer cs.mu.Unlock()
 
 	cs.locks[fcid].Unlock()
-	delete(cs.locks, fcid)
 	return nil
 }
 

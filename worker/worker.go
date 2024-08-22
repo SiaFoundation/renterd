@@ -592,30 +592,6 @@ func (w *Worker) rhpRenewHandler(jc jape.Context) {
 	})
 }
 
-func (w *Worker) rhpFundHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode request
-	var rfr api.RHPFundRequest
-	if jc.Decode(&rfr) != nil {
-		return
-	} else if jc.Check("failed to fund account", w.FundAccount(ctx, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, rfr.Balance)) != nil {
-		return
-	}
-}
-
-func (w *Worker) rhpSyncHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the request
-	var rsr api.RHPSyncRequest
-	if jc.Decode(&rsr) != nil {
-		return
-	} else if jc.Check("failed to sync account", w.SyncAccount(ctx, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr)) != nil {
-		return
-	}
-}
-
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -1234,8 +1210,6 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/renew":                  w.rhpRenewHandler,
-		"POST   /rhp/fund":                   w.rhpFundHandler,
-		"POST   /rhp/sync":                   w.rhpSyncHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,

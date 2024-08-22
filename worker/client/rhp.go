@@ -89,14 +89,3 @@ func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP st
 	}, &resp)
 	return
 }
-
-// RHPSync funds an ephemeral account using the supplied contract.
-func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (err error) {
-	req := api.RHPSyncRequest{
-		ContractID: contractID,
-		HostKey:    hostKey,
-		SiamuxAddr: siamuxAddr,
-	}
-	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
-	return
-}
