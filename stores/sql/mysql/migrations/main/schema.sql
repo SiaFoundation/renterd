@@ -225,9 +225,11 @@ CREATE TABLE `ephemeral_accounts` (
   `balance` longtext,
   `drift` longtext,
   `requires_sync` tinyint(1) DEFAULT NULL,
+  `owner` varchar(128) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `account_id` (`account_id`),
-  KEY `idx_ephemeral_accounts_requires_sync` (`requires_sync`)
+  KEY `idx_ephemeral_accounts_requires_sync` (`requires_sync`),
+  KEY `idx_ephemeral_accounts_owner` (`owner`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbAllowlistEntry

@@ -97,8 +97,8 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
-func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
-	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts")
+func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, error) {
+	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts WHERE owner = ?", owner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
 	}
@@ -2229,8 +2229,8 @@ func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
 	return settings, nil
 }
 
-func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
+func SetUncleanShutdown(ctx context.Context, tx sql.Tx, owner string) error {
+	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1 WHERE owner = ?", owner)
 	if err != nil {
 		return fmt.Errorf("failed to set unclean shutdown: %w", err)
 	}

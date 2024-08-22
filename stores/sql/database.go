@@ -52,7 +52,7 @@ type (
 		AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error
 
 		// Accounts returns all accounts from the db.
-		Accounts(ctx context.Context) ([]api.Account, error)
+		Accounts(ctx context.Context, owner string) ([]api.Account, error)
 
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
@@ -308,7 +308,7 @@ type (
 
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones and setting the clean shutdown flag.
-		SaveAccounts(ctx context.Context, accounts []api.Account) error
+		SaveAccounts(ctx context.Context, owner string, accounts []api.Account) error
 
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
@@ -319,7 +319,7 @@ type (
 
 		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
 		// 'false' and also marks them as requiring a resync.
-		SetUncleanShutdown(ctx context.Context) error
+		SetUncleanShutdown(ctx context.Context, owner string) error
 
 		// SetContractSet creates the contract set with the given name and
 		// associates it with the provided contract IDs.

@@ -10,7 +10,7 @@ import (
 // Accounts returns all accounts from the db.
 func (s *SQLStore) Accounts(ctx context.Context, owner string) (accounts []api.Account, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		accounts, err = tx.Accounts(ctx)
+		accounts, err = tx.Accounts(ctx, owner)
 		return err
 	})
 	return
@@ -22,7 +22,7 @@ func (s *SQLStore) Accounts(ctx context.Context, owner string) (accounts []api.A
 // apply drift.
 func (s *SQLStore) SetUncleanShutdown(ctx context.Context, owner string) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.SetUncleanShutdown(ctx)
+		return tx.SetUncleanShutdown(ctx, owner)
 	})
 }
 
@@ -30,6 +30,6 @@ func (s *SQLStore) SetUncleanShutdown(ctx context.Context, owner string) error {
 // ones.
 func (s *SQLStore) SaveAccounts(ctx context.Context, owner string, accounts []api.Account) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.SaveAccounts(ctx, accounts)
+		return tx.SaveAccounts(ctx, owner, accounts)
 	})
 }

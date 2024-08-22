@@ -90,8 +90,8 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
-func (tx *MainDatabaseTx) Accounts(ctx context.Context) ([]api.Account, error) {
-	return ssql.Accounts(ctx, tx)
+func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Account, error) {
+	return ssql.Accounts(ctx, tx, owner)
 }
 
 func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
@@ -714,11 +714,11 @@ func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicK
 	return ssql.ResetLostSectors(ctx, tx, hk)
 }
 
-func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
+func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, owner string, accounts []api.Account) error {
 	// clean_shutdown = 1 after save
 	stmt, err := tx.Prepare(ctx, `
-		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync)
-		VAlUES (?, ?, 1, ?, ?, ?, ?)
+		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync, owner)
+		VAlUES (?, ?, 1, ?, ?, ?, ?, ?)
 		ON CONFLICT(account_id) DO UPDATE SET
 		account_id = EXCLUDED.account_id,
 		clean_shutdown = 1,
@@ -733,7 +733,7 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 	defer stmt.Close()
 
 	for _, acc := range accounts {
-		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync)
+		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync, owner)
 		if err != nil {
 			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
 		} else if n, err := res.RowsAffected(); err != nil {
@@ -826,8 +826,8 @@ func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
 	return ssql.Settings(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
-	return ssql.SetUncleanShutdown(ctx, tx)
+func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context, owner string) error {
+	return ssql.SetUncleanShutdown(ctx, tx, owner)
 }
 
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
