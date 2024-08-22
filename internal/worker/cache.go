@@ -168,6 +168,9 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventConsensusUpdate:
 		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
 		c.handleConsensusUpdate(e)
+	case api.EventContractAdd:
+		log = log.With("fcid", e.Added.ID, "ts", e.Timestamp)
+		c.handleContractAdd(e)
 	case api.EventContractArchive:
 		log = log.With("fcid", e.ContractID, "ts", e.Timestamp)
 		c.handleContractArchive(e)
@@ -232,6 +235,24 @@ func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
 	gp.ConsensusState = event.ConsensusState
 	gp.TransactionFee = event.TransactionFee
 	c.cache.Set(cacheKeyGougingParams, gp)
+}
+
+func (c *cache) handleContractAdd(event api.EventContractAdd) {
+	// return early if the cache doesn't have contracts
+	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		return
+	}
+	contracts := value.([]api.ContractMetadata)
+
+	// add the contract to the cache
+	for _, contract := range contracts {
+		if contract.ID == event.Added.ID {
+			return
+		}
+	}
+	contracts = append(contracts, event.Added)
+	c.cache.Set(cacheKeyDownloadContracts, contracts)
 }
 
 func (c *cache) handleContractArchive(event api.EventContractArchive) {
