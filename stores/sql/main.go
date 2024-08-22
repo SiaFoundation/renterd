@@ -247,29 +247,25 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 // ContractRootsDiff returns the indices, offset by the given offset, of roots
 // that are not in the contract.
 func ContractRootsDiff(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error) {
-	// build tmp table name
-	var r [4]byte
-	frand.Read(r[:])
-	tmpTable := strings.ReplaceAll(fmt.Sprintf("diff_%s_%x", fcid.String(), r), ":", "_")
-
 	// build insert query
 	query := "SELECT ? as idx, ? as root" + strings.Repeat(" UNION ALL SELECT ? AS idx, ?", len(roots)-1)
 	var args []interface{}
 	for i, root := range roots {
 		args = append(args, offset+uint64(i), Hash256(root))
 	}
-
-	// create temporary table
-	_, err = tx.Exec(ctx, fmt.Sprintf(`CREATE TEMPORARY TABLE %s AS %s`, tmpTable, query), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// defer removal
-	defer func() { tx.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tmpTable)) }()
+	args = append(args, FileContractID(fcid))
 
 	// query indices that are not in the contract
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+SELECT idx
+FROM (%s) AS contract_sectors
+LEFT JOIN (
+	SELECT s.root
+	FROM contracts c
+	INNER JOIN contract_sectors cs on cs.db_contract_id = c.id
+	INNER JOIN sectors s on cs.db_sector_id = s.id
+	WHERE c.fcid = ?
+) AS db_sectors ON contract_sectors.root = db_sectors.root  WHERE db_sectors.root IS NULL`, query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract diff: %w", err)
 	}
