@@ -947,19 +947,17 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	var req api.ContractAddRequest
 	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
 		return
-	}
-	if req.Contract.ID() != id {
+	} else if req.Contract.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
-	}
-	if req.TotalCost.IsZero() {
+	} else if req.TotalCost.IsZero() {
 		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
 		return
 	}
 
 	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) == nil {
-		jc.Encode(a)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
 	}
 
 	b.broadcastAction(webhooks.Event{
@@ -970,6 +968,8 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 			Timestamp: time.Now().UTC(),
 		},
 	})
+
+	jc.Encode(a)
 }
 
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
