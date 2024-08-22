@@ -178,9 +178,9 @@ type (
 	// are rapidly updated and can be recovered, they are only loaded upon
 	// startup and persisted upon shutdown.
 	AccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
-		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
+		Accounts(context.Context, string) ([]api.Account, error)
+		SaveAccounts(context.Context, string, []api.Account) error
+		SetUncleanShutdown(context.Context, string) error
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -309,15 +309,16 @@ type Bus struct {
 	startTime time.Time
 	masterKey [32]byte
 
-	accountsMgr AccountManager
-	alerts      alerts.Alerter
-	alertMgr    AlertManager
-	pinMgr      PinManager
-	webhooksMgr WebhooksManager
-	cm          ChainManager
-	cs          ChainSubscriber
-	s           Syncer
-	w           Wallet
+	accountsMgr  AccountManager
+	alerts       alerts.Alerter
+	alertMgr     AlertManager
+	pinMgr       PinManager
+	webhooksMgr  WebhooksManager
+	accountStore AccountStore
+	cm           ChainManager
+	cs           ChainSubscriber
+	s            Syncer
+	w            Wallet
 
 	as    AutopilotStore
 	hs    HostStore
@@ -342,14 +343,15 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		startTime: time.Now(),
 		masterKey: masterKey,
 
-		s:     s,
-		cm:    cm,
-		w:     w,
-		hs:    store,
-		as:    store,
-		ms:    store,
-		mtrcs: store,
-		ss:    store,
+		accountStore: store,
+		s:            s,
+		cm:           cm,
+		w:            w,
+		hs:           store,
+		as:           store,
+		ms:           store,
+		mtrcs:        store,
+		ss:           store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -392,13 +394,14 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"GET    /accounts":                 b.accountsHandlerGET,
-		"POST   /account/:id":              b.accountHandlerGET,
-		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"POST   /accounts":                 b.accountsHandlerPOST,
+		"POST   /account/:id":              b.accountHandlerGET,               // deprecated
+		"POST   /account/:id/add":          b.accountsAddHandlerPOST,          // deprecated
+		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,         // deprecated
+		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,       // deprecated
+		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,       // deprecated
+		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST, // deprecated
+		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,   // deprecated
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,

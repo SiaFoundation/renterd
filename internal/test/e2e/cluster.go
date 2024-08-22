@@ -88,6 +88,13 @@ type dbConfig struct {
 	RetryTxIntervals []time.Duration
 }
 
+func (tc *TestCluster) Accounts() []api.Account {
+	tc.tt.Helper()
+	accounts, err := tc.Worker.Accounts(context.Background())
+	tc.tt.OK(err)
+	return accounts
+}
+
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
 	tc.tt.Helper()
 	for _, fn := range tc.autopilotShutdownFns {
@@ -707,7 +714,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 	c.waitForHostAccounts(hostsMap)
 
 	// fetch all accounts
-	accounts, err := c.Bus.Accounts(context.Background())
+	accounts, err := c.Worker.Accounts(context.Background())
 	c.tt.OK(err)
 	return accounts
 }
@@ -904,7 +911,7 @@ func (c *TestCluster) Shutdown() {
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		accounts, err := c.Bus.Accounts(context.Background())
+		accounts, err := c.Worker.Accounts(context.Background())
 		if err != nil {
 			return err
 		}

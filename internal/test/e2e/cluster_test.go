@@ -1158,8 +1158,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Fetch accounts again.
-	accounts, err := cluster.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts = cluster.Accounts()
 
 	acc := accounts[0]
 	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
@@ -1177,8 +1176,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// Fetch account from bus directly.
-	busAccounts, err := cluster.Bus.Accounts(context.Background())
-	tt.OK(err)
+	busAccounts := cluster.Accounts()
 	if len(busAccounts) != 1 {
 		t.Fatal("expected one account but got", len(busAccounts))
 	}
@@ -1207,8 +1205,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, acc.HostKey, newBalance.Big()); err != nil {
 		t.Fatal(err)
 	}
-	busAccounts, err = cluster.Bus.Accounts(context.Background())
-	tt.OK(err)
+	busAccounts = cluster.Accounts()
 	busAcc = busAccounts[0]
 	maxNewDrift := newDrift.Add(newDrift, types.NewCurrency64(2).Big()) // forgive 2H
 	if busAcc.Drift.Cmp(maxNewDrift) > 0 {
@@ -1220,8 +1217,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	defer cluster2.Shutdown()
 
 	// Check that accounts were loaded from the bus.
-	accounts2, err := cluster2.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts2 := cluster2.Accounts()
 	for _, acc := range accounts2 {
 		if acc.Balance.Cmp(big.NewInt(0)) == 0 {
 			t.Fatal("account balance wasn't loaded")
@@ -1236,13 +1232,11 @@ func TestEphemeralAccounts(t *testing.T) {
 	if err := cluster2.Bus.ResetDrift(context.Background(), acc.ID); err != nil {
 		t.Fatal(err)
 	}
-	accounts2, err = cluster2.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts2 = cluster2.Accounts()
 	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
 		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
 	}
-	accounts2, err = cluster2.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts2 = cluster2.Accounts()
 	if accounts2[0].Drift.Cmp(new(big.Int)) != 0 {
 		t.Fatal("drift wasn't reset", accounts2[0].Drift.String())
 	}
@@ -1387,8 +1381,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	cluster.ShutdownAutopilot(context.Background())
 
 	// Fetch the account balance before setting the balance
-	accounts, err := cluster.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts := cluster.Accounts()
 	if len(accounts) != 1 || accounts[0].RequiresSync {
 		t.Fatal("account shouldn't require a sync")
 	}
@@ -1401,8 +1394,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if err := cluster.Bus.ScheduleSync(context.Background(), acc.ID, acc.HostKey); err != nil {
 		t.Fatal(err)
 	}
-	accounts, err = cluster.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts = cluster.Accounts()
 	if len(accounts) != 1 || !accounts[0].RequiresSync {
 		t.Fatal("account wasn't updated")
 	}
@@ -1431,8 +1423,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	})
 
 	// Flag should also be reset on bus now.
-	accounts, err = cluster2.Bus.Accounts(context.Background())
-	tt.OK(err)
+	accounts = cluster2.Accounts()
 	if len(accounts) != 1 || accounts[0].RequiresSync {
 		t.Fatal("account wasn't updated")
 	}

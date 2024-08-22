@@ -14,9 +14,9 @@ import (
 
 type mockAccStore struct{}
 
-func (m *mockAccStore) Accounts(context.Context) ([]api.Account, error)   { return nil, nil }
-func (m *mockAccStore) SaveAccounts(context.Context, []api.Account) error { return nil }
-func (m *mockAccStore) SetUncleanShutdown(context.Context) error          { return nil }
+func (m *mockAccStore) Accounts(context.Context, string) ([]api.Account, error)   { return nil, nil }
+func (m *mockAccStore) SaveAccounts(context.Context, string, []api.Account) error { return nil }
+func (m *mockAccStore) SetUncleanShutdown(context.Context, string) error          { return nil }
 
 func TestAccountLocking(t *testing.T) {
 	eas := &mockAccStore{}

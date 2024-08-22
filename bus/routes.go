@@ -1714,6 +1714,19 @@ func (b *Bus) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(b.accountsMgr.Accounts())
 }
 
+func (b *Bus) accountsHandlerPOST(jc jape.Context) {
+	var req api.AccountsSaveRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if b.accountStore.SaveAccounts(jc.Request.Context(), req.Owner, req.Accounts) != nil {
+		return
+	} else if !req.SetUnclean {
+		return
+	} else if jc.Check("failed to set accounts unclean", b.accountStore.SetUncleanShutdown(jc.Request.Context(), req.Owner)) != nil {
+		return
+	}
+}
+
 func (b *Bus) accountHandlerGET(jc jape.Context) {
 	var id rhpv3.Account
 	if jc.DecodeParam("id", &id) != nil {

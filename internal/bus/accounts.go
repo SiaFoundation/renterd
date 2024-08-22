@@ -16,15 +16,19 @@ import (
 	"lukechampine.com/frand"
 )
 
+const (
+	busAccountOwner = "bus"
+)
+
 var (
 	ErrAccountNotFound = errors.New("account doesn't exist")
 )
 
 type (
 	AccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
-		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
+		Accounts(context.Context, string) ([]api.Account, error)
+		SaveAccounts(context.Context, string, []api.Account) error
+		SetUncleanShutdown(context.Context, string) error
 	}
 )
 
@@ -60,7 +64,7 @@ func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) 
 	logger = logger.Named("accounts")
 
 	// load saved accounts
-	saved, err := s.Accounts(ctx)
+	saved, err := s.Accounts(ctx, busAccountOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +80,7 @@ func NewAccountManager(ctx context.Context, s AccountStore, logger *zap.Logger) 
 	}
 
 	// mark the shutdown as unclean, this will be overwritten on shutdown
-	err = s.SetUncleanShutdown(ctx)
+	err = s.SetUncleanShutdown(ctx, busAccountOwner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mark account shutdown as unclean: %w", err)
 	}
@@ -252,7 +256,7 @@ func (a *AccountMgr) ScheduleSync(id rhpv3.Account, hk types.PublicKey) error {
 
 func (a *AccountMgr) Shutdown(ctx context.Context) error {
 	accounts := a.Accounts()
-	err := a.s.SaveAccounts(ctx, accounts)
+	err := a.s.SaveAccounts(ctx, busAccountOwner, accounts)
 	if err != nil {
 		a.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
 		return err

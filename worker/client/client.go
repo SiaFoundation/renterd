@@ -38,6 +38,12 @@ func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account 
 	return
 }
 
+// Accounts returns all accounts.
+func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts"), &accounts)
+	return
+}
+
 // Contracts returns all contracts from the worker. These contracts decorate a
 // bus contract with the contract's latest revision.
 func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {

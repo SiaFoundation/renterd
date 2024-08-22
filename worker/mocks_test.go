@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"time"
 
@@ -20,35 +19,17 @@ import (
 	"go.sia.tech/renterd/webhooks"
 )
 
-var _ AccountStore = (*accountsMock)(nil)
-
 type accountsMock struct{}
 
-func (*accountsMock) Accounts(context.Context) ([]api.Account, error) {
+func (*accountsMock) Accounts(context.Context, string) ([]api.Account, error) {
 	return nil, nil
 }
 
-func (*accountsMock) AddBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
+func (*accountsMock) SaveAccounts(context.Context, string, []api.Account, bool) error {
 	return nil
 }
 
-func (*accountsMock) LockAccount(context.Context, rhpv3.Account, types.PublicKey, bool, time.Duration) (api.Account, uint64, error) {
-	return api.Account{}, 0, nil
-}
-
-func (*accountsMock) UnlockAccount(context.Context, rhpv3.Account, uint64) error {
-	return nil
-}
-
-func (*accountsMock) ResetDrift(context.Context, rhpv3.Account) error {
-	return nil
-}
-
-func (*accountsMock) SetBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
-	return nil
-}
-
-func (*accountsMock) ScheduleSync(context.Context, rhpv3.Account, types.PublicKey) error {
+func (*accountsMock) SetUncleanShutdown(context.Context, string) error {
 	return nil
 }
 
@@ -131,7 +112,6 @@ func (c *contractMock) AddSector(root types.Hash256, sector *[rhpv2.SectorSize]b
 	c.mu.Lock()
 	c.sectors[root] = sector
 	c.mu.Unlock()
-	return
 }
 
 func (c *contractMock) Sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {

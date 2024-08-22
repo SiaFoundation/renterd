@@ -20,8 +20,8 @@ func (c *Client) Account(ctx context.Context, id rhpv3.Account, hostKey types.Pu
 }
 
 // Accounts returns all accounts.
-func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
-	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
+func (c *Client) Accounts(ctx context.Context, owner string) (accounts []api.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts?owner=%s", owner), &accounts)
 	return
 }
 
@@ -51,6 +51,16 @@ func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	return
 }
 
+// SaveAccounts saves all accounts.
+func (c *Client) SaveAccounts(ctx context.Context, owner string, accounts []api.Account, setUnclean bool) (err error) {
+	err = c.c.WithContext(ctx).POST("/accounts", &api.AccountsSaveRequest{
+		Accounts:   accounts,
+		Owner:      owner,
+		SetUnclean: setUnclean,
+	}, nil)
+	return
+}
+
 // SetBalance sets the given account's balance to a certain amount.
 func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, amount *big.Int) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/account/%s/update", id), api.AccountsUpdateBalanceRequest{
@@ -58,6 +68,10 @@ func (c *Client) SetBalance(ctx context.Context, id rhpv3.Account, hostKey types
 		Amount:  amount,
 	}, nil)
 	return
+}
+
+func (c *Client) SetUncleanShutdown(context.Context, string) error {
+	panic("not implemented")
 }
 
 // ScheduleSync sets the requiresSync flag of an account.

@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/worker"
 	"go.uber.org/zap"
 )
 
@@ -41,11 +42,10 @@ type (
 	host struct {
 		hk         types.PublicKey
 		renterKey  types.PrivateKey
-		accountKey types.PrivateKey
 		fcid       types.FileContractID
 		siamuxAddr string
 
-		acc                      *account
+		acc                      *worker.Account
 		client                   *rhp3.Client
 		bus                      Bus
 		contractSpendingRecorder ContractSpendingRecorder
@@ -70,7 +70,6 @@ func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		fcid:                     fcid,
 		siamuxAddr:               siamuxAddr,
 		renterKey:                w.deriveRenterKey(hk),
-		accountKey:               w.accounts.deriveAccountKey(hk),
 		priceTables:              w.priceTables,
 	}
 }
@@ -93,8 +92,8 @@ func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
 	}
 
-	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		return h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.id, h.accountKey, hpt)
+	return h.acc.WithWithdrawal(func() (amount types.Currency, err error) {
+		return h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.ID(), h.acc.Key(), hpt)
 	})
 }
 
@@ -105,7 +104,7 @@ func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 		return err
 	}
 	// upload
-	cost, err := h.client.AppendSector(ctx, sectorRoot, sector, &rev, h.hk, h.siamuxAddr, h.acc.id, pt, h.renterKey)
+	cost, err := h.client.AppendSector(ctx, sectorRoot, sector, &rev, h.hk, h.siamuxAddr, h.acc.ID(), pt, h.renterKey)
 	if err != nil {
 		return fmt.Errorf("failed to upload sector: %w", err)
 	}
@@ -172,11 +171,11 @@ func (h *host) PriceTable(ctx context.Context, rev *types.FileContractRevision) 
 
 	// pay by contract if a revision is given
 	if rev != nil {
-		return fetchPT(rhp3.PreparePriceTableContractPayment(rev, h.acc.id, h.renterKey))
+		return fetchPT(rhp3.PreparePriceTableContractPayment(rev, h.acc.ID(), h.renterKey))
 	}
 
 	// pay by account
-	return fetchPT(rhp3.PreparePriceTableAccountPayment(h.accountKey))
+	return fetchPT(rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
 }
 
 // FetchRevision tries to fetch a contract revision from the host.
@@ -191,19 +190,13 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 }
 
 func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
-	// fetch current balance
-	curr, err := h.acc.Balance(ctx)
-	if err != nil {
-		return err
-	}
+	return h.acc.WithDeposit(func(curr types.Currency) (types.Currency, error) {
+		// return early if we have the desired balance
+		if curr.Cmp(balance) >= 0 {
+			return types.ZeroCurrency, nil
+		}
+		deposit := balance.Sub(curr)
 
-	// return early if we have the desired balance
-	if curr.Cmp(balance) >= 0 {
-		return nil
-	}
-	deposit := balance.Sub(curr)
-
-	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
 		// fetch pricetable directly to bypass the gouging check
 		pt, err := h.priceTables.fetch(ctx, h.hk, rev)
 		if err != nil {
@@ -221,7 +214,7 @@ func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *typ
 		if deposit.Cmp(availableFunds) > 0 {
 			deposit = availableFunds
 		}
-		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.id, pt.HostPriceTable, h.renterKey); err != nil {
+		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.ID(), pt.HostPriceTable, h.renterKey); err != nil {
 			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
 		}
 		// record the spend
@@ -245,8 +238,8 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
 	}
 
-	return h.acc.WithSync(ctx, func() (types.Currency, error) {
-		return h.client.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.id, pt.UID, h.renterKey)
+	return h.acc.WithSync(func() (types.Currency, error) {
+		return h.client.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.ID(), pt.UID, h.renterKey)
 	})
 }
 
