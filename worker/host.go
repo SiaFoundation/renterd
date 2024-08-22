@@ -23,7 +23,7 @@ type (
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
-		PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error)
+		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
 		PriceTableUnpaid(ctx context.Context) (hpt api.HostPriceTable, err error)
 		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
@@ -77,30 +77,39 @@ func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 func (h *host) PublicKey() types.PublicKey { return h.hk }
 
 func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
-	pt, err := h.priceTables.fetch(ctx, h.hk, nil)
-	if err != nil {
-		return err
-	}
-	hpt := pt.HostPriceTable
+	var amount types.Currency
+	return h.acc.WithWithdrawal(func() (types.Currency, error) {
+		pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+		hpt := pt.HostPriceTable
+		amount = uptc
 
-	// check for download gouging specifically
-	gc, err := GougingCheckerFromContext(ctx, overpay)
-	if err != nil {
-		return err
-	}
-	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
-		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
-	}
+		// check for download gouging specifically
+		gc, err := GougingCheckerFromContext(ctx, overpay)
+		if err != nil {
+			return amount, err
+		}
+		if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
+			return amount, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
+		}
 
-	return h.acc.WithWithdrawal(func() (amount types.Currency, err error) {
-		return h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.ID(), h.acc.Key(), hpt)
+		cost, err := h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.ID(), h.acc.Key(), hpt)
+		if err != nil {
+			return amount, err
+		}
+		return amount.Add(cost), nil
 	})
 }
 
-func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (err error) {
+func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
 	// fetch price table
-	pt, err := h.priceTable(ctx, nil)
-	if err != nil {
+	var pt rhpv3.HostPriceTable
+	if err := h.acc.WithWithdrawal(func() (amount types.Currency, err error) {
+		pt, amount, err = h.priceTable(ctx, nil)
+		return
+	}); err != nil {
 		return err
 	}
 	// upload
@@ -163,19 +172,24 @@ func (h *host) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error)
 	return h.client.PriceTableUnpaid(ctx, h.hk, h.siamuxAddr)
 }
 
-func (h *host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error) {
+func (h *host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn rhp3.PriceTablePaymentFunc) (api.HostPriceTable, error) {
 		return h.client.PriceTable(ctx, h.hk, h.siamuxAddr, paymentFn)
 	}
 
-	// pay by contract if a revision is given
+	// fetch the price table
 	if rev != nil {
-		return fetchPT(rhp3.PreparePriceTableContractPayment(rev, h.acc.ID(), h.renterKey))
+		hpt, err = fetchPT(rhp3.PreparePriceTableContractPayment(rev, h.acc.ID(), h.renterKey))
+	} else {
+		hpt, err = fetchPT(rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
 	}
 
-	// pay by account
-	return fetchPT(rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
+	// set the cost
+	if err == nil {
+		cost = hpt.UpdatePriceTableCost
+	}
+	return
 }
 
 // FetchRevision tries to fetch a contract revision from the host.
@@ -189,43 +203,61 @@ func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (t
 	return h.client.Revision(ctx, h.fcid, h.hk, h.siamuxAddr)
 }
 
-func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
-	return h.acc.WithDeposit(func(curr types.Currency) (types.Currency, error) {
+func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *types.FileContractRevision) error {
+	log := h.logger.With(
+		zap.Stringer("host", h.hk),
+		zap.Stringer("account", h.acc.ID()),
+	)
+
+	// ensure we have at least 2H in the contract to cover the costs
+	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
+		return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2))
+	}
+
+	// calculate the deposit amount
+	return h.acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
 		// return early if we have the desired balance
-		if curr.Cmp(balance) >= 0 {
+		if balance.Cmp(desired) >= 0 {
 			return types.ZeroCurrency, nil
 		}
-		deposit := balance.Sub(curr)
+		deposit := desired.Sub(balance)
 
 		// fetch pricetable directly to bypass the gouging check
-		pt, err := h.priceTables.fetch(ctx, h.hk, rev)
+		pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
 
-		// check whether we have money left in the contract
+		// cap the deposit by what's left in the contract
 		cost := types.NewCurrency64(1)
-		if cost.Cmp(rev.ValidRenterPayout()) >= 0 {
-			return types.ZeroCurrency, fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), cost)
-		}
 		availableFunds := rev.ValidRenterPayout().Sub(cost)
-
-		// cap the deposit amount by the money that's left in the contract
 		if deposit.Cmp(availableFunds) > 0 {
 			deposit = availableFunds
 		}
+
+		// fund the account
 		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.ID(), pt.HostPriceTable, h.renterKey); err != nil {
+			if rhp3.IsBalanceMaxExceeded(err) {
+				h.acc.ScheduleSync()
+			}
 			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
 		}
+
 		// record the spend
 		h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: deposit.Add(cost)})
+
+		// log the account balance after funding
+		log.Debugw("fund account succeeded",
+			"balance", balance.ExactString(),
+			"deposit", deposit.ExactString(),
+		)
 		return deposit, nil
 	})
 }
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
-	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
+	pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return err
 	}
@@ -254,17 +286,17 @@ func (h *host) gougingChecker(ctx context.Context, criticalMigration bool) (goug
 // priceTable fetches a price table from the host. If a revision is provided, it
 // will be used to pay for the price table. The returned price table is
 // guaranteed to be safe to use.
-func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, error) {
-	pt, err := h.priceTables.fetch(ctx, h.hk, rev)
+func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
+	pt, cost, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
 	}
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return rhpv3.HostPriceTable{}, err
+		return rhpv3.HostPriceTable{}, cost, err
 	}
 	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return rhpv3.HostPriceTable{}, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
+		return rhpv3.HostPriceTable{}, cost, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
 	}
-	return pt.HostPriceTable, nil
+	return pt.HostPriceTable, cost, nil
 }

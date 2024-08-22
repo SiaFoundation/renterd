@@ -76,7 +76,7 @@ func newPriceTables(hm HostManager, hs HostStore) *priceTables {
 }
 
 // fetch returns a price table for the given host
-func (pts *priceTables) fetch(ctx context.Context, hk types.PublicKey, rev *types.FileContractRevision) (api.HostPriceTable, error) {
+func (pts *priceTables) fetch(ctx context.Context, hk types.PublicKey, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	pts.mu.Lock()
 	pt, exists := pts.priceTables[hk]
 	if !exists {
@@ -106,7 +106,7 @@ func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {
 	return ongoing, pt.update
 }
 
-func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error) {
+func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
 	// grab the current price table
 	p.mu.Lock()
 	hpt = p.hpt
@@ -116,7 +116,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	// current price table is considered to gouge on the block height
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return api.HostPriceTable{}, err
+		return api.HostPriceTable{}, types.ZeroCurrency, err
 	}
 
 	// figure out whether we should update the price table, if not we can return
@@ -138,10 +138,10 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	} else if ongoing {
 		select {
 		case <-ctx.Done():
-			return api.HostPriceTable{}, fmt.Errorf("%w; %w", errPriceTableUpdateTimedOut, context.Cause(ctx))
+			return api.HostPriceTable{}, types.ZeroCurrency, fmt.Errorf("%w; %w", errPriceTableUpdateTimedOut, context.Cause(ctx))
 		case <-update.done:
 		}
-		return update.hpt, update.err
+		return update.hpt, types.ZeroCurrency, update.err
 	}
 
 	// this thread is updating the price table
@@ -167,12 +167,12 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// sanity check the host has been scanned before fetching the price table
 	if !host.Scanned {
-		return api.HostPriceTable{}, fmt.Errorf("host %v was not scanned", p.hk)
+		return api.HostPriceTable{}, types.ZeroCurrency, fmt.Errorf("host %v was not scanned", p.hk)
 	}
 
 	// otherwise fetch it
 	h := p.hm.Host(p.hk, types.FileContractID{}, host.Settings.SiamuxAddr())
-	hpt, err = h.PriceTable(ctx, rev)
+	hpt, cost, err = h.PriceTable(ctx, rev)
 
 	// record it in the background
 	if shouldRecordPriceTable(err) {
@@ -190,7 +190,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// handle error after recording
 	if err != nil {
-		return api.HostPriceTable{}, fmt.Errorf("failed to update pricetable, err %v", err)
+		return api.HostPriceTable{}, types.ZeroCurrency, fmt.Errorf("failed to update pricetable, err %v", err)
 	}
 	return
 }

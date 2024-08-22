@@ -456,7 +456,7 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 
 	// in case of an insufficient balance, we schedule a sync
 	if rhp3.IsBalanceInsufficient(err) {
-		a.scheduleSync()
+		a.ScheduleSync()
 	}
 
 	// if an amount was returned, we withdraw it
@@ -509,7 +509,7 @@ func (a *Account) resetDrift() {
 }
 
 // scheduleSync sets the requiresSync flag of an account.
-func (a *Account) scheduleSync() {
+func (a *Account) ScheduleSync() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -525,7 +525,7 @@ func (a *Account) scheduleSync() {
 
 	// Log scheduling a sync.
 	a.logger.Infow("account sync was scheduled",
-		"account", a.acc.ID,
+		"account", a.ID,
 		"host", a.acc.HostKey.String(),
 		"balance", a.acc.Balance.String(),
 		"drift", a.acc.Drift.String())
@@ -539,27 +539,34 @@ func (a *Account) setBalance(balance *big.Int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Update balance and drift.
-	delta := new(big.Int).Sub(balance, a.acc.Balance)
-	balanceBefore := a.acc.Balance.String()
-	driftBefore := a.acc.Drift.String()
-	if a.acc.CleanShutdown {
-		a.acc.Drift = a.acc.Drift.Add(a.acc.Drift, delta)
-	}
-	a.acc.Balance.Set(balance)
-	a.acc.CleanShutdown = true
-	a.acc.RequiresSync = false // resetting the balance resets the sync field
-	balanceAfter := a.acc.Balance.String()
+	// save previous values
+	prevBalance := new(big.Int).Set(a.acc.Balance)
+	prevDrift := new(big.Int).Set(a.acc.Drift)
 
-	// Log resets.
+	// update balance
+	a.acc.Balance.Set(balance)
+
+	// update drift
+	drift := new(big.Int).Sub(balance, prevBalance)
+	if a.acc.CleanShutdown {
+		a.acc.Drift = a.acc.Drift.Add(a.acc.Drift, drift)
+	}
+
+	// reset fields
+	a.acc.CleanShutdown = true
+	a.acc.RequiresSync = false
+
+	// log account changes
 	a.logger.Infow("account balance was reset",
-		"account", a.acc.ID,
-		"host", a.acc.HostKey.String(),
-		"balanceBefore", balanceBefore,
-		"balanceAfter", balanceAfter,
-		"driftBefore", driftBefore,
-		"driftAfter", a.acc.Drift.String(),
-		"delta", delta.String())
+		zap.Stringer("account", a.acc.ID),
+		zap.Stringer("host", a.acc.HostKey),
+		zap.Stringer("balanceBefore", prevBalance),
+		zap.Stringer("balanceAfter", balance),
+		zap.Stringer("driftBefore", prevDrift),
+		zap.Stringer("driftAfter", a.acc.Drift),
+		zap.Bool("firstDrift", a.acc.Drift.Cmp(big.NewInt(0)) != 0 && prevDrift.Cmp(big.NewInt(0)) == 0),
+		zap.Bool("cleanshutdown", a.acc.CleanShutdown),
+		zap.Stringer("drift", drift))
 }
 
 // deriveAccountKey derives an account plus key for a given host and worker.

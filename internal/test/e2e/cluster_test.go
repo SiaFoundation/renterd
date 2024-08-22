@@ -1128,18 +1128,17 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// Create cluster
-	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
+	// create cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: 1,
+	})
 	defer cluster.Shutdown()
+
+	// convenience variables
 	tt := cluster.tt
 
-	// Shut down the autopilot to prevent it from interfering.
-	cluster.ShutdownAutopilot(context.Background())
-
-	// Accounts should exist for the host
-	accounts := cluster.Accounts()
-
-	acc := accounts[0]
+	// assert account state
+	acc := cluster.Accounts()[0]
 	host := cluster.hosts[0]
 	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
 		t.Fatalf("wrong balance %v", acc.Balance)

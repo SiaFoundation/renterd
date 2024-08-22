@@ -110,7 +110,7 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// schedule a sync
-	account.scheduleSync()
+	account.ScheduleSync()
 
 	acc = mgr.Account(hk)
 	if expected := (api.Account{
