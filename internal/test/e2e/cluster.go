@@ -1042,6 +1042,7 @@ func testDBCfg() dbConfig {
 
 func testWorkerCfg() config.Worker {
 	return config.Worker{
+		AccountsRefillInterval:   time.Second,
 		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
@@ -1056,7 +1057,6 @@ func testWorkerCfg() config.Worker {
 
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
-		AccountsRefillInterval:         time.Second,
 		Heartbeat:                      time.Second,
 		ID:                             api.DefaultAutopilotID,
 		MigrationHealthCutoff:          0.99,

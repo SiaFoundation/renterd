@@ -1711,18 +1711,33 @@ func (b *Bus) handlePOSTAlertsRegister(jc jape.Context) {
 }
 
 func (b *Bus) accountsHandlerGET(jc jape.Context) {
-	jc.Encode(b.accountsMgr.Accounts())
+	var owner string
+	if jc.DecodeForm("owner", &owner) != nil {
+		return
+	} else if owner == "" {
+		jc.Error(errors.New("owner is required"), http.StatusBadRequest)
+		return
+	}
+	accounts, err := b.accounts.Accounts(jc.Request.Context(), owner)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(accounts)
 }
 
 func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 	var req api.AccountsSaveRequest
-	if jc.Decode(&req) != nil {
+	if req.Owner == "" {
+		jc.Error(errors.New("owner is required"), http.StatusBadRequest)
 		return
-	} else if b.accountStore.SaveAccounts(jc.Request.Context(), req.Owner, req.Accounts) != nil {
+	} else if jc.Decode(&req) != nil {
+		return
+	} else if b.accounts.SaveAccounts(jc.Request.Context(), req.Owner, req.Accounts) != nil {
 		return
 	} else if !req.SetUnclean {
 		return
-	} else if jc.Check("failed to set accounts unclean", b.accountStore.SetUncleanShutdown(jc.Request.Context(), req.Owner)) != nil {
+	} else if jc.Check("failed to set accounts unclean", b.accounts.SetUncleanShutdown(jc.Request.Context(), req.Owner)) != nil {
 		return
 	}
 }

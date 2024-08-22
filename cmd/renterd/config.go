@@ -97,9 +97,10 @@ func defaultConfig() config.Config {
 		Worker: config.Worker{
 			Enabled: true,
 
-			ID:                  "worker",
-			ContractLockTimeout: 30 * time.Second,
-			BusFlushInterval:    5 * time.Second,
+			ID:                     "worker",
+			AccountsRefillInterval: defaultAccountRefillInterval,
+			ContractLockTimeout:    30 * time.Second,
+			BusFlushInterval:       5 * time.Second,
 
 			DownloadMaxOverdrive:     5,
 			DownloadOverdriveTimeout: 3 * time.Second,
@@ -114,7 +115,6 @@ func defaultConfig() config.Config {
 
 			ID:                             api.DefaultAutopilotID,
 			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
-			AccountsRefillInterval:         defaultAccountRefillInterval,
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,
 			RevisionBroadcastInterval:      7 * 24 * time.Hour,
@@ -294,6 +294,7 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.Int64Var(&cfg.Bus.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", cfg.Bus.SlabBufferCompletionThreshold, "Threshold for slab buffer upload (overrides with RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD)")
 
 	// worker
+	flag.DurationVar(&cfg.Worker.AccountsRefillInterval, "worker.accountRefillInterval", cfg.Worker.AccountsRefillInterval, "Interval for refilling workers' account balances")
 	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "Allows hosts with private IPs")
 	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
@@ -308,7 +309,6 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.StringVar(&cfg.Worker.ExternalAddress, "worker.externalAddress", cfg.Worker.ExternalAddress, "Address of the worker on the network, only necessary when the bus is remote (overrides with RENTERD_WORKER_EXTERNAL_ADDR)")
 
 	// autopilot
-	flag.DurationVar(&cfg.Autopilot.AccountsRefillInterval, "autopilot.accountRefillInterval", cfg.Autopilot.AccountsRefillInterval, "Interval for refilling workers' account balances")
 	flag.DurationVar(&cfg.Autopilot.Heartbeat, "autopilot.heartbeat", cfg.Autopilot.Heartbeat, "Interval for autopilot loop execution")
 	flag.Float64Var(&cfg.Autopilot.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", cfg.Autopilot.MigrationHealthCutoff, "Threshold for migrating slabs based on health")
 	flag.DurationVar(&cfg.Autopilot.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", cfg.Autopilot.RevisionBroadcastInterval, "Interval for broadcasting contract revisions (overrides with RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL)")

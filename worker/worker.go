@@ -1205,7 +1205,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		shutdownCtxCancel:       shutdownCancel,
 	}
 
-	if err := w.initAccounts(); err != nil {
+	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
 		return nil, fmt.Errorf("failed to initialize accounts; %w", err)
 	}
 	w.initPriceTables()
@@ -1640,12 +1640,12 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	}, nil
 }
 
-func (w *Worker) initAccounts() (err error) {
+func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
 	keyPath := fmt.Sprintf("accounts/%s", w.id)
-	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w, w.bus, w.cache, w.bus, 10*time.Second, w.logger.Desugar()) // TODO: refill interval
+	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 
