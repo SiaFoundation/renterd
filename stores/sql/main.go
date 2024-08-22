@@ -247,7 +247,7 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 // ContractRootsDiff returns the indices, offset by the given offset, of roots
 // that are not in the contract.
 func ContractRootsDiff(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error) {
-	// build insert query
+	// build select query
 	query := "SELECT ? as idx, ? as root" + strings.Repeat(" UNION ALL SELECT ? AS idx, ?", len(roots)-1)
 	var args []interface{}
 	for i, root := range roots {
