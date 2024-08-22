@@ -213,6 +213,14 @@ func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (
 	return
 }
 
+func (s *SQLStore) ContractRootsDiff(ctx context.Context, fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error) {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		indices, err = tx.ContractRootsDiff(ctx, fcid, roots, offset)
+		return err
+	})
+	return
+}
+
 func (s *SQLStore) ContractSets(ctx context.Context) (sets []string, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		sets, err = tx.ContractSets(ctx)

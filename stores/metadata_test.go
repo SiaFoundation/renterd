@@ -126,6 +126,80 @@ SET health = (
 	return err
 }
 
+func TestDiffSectors(t *testing.T) {
+	// create a SQL store
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add a contract
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 4 objects
+	for i := 1; i <= 4; i++ {
+		if _, err := ss.addTestObject(fmt.Sprintf("%s_%d", t.Name(), i), object.Object{
+			Key: object.GenerateEncryptionKey(),
+			Slabs: []object.SlabSlice{
+				{
+					Slab: object.Slab{
+						Key:       object.GenerateEncryptionKey(),
+						MinShards: 1,
+						Shards:    newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
+					},
+				},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert there's 4 roots in the database
+	roots, err := ss.ContractRoots(context.Background(), fcids[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if len(roots) != 4 {
+		t.Fatal("unexpected number of roots", len(roots))
+	}
+
+	// diff the roots - should be empty
+	indices, err := ss.ContractRootsDiff(context.Background(), fcids[0], roots, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatal("unexpected number of indices", len(indices))
+	}
+
+	// delete every other object
+	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, fmt.Sprintf("%s_1", t.Name())); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, fmt.Sprintf("%s_3", t.Name())); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's 2 roots left
+	updated, err := ss.ContractRoots(context.Background(), fcids[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if len(updated) != 2 {
+		t.Fatal("unexpected number of roots", len(updated))
+	}
+
+	// diff the roots again, should return indices 0 and 2, but for testing purposes we pass an offset of 123 so we should get 123 and 125
+	indices, err = ss.ContractRootsDiff(context.Background(), fcids[0], roots, 123)
+	if err != nil {
+		t.Fatal(err)
+	} else if indices[0] != 123 || indices[1] != 125 {
+		t.Fatal("unexpected indices", indices)
+	}
+}
+
 // TestObjectBasic tests the hydration of raw objects works when we fetch
 // objects from the metadata store.
 func TestObjectBasic(t *testing.T) {
