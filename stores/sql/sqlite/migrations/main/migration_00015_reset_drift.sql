@@ -1,0 +1,1 @@
+UPDATE ephemeral_accounts SET drift = "0", clean_shutdown = 0, requires_sync = 1;

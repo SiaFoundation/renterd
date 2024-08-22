@@ -167,9 +167,8 @@ func (c *Client) Renew(ctx context.Context, rrr api.RHPRenewRequest, gougingChec
 	return
 }
 
-func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.SettingsID, rk types.PrivateKey) (types.Currency, error) {
-	var balance types.Currency
-	err := c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
+func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.SettingsID, rk types.PrivateKey) (balance types.Currency, _ error) {
+	return balance, c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		payment, err := payByContract(rev, types.NewCurrency64(1), accID, rk)
 		if err != nil {
 			return err
@@ -177,7 +176,6 @@ func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevisio
 		balance, err = rpcAccountBalance(ctx, t, &payment, accID, pt)
 		return err
 	})
-	return balance, err
 }
 
 func (c *Client) PriceTable(ctx context.Context, hk types.PublicKey, siamuxAddr string, paymentFn PriceTablePaymentFunc) (pt api.HostPriceTable, err error) {
@@ -207,6 +205,7 @@ func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root typ
 			return err
 		}
 
+		amount = cost // pessimistic cost estimate in case rpc fails
 		payment := rhpv3.PayByEphemeralAccount(accID, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, accKey)
 		cost, refund, err := rpcReadSector(ctx, t, w, pt, &payment, offset, length, root)
 		if err != nil {
