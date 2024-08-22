@@ -17,6 +17,7 @@ const (
 	ModuleHost        = "host"
 	ModuleSetting     = "setting"
 
+	EventAdd     = "add"
 	EventUpdate  = "update"
 	EventDelete  = "delete"
 	EventArchive = "archive"
@@ -32,6 +33,11 @@ type (
 		ConsensusState
 		TransactionFee types.Currency `json:"transactionFee"`
 		Timestamp      time.Time      `json:"timestamp"`
+	}
+
+	EventContractAdd struct {
+		Added     ContractMetadata `json:"added"`
+		Timestamp time.Time        `json:"timestamp"`
 	}
 
 	EventContractArchive struct {
@@ -75,6 +81,15 @@ var (
 			Event:   EventUpdate,
 			Headers: headers,
 			Module:  ModuleConsensus,
+			URL:     url,
+		}
+	}
+
+	WebhookContractAdd = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventAdd,
+			Headers: headers,
+			Module:  ModuleContract,
 			URL:     url,
 		}
 	}
@@ -142,6 +157,12 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 	switch event.Module {
 	case ModuleContract:
 		switch event.Event {
+		case EventAdd:
+			var e EventContractAdd
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
 		case EventArchive:
 			var e EventContractArchive
 			if err := json.Unmarshal(bytes, &e); err != nil {

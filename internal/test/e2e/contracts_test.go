@@ -35,10 +35,10 @@ func TestFormContract(t *testing.T) {
 	tt.OK(err)
 
 	// form a contract using the bus
-	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
+	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
+	tt.OK(err)
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
 	tt.OK(err)
 
 	// assert the contract was added to the bus
