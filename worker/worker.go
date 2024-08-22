@@ -96,7 +96,6 @@ type (
 		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
 		UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
 
-		ResetDrift(ctx context.Context, id rhpv3.Account) error
 		SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
 		ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 	}
@@ -637,7 +636,7 @@ func (w *Worker) rhpRenewHandler(jc jape.Context) {
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var contractPrice, fundAmount types.Currency
-	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, func(_ types.FileContractRevision) (err error) {
+	if jc.Check("couldn't renew contract", w.withContractLock(ctx, rrr.ContractID, lockingPriorityRenew, func() (err error) {
 		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
 		renewed, txnSet, contractPrice, fundAmount, err = h.RenewContract(ctx, rrr)
 		return err
@@ -678,24 +677,8 @@ func (w *Worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) (err error) {
-		h := w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr)
-		err = h.FundAccount(ctx, rfr.Balance, &rev)
-		if rhp3.IsBalanceMaxExceeded(err) {
-			// sync the account
-			err = h.SyncAccount(ctx, &rev)
-			if err != nil {
-				w.logger.Infof(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
-				return
-			}
-
-			// try funding the account again
-			err = h.FundAccount(ctx, rfr.Balance, &rev)
-			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to fund account after syncing: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
-			}
-		}
-		return
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) error {
+		return w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr).FundAccount(ctx, rfr.Balance, &rev)
 	}))
 }
 

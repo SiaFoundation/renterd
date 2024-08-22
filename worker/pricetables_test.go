@@ -58,14 +58,14 @@ func TestPriceTables(t *testing.T) {
 	// update
 	ctx, cancel := context.WithCancel(gCtx)
 	cancel()
-	_, err := pts.fetch(ctx, h.hk, nil)
+	_, _, err := pts.fetch(ctx, h.hk, nil)
 	if !errors.Is(err, errPriceTableUpdateTimedOut) {
 		t.Fatal("expected errPriceTableUpdateTimedOut, got", err)
 	}
 
-	// unblock and assert we receive a valid price table
+	// unblock and assert we paid for the price table
 	close(fetchPTBlockChan)
-	update, err := pts.fetch(gCtx, h.hk, nil)
+	update, _, err := pts.fetch(gCtx, h.hk, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != validPT.UID {
@@ -75,7 +75,7 @@ func TestPriceTables(t *testing.T) {
 	// refresh the price table on the host, update again, assert we receive the
 	// same price table as it hasn't expired yet
 	h.hi.PriceTable = newTestHostPriceTable()
-	update, err = pts.fetch(gCtx, h.hk, nil)
+	update, _, err = pts.fetch(gCtx, h.hk, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != validPT.UID {
@@ -86,7 +86,7 @@ func TestPriceTables(t *testing.T) {
 	pts.priceTables[h.hk].hpt.Expiry = time.Now()
 
 	// fetch it again and assert we updated the price table
-	update, err = pts.fetch(gCtx, h.hk, nil)
+	update, _, err = pts.fetch(gCtx, h.hk, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != h.hi.PriceTable.UID {
@@ -97,7 +97,7 @@ func TestPriceTables(t *testing.T) {
 	// the price table since it's not expired
 	validPT = h.hi.PriceTable
 	h.hi.PriceTable = newTestHostPriceTable()
-	update, err = pts.fetch(gCtx, h.hk, nil)
+	update, _, err = pts.fetch(gCtx, h.hk, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != validPT.UID {
@@ -110,7 +110,7 @@ func TestPriceTables(t *testing.T) {
 	cm.cs.BlockHeight = validPT.HostBlockHeight + uint64(blockHeightLeeway) - priceTableBlockHeightLeeway
 
 	// fetch it again and assert we updated the price table
-	update, err = pts.fetch(gCtx, h.hk, nil)
+	update, _, err = pts.fetch(gCtx, h.hk, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != h.hi.PriceTable.UID {
