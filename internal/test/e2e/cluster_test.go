@@ -1157,9 +1157,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(10), types.Siacoins(1))
-	tt.OK(err)
-	c, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	c, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(2), h.PublicKey, h.NetAddress, types.Siacoins(1), cs.BlockHeight+10)
 	tt.OK(err)
 
 	tt.OK(b.SetContractSet(context.Background(), test.ContractSet, []types.FileContractID{c.ID}))
