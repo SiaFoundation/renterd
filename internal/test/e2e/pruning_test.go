@@ -163,7 +163,7 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal("unexpected number of roots", n)
 	}
 
-	// sleep for a bit to ensure spending records get flushed
+	// sleep to ensure spending records get flushed
 	time.Sleep(3 * testBusFlushInterval)
 
 	// assert prunable data is 0
@@ -179,30 +179,27 @@ func TestSectorPruning(t *testing.T) {
 		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
 	}
 
+	// sleep to ensure slabs were pruned
+	time.Sleep(time.Second)
+
 	// assert amount of prunable data
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		res, err = b.PrunableData(context.Background())
-		tt.OK(err)
-		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
-			return fmt.Errorf("unexpected prunable data %v", n)
-		}
-		return nil
-	})
+	res, err = b.PrunableData(context.Background())
+	tt.OK(err)
+	if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
+		t.Fatalf("unexpected prunable data %v", n)
+	}
 
 	// prune all contracts
 	for _, c := range contracts {
 		tt.OKAll(b.PruneContract(context.Background(), c.ID, 0))
 	}
 
-	// assert spending records were updated and prunable data is 0
-	tt.Retry(10, testBusFlushInterval, func() error {
-		res, err := b.PrunableData(context.Background())
-		tt.OK(err)
-		if res.TotalPrunable != 0 {
-			return fmt.Errorf("unexpected prunable data: %d", n)
-		}
-		return nil
-	})
+	// assert prunable data is 0
+	res, err = b.PrunableData(context.Background())
+	tt.OK(err)
+	if res.TotalPrunable != 0 {
+		t.Fatalf("unexpected prunable data: %d", n)
+	}
 
 	// assert spending was updated
 	for _, c := range contracts {
@@ -222,8 +219,8 @@ func TestSectorPruning(t *testing.T) {
 		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
 	}
 
-	// sleep for a bit to ensure spending records get flushed
-	time.Sleep(3 * testBusFlushInterval)
+	// sleep to ensure slabs were pruned
+	time.Sleep(time.Second)
 
 	// assert amount of prunable data
 	res, err = b.PrunableData(context.Background())
