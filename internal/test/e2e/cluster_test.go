@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -1298,6 +1299,8 @@ func TestParallelDownload(t *testing.T) {
 func TestEphemeralAccountSync(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
+	} else if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
+		t.Skip("skipping MySQL suite")
 	}
 
 	dir := t.TempDir()
