@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -26,10 +27,13 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/rhp"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -303,6 +307,7 @@ type (
 
 type Bus struct {
 	startTime time.Time
+	masterKey [32]byte
 
 	accountsMgr AccountManager
 	alerts      alerts.Alerter
@@ -320,6 +325,8 @@ type Bus struct {
 	mtrcs MetricsStore
 	ss    SettingStore
 
+	rhp2 *rhp2.Client
+
 	contractLocker        ContractLocker
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
@@ -328,10 +335,13 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
+		startTime: time.Now(),
+		masterKey: masterKey,
+
 		s:     s,
 		cm:    cm,
 		w:     w,
@@ -346,7 +356,7 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 		webhooksMgr: wm,
 		logger:      l.Sugar(),
 
-		startTime: time.Now(),
+		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
 	// init settings
@@ -411,6 +421,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
+		"POST   /contracts":              b.contractsFormHandler,
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
@@ -507,7 +518,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /wallet/fund":          b.walletFundHandler,
 		"GET    /wallet/outputs":       b.walletOutputsHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
-		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
 		"POST   /wallet/send":          b.walletSendSiacoinsHandler,
@@ -644,4 +654,22 @@ func (b *Bus) initSettings(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
+	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
+}
+
+func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
+	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }

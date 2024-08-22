@@ -130,6 +130,19 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 	return
 }
 
+// FormContract forms a contract with a host and adds it to the bus.
+func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).POST("/contracts", api.ContractFormRequest{
+		EndHeight:      endHeight,
+		HostCollateral: hostCollateral,
+		HostKey:        hostKey,
+		HostIP:         hostIP,
+		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
+	}, &contract)
+	return
+}
+
 // KeepaliveContract extends the duration on an already acquired lock on a
 // contract.
 func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileContractID, lockID uint64, d time.Duration) (err error) {
