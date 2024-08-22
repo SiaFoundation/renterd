@@ -161,6 +161,20 @@ type (
 		LockID   uint64     `json:"lockID"`
 	}
 
+	// ContractPruneRequest is the request type for the /contract/:id/prune
+	// endpoint.
+	ContractPruneRequest struct {
+		Timeout DurationMS `json:"timeout"`
+	}
+
+	// ContractPruneResponse is the response type for the /contract/:id/prune
+	// endpoint.
+	ContractPruneResponse struct {
+		Pruned    uint64 `json:"pruned"`
+		Remaining uint64 `json:"remaining"`
+		Error     string `json:"error,omitempty"`
+	}
+
 	// ContractAcquireRequest is the request type for the /contract/:id/release
 	// endpoint.
 	ContractReleaseRequest struct {

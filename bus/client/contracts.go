@@ -160,6 +160,12 @@ func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPr
 	return
 }
 
+// PruneContract prunes the given contract.
+func (c *Client) PruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (res api.ContractPruneResponse, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/prune", contractID), api.ContractPruneRequest{Timeout: api.DurationMS(timeout)}, &res)
+	return
+}
+
 // RenewedContract returns the renewed contract for the given ID.
 func (c *Client) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/renewed/%s", renewedFrom), &contract)

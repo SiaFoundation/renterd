@@ -442,84 +442,6 @@ func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
 	}
 }
 
-func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode fcid
-	var fcid types.FileContractID
-	if jc.DecodeParam("id", &fcid) != nil {
-		return
-	}
-
-	// decode timeout
-	var pcr api.RHPPruneContractRequest
-	if jc.Decode(&pcr) != nil {
-		return
-	}
-
-	// apply timeout
-	if pcr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(pcr.Timeout))
-		defer cancel()
-	}
-
-	// fetch the contract from the bus
-	contract, err := w.bus.Contract(ctx, fcid)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch contract", err) != nil {
-		return
-	}
-
-	// return early if there's no data to prune
-	size, err := w.bus.ContractSize(ctx, fcid)
-	if jc.Check("couldn't fetch contract size", err) != nil {
-		return
-	} else if size.Prunable == 0 {
-		jc.Encode(api.RHPPruneContractResponse{})
-		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not fetch gouging parameters", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	// prune the contract
-	var pruned, remaining uint64
-	var rev *types.FileContractRevision
-	var cost types.Currency
-	err = w.withContractLock(ctx, contract.ID, lockingPriorityPruning, func() error {
-		stored, pending, err := w.bus.ContractRoots(ctx, contract.ID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch contract roots; %w", err)
-		}
-		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
-		return err
-	})
-	if rev != nil {
-		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{Deletions: cost})
-	}
-	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) && pruned == 0 {
-		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-
-	res := api.RHPPruneContractResponse{
-		Pruned:    pruned,
-		Remaining: remaining,
-	}
-	if err != nil {
-		res.Error = err.Error()
-	}
-	jc.Encode(res)
-}
-
 func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -1257,7 +1179,6 @@ func (w *Worker) Handler() http.Handler {
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
-		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
 		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/renew":                  w.rhpRenewHandler,

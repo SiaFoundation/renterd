@@ -105,7 +105,7 @@ func (ap *Autopilot) fetchHostContract(fcid types.FileContractID) (host api.Host
 	return
 }
 
-func (ap *Autopilot) performContractPruning(wp *workerPool) {
+func (ap *Autopilot) performContractPruning() {
 	ap.logger.Info("performing contract pruning")
 
 	// fetch prunable contracts
@@ -131,37 +131,44 @@ func (ap *Autopilot) performContractPruning(wp *workerPool) {
 		if utils.IsErr(err, api.ErrContractNotFound) {
 			continue // contract got archived
 		} else if err != nil {
-			ap.logger.Errorf("failed to fetch host for contract '%v', err %v", contract.ID, err)
+			ap.logger.Errorw("failed to fetch host", zap.Error(err), "contract", contract.ID)
 			continue
 		}
 
-		// prune contract using a random worker
-		wp.withWorker(func(w Worker) {
-			total += ap.pruneContract(w, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release)
-		})
+		// prune contract
+		n, err := ap.pruneContract(ap.shutdownCtx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release)
+		if err != nil {
+			ap.logger.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
+			continue
+		}
+
+		total += n
 	}
 
 	// log total pruned
 	ap.logger.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
 }
 
-func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string) uint64 {
-	// use a sane timeout
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, timeoutPruneContract+5*time.Minute)
-	defer cancel()
+func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string) (uint64, error) {
+	log := ap.logger.With("contract", fcid, "host", hk, "version", hostVersion, "release", hostRelease)
 
 	// prune the contract
 	start := time.Now()
-	pruned, remaining, err := w.RHPPruneContract(ctx, fcid, timeoutPruneContract)
-	duration := time.Since(start)
+	res, err := ap.bus.PruneContract(ctx, fcid, timeoutPruneContract)
+	if err != nil {
+		return 0, err
+	}
+
+	// decorate logger
+	log = log.With("pruned", res.Pruned, "remaining", res.Remaining, "elapsed", time.Since(start))
 
 	// ignore slow pruning until host network is 1.6.0+
-	if utils.IsErr(err, context.DeadlineExceeded) && pruned > 0 {
-		err = nil
+	if res.Error != "" && utils.IsErr(errors.New(res.Error), context.DeadlineExceeded) && res.Pruned > 0 {
+		res.Error = ""
 	}
 
 	// handle metrics
-	if err == nil || pruned > 0 {
+	if res.Pruned > 0 {
 		if err := ap.bus.RecordContractPruneMetric(ctx, api.ContractPruneMetric{
 			Timestamp: api.TimeRFC3339(start),
 
@@ -169,20 +176,17 @@ func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types
 			HostKey:     hk,
 			HostVersion: hostVersion,
 
-			Pruned:    pruned,
-			Remaining: remaining,
-			Duration:  duration,
+			Pruned:    res.Pruned,
+			Remaining: res.Remaining,
+			Duration:  time.Since(start),
 		}); err != nil {
 			ap.logger.Error(err)
 		}
 	}
 
 	// handle logs
-	log := ap.logger.With("contract", fcid, "host", hk, "version", hostVersion, "release", hostRelease, "pruned", pruned, "remaining", remaining, "elapsed", duration)
-	if err != nil && pruned > 0 {
-		log.With(zap.Error(err)).Error("unexpected error interrupted pruning")
-	} else if err != nil {
-		log.With(zap.Error(err)).Error("failed to prune contract")
+	if res.Error != "" {
+		log.Errorw("unexpected error interrupted pruning", zap.Error(errors.New(res.Error)))
 	} else {
 		log.Info("successfully pruned contract")
 	}
@@ -199,10 +203,10 @@ func (ap *Autopilot) pruneContract(w Worker, fcid types.FileContractID, hk types
 		delete(ap.pruningAlertIDs, fcid)
 	}
 
-	return pruned
+	return res.Pruned, nil
 }
 
-func (ap *Autopilot) tryPerformPruning(wp *workerPool) {
+func (ap *Autopilot) tryPerformPruning() {
 	ap.mu.Lock()
 	if ap.pruning || ap.isStopped() {
 		ap.mu.Unlock()
@@ -215,7 +219,7 @@ func (ap *Autopilot) tryPerformPruning(wp *workerPool) {
 	ap.wg.Add(1)
 	go func() {
 		defer ap.wg.Done()
-		ap.performContractPruning(wp)
+		ap.performContractPruning()
 		ap.mu.Lock()
 		ap.pruning = false
 		ap.mu.Unlock()

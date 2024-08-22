@@ -49,8 +49,9 @@ type Bus interface {
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
-	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
+	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
+	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -336,7 +337,7 @@ func (ap *Autopilot) Run() {
 
 			// pruning
 			if autopilot.Config.Contracts.Prune {
-				ap.tryPerformPruning(ap.workers)
+				ap.tryPerformPruning()
 			} else {
 				ap.logger.Info("pruning disabled")
 			}
