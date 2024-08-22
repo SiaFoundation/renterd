@@ -215,6 +215,11 @@ type (
 	}
 )
 
+// Total returns the total cost of the contract spending.
+func (x ContractSpending) Total() types.Currency {
+	return x.Uploads.Add(x.Downloads).Add(x.FundAccount).Add(x.Deletions).Add(x.SectorRoots)
+}
+
 // Add returns the sum of the current and given contract spending.
 func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 	z.Uploads = x.Uploads.Add(y.Uploads)

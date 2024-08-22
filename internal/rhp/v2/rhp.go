@@ -13,6 +13,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
@@ -65,6 +66,10 @@ var (
 	// ErrNoSectorsToPrune is returned when we try to prune a contract that has
 	// no sectors to prune.
 	ErrNoSectorsToPrune = errors.New("no sectors to prune")
+)
+
+type (
+	DiffRootsFn = func(fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error)
 )
 
 type (
@@ -163,48 +168,25 @@ func (c *Client) FormContract(ctx context.Context, hostKey types.PublicKey, host
 	return
 }
 
-func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, toKeep []types.Hash256) (revision *types.FileContractRevision, deleted, remaining uint64, cost types.Currency, err error) {
+func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, diffRootsFn DiffRootsFn) (revision *types.FileContractRevision, spending api.ContractSpending, deleted, remaining uint64, err error) {
 	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
-			// fetch roots
-			got, fetchCost, err := c.fetchContractRoots(t, renterKey, &rev, settings)
-			if err != nil {
-				return err
-			}
-
-			// update cost and revision
-			cost = cost.Add(fetchCost)
+			// reference the revision
 			revision = &rev.Revision
 
-			keep := make(map[types.Hash256]struct{})
-			for _, root := range toKeep {
-				keep[root] = struct{}{}
-			}
-
-			// collect indices for roots we want to prune
+			// fetch roots to delete
 			var indices []uint64
-			for i, root := range got {
-				if _, wanted := keep[root]; wanted {
-					delete(keep, root) // prevent duplicates
-					continue
-				}
-				indices = append(indices, uint64(i))
-			}
-			if len(indices) == 0 {
-				return fmt.Errorf("%w: database holds %d, contract contains %d", ErrNoSectorsToPrune, len(toKeep), len(got))
+			indices, spending.SectorRoots, err = c.diffContractRoots(t, renterKey, &rev, settings, diffRootsFn)
+			if err != nil {
+				return err
+			} else if len(indices) == 0 {
+				return ErrNoSectorsToPrune
 			}
 
 			// delete the roots from the contract
-			var deleteCost types.Currency
-			deleted, deleteCost, err = c.deleteContractRoots(t, renterKey, &rev, settings, indices)
+			deleted, spending.Deletions, err = c.deleteContractRoots(t, renterKey, &rev, settings, indices)
 			if deleted < uint64(len(indices)) {
 				remaining = uint64(len(indices)) - deleted
-			}
-
-			// update cost and revision
-			if deleted > 0 {
-				cost = cost.Add(deleteCost)
-				revision = &rev.Revision
 			}
 
 			// return sizes instead of number of roots
@@ -403,97 +385,140 @@ func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.Private
 	return
 }
 
-func (c *Client) fetchContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, cost types.Currency, _ error) {
-	// download the full set of SectorRoots
+func (c *Client) diffContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, diffFn DiffRootsFn) (indices []uint64, cost types.Currency, _ error) {
 	numsectors := rev.NumSectors()
 	for offset := uint64(0); offset < numsectors; {
+		// calculate the batch size
 		n := batchSizeFetchSectors
 		if offset+n > numsectors {
 			n = numsectors - offset
 		}
 
-		// calculate the cost
-		batchCost, _ := settings.RPCSectorRootsCost(offset, n).Total()
-
-		// TODO: remove once host network is updated
-		if utils.VersionCmp(settings.Version, "1.6.0") < 0 {
-			// calculate the response size
-			proofSize := rhpv2.RangeProofSize(numsectors, offset, offset+n)
-			responseSize := (proofSize + n) * 32
-			if responseSize < minMessageSize {
-				responseSize = minMessageSize
-			}
-			batchCost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
-			batchCost = batchCost.Mul64(2) // generous leeway
-		}
-
-		// check funds
-		if rev.RenterFunds().Cmp(batchCost) < 0 {
-			return nil, types.ZeroCurrency, ErrInsufficientFunds
-		}
-
-		// update the revision number
-		if rev.Revision.RevisionNumber == math.MaxUint64 {
-			return nil, types.ZeroCurrency, ErrContractFinalized
-		}
-		rev.Revision.RevisionNumber++
-
-		// update the revision outputs
-		newRevision, err := updatedRevision(rev.Revision, batchCost, types.ZeroCurrency)
+		// fetch the batch
+		batch, batchCost, err := c.fetchContractRootsBatch(t, renterKey, rev, settings, offset, n)
 		if err != nil {
 			return nil, types.ZeroCurrency, err
 		}
 
-		// build the sector roots request
-		revisionHash := hashRevision(newRevision)
-		req := &rhpv2.RPCSectorRootsRequest{
-			RootOffset: uint64(offset),
-			NumRoots:   uint64(n),
-
-			RevisionNumber: rev.Revision.RevisionNumber,
-			ValidProofValues: []types.Currency{
-				newRevision.ValidProofOutputs[0].Value,
-				newRevision.ValidProofOutputs[1].Value,
-			},
-			MissedProofValues: []types.Currency{
-				newRevision.MissedProofOutputs[0].Value,
-				newRevision.MissedProofOutputs[1].Value,
-				newRevision.MissedProofOutputs[2].Value,
-			},
-			Signature: renterKey.SignHash(revisionHash),
-		}
-
-		// execute the sector roots RPC
-		var rootsResp rhpv2.RPCSectorRootsResponse
-		if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
+		// diff the batch
+		diff, err := diffFn(rev.ID(), batch, offset)
+		if err != nil {
 			return nil, types.ZeroCurrency, err
-		} else if err := t.ReadResponse(&rootsResp, maxMerkleProofResponseSize); err != nil {
-			return nil, types.ZeroCurrency, fmt.Errorf("couldn't read sector roots response: %w", err)
 		}
 
-		// verify the host signature
-		if !rev.HostKey().VerifyHash(revisionHash, rootsResp.Signature) {
-			return nil, types.ZeroCurrency, errors.New("host's signature is invalid")
-		}
-		rev.Signatures[0].Signature = req.Signature[:]
-		rev.Signatures[1].Signature = rootsResp.Signature[:]
-
-		// verify the proof
-		if uint64(len(rootsResp.SectorRoots)) != n {
-			return nil, types.ZeroCurrency, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v, err: number of roots does not match range %d != %d (num sectors: %d rev size: %d offset: %d)", rev.HostKey(), settings.Version, len(rootsResp.SectorRoots), n, numsectors, rev.Revision.Filesize, offset)
-		} else if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+n, numsectors, rev.Revision.FileMerkleRoot) {
-			return nil, types.ZeroCurrency, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
-		}
-
-		// append roots
-		roots = append(roots, rootsResp.SectorRoots...)
+		// append the roots
+		indices = append(indices, diff...)
 		offset += n
 
-		// update revision
-		rev.Revision = newRevision
+		// update the cost
 		cost = cost.Add(batchCost)
 	}
 	return
+}
+
+func (c *Client) fetchContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings) (roots []types.Hash256, cost types.Currency, _ error) {
+	numsectors := rev.NumSectors()
+	for offset := uint64(0); offset < numsectors; {
+		// calculate the batch size
+		n := batchSizeFetchSectors
+		if offset+n > numsectors {
+			n = numsectors - offset
+		}
+
+		// fetch the batch
+		batch, batchCost, err := c.fetchContractRootsBatch(t, renterKey, rev, settings, offset, n)
+		if err != nil {
+			return nil, types.ZeroCurrency, err
+		}
+
+		// append the roots
+		roots = append(roots, batch...)
+		offset += n
+
+		// update the cost
+		cost = cost.Add(batchCost)
+	}
+	return
+}
+
+func (c *Client) fetchContractRootsBatch(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, offset, limit uint64) ([]types.Hash256, types.Currency, error) {
+	// calculate the cost
+	cost, _ := settings.RPCSectorRootsCost(offset, limit).Total()
+
+	// TODO: remove once host network is updated
+	if utils.VersionCmp(settings.Version, "1.6.0") < 0 {
+		// calculate the response size
+		proofSize := rhpv2.RangeProofSize(rev.NumSectors(), offset, offset+limit)
+		responseSize := (proofSize + limit) * 32
+		if responseSize < minMessageSize {
+			responseSize = minMessageSize
+		}
+		cost = settings.BaseRPCPrice.Add(settings.DownloadBandwidthPrice.Mul64(responseSize))
+		cost = cost.Mul64(2) // generous leeway
+	}
+
+	// check funds
+	if rev.RenterFunds().Cmp(cost) < 0 {
+		return nil, types.ZeroCurrency, ErrInsufficientFunds
+	}
+
+	// update the revision number
+	if rev.Revision.RevisionNumber == math.MaxUint64 {
+		return nil, types.ZeroCurrency, ErrContractFinalized
+	}
+	rev.Revision.RevisionNumber++
+
+	// update the revision outputs
+	newRevision, err := updatedRevision(rev.Revision, cost, types.ZeroCurrency)
+	if err != nil {
+		return nil, types.ZeroCurrency, err
+	}
+
+	// build the sector roots request
+	revisionHash := hashRevision(newRevision)
+	req := &rhpv2.RPCSectorRootsRequest{
+		RootOffset: offset,
+		NumRoots:   limit,
+
+		RevisionNumber: rev.Revision.RevisionNumber,
+		ValidProofValues: []types.Currency{
+			newRevision.ValidProofOutputs[0].Value,
+			newRevision.ValidProofOutputs[1].Value,
+		},
+		MissedProofValues: []types.Currency{
+			newRevision.MissedProofOutputs[0].Value,
+			newRevision.MissedProofOutputs[1].Value,
+			newRevision.MissedProofOutputs[2].Value,
+		},
+		Signature: renterKey.SignHash(revisionHash),
+	}
+
+	// execute the sector roots RPC
+	var rootsResp rhpv2.RPCSectorRootsResponse
+	if err := t.WriteRequest(rhpv2.RPCSectorRootsID, req); err != nil {
+		return nil, types.ZeroCurrency, err
+	} else if err := t.ReadResponse(&rootsResp, maxMerkleProofResponseSize); err != nil {
+		return nil, types.ZeroCurrency, fmt.Errorf("couldn't read sector roots response: %w", err)
+	}
+
+	// verify the host signature
+	if !rev.HostKey().VerifyHash(revisionHash, rootsResp.Signature) {
+		return nil, cost, errors.New("host's signature is invalid")
+	}
+	rev.Signatures[0].Signature = req.Signature[:]
+	rev.Signatures[1].Signature = rootsResp.Signature[:]
+
+	// verify the proof
+	if uint64(len(rootsResp.SectorRoots)) != limit {
+		return nil, cost, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v, err: number of roots does not match range %d != %d (num sectors: %d rev size: %d offset: %d)", rev.HostKey(), settings.Version, len(rootsResp.SectorRoots), limit, rev.NumSectors(), rev.Revision.Filesize, offset)
+	} else if !rhpv2.VerifySectorRangeProof(rootsResp.MerkleProof, rootsResp.SectorRoots, offset, offset+limit, rev.NumSectors(), rev.Revision.FileMerkleRoot) {
+		return nil, cost, fmt.Errorf("couldn't verify contract roots proof, host %v, version %v; %w", rev.HostKey(), settings.Version, ErrInvalidMerkleProof)
+	}
+
+	// update revision
+	rev.Revision = newRevision
+
+	return rootsResp.SectorRoots, cost, nil
 }
 
 func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingChecker gouging.Checker, t *rhpv2.Transport, fcid types.FileContractID, lastKnownRevisionNumber uint64, fn func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) error) error {
@@ -549,7 +574,7 @@ func (w *Client) withRevisionV2(renterKey types.PrivateKey, gougingChecker gougi
 
 	// perform gouging checks on settings
 	if breakdown := gougingChecker.CheckSettings(settings); breakdown.Gouging() {
-		return fmt.Errorf("failed to prune contract: %v", breakdown)
+		return fmt.Errorf("%w: %v", gouging.ErrHostSettingsGouging, breakdown)
 	}
 
 	return fn(t, rev, settings)

@@ -840,6 +840,8 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 }
 
 func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
 	// decode fcid
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
@@ -853,7 +855,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}
 
 	// fetch the contract from the bus
-	c, err := b.ms.Contract(jc.Request.Context(), fcid)
+	c, err := b.ms.Contract(ctx, fcid)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -862,22 +864,22 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}
 
 	// create gouging checker
-	gp, err := b.gougingParams(jc.Request.Context())
+	gp, err := b.gougingParams(ctx)
 	if jc.Check("couldn't fetch gouging parameters", err) != nil {
 		return
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
 
 	// apply timeout
-	ctx := jc.Request.Context()
+	pruneCtx := ctx
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout))
+		pruneCtx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout))
 		defer cancel()
 	}
 
 	// acquire contract lock indefinitely and defer the release
-	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityPruning, fcid, time.Duration(math.MaxInt64))
+	lockID, err := b.contractLocker.Acquire(pruneCtx, lockingPriorityPruning, fcid, time.Duration(math.MaxInt64))
 	if jc.Check("couldn't acquire contract lock", err) != nil {
 		return
 	}
@@ -887,28 +889,48 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		}
 	}()
 
-	// fetch contract sectors
-	stored, err := b.ms.ContractRoots(ctx, fcid)
-	if jc.Check("couldn't fetch contract sectors", err) != nil {
-		return
+	// build map of uploading sectors
+	pending := make(map[types.Hash256]struct{})
+	for _, root := range b.sectors.Sectors(fcid) {
+		pending[root] = struct{}{}
 	}
 
-	// fetch uploading sectors
-	pending := b.sectors.Sectors(fcid)
-
 	// prune the contract
-	rev, pruned, remaining, cost, err := b.rhp2.PruneContract(ctx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, append(stored, pending...))
+	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256, offset uint64) ([]uint64, error) {
+		indexMap := make(map[uint64]types.Hash256)
+		for i, root := range roots {
+			indexMap[offset+uint64(i)] = root
+		}
+
+		indices, err := b.ms.ContractRootsDiff(ctx, fcid, roots, offset)
+		if err != nil {
+			return nil, err
+		}
+
+		filtered := indices[:0]
+		for _, index := range indices {
+			_, ok := pending[indexMap[index]]
+			if ok {
+				continue
+			}
+			filtered = append(filtered, index)
+		}
+		indices = filtered
+		return indices, nil
+	})
 	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
 		err = nil // ignore error
-	} else if jc.Check("couldn't prune contract", err) != nil {
-		return
+	} else if !errors.Is(err, context.Canceled) {
+		if jc.Check("couldn't prune contract", err) != nil {
+			return
+		}
 	}
 
 	// record spending
-	if !cost.IsZero() && rev != nil {
+	if !spending.Total().IsZero() {
 		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
 			{
-				ContractSpending: api.ContractSpending{Deletions: cost},
+				ContractSpending: spending,
 				ContractID:       fcid,
 				RevisionNumber:   rev.RevisionNumber,
 				Size:             rev.Filesize,
