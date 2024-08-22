@@ -191,7 +191,7 @@ func TestSectorPruning(t *testing.T) {
 
 	// prune all contracts
 	for _, c := range contracts {
-		tt.OKAll(w.RHPPruneContract(context.Background(), c.ID, 0))
+		tt.OKAll(b.PruneContract(context.Background(), c.ID, 0))
 	}
 
 	// assert spending records were updated and prunable data is 0
@@ -249,7 +249,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// prune the contract and assert it threw a gouging error
-	_, _, err = w.RHPPruneContract(context.Background(), c.ID, 0)
+	_, err = b.PruneContract(context.Background(), c.ID, 0)
 	if err == nil || !strings.Contains(err.Error(), "gouging") {
 		t.Fatal("expected gouging error", err)
 	}

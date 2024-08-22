@@ -40,7 +40,10 @@ const (
 	defaultWalletRecordMetricInterval = 5 * time.Minute
 	defaultPinUpdateInterval          = 5 * time.Minute
 	defaultPinRateWindow              = 6 * time.Hour
-	stdTxnSize                        = 1200 // bytes
+
+	lockingPriorityPruning = 20
+
+	stdTxnSize = 1200 // bytes
 )
 
 // Client re-exports the client from the client package.
@@ -437,6 +440,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,

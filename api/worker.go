@@ -95,20 +95,6 @@ type (
 		Balance    types.Currency       `json:"balance"`
 	}
 
-	// RHPPruneContractRequest is the request type for the /rhp/contract/:id/prune
-	// endpoint.
-	RHPPruneContractRequest struct {
-		Timeout DurationMS `json:"timeout"`
-	}
-
-	// RHPPruneContractResponse is the response type for the /rhp/contract/:id/prune
-	// endpoint.
-	RHPPruneContractResponse struct {
-		Pruned    uint64 `json:"pruned"`
-		Remaining uint64 `json:"remaining"`
-		Error     string `json:"error,omitempty"`
-	}
-
 	// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
 	RHPPriceTableRequest struct {
 		HostKey    types.PublicKey `json:"hostKey"`

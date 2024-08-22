@@ -18,6 +18,7 @@ import (
 
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -836,6 +837,97 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
 	}
+}
+
+func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
+	// decode fcid
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode timeout
+	var req api.ContractPruneRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// fetch the contract from the bus
+	c, err := b.ms.Contract(jc.Request.Context(), fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// create gouging checker
+	gp, err := b.gougingParams(jc.Request.Context())
+	if jc.Check("couldn't fetch gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// apply timeout
+	ctx := jc.Request.Context()
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout))
+		defer cancel()
+	}
+
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityPruning, fcid, time.Duration(math.MaxInt64))
+	if jc.Check("couldn't acquire contract lock", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch contract sectors
+	stored, err := b.ms.ContractRoots(ctx, fcid)
+	if jc.Check("couldn't fetch contract sectors", err) != nil {
+		return
+	}
+
+	// fetch uploading sectors
+	pending := b.sectors.Sectors(fcid)
+
+	// prune the contract
+	rev, pruned, remaining, cost, err := b.rhp2.PruneContract(ctx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, append(stored, pending...))
+	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
+		err = nil // ignore error
+	} else if jc.Check("couldn't prune contract", err) != nil {
+		return
+	}
+
+	// record spending
+	if !cost.IsZero() && rev != nil {
+		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+			{
+				ContractSpending: api.ContractSpending{Deletions: cost},
+				ContractID:       fcid,
+				RevisionNumber:   rev.RevisionNumber,
+				Size:             rev.Filesize,
+
+				MissedHostPayout:  rev.MissedHostPayout(),
+				ValidRenterPayout: rev.ValidRenterPayout(),
+			},
+		})
+	}
+
+	// return response
+	res := api.ContractPruneResponse{
+		Pruned:    pruned,
+		Remaining: remaining,
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	jc.Encode(res)
 }
 
 func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
