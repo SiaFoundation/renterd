@@ -29,6 +29,7 @@ import (
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
@@ -40,6 +41,7 @@ const (
 	defaultWalletRecordMetricInterval = 5 * time.Minute
 	defaultPinUpdateInterval          = 5 * time.Minute
 	defaultPinRateWindow              = 6 * time.Hour
+	lockingPriorityRenew              = 80
 	stdTxnSize                        = 1200 // bytes
 )
 
@@ -326,6 +328,7 @@ type Bus struct {
 	ss    SettingStore
 
 	rhp2 *rhp2.Client
+	rhp3 *rhp3.Client
 
 	contractLocker        ContractLocker
 	sectors               UploadingSectorsCache
@@ -357,6 +360,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		logger:      l.Sugar(),
 
 		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
+		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
 	// init settings
@@ -437,6 +441,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
@@ -513,16 +518,15 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 
-		"GET    /wallet":               b.walletHandler,
-		"POST   /wallet/discard":       b.walletDiscardHandler,
-		"POST   /wallet/fund":          b.walletFundHandler,
-		"GET    /wallet/outputs":       b.walletOutputsHandler,
-		"GET    /wallet/pending":       b.walletPendingHandler,
-		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
-		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
-		"POST   /wallet/send":          b.walletSendSiacoinsHandler,
-		"POST   /wallet/sign":          b.walletSignHandler,
-		"GET    /wallet/transactions":  b.walletTransactionsHandler,
+		"GET    /wallet":              b.walletHandler,
+		"POST   /wallet/discard":      b.walletDiscardHandler,
+		"POST   /wallet/fund":         b.walletFundHandler,
+		"GET    /wallet/outputs":      b.walletOutputsHandler,
+		"GET    /wallet/pending":      b.walletPendingHandler,
+		"POST   /wallet/redistribute": b.walletRedistributeHandler,
+		"POST   /wallet/send":         b.walletSendSiacoinsHandler,
+		"POST   /wallet/sign":         b.walletSignHandler,
+		"GET    /wallet/transactions": b.walletTransactionsHandler,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,

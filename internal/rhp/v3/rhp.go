@@ -159,7 +159,7 @@ func (c *Client) FundAccount(ctx context.Context, rev *types.FileContractRevisio
 	})
 }
 
-func (c *Client) Renew(ctx context.Context, rrr api.RHPRenewRequest, gougingChecker gouging.Checker, renewer PrepareRenewFunc, signer SignFunc, rev types.FileContractRevision, renterKey types.PrivateKey) (newRev rhpv2.ContractRevision, txnSet []types.Transaction, contractPrice, fundAmount types.Currency, err error) {
+func (c *Client) Renew(ctx context.Context, rrr api.ContractRenewRequest, gougingChecker gouging.Checker, renewer PrepareRenewFunc, signer SignFunc, rev types.FileContractRevision, renterKey types.PrivateKey) (newRev rhpv2.ContractRevision, txnSet []types.Transaction, contractPrice, fundAmount types.Currency, err error) {
 	err = c.tpool.withTransport(ctx, rrr.HostKey, rrr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
 		newRev, txnSet, contractPrice, fundAmount, err = rpcRenew(ctx, rrr, gougingChecker, renewer, signer, t, rev, renterKey)
 		return err

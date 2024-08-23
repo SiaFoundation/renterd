@@ -160,6 +160,25 @@ func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPr
 	return
 }
 
+// RenewContract renews an existing contract with a host and adds it to the bus.
+func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, hostKey types.PublicKey, siamuxAddr string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage, windowSize uint64) (resp api.ContractRenewResponse, err error) {
+	req := api.ContractRenewRequest{
+		ContractID:         contractID,
+		EndHeight:          endHeight,
+		ExpectedNewStorage: expectedStorage,
+		HostAddress:        hostAddress,
+		HostKey:            hostKey,
+		MaxFundAmount:      maxFundAmount,
+		MinNewCollateral:   minNewCollateral,
+		RenterAddress:      renterAddress,
+		RenterFunds:        renterFunds,
+		SiamuxAddr:         siamuxAddr,
+		WindowSize:         windowSize,
+	}
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renew", contractID), req, &resp)
+	return
+}
+
 // RenewedContract returns the renewed contract for the given ID.
 func (c *Client) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/renewed/%s", renewedFrom), &contract)

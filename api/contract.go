@@ -167,6 +167,33 @@ type (
 		LockID uint64 `json:"lockID"`
 	}
 
+	// ContractRenewRequest is the request type for the /contract/:id/renew
+	// endpoint.
+	ContractRenewRequest struct {
+		ContractID         types.FileContractID `json:"contractID"`
+		EndHeight          uint64               `json:"endHeight"`
+		ExpectedNewStorage uint64               `json:"expectedNewStorage"`
+		HostAddress        types.Address        `json:"hostAddress"`
+		HostKey            types.PublicKey      `json:"hostKey"`
+		MaxFundAmount      types.Currency       `json:"maxFundAmount"`
+		MinNewCollateral   types.Currency       `json:"minNewCollateral"`
+		SiamuxAddr         string               `json:"siamuxAddr"`
+		RenterAddress      types.Address        `json:"renterAddress"`
+		RenterFunds        types.Currency       `json:"renterFunds"`
+		WindowSize         uint64               `json:"windowSize"`
+	}
+
+	// ContractRenewResponse is the response type for the /contract/:id/renew
+	// endpoint.
+	ContractRenewResponse struct {
+		Error          string                 `json:"error"`
+		ContractID     types.FileContractID   `json:"contractID"`
+		Contract       rhpv2.ContractRevision `json:"contract"`
+		ContractPrice  types.Currency         `json:"contractPrice"`
+		FundAmount     types.Currency         `json:"fundAmount"`
+		TransactionSet []types.Transaction    `json:"transactionSet"`
+	}
+
 	// ContractRenewedRequest is the request type for the /contract/:id/renewed
 	// endpoint.
 	ContractRenewedRequest struct {

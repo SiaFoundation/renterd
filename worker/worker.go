@@ -154,7 +154,6 @@ type (
 	Wallet interface {
 		WalletDiscard(ctx context.Context, txn types.Transaction) error
 		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
 		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
 
@@ -553,56 +552,6 @@ func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
 		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{SectorRoots: cost})
 	}
 	jc.Encode(roots)
-}
-
-func (w *Worker) rhpRenewHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode request
-	var rrr api.RHPRenewRequest
-	if jc.Decode(&rrr) != nil {
-		return
-	}
-
-	// check renter funds is not zero
-	if rrr.RenterFunds.IsZero() {
-		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
-		return
-	}
-
-	// attach gouging checker
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// renew the contract
-	var renewed rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	var contractPrice, fundAmount types.Currency
-	if jc.Check("couldn't renew contract", w.withContractLock(ctx, rrr.ContractID, lockingPriorityRenew, func() (err error) {
-		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
-		renewed, txnSet, contractPrice, fundAmount, err = h.RenewContract(ctx, rrr)
-		return err
-	})) != nil {
-		return
-	}
-
-	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil {
-		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
-	}
-
-	// send the response
-	jc.Encode(api.RHPRenewResponse{
-		ContractID:     renewed.ID(),
-		Contract:       renewed,
-		ContractPrice:  contractPrice,
-		FundAmount:     fundAmount,
-		TransactionSet: txnSet,
-	})
 }
 
 func (w *Worker) rhpFundHandler(jc jape.Context) {
@@ -1260,7 +1209,6 @@ func (w *Worker) Handler() http.Handler {
 		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
 		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
-		"POST   /rhp/renew":                  w.rhpRenewHandler,
 		"POST   /rhp/fund":                   w.rhpFundHandler,
 		"POST   /rhp/sync":                   w.rhpSyncHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,

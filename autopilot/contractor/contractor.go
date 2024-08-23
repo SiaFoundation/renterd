@@ -89,6 +89,7 @@ type Bus interface {
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
+	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage, windowSize uint64) (api.ContractRenewResponse, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
@@ -100,7 +101,6 @@ type Worker interface {
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
-	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage, windowSize uint64) (api.RHPRenewResponse, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
@@ -319,7 +319,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	maxFundAmount := budget.Add(rev.ValidRenterPayout())
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
+	resp, err := c.bus.RenewContract(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
 	if err != nil {
 		if strings.Contains(err.Error(), "new collateral is too low") {
 			logger.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
@@ -400,7 +400,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, pt)
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
+	resp, err := c.bus.RenewContract(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
 	if err != nil {
 		logger.Errorw(
 			"renewal failed",

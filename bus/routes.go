@@ -481,63 +481,6 @@ func (b *Bus) walletDiscardHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
-	var wprr api.WalletPrepareRenewRequest
-	if jc.Decode(&wprr) != nil {
-		return
-	}
-	if wprr.RenterKey == nil {
-		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
-		return
-	}
-	cs := b.cm.TipState()
-
-	// Create the final revision from the provided revision.
-	finalRevision := wprr.Revision
-	finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
-	finalRevision.Filesize = 0
-	finalRevision.FileMerkleRoot = types.Hash256{}
-	finalRevision.RevisionNumber = math.MaxUint64
-
-	// Prepare the new contract.
-	fc, basePrice, err := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.MinNewCollateral, wprr.PriceTable, wprr.ExpectedNewStorage, wprr.EndHeight)
-	if jc.Check("couldn't prepare contract renewal", err) != nil {
-		return
-	}
-
-	// Create the transaction containing both the final revision and new
-	// contract.
-	txn := types.Transaction{
-		FileContracts:         []types.FileContract{fc},
-		FileContractRevisions: []types.FileContractRevision{finalRevision},
-		MinerFees:             []types.Currency{wprr.PriceTable.TxnFeeMaxRecommended.Mul64(4096)},
-	}
-
-	// Compute how much renter funds to put into the new contract.
-	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
-
-	// Make sure we don't exceed the max fund amount.
-	// TODO: remove the IsZero check for the v2 change
-	if /*!wprr.MaxFundAmount.IsZero() &&*/ wprr.MaxFundAmount.Cmp(cost) < 0 {
-		jc.Error(fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, wprr.MaxFundAmount), http.StatusBadRequest)
-		return
-	}
-
-	// Fund the txn. We are not signing it yet since it's not complete. The host
-	// still needs to complete it and the revision + contract are signed with
-	// the renter key by the worker.
-	toSign, err := b.w.FundTransaction(&txn, cost, true)
-	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	jc.Encode(api.WalletPrepareRenewResponse{
-		FundAmount:     cost,
-		ToSign:         toSign,
-		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
-	})
-}
-
 func (b *Bus) walletPendingHandler(jc jape.Context) {
 	isRelevant := func(txn types.Transaction) bool {
 		addr := b.w.Address()
@@ -955,6 +898,136 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	jc.Encode(a)
 }
 
+// TODOs PJ:
+// -extend validation
+// -trim req/res obj
+// -fix discard fn
+// -fix sign fn
+// -return 404 on ErrMaxFundAmountExceeded
+func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
+	// apply pessimistic timeout
+	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
+	defer cancel()
+
+	// decode contract id
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode request
+	var rrr api.ContractRenewRequest
+	if jc.Decode(&rrr) != nil {
+		return
+	}
+
+	// validate the request
+	if rrr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	}
+
+	// fetch gouging parameters
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
+	if jc.Check("couldn't acquire contract lock", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch the revision
+	rev, err := b.rhp3.Revision(ctx, fcid, rrr.HostKey, rrr.SiamuxAddr)
+	if jc.Check("couldn't fetch revision", err) != nil {
+		return
+	}
+
+	// helper to discard txn on error
+	discardTxn := func(_ context.Context, txn types.Transaction, err *error) {
+		if *err == nil {
+			return
+		}
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+	}
+
+	// helper to sign txn
+	signTxn := func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
+		b.w.SignTransaction(txn, toSign, cf)
+		return nil
+	}
+
+	// helper to prepare contract renewal
+	prepareRenew := func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) ([]types.Hash256, []types.Transaction, types.Currency, func(context.Context, types.Transaction, *error), error) {
+		cs := b.cm.TipState()
+
+		// Create the final revision from the provided revision.
+		finalRevision := revision
+		finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
+		finalRevision.Filesize = 0
+		finalRevision.FileMerkleRoot = types.Hash256{}
+		finalRevision.RevisionNumber = math.MaxUint64
+
+		// Prepare the new contract.
+		fc, basePrice, err := rhpv3.PrepareContractRenewal(revision, hostAddress, renterAddress, renterFunds, minNewCollateral, pt, expectedStorage, endHeight)
+		if err != nil {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't prepare contract renewal: %w", err)
+		}
+
+		// Create the transaction containing both the final revision and new
+		// contract.
+		txn := types.Transaction{
+			FileContracts:         []types.FileContract{fc},
+			FileContractRevisions: []types.FileContractRevision{finalRevision},
+			MinerFees:             []types.Currency{pt.TxnFeeMaxRecommended.Mul64(4096)},
+		}
+
+		// Compute how much renter funds to put into the new contract.
+		cost := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
+
+		// Make sure we don't exceed the max fund amount.
+		// TODO: remove the IsZero check for the v2 change
+		if /*!wprr.MaxFundAmount.IsZero() &&*/ maxFundAmount.Cmp(cost) < 0 {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, maxFundAmount)
+		}
+
+		// Fund the txn. We are not signing it yet since it's not complete. The host
+		// still needs to complete it and the revision + contract are signed with
+		// the renter key by the worker.
+		toSign, err := b.w.FundTransaction(&txn, cost, true)
+		if err != nil {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+		}
+
+		return toSign, append(b.cm.UnconfirmedParents(txn), txn), cost, discardTxn, nil
+	}
+
+	// renew contract
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, rrr, gc, prepareRenew, signTxn, rev, b.deriveRenterKey(rrr.HostKey))
+	if jc.Check("couldn't renew contract", err) != nil {
+		return
+	}
+
+	// broadcast the transaction set
+	b.s.BroadcastTransactionSet(txnSet)
+
+	// send the response
+	jc.Encode(api.ContractRenewResponse{
+		ContractID:     newRevision.ID(),
+		Contract:       newRevision,
+		ContractPrice:  contractPrice,
+		FundAmount:     fundAmount,
+		TransactionSet: txnSet,
+	})
+}
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractRenewedRequest
