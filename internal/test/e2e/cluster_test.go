@@ -1171,6 +1171,31 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 		return nil
 	})
+
+	// manuall save accounts in bus
+	tt.OK(cluster.Bus.UpdateAccounts(context.Background(), "owner", []api.Account{acc}, false))
+
+	// fetch again
+	busAccounts, err := cluster.Bus.Accounts(context.Background(), "owner")
+	tt.OK(err)
+	if len(busAccounts) != 1 || busAccounts[0].ID != acc.ID || busAccounts[0].CleanShutdown != acc.CleanShutdown {
+		t.Fatalf("expected 1 clean account, got %v", len(busAccounts))
+	}
+
+	// again but with invalid owner
+	busAccounts, err = cluster.Bus.Accounts(context.Background(), "invalid")
+	tt.OK(err)
+	if len(busAccounts) != 0 {
+		t.Fatalf("expected 0 accounts, got %v", len(busAccounts))
+	}
+
+	// mark accounts unclean
+	tt.OK(cluster.Bus.UpdateAccounts(context.Background(), "owner", nil, true))
+	busAccounts, err = cluster.Bus.Accounts(context.Background(), "owner")
+	tt.OK(err)
+	if len(busAccounts) != 1 || busAccounts[0].ID != acc.ID || busAccounts[0].CleanShutdown {
+		t.Fatalf("expected 1 unclean account, got %v", len(busAccounts))
+	}
 }
 
 // TestParallelUpload tests uploading multiple files in parallel.
@@ -1357,6 +1382,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatalf("account shouldn't be marked as clean shutdown or not require a sync, got %v", accounts[0])
 	}
 
+	// assert account was funded
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		accounts = cluster.Accounts()
 		if len(accounts) != 1 || accounts[0].ID != acc.ID {
