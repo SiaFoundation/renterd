@@ -1333,7 +1333,6 @@ func TestEphemeralAccountSync(t *testing.T) {
 	// start the cluster again
 	cluster = newTestCluster(t, testClusterOptions{
 		dir:       cluster.dir,
-		dbName:    cluster.dbName,
 		logger:    cluster.logger,
 		walletKey: &cluster.wk,
 	})
@@ -1349,6 +1348,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// make sure we form a contract
 	cluster.WaitForContracts()
+	cluster.MineBlocks(1)
 
 	accounts = cluster.Accounts()
 	if len(accounts) != 1 || accounts[0].ID != acc.ID {
