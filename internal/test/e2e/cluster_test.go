@@ -1347,6 +1347,9 @@ func TestEphemeralAccountSync(t *testing.T) {
 	// ask for the account, this should trigger its creation
 	tt.OKAll(cluster.Worker.Account(context.Background(), hk))
 
+	// make sure we form a contract
+	cluster.WaitForContracts()
+
 	accounts = cluster.Accounts()
 	if len(accounts) != 1 || accounts[0].ID != acc.ID {
 		t.Fatal("account should exist")
