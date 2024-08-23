@@ -186,12 +186,9 @@ type (
 	// ContractRenewResponse is the response type for the /contract/:id/renew
 	// endpoint.
 	ContractRenewResponse struct {
-		Error          string                 `json:"error"`
-		ContractID     types.FileContractID   `json:"contractID"`
-		Contract       rhpv2.ContractRevision `json:"contract"`
-		ContractPrice  types.Currency         `json:"contractPrice"`
-		FundAmount     types.Currency         `json:"fundAmount"`
-		TransactionSet []types.Transaction    `json:"transactionSet"`
+		Renewal       ContractMetadata `json:"renewal"`
+		FundAmount    types.Currency   `json:"fundAmount"`
+		NewCollateral types.Currency   `json:"newCollateral"`
 	}
 
 	// ContractRenewedRequest is the request type for the /contract/:id/renewed

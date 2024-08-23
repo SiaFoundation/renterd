@@ -927,6 +927,12 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	// fetch consensus state
+	cs, err := b.consensusState(ctx)
+	if jc.Check("couldn't fetch consensus state", err) != nil {
+		return
+	}
+
 	// fetch gouging parameters
 	gp, err := b.gougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -1019,13 +1025,28 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	// broadcast the transaction set
 	b.s.BroadcastTransactionSet(txnSet)
 
+	// add renewal contract to store
+	renewal, err := b.ms.AddRenewedContract(ctx, newRevision, contractPrice, fundAmount, cs.BlockHeight, fcid, api.ContractStatePending)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
+	}
+
+	// broadcast the renewal
+	b.sectors.HandleRenewal(renewal.ID, renewal.RenewedFrom)
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventRenew,
+		Payload: api.EventContractRenew{
+			Renewal:   renewal,
+			Timestamp: time.Now().UTC(),
+		},
+	})
+
 	// send the response
 	jc.Encode(api.ContractRenewResponse{
-		ContractID:     newRevision.ID(),
-		Contract:       newRevision,
-		ContractPrice:  contractPrice,
-		FundAmount:     fundAmount,
-		TransactionSet: txnSet,
+		Renewal:       renewal,
+		FundAmount:    fundAmount,
+		NewCollateral: newRevision.Revision.MissedHostPayout().Sub(contractPrice),
 	})
 }
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {

@@ -81,7 +81,6 @@ const (
 )
 
 type Bus interface {
-	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
@@ -340,23 +339,15 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	// update the budget
 	*budget = budget.Sub(resp.FundAmount)
 
-	// persist the contract
-	refreshedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
-	if err != nil {
-		logger.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, false, err
-	}
-
 	// add to renewed set
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	logger.Infow("refresh succeeded",
-		"fcid", refreshedContract.ID,
-		"renewedFrom", contract.ID,
+		"fcid", resp.Renewal.ID,
+		"renewedFrom", resp.Renewal.RenewedFrom,
 		"renterFunds", renterFunds.String(),
 		"minNewCollateral", minNewCollateral.String(),
-		"newCollateral", newCollateral.String(),
+		"newCollateral", resp.NewCollateral.String(),
 	)
-	return refreshedContract, true, nil
+	return resp.Renewal, true, nil
 }
 
 func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, host api.Host, budget *types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
@@ -418,22 +409,14 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	// update the budget
 	*budget = budget.Sub(resp.FundAmount)
 
-	// persist the contract
-	renewedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
-	if err != nil {
-		logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err))
-		return api.ContractMetadata{}, false, err
-	}
-
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	logger.Infow(
 		"renewal succeeded",
-		"fcid", renewedContract.ID,
-		"renewedFrom", fcid,
+		"fcid", resp.Renewal.ID,
+		"renewedFrom", resp.Renewal.RenewedFrom,
 		"renterFunds", renterFunds.String(),
-		"newCollateral", newCollateral.String(),
+		"newCollateral", resp.NewCollateral.String(),
 	)
-	return renewedContract, true, nil
+	return resp.Renewal, true, nil
 }
 
 // broadcastRevisions broadcasts contract revisions from the current set of
