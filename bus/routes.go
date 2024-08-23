@@ -15,6 +15,8 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
 
@@ -39,6 +41,49 @@ func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) e
 		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
 	}
 	return nil
+}
+
+func (b *Bus) accountsFundHandler(jc jape.Context) {
+	b.gougingParams(jc.Request.Context())
+
+	var req struct {
+		AccountID  rhpv3.Account        `json:"accountID"`
+		Amount     types.Currency       `json:"amount"`
+		ContractID types.FileContractID `json:"contractID"`
+	}
+	var rk types.PrivateKey
+	var client *rhp3.Client
+	const lockingPriorityFunding = 40
+
+	// contract metadata
+	cm, err := b.ms.Contract(jc.Request.Context(), req.ContractID)
+	if jc.Check("failed to fetch contract metadata", err) != nil {
+		return
+	}
+
+	// acquire contract
+	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), 40, req.ContractID, math.MaxInt64)
+	if jc.Check("failed to acquire lock", err) != nil {
+		return
+	}
+	defer b.contractLocker.Release(req.ContractID, lockID)
+
+	// latest revision
+	rev, err := client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+	if jc.Check("failed to fetch contract revision", err) != nil {
+		return
+	}
+
+	// price table
+	pt, err := client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+	if jc.Check("failed to fetch price table", err) != nil {
+		return
+	}
+
+	err = client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, req.Amount, req.AccountID, pt.HostPriceTable, rk)
+	if jc.Check("failed to fund account", err) != nil {
+		return
+	}
 }
 
 func (b *Bus) consensusAcceptBlock(jc jape.Context) {
