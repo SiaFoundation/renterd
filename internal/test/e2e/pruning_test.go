@@ -181,7 +181,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// assert amount of prunable data
-	tt.Retry(30, time.Second, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		res, err = b.PrunableData(context.Background())
 		tt.OK(err)
 		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
@@ -192,7 +192,13 @@ func TestSectorPruning(t *testing.T) {
 
 	// prune all contracts
 	for _, c := range contracts {
-		tt.OKAll(b.PruneContract(context.Background(), c.ID, 0))
+		res, err := b.PruneContract(context.Background(), c.ID, 0)
+		tt.OK(err)
+		if res.Pruned == 0 {
+			t.Fatal("expected pruned to be non-zero")
+		} else if res.Remaining != 0 {
+			t.Fatal("expected remaining to be zero")
+		}
 	}
 
 	// assert prunable data is 0
@@ -221,12 +227,19 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// assert amount of prunable data
-	tt.Retry(30, time.Second, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		res, err = b.PrunableData(context.Background())
 		tt.OK(err)
 
-		if res.TotalPrunable == 0 {
-			return errors.New(("expected prunable data"))
+		if len(res.Contracts) != len(contracts) {
+			return fmt.Errorf("expected %d contracts, got %d", len(contracts), len(res.Contracts))
+		} else if res.TotalPrunable == 0 {
+			var sizes []string
+			for _, c := range res.Contracts {
+				res, _ := b.ContractSize(context.Background(), c.ID)
+				sizes = append(sizes, fmt.Sprintf("c: %v size: %v prunable: %v", c.ID, res.Size, res.Prunable))
+			}
+			return errors.New("expected prunable data, contract sizes:\n" + strings.Join(sizes, "\n"))
 		}
 		return nil
 	})
