@@ -898,12 +898,6 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	jc.Encode(a)
 }
 
-// TODOs PJ:
-// -extend validation
-// -trim req/res obj
-// -fix discard fn
-// -fix sign fn
-// -return 404 on ErrMaxFundAmountExceeded
 func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	// apply pessimistic timeout
 	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
@@ -922,133 +916,72 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	}
 
 	// validate the request
-	if rrr.RenterFunds.IsZero() {
+	if rrr.EndHeight == 0 {
+		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+	} else if rrr.ExpectedNewStorage == 0 {
+		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
+	} else if rrr.MaxFundAmount.IsZero() {
+		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
+	} else if rrr.MinNewCollateral.IsZero() {
+		http.Error(jc.ResponseWriter, "MinNewCollateral can not be zero", http.StatusBadRequest)
+	} else if rrr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
 	}
 
-	// fetch consensus state
-	cs, err := b.consensusState(ctx)
-	if jc.Check("couldn't fetch consensus state", err) != nil {
+	// fetch the contract
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
 		return
 	}
+
+	// fetch the host
+	h, err := b.hs.Host(ctx, c.HostKey)
+	if jc.Check("couldn't fetch host", err) != nil {
+		return
+	}
+
+	// fetch consensus state
+	cs := b.cm.TipState()
 
 	// fetch gouging parameters
 	gp, err := b.gougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
 
-	// acquire contract lock indefinitely and defer the release
-	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
-	if jc.Check("couldn't acquire contract lock", err) != nil {
-		return
-	}
-	defer func() {
-		if err := b.contractLocker.Release(fcid, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
-		}
-	}()
-
-	// fetch the revision
-	rev, err := b.rhp3.Revision(ctx, fcid, rrr.HostKey, rrr.SiamuxAddr)
-	if jc.Check("couldn't fetch revision", err) != nil {
-		return
-	}
-
-	// helper to discard txn on error
-	discardTxn := func(_ context.Context, txn types.Transaction, err *error) {
-		if *err == nil {
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	var newRevision rhpv2.ContractRevision
+	var contractPrice, fundAmount types.Currency
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		newRevision, contractPrice, fundAmount, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
+			jc.Error(err, http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't renew contract", err) != nil {
 			return
 		}
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
-
-	// helper to sign txn
-	signTxn := func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
-		b.w.SignTransaction(txn, toSign, cf)
-		return nil
-	}
-
-	// helper to prepare contract renewal
-	prepareRenew := func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) ([]types.Hash256, []types.Transaction, types.Currency, func(context.Context, types.Transaction, *error), error) {
-		cs := b.cm.TipState()
-
-		// Create the final revision from the provided revision.
-		finalRevision := revision
-		finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
-		finalRevision.Filesize = 0
-		finalRevision.FileMerkleRoot = types.Hash256{}
-		finalRevision.RevisionNumber = math.MaxUint64
-
-		// Prepare the new contract.
-		fc, basePrice, err := rhpv3.PrepareContractRenewal(revision, hostAddress, renterAddress, renterFunds, minNewCollateral, pt, expectedStorage, endHeight)
-		if err != nil {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't prepare contract renewal: %w", err)
-		}
-
-		// Create the transaction containing both the final revision and new
-		// contract.
-		txn := types.Transaction{
-			FileContracts:         []types.FileContract{fc},
-			FileContractRevisions: []types.FileContractRevision{finalRevision},
-			MinerFees:             []types.Currency{pt.TxnFeeMaxRecommended.Mul64(4096)},
-		}
-
-		// Compute how much renter funds to put into the new contract.
-		cost := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
-
-		// Make sure we don't exceed the max fund amount.
-		// TODO: remove the IsZero check for the v2 change
-		if /*!wprr.MaxFundAmount.IsZero() &&*/ maxFundAmount.Cmp(cost) < 0 {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, maxFundAmount)
-		}
-
-		// Fund the txn. We are not signing it yet since it's not complete. The host
-		// still needs to complete it and the revision + contract are signed with
-		// the renter key by the worker.
-		toSign, err := b.w.FundTransaction(&txn, cost, true)
-		if err != nil {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't fund transaction: %w", err)
-		}
-
-		return toSign, append(b.cm.UnconfirmedParents(txn), txn), cost, discardTxn, nil
-	}
-
-	// renew contract
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, rrr, gc, prepareRenew, signTxn, rev, b.deriveRenterKey(rrr.HostKey))
-	if jc.Check("couldn't renew contract", err) != nil {
-		return
-	}
-
-	// broadcast the transaction set
-	b.s.BroadcastTransactionSet(txnSet)
 
 	// add renewal contract to store
-	renewal, err := b.ms.AddRenewedContract(ctx, newRevision, contractPrice, fundAmount, cs.BlockHeight, fcid, api.ContractStatePending)
+	r, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
 
-	// broadcast the renewal
-	b.sectors.HandleRenewal(renewal.ID, renewal.RenewedFrom)
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventRenew,
-		Payload: api.EventContractRenew{
-			Renewal:   renewal,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-
 	// send the response
 	jc.Encode(api.ContractRenewResponse{
-		Renewal:       renewal,
+		Renewal:       r,
 		FundAmount:    fundAmount,
 		NewCollateral: newRevision.Revision.MissedHostPayout().Sub(contractPrice),
 	})
 }
+
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractRenewedRequest
@@ -1066,20 +999,10 @@ func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	if req.State == "" {
 		req.State = api.ContractStatePending
 	}
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
+	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
-
-	b.sectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventRenew,
-		Payload: api.EventContractRenew{
-			Renewal:   r,
-			Timestamp: time.Now().UTC(),
-		},
-	})
 
 	jc.Encode(r)
 }

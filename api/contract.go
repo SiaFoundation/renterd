@@ -170,17 +170,11 @@ type (
 	// ContractRenewRequest is the request type for the /contract/:id/renew
 	// endpoint.
 	ContractRenewRequest struct {
-		ContractID         types.FileContractID `json:"contractID"`
-		EndHeight          uint64               `json:"endHeight"`
-		ExpectedNewStorage uint64               `json:"expectedNewStorage"`
-		HostAddress        types.Address        `json:"hostAddress"`
-		HostKey            types.PublicKey      `json:"hostKey"`
-		MaxFundAmount      types.Currency       `json:"maxFundAmount"`
-		MinNewCollateral   types.Currency       `json:"minNewCollateral"`
-		SiamuxAddr         string               `json:"siamuxAddr"`
-		RenterAddress      types.Address        `json:"renterAddress"`
-		RenterFunds        types.Currency       `json:"renterFunds"`
-		WindowSize         uint64               `json:"windowSize"`
+		EndHeight          uint64         `json:"endHeight"`
+		ExpectedNewStorage uint64         `json:"expectedNewStorage"`
+		MaxFundAmount      types.Currency `json:"maxFundAmount"`
+		MinNewCollateral   types.Currency `json:"minNewCollateral"`
+		RenterFunds        types.Currency `json:"renterFunds"`
 	}
 
 	// ContractRenewResponse is the response type for the /contract/:id/renew

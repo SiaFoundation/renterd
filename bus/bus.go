@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -563,9 +565,22 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 	return c, nil
 }
 
-func (b *Bus) isPassedV2AllowHeight() bool {
-	cs := b.cm.TipState()
-	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
+func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	b.sectors.HandleRenewal(r.ID, r.RenewedFrom)
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventRenew,
+		Payload: api.EventContractRenew{
+			Renewal:   r,
+			Timestamp: time.Now().UTC(),
+		},
+	})
+	return r, nil
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
@@ -725,6 +740,11 @@ func (b *Bus) initSettings(ctx context.Context) error {
 	return nil
 }
 
+func (b *Bus) isPassedV2AllowHeight() bool {
+	cs := b.cm.TipState()
+	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
+}
+
 func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
 	pk := types.NewPrivateKeyFromSeed(seed[:])
@@ -741,4 +761,85 @@ func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
 		seed[i] = 0
 	}
 	return pk
+}
+
+func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
+	return func(pt rhpv3.HostPriceTable) ([]types.Hash256, []types.Transaction, types.Currency, rhp3.DiscardTxnFn, error) {
+		// create the final revision from the provided revision
+		finalRevision := revision
+		finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
+		finalRevision.Filesize = 0
+		finalRevision.FileMerkleRoot = types.Hash256{}
+		finalRevision.RevisionNumber = math.MaxUint64
+
+		// prepare the new contract
+		fc, basePrice, err := rhpv3.PrepareContractRenewal(revision, hostAddress, renterAddress, renterFunds, minNewCollateral, pt, expectedStorage, endHeight)
+		if err != nil {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't prepare contract renewal: %w", err)
+		}
+
+		// prepare the transaction
+		txn := types.Transaction{
+			FileContracts:         []types.FileContract{fc},
+			FileContractRevisions: []types.FileContractRevision{finalRevision},
+			MinerFees:             []types.Currency{pt.TxnFeeMaxRecommended.Mul64(4096)},
+		}
+
+		// compute how much renter funds to put into the new contract
+		fundAmount := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
+
+		// make sure we don't exceed the max fund amount.
+		// TODO: remove the IsZero check for the v2 change
+		if /*!wprr.MaxFundAmount.IsZero() &&*/ maxFundAmount.Cmp(fundAmount) < 0 {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, fundAmount, maxFundAmount)
+		}
+
+		// fund the transaction, we are not signing it yet since it's not
+		// complete. The host still needs to complete it and the revision +
+		// contract are signed with the renter key by the worker.
+		toSign, err := b.w.FundTransaction(&txn, fundAmount, true)
+		if err != nil {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+		}
+
+		return toSign, append(b.cm.UnconfirmedParents(txn), txn), fundAmount, func(err *error) {
+			if *err == nil {
+				return
+			}
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		}, nil
+	}
+}
+
+func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
+	if err != nil {
+		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't acquire contract lock; %w", err)
+	}
+	defer func() {
+		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch the revision
+	rev, err := b.rhp3.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	if err != nil {
+		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
+	}
+
+	// renew contract
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	renterKey := b.deriveRenterKey(c.HostKey)
+	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, maxFundAmount, endHeight, expectedNewStorage)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	if err != nil {
+		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
+	}
+
+	// broadcast the transaction set
+	b.s.BroadcastTransactionSet(txnSet)
+
+	return newRevision, contractPrice, fundAmount, nil
 }

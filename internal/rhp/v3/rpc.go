@@ -26,9 +26,9 @@ type (
 	// gouging checks before paying for the table.
 	PriceTablePaymentFunc func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error)
 
-	PrepareRenewFunc func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (toSign []types.Hash256, txnSet []types.Transaction, fundAmount types.Currency, discard func(context.Context, types.Transaction, *error), err error)
-
-	SignFunc func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
+	DiscardTxnFn   func(err *error)
+	PrepareRenewFn func(pt rhpv3.HostPriceTable) (toSign []types.Hash256, txnSet []types.Transaction, fundAmount types.Currency, discard DiscardTxnFn, err error)
+	SignTxnFn      func(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 )
 
 // rpcPriceTable calls the UpdatePriceTable RPC.
@@ -343,7 +343,7 @@ func rpcAppendSector(ctx context.Context, t *transportV3, renterKey types.Privat
 	return
 }
 
-func rpcRenew(ctx context.Context, rrr api.ContractRenewRequest, gougingChecker gouging.Checker, prepareRenew PrepareRenewFunc, signTxn SignFunc, t *transportV3, rev types.FileContractRevision, renterKey types.PrivateKey) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
+func rpcRenew(ctx context.Context, t *transportV3, gc gouging.Checker, rev types.FileContractRevision, renterKey types.PrivateKey, prepareTxnFn PrepareRenewFn, signTxnFn SignTxnFn) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
 	defer utils.WrapErr(ctx, "RPCRenew", &err)
 
 	s, err := t.DialStream(ctx)
@@ -368,19 +368,19 @@ func rpcRenew(ctx context.Context, rrr api.ContractRenewRequest, gougingChecker 
 	}
 
 	// Perform gouging checks.
-	if breakdown := gougingChecker.Check(nil, &pt); breakdown.Gouging() {
+	if breakdown := gc.Check(nil, &pt); breakdown.Gouging() {
 		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("host gouging during renew: %v", breakdown)
 	}
 
 	// Prepare the signed transaction that contains the final revision as well
 	// as the new contract
-	toSign, txnSet, fundAmount, discard, err := prepareRenew(ctx, rev, rrr.HostAddress, rrr.RenterAddress, renterKey, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, pt, rrr.EndHeight, rrr.WindowSize, rrr.ExpectedNewStorage)
+	toSign, txnSet, fundAmount, discard, err := prepareTxnFn(pt)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to prepare renew: %w", err)
 	}
 
 	// Starting from here, we need to make sure to release the txn on error.
-	defer discard(ctx, txnSet[len(txnSet)-1], &err)
+	defer discard(&err)
 
 	parents, txn := txnSet[:len(txnSet)-1], txnSet[len(txnSet)-1]
 
@@ -435,9 +435,7 @@ func rpcRenew(ctx context.Context, rrr api.ContractRenewRequest, gougingChecker 
 		WholeTransaction: true,
 		Signatures:       []uint64{0, 1},
 	}
-	if err := signTxn(ctx, &txn, toSign, cf); err != nil {
-		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("failed to sign transaction: %w", err)
-	}
+	signTxnFn(&txn, toSign, cf)
 
 	// Create a new no-op revision and sign it.
 	noOpRevision := initialRevision(txn, rev.UnlockConditions.PublicKeys[1], renterKey.PublicKey().UnlockKey())
