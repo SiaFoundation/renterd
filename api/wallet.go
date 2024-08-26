@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
@@ -43,18 +42,6 @@ type (
 		Transaction types.Transaction   `json:"transaction"`
 		ToSign      []types.Hash256     `json:"toSign"`
 		DependsOn   []types.Transaction `json:"dependsOn"`
-	}
-
-	// WalletPrepareFormRequest is the request type for the /wallet/prepare/form
-	// endpoint.
-	WalletPrepareFormRequest struct {
-		EndHeight      uint64             `json:"endHeight"`
-		HostCollateral types.Currency     `json:"hostCollateral"`
-		HostKey        types.PublicKey    `json:"hostKey"`
-		HostSettings   rhpv2.HostSettings `json:"hostSettings"`
-		RenterAddress  types.Address      `json:"renterAddress"`
-		RenterFunds    types.Currency     `json:"renterFunds"`
-		RenterKey      types.PublicKey    `json:"renterKey"`
 	}
 
 	// WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew

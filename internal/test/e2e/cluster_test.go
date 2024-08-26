@@ -1099,9 +1099,8 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
-	tt.OK(err)
-	contract, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
 	tt.OK(err)
 
 	// assert revision height is 0
@@ -1110,13 +1109,12 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	}
 
 	// broadcast the revision for each contract
-	fcid := contract.ID
-	tt.OK(w.RHPBroadcast(context.Background(), fcid))
+	tt.OK(w.RHPBroadcast(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		c, err := cluster.Bus.Contract(context.Background(), fcid)
+		c, err := cluster.Bus.Contract(context.Background(), contract.ID)
 		tt.OK(err)
 		if c.RevisionHeight == 0 {
 			return fmt.Errorf("contract %v should have been revised", c.ID)
@@ -1159,9 +1157,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(10), types.Siacoins(1))
-	tt.OK(err)
-	c, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	c, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(2), h.PublicKey, h.NetAddress, types.Siacoins(1), cs.BlockHeight+10)
 	tt.OK(err)
 
 	tt.OK(b.SetContractSet(context.Background(), test.ContractSet, []types.FileContractID{c.ID}))
@@ -1589,7 +1585,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	c := contracts[0]
 
 	// add a contract to the bus
-	_, err = cluster.Bus.AddContract(context.Background(), rhpv2.ContractRevision{
+	_, err = cluster.bs.AddContract(context.Background(), rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID: types.FileContractID{1},
 			UnlockConditions: types.UnlockConditions{
