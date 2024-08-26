@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -28,59 +27,11 @@ func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error
 	return
 }
 
-// WalletDiscard discards the provided txn, make its inputs usable again. This
-// should only be called on transactions that will never be broadcast.
-func (c *Client) WalletDiscard(ctx context.Context, txn types.Transaction) error {
-	return c.c.WithContext(ctx).POST("/wallet/discard", txn, nil)
-}
-
-// WalletFund funds txn using inputs controlled by the wallet.
-func (c *Client) WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTransactions bool) ([]types.Hash256, []types.Transaction, error) {
-	req := api.WalletFundRequest{
-		Transaction:        *txn,
-		Amount:             amount,
-		UseUnconfirmedTxns: useUnconfirmedTransactions,
-	}
-	var resp api.WalletFundResponse
-	err := c.c.WithContext(ctx).POST("/wallet/fund", req, &resp)
-	if err != nil {
-		return nil, nil, err
-	}
-	*txn = resp.Transaction
-	return resp.ToSign, resp.DependsOn, nil
-}
-
-// WalletOutputs returns the set of unspent outputs controlled by the wallet.
-func (c *Client) WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet/outputs", &resp)
-	return
-}
-
 // WalletPending returns the txpool transactions that are relevant to the
 // wallet.
 func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/pending", &resp)
 	return
-}
-
-// WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error) {
-	req := api.WalletPrepareRenewRequest{
-		Revision:           revision,
-		EndHeight:          endHeight,
-		ExpectedNewStorage: expectedStorage,
-		HostAddress:        hostAddress,
-		PriceTable:         pt,
-		MaxFundAmount:      maxFundAmount,
-		MinNewCollateral:   minNewCollateral,
-		RenterAddress:      renterAddress,
-		RenterFunds:        renterFunds,
-		RenterKey:          renterKey,
-		WindowSize:         windowSize,
-	}
-	var resp api.WalletPrepareRenewResponse
-	err := c.c.WithContext(ctx).POST("/wallet/prepare/renew", req, &resp)
-	return resp, err
 }
 
 // WalletRedistribute broadcasts a transaction that redistributes the money in
@@ -96,19 +47,9 @@ func (c *Client) WalletRedistribute(ctx context.Context, outputs int, amount typ
 	return
 }
 
-// WalletSign signs txn using the wallet's private key.
-func (c *Client) WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
-	req := api.WalletSignRequest{
-		Transaction:   *txn,
-		ToSign:        toSign,
-		CoveredFields: cf,
-	}
-	return c.c.WithContext(ctx).POST("/wallet/sign", req, txn)
-}
-
-// WalletTransactions returns all transactions relevant to the wallet.
-func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []api.Transaction, err error) {
-	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
+// WalletEvents returns all events relevant to the wallet.
+func (c *Client) WalletEvents(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []api.Transaction, err error) {
+	c.c.Custom("GET", "/wallet/events", nil, &resp)
 
 	values := url.Values{}
 	for _, opt := range opts {

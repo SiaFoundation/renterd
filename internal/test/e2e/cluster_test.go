@@ -1897,9 +1897,6 @@ func TestWallet(t *testing.T) {
 	// Check wallet info is sane after startup.
 	wallet, err := b.Wallet(context.Background())
 	tt.OK(err)
-	if wallet.ScanHeight == 0 {
-		t.Fatal("wallet scan height should not be 0")
-	}
 	if wallet.Confirmed.IsZero() {
 		t.Fatal("wallet confirmed balance should not be zero")
 	}
