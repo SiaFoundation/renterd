@@ -929,6 +929,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// record spending
 	if !spending.Total().IsZero() {
+		fmt.Println("DEBUG PJ: bus: record contract spending", fcid, rev.RevisionNumber, rev.Filesize)
 		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
 			{
 				ContractSpending: spending,

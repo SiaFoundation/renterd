@@ -2827,7 +2827,7 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 	if err != nil {
 		return fmt.Errorf("failed to record contract spending: %w", err)
 	}
-	fmt.Println("DEBUG PJ: updating contract size", fcid, size)
+	fmt.Printf("DEBUG PJ: updating contract %v size %v rev %v | del %v | dl %v | ul %v | fund %v | roots %v \n", fcid, size, revisionNumber, newSpending.Deletions, newSpending.Downloads, newSpending.Uploads, newSpending.FundAccount, newSpending.SectorRoots)
 	return nil
 }
 
