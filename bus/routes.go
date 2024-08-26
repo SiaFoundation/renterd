@@ -1714,9 +1714,6 @@ func (b *Bus) accountsHandlerGET(jc jape.Context) {
 	var owner string
 	if jc.DecodeForm("owner", &owner) != nil {
 		return
-	} else if owner == "" {
-		jc.Error(errors.New("owner is required"), http.StatusBadRequest)
-		return
 	}
 	accounts, err := b.accounts.Accounts(jc.Request.Context(), owner)
 	if err != nil {

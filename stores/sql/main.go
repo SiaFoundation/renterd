@@ -98,7 +98,14 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 }
 
 func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, error) {
-	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts WHERE owner = ?", owner)
+	var whereExpr string
+	var args []any
+	if owner != "" {
+		whereExpr = "WHERE owner = ?"
+		args = append(args, owner)
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf("SELECT account_id, clean_shutdown, host, balance, drift, requires_sync, owner FROM ephemeral_accounts %s", whereExpr),
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
 	}
@@ -107,7 +114,7 @@ func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, erro
 	var accounts []api.Account
 	for rows.Next() {
 		a := api.Account{Balance: new(big.Int), Drift: new(big.Int)} // init big.Int
-		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync, &a.Owner); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
 		accounts = append(accounts, a)

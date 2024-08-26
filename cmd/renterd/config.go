@@ -97,7 +97,7 @@ func defaultConfig() config.Config {
 		Worker: config.Worker{
 			Enabled: true,
 
-			ID:                     "worker",
+			ID:                     "",
 			AccountsRefillInterval: defaultAccountRefillInterval,
 			ContractLockTimeout:    30 * time.Second,
 			BusFlushInterval:       5 * time.Second,
@@ -132,6 +132,15 @@ func defaultConfig() config.Config {
 	}
 }
 
+func assertWorkerID(cfg *config.Config) error {
+	if cfg.Bus.RemoteAddr != "" && cfg.Worker.ID == "" {
+		return errors.New("a unique worker ID must be set in a cluster setup")
+	} else if cfg.Worker.ID == "" {
+		cfg.Worker.ID = "worker"
+	}
+	return nil
+}
+
 // loadConfig creates a default config and overrides it with the contents of the
 // YAML file (specified by the RENTERD_CONFIG_FILE), CLI flags, and environment
 // variables, in that order.
@@ -140,6 +149,11 @@ func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.
 	parseYamlConfig(&cfg)
 	parseCLIFlags(&cfg)
 	parseEnvironmentVariables(&cfg)
+
+	// check worker id
+	if err = assertWorkerID(&cfg); err != nil {
+		return
+	}
 
 	// check network
 	switch cfg.Network {

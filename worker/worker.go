@@ -1137,6 +1137,10 @@ func (w *Worker) stateHandlerGET(jc jape.Context) {
 
 // New returns an HTTP handler that serves the worker API.
 func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, error) {
+	if cfg.ID == "" {
+		return nil, errors.New("worker ID cannot be empty")
+	}
+
 	l = l.Named("worker").Named(cfg.ID)
 
 	if cfg.ContractLockTimeout == 0 {

@@ -52,6 +52,7 @@ type (
 
 type (
 	AccountMgr struct {
+		alerts                   alerts.Alerter
 		w                        AccountMgrWorker
 		dc                       DownloadContracts
 		cs                       ConsensusState
@@ -180,6 +181,7 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 				HostKey:       hk,
 				Balance:       big.NewInt(0),
 				Drift:         big.NewInt(0),
+				Owner:         a.owner,
 				RequiresSync:  true, // force sync on new account
 			},
 		}
@@ -352,16 +354,16 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	// negative because we don't care if we have more money than
 	// expected.
 	if account.Drift.Cmp(maxNegDrift) < 0 {
-		// TODO: register alert
-		_ = newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
+		alert := newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
 			"accountID", account.ID.String(),
 			"hostKey", contract.HostKey.String(),
 			"balance", account.Balance.String(),
 			"drift", account.Drift.String(),
 		)
+		_ = a.alerts.RegisterAlert(a.shutdownCtx, alert)
 		return fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
 	} else {
-		// TODO: dismiss alert on success
+		_ = a.alerts.DismissAlerts(a.shutdownCtx, alerts.IDForAccount(alertAccountRefillID, account.ID))
 	}
 
 	// check if a resync is needed
@@ -498,6 +500,7 @@ func (a *Account) convert() api.Account {
 		HostKey:       a.acc.HostKey,
 		Balance:       new(big.Int).Set(a.acc.Balance),
 		Drift:         new(big.Int).Set(a.acc.Drift),
+		Owner:         a.acc.Owner,
 		RequiresSync:  a.acc.RequiresSync,
 	}
 }

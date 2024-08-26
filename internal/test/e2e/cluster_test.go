@@ -1151,6 +1151,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal("wrong host")
 	} else if !acc.CleanShutdown {
 		t.Fatal("account should indicate a clean shutdown")
+	} else if acc.Owner != testWorkerCfg().ID {
+		t.Fatalf("wrong owner %v", acc.Owner)
 	}
 
 	// Check that the spending was recorded for the contract. The recorded

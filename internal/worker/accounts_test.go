@@ -74,6 +74,7 @@ func TestAccounts(t *testing.T) {
 			HostKey:       hk,
 			Balance:       types.ZeroCurrency.Big(),
 			Drift:         types.ZeroCurrency.Big(),
+			Owner:         "test",
 		}); !cmp.Equal(acc, expected, comparer) {
 			t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
 		}
@@ -90,6 +91,7 @@ func TestAccounts(t *testing.T) {
 		HostKey:       hk,
 		Balance:       types.ZeroCurrency.Big(),
 		Drift:         types.ZeroCurrency.Big(),
+		Owner:         "test",
 	}); !cmp.Equal(acc, expected, comparer) {
 		t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
 	}
@@ -105,6 +107,7 @@ func TestAccounts(t *testing.T) {
 		HostKey:       hk,
 		Balance:       types.Siacoins(1).Big(),
 		Drift:         types.ZeroCurrency.Big(),
+		Owner:         "test",
 	}); !cmp.Equal(acc, expected, comparer) {
 		t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
 	}
@@ -120,6 +123,7 @@ func TestAccounts(t *testing.T) {
 		HostKey:       hk,
 		Balance:       types.Siacoins(1).Big(),
 		Drift:         types.ZeroCurrency.Big(),
+		Owner:         "test",
 	}); !cmp.Equal(acc, expected, comparer) {
 		t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
 	}
@@ -136,6 +140,7 @@ func TestAccounts(t *testing.T) {
 		HostKey:       hk,
 		Balance:       newBalance,
 		Drift:         newDrift,
+		Owner:         "test",
 	}); !cmp.Equal(acc, expected, comparer) {
 		t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
 	}
