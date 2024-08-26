@@ -17,8 +17,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
@@ -51,8 +51,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrivePct              *stats.DataPoints
-		statsSlabUploadSpeedBytesPerMS *stats.DataPoints
+		statsOverdrivePct              *utils.DataPoints
+		statsSlabUploadSpeedBytesPerMS *utils.DataPoints
 
 		shutdownCtx context.Context
 
@@ -146,18 +146,17 @@ type (
 	}
 )
 
-func (w *worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *Worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
-	mm := newMemoryManager(logger.Named("memorymanager"), maxMemory)
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, mm, w.bus, w.bus, w.bus, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *worker) upload(ctx context.Context, bucket, path string, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
+func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
 	// apply the options
-	up := defaultParameters(bucket, path)
+	up := defaultParameters(bucket, path, rs)
 	for _, opt := range opts {
 		opt(&up)
 	}
@@ -212,7 +211,7 @@ func (w *worker) upload(ctx context.Context, bucket, path string, r io.Reader, c
 	return eTag, nil
 }
 
-func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string, lockPriority int) {
+func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string, lockPriority int) {
 	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
 	w.uploadsMu.Lock()
 	if _, ok := w.uploadingPackedSlabs[key]; ok {
@@ -278,7 +277,7 @@ func (w *worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	wg.Wait()
 }
 
-func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
+func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
@@ -303,22 +302,23 @@ func (w *worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.Pac
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.SugaredLogger) *uploadManager {
+func newUploadManager(ctx context.Context, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
+	logger = logger.Named("uploadmanager")
 	return &uploadManager{
 		hm:     hm,
-		mm:     mm,
+		mm:     newMemoryManager(maxMemory, logger),
 		os:     os,
 		cl:     cl,
 		cs:     cs,
-		logger: logger,
+		logger: logger.Sugar(),
 
 		contractLockDuration: contractLockDuration,
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrivePct:              stats.NoDecay(),
-		statsSlabUploadSpeedBytesPerMS: stats.NoDecay(),
+		statsOverdrivePct:              utils.NewDataPoints(0),
+		statsSlabUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		shutdownCtx: ctx,
 
@@ -341,8 +341,8 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs Cont
 		signalNewUpload: make(chan struct{}, 1),
 
 		// stats
-		statsSectorUploadEstimateInMS:    stats.Default(),
-		statsSectorUploadSpeedBytesPerMS: stats.NoDecay(),
+		statsSectorUploadEstimateInMS:    utils.NewDataPoints(10 * time.Minute),
+		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
 		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),

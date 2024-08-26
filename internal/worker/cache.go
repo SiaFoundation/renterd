@@ -75,14 +75,13 @@ type (
 	Bus interface {
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
-		RegisterWebhook(ctx context.Context, wh webhooks.Webhook) error
 	}
 
 	WorkerCache interface {
 		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 		HandleEvent(event webhooks.Event) error
-		Initialize(ctx context.Context, workerAPI string, opts ...webhooks.HeaderOption) error
+		Subscribe(e EventSubscriber) error
 	}
 )
 
@@ -92,16 +91,17 @@ type cache struct {
 	cache  *memoryCache
 	logger *zap.SugaredLogger
 
-	mu    sync.Mutex
-	ready bool
+	mu        sync.Mutex
+	readyChan chan struct{}
 }
 
 func NewCache(b Bus, logger *zap.Logger) WorkerCache {
+	logger = logger.Named("workercache")
 	return &cache{
 		b: b,
 
 		cache:  newMemoryCache(),
-		logger: logger.Sugar().Named("workercache"),
+		logger: logger.Sugar(),
 	}
 }
 
@@ -168,12 +168,18 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventConsensusUpdate:
 		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
 		c.handleConsensusUpdate(e)
+	case api.EventContractAdd:
+		log = log.With("fcid", e.Added.ID, "ts", e.Timestamp)
+		c.handleContractAdd(e)
 	case api.EventContractArchive:
 		log = log.With("fcid", e.ContractID, "ts", e.Timestamp)
 		c.handleContractArchive(e)
 	case api.EventContractRenew:
 		log = log.With("fcid", e.Renewal.ID, "renewedFrom", e.Renewal.RenewedFrom, "ts", e.Timestamp)
 		c.handleContractRenew(e)
+	case api.EventHostUpdate:
+		log = log.With("hk", e.HostKey, "ts", e.Timestamp)
+		c.handleHostUpdate(e)
 	case api.EventSettingUpdate:
 		log = log.With("key", e.Key, "ts", e.Timestamp)
 		err = c.handleSettingUpdate(e)
@@ -194,32 +200,27 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	return
 }
 
-func (c *cache) Initialize(ctx context.Context, workerAPI string, webhookOpts ...webhooks.HeaderOption) error {
-	eventsURL := fmt.Sprintf("%s/events", workerAPI)
-	headers := make(map[string]string)
-	for _, opt := range webhookOpts {
-		opt(headers)
-	}
-	for _, wh := range []webhooks.Webhook{
-		api.WebhookConsensusUpdate(eventsURL, headers),
-		api.WebhookContractArchive(eventsURL, headers),
-		api.WebhookContractRenew(eventsURL, headers),
-		api.WebhookSettingUpdate(eventsURL, headers),
-	} {
-		if err := c.b.RegisterWebhook(ctx, wh); err != nil {
-			return fmt.Errorf("failed to register webhook '%s', err: %v", wh, err)
-		}
-	}
+func (c *cache) Subscribe(e EventSubscriber) (err error) {
 	c.mu.Lock()
-	c.ready = true
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if c.readyChan != nil {
+		return fmt.Errorf("already subscribed")
+	}
+
+	c.readyChan, err = e.AddEventHandler(c.logger.Desugar().Name(), c)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe the worker cache, error: %v", err)
+	}
 	return nil
 }
 
 func (c *cache) isReady() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ready
+	select {
+	case <-c.readyChan:
+		return true
+	default:
+	}
+	return false
 }
 
 func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
@@ -234,6 +235,24 @@ func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
 	gp.ConsensusState = event.ConsensusState
 	gp.TransactionFee = event.TransactionFee
 	c.cache.Set(cacheKeyGougingParams, gp)
+}
+
+func (c *cache) handleContractAdd(event api.EventContractAdd) {
+	// return early if the cache doesn't have contracts
+	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		return
+	}
+	contracts := value.([]api.ContractMetadata)
+
+	// add the contract to the cache
+	for _, contract := range contracts {
+		if contract.ID == event.Added.ID {
+			return
+		}
+	}
+	contracts = append(contracts, event.Added)
+	c.cache.Set(cacheKeyDownloadContracts, contracts)
 }
 
 func (c *cache) handleContractArchive(event api.EventContractArchive) {
@@ -267,6 +286,24 @@ func (c *cache) handleContractRenew(event api.EventContractRenew) {
 		if contract.ID == event.Renewal.RenewedFrom {
 			contracts[i] = event.Renewal
 			break
+		}
+	}
+
+	c.cache.Set(cacheKeyDownloadContracts, contracts)
+}
+
+func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
+	// return early if the cache doesn't have contracts
+	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
+	if !found {
+		return
+	}
+	contracts := value.([]api.ContractMetadata)
+
+	// update the host's IP in the cache
+	for i, contract := range contracts {
+		if contract.HostKey == e.HostKey {
+			contracts[i].HostIP = e.NetAddr
 		}
 	}
 

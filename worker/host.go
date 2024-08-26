@@ -5,18 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.uber.org/zap"
-)
-
-var (
-	errFailedToCreatePayment = errors.New("failed to create payment")
 )
 
 type (
@@ -26,7 +23,8 @@ type (
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
-		FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error)
+		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
+		PriceTableUnpaid(ctx context.Context) (hpt api.HostPriceTable, err error)
 		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
@@ -49,21 +47,22 @@ type (
 		siamuxAddr string
 
 		acc                      *account
+		client                   *rhp3.Client
 		bus                      Bus
 		contractSpendingRecorder ContractSpendingRecorder
 		logger                   *zap.SugaredLogger
-		transportPool            *transportPoolV3
 		priceTables              *priceTables
 	}
 )
 
 var (
 	_ Host        = (*host)(nil)
-	_ HostManager = (*worker)(nil)
+	_ HostManager = (*Worker)(nil)
 )
 
-func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
+func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	return &host{
+		client:                   w.rhp3Client,
 		hk:                       hk,
 		acc:                      w.accounts.ForHost(hk),
 		bus:                      w.bus,
@@ -73,7 +72,6 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		siamuxAddr:               siamuxAddr,
 		renterKey:                w.deriveRenterKey(hk),
 		accountKey:               w.accounts.deriveAccountKey(hk),
-		transportPool:            w.transportPoolV3,
 		priceTables:              w.priceTables,
 	}
 }
@@ -81,240 +79,232 @@ func (w *worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 func (h *host) PublicKey() types.PublicKey { return h.hk }
 
 func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
-	pt, err := h.priceTables.fetch(ctx, h.hk, nil)
-	if err != nil {
-		return err
-	}
-	hpt := pt.HostPriceTable
-
-	// check for download gouging specifically
-	gc, err := GougingCheckerFromContext(ctx, overpay)
-	if err != nil {
-		return err
-	}
-	if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
-		return fmt.Errorf("%w: %v", errPriceTableGouging, breakdown.DownloadErr)
-	}
-
-	// return errBalanceInsufficient if balance insufficient
-	defer func() {
-		if isBalanceInsufficient(err) {
-			err = fmt.Errorf("%w %v, err: %v", errBalanceInsufficient, h.hk, err)
+	var amount types.Currency
+	return h.acc.WithWithdrawal(ctx, func() (types.Currency, error) {
+		pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
+		if err != nil {
+			return types.ZeroCurrency, err
 		}
-	}()
+		hpt := pt.HostPriceTable
+		amount = uptc
 
-	return h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
-		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			cost, err := readSectorCost(hpt, uint64(length))
-			if err != nil {
-				return err
-			}
+		// check for download gouging specifically
+		gc, err := GougingCheckerFromContext(ctx, overpay)
+		if err != nil {
+			return amount, err
+		}
+		if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
+			return amount, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
+		}
 
-			payment := rhpv3.PayByEphemeralAccount(h.acc.id, cost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-			cost, refund, err := RPCReadSector(ctx, t, w, hpt, &payment, offset, length, root)
-			if err != nil {
-				return err
-			}
-
-			amount = cost.Sub(refund)
-			return nil
-		})
-		return
+		cost, err := h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.id, h.accountKey, hpt)
+		if err != nil {
+			return amount, err
+		}
+		return amount.Add(cost), nil
 	})
 }
 
-func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) (err error) {
+func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
 	// fetch price table
-	pt, err := h.priceTable(ctx, nil)
+	var pt rhpv3.HostPriceTable
+	if err := h.acc.WithWithdrawal(ctx, func() (amount types.Currency, err error) {
+		pt, amount, err = h.priceTable(ctx, nil)
+		return
+	}); err != nil {
+		return err
+	}
+	// upload
+	cost, err := h.client.AppendSector(ctx, sectorRoot, sector, &rev, h.hk, h.siamuxAddr, h.acc.id, pt, h.renterKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to upload sector: %w", err)
 	}
-
-	// prepare payment
-	//
-	// TODO: change to account payments once we have the means to check for an
-	// insufficient balance error
-	expectedCost, _, _, err := uploadSectorCost(pt, rev.WindowEnd)
-	if err != nil {
-		return err
-	}
-	if rev.RevisionNumber == math.MaxUint64 {
-		return fmt.Errorf("revision number has reached max, fcid %v", rev.ParentID)
-	}
-	payment, ok := rhpv3.PayByContract(&rev, expectedCost, h.acc.id, h.renterKey)
-	if !ok {
-		return errFailedToCreatePayment
-	}
-
-	var cost types.Currency
-	err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		cost, err = RPCAppendSector(ctx, t, h.renterKey, pt, &rev, &payment, sectorRoot, sector)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-
 	// record spending
 	h.contractSpendingRecorder.Record(rev, api.ContractSpending{Uploads: cost})
 	return nil
 }
 
 func (h *host) RenewContract(ctx context.Context, rrr api.RHPRenewRequest) (_ rhpv2.ContractRevision, _ []types.Transaction, _, _ types.Currency, err error) {
-	// Try to get a valid pricetable.
-	ptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	var pt *rhpv3.HostPriceTable
-	hpt, err := h.priceTables.fetch(ptCtx, h.hk, nil)
-	if err == nil {
-		pt = &hpt.HostPriceTable
-	} else {
-		h.logger.Infof("unable to fetch price table for renew: %v", err)
+	gc, err := h.gougingChecker(ctx, false)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, types.ZeroCurrency, err
+	}
+	revision, err := h.client.Revision(ctx, h.fcid, h.hk, h.siamuxAddr)
+	if err != nil {
+		return rhpv2.ContractRevision{}, nil, types.ZeroCurrency, types.ZeroCurrency, err
 	}
 
-	var contractPrice types.Currency
-	var rev rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	var renewErr error
-	var fundAmount types.Currency
-	err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-		// NOTE: to avoid an edge case where the contract is drained and can
-		// therefore not be used to pay for the revision, we simply don't pay
-		// for it.
-		_, err = RPCLatestRevision(ctx, t, h.fcid, func(revision *types.FileContractRevision) (rhpv3.HostPriceTable, rhpv3.PaymentMethod, error) {
-			// Renew contract.
-			rev, txnSet, contractPrice, fundAmount, renewErr = RPCRenew(ctx, rrr, h.bus, t, pt, *revision, h.renterKey, h.logger)
-			return rhpv3.HostPriceTable{}, nil, nil
-		})
-		return err
-	})
+	// helper to discard txn on error
+	discardTxn := func(ctx context.Context, txn types.Transaction, err *error) {
+		if *err == nil {
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if dErr := h.bus.WalletDiscard(ctx, txn); dErr != nil {
+			h.logger.Errorf("%v: %s, failed to discard txn: %v", *err, dErr)
+		}
+		cancel()
+	}
+
+	// helper to sign txn
+	signTxn := func(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error {
+		// sign txn
+		return h.bus.WalletSign(ctx, txn, toSign, cf)
+	}
+
+	// helper to prepare contract renewal
+	prepareRenew := func(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, func(context.Context, types.Transaction, *error), error) {
+		resp, err := h.bus.WalletPrepareRenew(ctx, revision, hostAddress, renterAddress, renterKey, renterFunds, minNewCollateral, maxFundAmount, pt, endHeight, windowSize, expectedStorage)
+		if err != nil {
+			return api.WalletPrepareRenewResponse{}, nil, err
+		}
+		return resp, discardTxn, nil
+	}
+
+	// renew contract
+	rev, txnSet, contractPrice, fundAmount, err := h.client.Renew(ctx, rrr, gc, prepareRenew, signTxn, revision, h.renterKey)
 	if err != nil {
 		return rhpv2.ContractRevision{}, nil, contractPrice, fundAmount, err
 	}
-	return rev, txnSet, contractPrice, fundAmount, renewErr
+	return rev, txnSet, contractPrice, fundAmount, err
 }
 
-func (h *host) FetchPriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, err error) {
+func (h *host) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {
+	return h.client.PriceTableUnpaid(ctx, h.hk, h.siamuxAddr)
+}
+
+func (h *host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
 	// fetchPT is a helper function that performs the RPC given a payment function
-	fetchPT := func(paymentFn PriceTablePaymentFunc) (hpt api.HostPriceTable, err error) {
-		err = h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) (err error) {
-			hpt, err = RPCPriceTable(ctx, t, paymentFn)
-			return
-		})
-		return
+	fetchPT := func(paymentFn rhp3.PriceTablePaymentFunc) (api.HostPriceTable, error) {
+		return h.client.PriceTable(ctx, h.hk, h.siamuxAddr, paymentFn)
 	}
 
-	// pay by contract if a revision is given
+	// fetch the price table
 	if rev != nil {
-		return fetchPT(h.preparePriceTableContractPayment(rev))
+		hpt, err = fetchPT(rhp3.PreparePriceTableContractPayment(rev, h.acc.id, h.renterKey))
+	} else {
+		hpt, err = fetchPT(rhp3.PreparePriceTableAccountPayment(h.accountKey))
 	}
 
-	// pay by account
-	return fetchPT(h.preparePriceTableAccountPayment())
+	// set the cost
+	if err == nil {
+		cost = hpt.UpdatePriceTableCost
+	}
+	return
 }
 
-func (h *host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
+// FetchRevision tries to fetch a contract revision from the host.
+func (h *host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
+	if fetchTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, fetchTimeout)
+		defer cancel()
+	}
+	// Try to fetch the revision with an account first.
+	return h.client.Revision(ctx, h.fcid, h.hk, h.siamuxAddr)
+}
+
+func (h *host) FundAccount(ctx context.Context, desired types.Currency, rev *types.FileContractRevision) error {
+	log := h.logger.With(
+		zap.Stringer("host", h.hk),
+		zap.Stringer("account", h.acc.id),
+	)
+
+	// ensure we have at least 2H in the contract to cover the costs
+	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
+		return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2))
+	}
+
 	// fetch current balance
-	curr, err := h.acc.Balance(ctx)
+	balance, err := h.acc.Balance(ctx)
 	if err != nil {
 		return err
 	}
 
 	// return early if we have the desired balance
-	if curr.Cmp(balance) >= 0 {
+	if balance.Cmp(desired) >= 0 {
 		return nil
 	}
-	deposit := balance.Sub(curr)
 
+	// calculate the deposit amount
+	deposit := desired.Sub(balance)
 	return h.acc.WithDeposit(ctx, func() (types.Currency, error) {
-		if err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			// fetch pricetable
-			pt, err := h.priceTable(ctx, rev)
-			if err != nil {
-				return err
-			}
-
-			// check whether we have money left in the contract
-			cost := types.NewCurrency64(1)
-			if cost.Cmp(rev.ValidRenterPayout()) >= 0 {
-				return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), cost)
-			}
-			availableFunds := rev.ValidRenterPayout().Sub(cost)
-
-			// cap the deposit amount by the money that's left in the contract
-			if deposit.Cmp(availableFunds) > 0 {
-				deposit = availableFunds
-			}
-
-			// create the payment
-			amount := deposit.Add(cost)
-			payment, err := payByContract(rev, amount, rhpv3.Account{}, h.renterKey) // no account needed for funding
-			if err != nil {
-				return err
-			}
-
-			// fund the account
-			if err := RPCFundAccount(ctx, t, &payment, h.acc.id, pt.UID); err != nil {
-				return fmt.Errorf("failed to fund account with %v (excluding cost %v);%w", deposit, cost, err)
-			}
-
-			// record the spend
-			h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: amount})
-			return nil
-		}); err != nil {
+		// fetch pricetable directly to bypass the gouging check
+		pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
+		if err != nil {
 			return types.ZeroCurrency, err
 		}
+
+		// cap the deposit by what's left in the contract
+		cost := types.NewCurrency64(1)
+		availableFunds := rev.ValidRenterPayout().Sub(cost)
+		if deposit.Cmp(availableFunds) > 0 {
+			deposit = availableFunds
+		}
+
+		// fund the account
+		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.id, pt.HostPriceTable, h.renterKey); err != nil {
+			if rhp3.IsBalanceMaxExceeded(err) {
+				err = errors.Join(err, h.acc.as.ScheduleSync(ctx, h.acc.id, h.hk))
+			}
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
+		}
+
+		// record the spend
+		h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: deposit.Add(cost)})
+
+		// log the account balance after funding
+		log.Debugw("fund account succeeded",
+			"balance", balance.ExactString(),
+			"deposit", deposit.ExactString(),
+		)
 		return deposit, nil
 	})
 }
 
 func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
-	// fetch pricetable
-	pt, err := h.priceTable(ctx, rev)
+	// fetch pricetable directly to bypass the gouging check
+	pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return err
 	}
 
+	// check only the unused defaults
+	gc, err := GougingCheckerFromContext(ctx, false)
+	if err != nil {
+		return err
+	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
+		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
+	}
+
 	return h.acc.WithSync(ctx, func() (types.Currency, error) {
-		var balance types.Currency
-		err := h.transportPool.withTransportV3(ctx, h.hk, h.siamuxAddr, func(ctx context.Context, t *transportV3) error {
-			payment, err := payByContract(rev, types.NewCurrency64(1), h.acc.id, h.renterKey)
-			if err != nil {
-				return err
-			}
-			balance, err = RPCAccountBalance(ctx, t, &payment, h.acc.id, pt.UID)
-			return err
-		})
-		return balance, err
+		return h.client.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.id, pt.UID, h.renterKey)
 	})
 }
 
-// preparePriceTableAccountPayment prepare a payment function to pay for a price
-// table from the given host using the provided revision.
-//
-// NOTE: This is the preferred way of paying for a price table since it is
-// faster and doesn't require locking a contract.
-func (h *host) preparePriceTableAccountPayment() PriceTablePaymentFunc {
-	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
-		account := rhpv3.Account(h.accountKey.PublicKey())
-		payment := rhpv3.PayByEphemeralAccount(account, pt.UpdatePriceTableCost, pt.HostBlockHeight+defaultWithdrawalExpiryBlocks, h.accountKey)
-		return &payment, nil
+func (h *host) gougingChecker(ctx context.Context, criticalMigration bool) (gouging.Checker, error) {
+	gp, err := h.bus.GougingParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gouging params: %w", err)
 	}
+	return newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, criticalMigration), nil
 }
 
-// preparePriceTableContractPayment prepare a payment function to pay for a
-// price table from the given host using the provided revision.
-//
-// NOTE: This way of paying for a price table should only be used if payment by
-// EA is not possible or if we already need a contract revision anyway. e.g.
-// funding an EA.
-func (h *host) preparePriceTableContractPayment(rev *types.FileContractRevision) PriceTablePaymentFunc {
-	return func(pt rhpv3.HostPriceTable) (rhpv3.PaymentMethod, error) {
-		refundAccount := rhpv3.Account(h.accountKey.PublicKey())
-		payment, err := payByContract(rev, pt.UpdatePriceTableCost, refundAccount, h.renterKey)
-		if err != nil {
-			return nil, err
-		}
-		return &payment, nil
+// priceTable fetches a price table from the host. If a revision is provided, it
+// will be used to pay for the price table. The returned price table is
+// guaranteed to be safe to use.
+func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
+	pt, cost, err := h.priceTables.fetch(ctx, h.hk, rev)
+	if err != nil {
+		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
 	}
+	gc, err := GougingCheckerFromContext(ctx, false)
+	if err != nil {
+		return rhpv3.HostPriceTable{}, cost, err
+	}
+	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
+		return rhpv3.HostPriceTable{}, cost, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
+	}
+	return pt.HostPriceTable, cost, nil
 }

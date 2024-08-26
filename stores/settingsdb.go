@@ -13,7 +13,7 @@ func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
 	defer s.settingsMu.Unlock()
 
 	// delete from database first
-	if err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.DeleteSettings(ctx, key)
 	}); err != nil {
 		return err
@@ -36,7 +36,7 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 
 	// Check database.
 	var err error
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		value, err = tx.Setting(ctx, key)
 		return err
 	})
@@ -49,7 +49,7 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 
 // Settings implements the bus.SettingStore interface.
 func (s *SQLStore) Settings(ctx context.Context) (settings []string, err error) {
-	err = s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		settings, err = tx.Settings(ctx)
 		return err
 	})
@@ -62,7 +62,7 @@ func (s *SQLStore) UpdateSetting(ctx context.Context, key, value string) error {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
-	err := s.bMain.Transaction(ctx, func(tx sql.DatabaseTx) error {
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateSetting(ctx, key, value)
 	})
 	if err != nil {

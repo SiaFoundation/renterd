@@ -11,16 +11,18 @@ type (
 		Seed          string `yaml:"seed,omitempty"`
 		Directory     string `yaml:"directory,omitempty"`
 		AutoOpenWebUI bool   `yaml:"autoOpenWebUI,omitempty"`
+		Network       string `yaml:"network,omitempty"`
 
 		ShutdownTimeout time.Duration `yaml:"shutdownTimeout,omitempty"`
 
 		Log Log `yaml:"log,omitempty"`
 
-		HTTP      HTTP      `yaml:"http,omitempty"`
+		HTTP HTTP `yaml:"http,omitempty"`
+
+		Autopilot Autopilot `yaml:"autopilot,omitempty"`
 		Bus       Bus       `yaml:"bus,omitempty"`
 		Worker    Worker    `yaml:"worker,omitempty"`
 		S3        S3        `yaml:"s3,omitempty"`
-		Autopilot Autopilot `yaml:"autopilot,omitempty"`
 
 		Database Database `yaml:"database,omitempty"`
 	}
@@ -51,9 +53,9 @@ type (
 		GatewayAddr                   string        `yaml:"gatewayAddr,omitempty"`
 		RemoteAddr                    string        `yaml:"remoteAddr,omitempty"`
 		RemotePassword                string        `yaml:"remotePassword,omitempty"`
-		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"`
 		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry,omitempty"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
+		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"` // deprecated
 	}
 
 	// LogFile configures the file output of the logger.
@@ -131,6 +133,7 @@ type (
 	// Autopilot contains the configuration for an autopilot.
 	Autopilot struct {
 		Enabled                        bool          `yaml:"enabled,omitempty"`
+		ID                             string        `yaml:"id,omitempty"`
 		AccountsRefillInterval         time.Duration `yaml:"accountsRefillInterval,omitempty"`
 		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
 		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`

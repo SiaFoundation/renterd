@@ -53,7 +53,8 @@ type SlabBufferManager struct {
 	buffersByKey      map[string]*SlabBuffer
 }
 
-func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database, logger *zap.SugaredLogger, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
+func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database, logger *zap.Logger, slabBufferCompletionThreshold int64, partialSlabDir string) (*SlabBufferManager, error) {
+	logger = logger.Named("slabbuffers")
 	if slabBufferCompletionThreshold < 0 || slabBufferCompletionThreshold > 1<<22 {
 		return nil, fmt.Errorf("invalid slabBufferCompletionThreshold %v", slabBufferCompletionThreshold)
 	}
@@ -69,7 +70,7 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 		bufferedSlabCompletionThreshold: slabBufferCompletionThreshold,
 		db:                              db,
 		dir:                             partialSlabDir,
-		logger:                          logger,
+		logger:                          logger.Sugar(),
 
 		completeBuffers:   make(map[bufferGroupID][]*SlabBuffer),
 		incompleteBuffers: make(map[bufferGroupID][]*SlabBuffer),
@@ -98,7 +99,7 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 				},
 				Timestamp: time.Now(),
 			})
-			logger.Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.Key, err)
+			logger.Sugar().Errorf("failed to open buffer file %v for slab %v: %v", buffer.Filename, buffer.Key, err)
 			continue
 		}
 
@@ -146,15 +147,21 @@ func (mgr *SlabBufferManager) Close() error {
 	return errors.Join(errs...)
 }
 
-func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet uint) ([]object.SlabSlice, int64, error) {
-	gid := bufferGID(minShards, totalShards, uint32(contractSet))
+func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.SlabSlice, int64, error) {
+	var set int64
+	err := mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		set, err = tx.ContractSetID(ctx, contractSet)
+		return err
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	gid := bufferGID(minShards, totalShards, uint32(set))
 
 	// Sanity check input.
 	slabSize := bufferedSlabSize(minShards)
 	if minShards == 0 || totalShards == 0 || minShards > totalShards {
 		return nil, 0, fmt.Errorf("invalid shard configuration: minShards=%v, totalShards=%v", minShards, totalShards)
-	} else if contractSet == 0 {
-		return nil, 0, fmt.Errorf("contract set must be set")
 	} else if len(data) > slabSize {
 		return nil, 0, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
 	}
@@ -170,7 +177,6 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// the data over too many slabs.
 	var slab object.SlabSlice
 	var slabs []object.SlabSlice
-	var err error
 	var usedBuffers []*SlabBuffer
 	for _, buffer := range buffers {
 		var used bool
@@ -191,7 +197,7 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	if len(data) > 0 {
 		var sb *SlabBuffer
 		err = mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-			sb, err = createSlabBuffer(ctx, tx, contractSet, mgr.dir, minShards, totalShards)
+			sb, err = createSlabBuffer(ctx, tx, uint(set), mgr.dir, minShards, totalShards)
 			return err
 		})
 		if err != nil {
@@ -291,7 +297,16 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 	return sbs
 }
 
-func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set uint, limit int) (slabs []api.PackedSlab, _ error) {
+func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, contractSet string, limit int) (slabs []api.PackedSlab, _ error) {
+	var set int64
+	err := mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		set, err = tx.ContractSetID(ctx, contractSet)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Deep copy complete buffers. We don't want to block the manager while we
 	// perform disk I/O.
 	mgr.mu.Lock()

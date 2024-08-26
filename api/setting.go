@@ -32,6 +32,57 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
+
+	// DefaultGougingSettings define the default gouging settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	//
+	DefaultGougingSettings = GougingSettings{
+		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                    // 1mS per RPC
+		MaxContractPrice:              types.Siacoins(15),                               // 15 SC per contract
+		MaxDownloadPrice:              types.Siacoins(3000),                             // 3000 SC per 1 TB
+		MaxUploadPrice:                types.Siacoins(3000),                             // 3000 SC per 1 TB
+		MaxStoragePrice:               types.Siacoins(3000).Div64(1e12).Div64(144 * 30), // 3000 SC per TB per month
+		HostBlockHeightLeeway:         6,                                                // 6 blocks
+		MinPriceTableValidity:         5 * time.Minute,                                  // 5 minutes
+		MinAccountExpiry:              24 * time.Hour,                                   // 1 day
+		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                // 1 SC
+		MigrationSurchargeMultiplier:  10,                                               // 10x
+	}
+
+	// DefaultPricePinSettings define the default price pin settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultPricePinSettings = PricePinSettings{
+		Enabled:          false,
+		Currency:         "usd",
+		ForexEndpointURL: "https://api.siascan.com/exchange-rate/siacoin",
+		Threshold:        0.05,
+	}
+
+	// DefaultUploadPackingSettings define the default upload packing settings
+	// the bus is configured with on startup.
+	DefaultUploadPackingSettings = UploadPackingSettings{
+		Enabled:               true,
+		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
+	}
+
+	// DefaultRedundancySettings define the default redundancy settings the bus
+	// is configured with on startup. These values can be adjusted using the
+	// settings API.
+	//
+	// NOTE: default redundancy settings for testnet are different from mainnet.
+	DefaultRedundancySettings = RedundancySettings{
+		MinShards:   10,
+		TotalShards: 30,
+	}
+
+	// Same as DefaultRedundancySettings but for running on testnet networks due
+	// to their reduced number of hosts.
+	DefaultRedundancySettingsTestnet = RedundancySettings{
+		MinShards:   2,
+		TotalShards: 6,
+	}
 )
 
 type (
@@ -49,10 +100,10 @@ type (
 		// MaxContractPrice is the maximum allowed price to form a contract
 		MaxContractPrice types.Currency `json:"maxContractPrice"`
 
-		// MaxDownloadPrice is the maximum allowed price to download 1TiB of data
+		// MaxDownloadPrice is the maximum allowed price to download 1TB of data
 		MaxDownloadPrice types.Currency `json:"maxDownloadPrice"`
 
-		// MaxUploadPrice is the maximum allowed price to upload 1TiB of data
+		// MaxUploadPrice is the maximum allowed price to upload 1TB of data
 		MaxUploadPrice types.Currency `json:"maxUploadPrice"`
 
 		// MaxStoragePrice is the maximum allowed price to store 1 byte per block
@@ -102,11 +153,11 @@ type (
 		Threshold float64 `json:"threshold"`
 
 		// Autopilots contains the pinned settings for every autopilot.
-		Autopilots map[string]AutopilotPins `json:"autopilots,omitempty"`
+		Autopilots map[string]AutopilotPins `json:"autopilots"`
 
 		// GougingSettingsPins contains the pinned settings for the gouging
 		// settings.
-		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins,omitempty"`
+		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins"`
 	}
 
 	// AutopilotPins contains the available autopilot settings that can be
@@ -119,7 +170,6 @@ type (
 	// pinned.
 	GougingSettingsPins struct {
 		MaxDownload Pin `json:"maxDownload"`
-		MaxRPCPrice Pin `json:"maxRPCPrice"`
 		MaxStorage  Pin `json:"maxStorage"`
 		MaxUpload   Pin `json:"maxUpload"`
 	}
@@ -155,9 +205,6 @@ func (p Pin) IsPinned() bool {
 
 // Validate returns an error if the price pin settings are not considered valid.
 func (pps PricePinSettings) Validate() error {
-	if !pps.Enabled {
-		return nil
-	}
 	if pps.ForexEndpointURL == "" {
 		return fmt.Errorf("price pin settings must have a forex endpoint URL")
 	}

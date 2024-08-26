@@ -3,9 +3,10 @@ package api
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/siad/build"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 const (
@@ -131,8 +132,19 @@ type (
 func (c AutopilotConfig) Validate() error {
 	if c.Hosts.MaxDowntimeHours > 99*365*24 {
 		return ErrMaxDowntimeHoursTooHigh
-	} else if c.Hosts.MinProtocolVersion != "" && !build.IsVersion(c.Hosts.MinProtocolVersion) {
+	} else if c.Hosts.MinProtocolVersion != "" && !utils.IsVersion(c.Hosts.MinProtocolVersion) {
 		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
 	}
 	return nil
+}
+
+func (c ContractsConfig) SortContractsForMaintenance(contracts []Contract) {
+	sort.SliceStable(contracts, func(i, j int) bool {
+		iInSet := contracts[i].InSet(c.Set)
+		jInSet := contracts[j].InSet(c.Set)
+		if iInSet != jInSet {
+			return iInSet
+		}
+		return contracts[i].FileSize() > contracts[j].FileSize()
+	})
 }

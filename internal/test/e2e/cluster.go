@@ -15,32 +15,37 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/node"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
-	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/stores"
+	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
+	"go.sia.tech/renterd/stores/sql/sqlite"
+	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gorm.io/gorm"
+	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
 
 	"go.sia.tech/renterd/worker"
 )
 
 const (
-	testBusFlushInterval   = 100 * time.Millisecond
-	testBusPersistInterval = 2 * time.Second
-	latestHardforkHeight   = 50 // foundation hardfork height in testing
+	testBusFlushInterval = 100 * time.Millisecond
 )
 
 var (
@@ -64,15 +69,22 @@ type TestCluster struct {
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
 
-	network *consensus.Network
-	miner   *node.Miner
-	apID    string
-	dbName  string
-	dir     string
-	logger  *zap.Logger
-	tt      test.TT
-	wk      types.PrivateKey
-	wg      sync.WaitGroup
+	network      *consensus.Network
+	genesisBlock types.Block
+	cm           *chain.Manager
+	apID         string
+	dbName       string
+	dir          string
+	logger       *zap.Logger
+	tt           test.TT
+	wk           types.PrivateKey
+	wg           sync.WaitGroup
+}
+
+type dbConfig struct {
+	Database         config.Database
+	DatabaseLog      config.DatabaseLog
+	RetryTxIntervals []time.Duration
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -161,15 +173,15 @@ type testClusterOptions struct {
 	skipRunningAutopilot bool
 	walletKey            *types.PrivateKey
 
-	autopilotCfg      *node.AutopilotConfig
+	autopilotCfg      *config.Autopilot
 	autopilotSettings *api.AutopilotConfig
-	busCfg            *node.BusConfig
+	busCfg            *config.Bus
 	workerCfg         *config.Worker
 }
 
 // newTestLogger creates a console logger used for testing.
 func newTestLogger() *zap.Logger {
-	return newTestLoggerCustom(zapcore.DebugLevel)
+	return newTestLoggerCustom(zapcore.WarnLevel)
 }
 
 // newTestLoggerCustom creates a console logger used for testing and allows
@@ -190,8 +202,6 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
-	t.Helper()
-
 	// Skip any test that requires a cluster when running short tests.
 	if testing.Short() {
 		t.SkipNow()
@@ -215,7 +225,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
-	busCfg, workerCfg, apCfg := testBusCfg(), testWorkerCfg(), testApCfg()
+	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
 	}
@@ -241,35 +251,27 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.autopilotSettings != nil {
 		apSettings = *opts.autopilotSettings
 	}
-	if busCfg.Logger == nil {
-		busCfg.Logger = logger
-	}
 	if opts.dbName != "" {
-		busCfg.Database.MySQL.Database = opts.dbName
+		dbCfg.Database.MySQL.Database = opts.dbName
 	}
 
 	// Check if we are testing against an external database. If so, we create a
 	// database with a random name first.
-	if mysql := config.MySQLConfigFromEnv(); mysql.URI != "" {
+	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
 		// generate a random database name if none are set
-		if busCfg.Database.MySQL.Database == "" {
-			busCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
+		if dbCfg.Database.MySQL.Database == "" {
+			dbCfg.Database.MySQL.Database = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
-		if busCfg.Database.MySQL.MetricsDatabase == "" {
-			busCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
+		if dbCfg.Database.MySQL.MetricsDatabase == "" {
+			dbCfg.Database.MySQL.MetricsDatabase = "db" + hex.EncodeToString(frand.Bytes(16))
 		}
 
-		tmpDB, err := gorm.Open(stores.NewMySQLConnection(mysql.User, mysql.Password, mysql.URI, ""))
+		tmpDB, err := mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, "")
 		tt.OK(err)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.Database)).Error)
-		tt.OK(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", busCfg.Database.MySQL.MetricsDatabase)).Error)
-		tmpDBB, err := tmpDB.DB()
-		tt.OK(err)
-		tt.OK(tmpDBB.Close())
+		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbCfg.Database.MySQL.Database)))
+		tt.OKAll(tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;", dbCfg.Database.MySQL.MetricsDatabase)))
+		tt.OK(tmpDB.Close())
 	}
-
-	// Prepare individual dirs.
-	busDir := filepath.Join(dir, "bus")
 
 	// Generate API passwords.
 	busPassword := randomPassword()
@@ -309,11 +311,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	})
 	tt.OK(err)
 
-	// Create miner.
-	busCfg.Miner = node.NewMiner(busClient)
-
 	// Create bus.
-	b, bSetupFn, bShutdownFn, err := node.NewBus(busCfg, busDir, wk, logger)
+	busDir := filepath.Join(dir, "bus")
+	b, bShutdownFn, cm, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -322,7 +322,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			Handler: renterd.Handler(), // ui
 			Sub: map[string]utils.TreeMux{
 				"/bus": {
-					Handler: busAuth(b),
+					Handler: busAuth(b.Handler()),
 				},
 			},
 		},
@@ -333,46 +333,47 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	busShutdownFns = append(busShutdownFns, bShutdownFn)
 
 	// Create worker.
-	w, s3Handler, wSetupFn, wShutdownFn, err := node.NewWorker(workerCfg, s3.Opts{}, busClient, wk, logger)
+	workerKey := blake2b.Sum256(append([]byte("worker"), wk...))
+	w, err := worker.New(workerCfg, workerKey, busClient, logger)
 	tt.OK(err)
-	workerServer := http.Server{
-		Handler: iworker.Auth(workerPassword, false)(w),
-	}
 
+	workerServer := http.Server{Handler: utils.Auth(workerPassword, false)(w.Handler())}
 	var workerShutdownFns []func(context.Context) error
 	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
-	workerShutdownFns = append(workerShutdownFns, wShutdownFn)
+	workerShutdownFns = append(workerShutdownFns, w.Shutdown)
 
 	// Create S3 API.
-	s3Server := http.Server{
-		Handler: s3Handler,
-	}
+	s3Handler, err := s3.New(busClient, w, logger, s3.Opts{})
+	tt.OK(err)
 
+	s3Server := http.Server{Handler: s3Handler}
 	var s3ShutdownFns []func(context.Context) error
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, aStartFn, aStopFn, err := node.NewAutopilot(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, err := autopilot.New(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
 	autopilotServer := http.Server{
-		Handler: autopilotAuth(ap),
+		Handler: autopilotAuth(ap.Handler()),
 	}
 
 	var autopilotShutdownFns []func(context.Context) error
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
-	autopilotShutdownFns = append(autopilotShutdownFns, aStopFn)
+	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
+	network, genesis := testNetwork()
 	cluster := &TestCluster{
-		apID:    apCfg.ID,
-		dir:     dir,
-		dbName:  busCfg.Database.MySQL.Database,
-		logger:  logger,
-		network: busCfg.Network,
-		miner:   busCfg.Miner,
-		tt:      tt,
-		wk:      wk,
+		apID:         apCfg.ID,
+		dir:          dir,
+		dbName:       dbCfg.Database.MySQL.Database,
+		logger:       logger,
+		network:      network,
+		genesisBlock: genesis,
+		cm:           cm,
+		tt:           tt,
+		wk:           wk,
 
 		Autopilot: autopilotClient,
 		Bus:       busClient,
@@ -410,18 +411,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if !opts.skipRunningAutopilot {
 		cluster.wg.Add(1)
 		go func() {
-			_ = aStartFn()
+			ap.Run()
 			cluster.wg.Done()
 		}()
 	}
 
-	// Finish bus setup.
-	if err := bSetupFn(ctx); err != nil {
-		tt.Fatalf("failed to setup bus, err: %v", err)
-	}
-
 	// Finish worker setup.
-	if err := wSetupFn(ctx, workerAddr, workerPassword); err != nil {
+	if err := w.Setup(ctx, workerAddr, workerPassword); err != nil {
 		tt.Fatalf("failed to setup worker, err: %v", err)
 	}
 
@@ -447,35 +443,32 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}))
 	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
-		SlabBufferMaxSizeSoft: build.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
+		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
 	}))
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(latestHardforkHeight)
-		tt.Retry(1000, 100*time.Millisecond, func() error {
-			resp, err := busClient.ConsensusState(ctx)
-			if err != nil {
+		cluster.MineBlocks(network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		tt.Retry(100, 100*time.Millisecond, func() error {
+			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
+			} else if !cs.Synced {
+				return fmt.Errorf("chain not synced: %v", cs.Synced)
 			}
 
-			if !resp.Synced || resp.BlockHeight < latestHardforkHeight {
-				return fmt.Errorf("chain not synced: %v %v", resp.Synced, resp.BlockHeight < latestHardforkHeight)
-			}
-			res, err := cluster.Bus.Wallet(ctx)
-			if err != nil {
+			if res, err := cluster.Bus.Wallet(ctx); err != nil {
 				return err
+			} else if res.Confirmed.IsZero() {
+				return fmt.Errorf("wallet not funded: %+v", res)
+			} else {
+				return nil
 			}
-
-			if res.Confirmed.IsZero() {
-				tt.Fatal("wallet not funded")
-			}
-			return nil
 		})
 	}
 
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
+		cluster.WaitForPeers()
 		cluster.WaitForContracts()
 		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
@@ -489,6 +482,114 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	return cluster
+}
+
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, error) {
+	// create store
+	alertsMgr := alerts.NewManager()
+	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	sqlStore, err := stores.NewSQLStore(storeCfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create webhooks manager
+	wh, err := webhooks.NewManager(sqlStore, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// hookup webhooks <-> alerts
+	alertsMgr.RegisterWebhookBroadcaster(wh)
+
+	// create consensus directory
+	consensusDir := filepath.Join(dir, "consensus")
+	if err := os.MkdirAll(consensusDir, 0700); err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create chain database
+	chainPath := filepath.Join(consensusDir, "blockchain.db")
+	bdb, err := coreutils.OpenBoltChainDB(chainPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create chain manager
+	network, genesis := testNetwork()
+	store, state, err := chain.NewDBStore(bdb, network, genesis)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cm := chain.NewManager(store, state)
+
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// create syncer, peers will reject us if our hostname is empty or
+	// unspecified, so use loopback
+	l, err := net.Listen("tcp", cfg.GatewayAddr)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	syncerAddr := l.Addr().String()
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// create header
+	header := gateway.Header{
+		GenesisID:  genesis.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
+	}
+
+	// create the syncer
+	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
+
+	// start syncer
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- s.Run(context.Background())
+		close(errChan)
+	}()
+
+	// create a helper function to wait for syncer to wind down on shutdown
+	syncerShutdown := func(ctx context.Context) error {
+		select {
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
+	}
+
+	// create bus
+	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
+	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	shutdownFn := func(ctx context.Context) error {
+		return errors.Join(
+			s.Close(),
+			w.Close(),
+			b.Shutdown(ctx),
+			sqlStore.Close(),
+			bdb.Close(),
+			syncerShutdown(ctx),
+		)
+	}
+	return b, shutdownFn, cm, nil
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
@@ -536,68 +637,55 @@ func (c *TestCluster) MineToRenewWindow() {
 	if cs.BlockHeight >= renewWindowStart {
 		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
 	}
-	c.MineBlocks(int(renewWindowStart - cs.BlockHeight))
-	c.Sync()
+	c.MineBlocks(renewWindowStart - cs.BlockHeight)
 }
 
-// sync blocks until the cluster is synced.
-func (c *TestCluster) sync(hosts []*Host) {
-	c.tt.Helper()
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
-		synced, err := c.synced(hosts)
-		if err != nil {
-			return err
-		}
-		if !synced {
-			return errors.New("cluster was unable to sync in time")
-		}
-		return nil
-	})
-}
-
-// synced returns true if bus and hosts are at the same blockheight.
-func (c *TestCluster) synced(hosts []*Host) (bool, error) {
-	c.tt.Helper()
-	cs, err := c.Bus.ConsensusState(context.Background())
-	if err != nil {
-		return false, err
-	}
-	if !cs.Synced {
-		return false, nil // can't be synced if bus itself isn't synced
-	}
-	for _, h := range hosts {
-		bh := h.cs.Height()
-		if cs.BlockHeight != uint64(bh) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// MineBlocks uses the bus' miner to mine n blocks.
-func (c *TestCluster) MineBlocks(n int) {
+// MineBlocks mines n blocks
+func (c *TestCluster) MineBlocks(n uint64) {
 	c.tt.Helper()
 	wallet, err := c.Bus.Wallet(context.Background())
 	c.tt.OK(err)
 
 	// If we don't have any hosts in the cluster mine all blocks right away.
 	if len(c.hosts) == 0 {
-		c.tt.OK(c.miner.Mine(wallet.Address, n))
-		c.Sync()
+		c.tt.OK(c.mineBlocks(wallet.Address, n))
+		c.sync()
 		return
 	}
 
-	// Otherwise mine blocks in batches of 3 to avoid going out of sync with
-	// hosts by too many blocks.
-	for mined := 0; mined < n; {
+	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
+	// with hosts by too many blocks.
+	for mined := uint64(0); mined < n; {
 		toMine := n - mined
 		if toMine > 10 {
 			toMine = 10
 		}
-		c.tt.OK(c.miner.Mine(wallet.Address, toMine))
-		c.Sync()
+		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
 		mined += toMine
+		c.sync()
 	}
+	c.sync()
+}
+
+func (c *TestCluster) sync() {
+	tip := c.cm.Tip()
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
+		cs, err := c.Bus.ConsensusState(context.Background())
+		if err != nil {
+			return err
+		} else if !cs.Synced {
+			return errors.New("bus is not synced")
+		} else if cs.BlockHeight < tip.Height {
+			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
+		}
+
+		for _, h := range c.hosts {
+			if hh := h.cm.Tip().Height; hh < tip.Height {
+				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
+			}
+		}
+		return nil
+	})
 }
 
 func (c *TestCluster) WaitForAccounts() []api.Account {
@@ -620,6 +708,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 
 func (c *TestCluster) WaitForContracts() []api.Contract {
 	c.tt.Helper()
+
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
@@ -680,6 +769,19 @@ func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
 	})
 }
 
+func (c *TestCluster) WaitForPeers() {
+	c.tt.Helper()
+	c.tt.Retry(300, 100*time.Millisecond, func() error {
+		peers, err := c.Bus.SyncerPeers(context.Background())
+		if err != nil {
+			return err
+		} else if len(peers) == 0 {
+			return errors.New("no peers found")
+		}
+		return nil
+	})
+}
+
 func (c *TestCluster) RemoveHost(host *Host) {
 	c.tt.Helper()
 	c.tt.OK(host.Close())
@@ -696,11 +798,11 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, false)
+	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock)
 	c.tt.OK(err)
 
 	// Connect gateways.
-	c.tt.OK(c.Bus.SyncerConnect(context.Background(), h.GatewayAddr()))
+	c.tt.OK(c.Bus.SyncerConnect(context.Background(), h.SyncerAddr()))
 	return h
 }
 
@@ -710,43 +812,41 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.hosts = append(c.hosts, h)
 
 	// Fund host from bus.
-	fundAmt := types.Siacoins(100e3)
-	var scos []types.SiacoinOutput
-	for i := 0; i < 10; i++ {
-		scos = append(scos, types.SiacoinOutput{
-			Value:   fundAmt,
-			Address: h.WalletAddress(),
-		})
+	fundAmt := types.Siacoins(5e3)
+	for i := 0; i < 5; i++ {
+		c.tt.OKAll(c.Bus.SendSiacoins(context.Background(), h.WalletAddress(), fundAmt, true))
 	}
-	c.tt.OK(c.Bus.SendSiacoins(context.Background(), scos, false))
 
 	// Mine transaction.
 	c.MineBlocks(1)
 
-	// Wait for hosts to sync up with consensus.
-	hosts := []*Host{h}
-	c.sync(hosts)
-
-	// Announce hosts.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	c.tt.OK(addStorageFolderToHost(ctx, hosts))
-	c.tt.OK(announceHosts(hosts))
-
-	// Mine a few blocks. The host should show up eventually.
-	c.tt.Retry(10, time.Second, func() error {
-		c.tt.Helper()
-
-		c.MineBlocks(1)
-		_, err := c.Bus.Host(context.Background(), h.PublicKey())
-		if err != nil {
-			return err
+	// Wait for host's wallet to be funded
+	c.tt.Retry(100, 100*time.Millisecond, func() error {
+		balance, err := h.wallet.Balance()
+		c.tt.OK(err)
+		if balance.Confirmed.IsZero() {
+			return errors.New("host wallet not funded")
 		}
 		return nil
 	})
 
-	// Wait for host to be synced.
-	c.Sync()
+	// Announce hosts.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
+	c.tt.OK(announceHosts([]*Host{h}))
+
+	// Mine until the host shows up.
+	c.tt.Retry(100, 100*time.Millisecond, func() error {
+		c.tt.Helper()
+
+		_, err := c.Bus.Host(context.Background(), h.PublicKey())
+		if err != nil {
+			c.MineBlocks(1)
+			return err
+		}
+		return nil
+	})
 }
 
 // AddHosts adds n hosts to the cluster. These hosts will be funded and announce
@@ -791,12 +891,6 @@ func (c *TestCluster) Shutdown() {
 		c.tt.OK(h.Close())
 	}
 	c.wg.Wait()
-}
-
-// Sync blocks until the whole cluster has reached the same block height.
-func (c *TestCluster) Sync() {
-	c.tt.Helper()
-	c.sync(c.hosts)
 }
 
 // waitForHostAccounts will fetch the accounts from the worker and wait until
@@ -866,52 +960,54 @@ func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	})
 }
 
-// testNetwork returns a custom network for testing which matches the
-// configuration of siad consensus in testing.
-func testNetwork() *consensus.Network {
-	n := &consensus.Network{
-		InitialCoinbase: types.Siacoins(300000),
-		MinimumCoinbase: types.Siacoins(299990),
-		InitialTarget:   types.BlockID{4: 32},
+func (c *TestCluster) mineBlocks(addr types.Address, n uint64) error {
+	for i := uint64(0); i < n; i++ {
+		if block, found := coreutils.MineBlock(c.cm, addr, 5*time.Second); !found {
+			c.tt.Fatal("failed to mine block")
+		} else if err := c.Bus.AcceptBlock(context.Background(), block); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
-	n.HardforkDevAddr.Height = 3
-	n.HardforkDevAddr.OldAddress = types.Address{}
-	n.HardforkDevAddr.NewAddress = types.Address{}
+// testNetwork returns a modified version of Zen used for testing
+func testNetwork() (*consensus.Network, types.Block) {
+	// use a modified version of Zen
+	n, genesis := chain.TestnetZen()
 
-	n.HardforkTax.Height = 10
+	// we have to set the initial target to 128 to ensure blocks we mine match
+	// the PoW testnet in siad testnet consensu
+	n.InitialTarget = types.BlockID{0x80}
 
-	n.HardforkStorageProof.Height = 10
-
-	n.HardforkOak.Height = 20
-	n.HardforkOak.FixHeight = 23
-	n.HardforkOak.GenesisTimestamp = time.Now().Add(-1e6 * time.Second)
-
-	n.HardforkASIC.Height = 5
-	n.HardforkASIC.OakTime = 10000 * time.Second
-	n.HardforkASIC.OakTarget = types.BlockID{255, 255}
-
-	n.HardforkFoundation.Height = 50
-	n.HardforkFoundation.PrimaryAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
-	n.HardforkFoundation.FailsafeAddress = types.StandardUnlockHash(types.GeneratePrivateKey().PublicKey())
-
-	// make it difficult to reach v2 in most tests
+	// we have to make minimum coinbase get hit after 10 blocks to ensure we
+	// match the siad test network settings, otherwise the blocksubsidy is
+	// considered invalid after 10 blocks
+	n.MinimumCoinbase = types.Siacoins(299990)
+	n.HardforkDevAddr.Height = 1
+	n.HardforkTax.Height = 1
+	n.HardforkStorageProof.Height = 1
+	n.HardforkOak.Height = 1
+	n.HardforkASIC.Height = 1
+	n.HardforkFoundation.Height = 1
 	n.HardforkV2.AllowHeight = 1000
 	n.HardforkV2.RequireHeight = 1020
 
-	return n
+	return n, genesis
 }
 
-func testBusCfg() node.BusConfig {
-	return node.BusConfig{
-		Bus: config.Bus{
-			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
-			Bootstrap:                     false,
-			GatewayAddr:                   "127.0.0.1:0",
-			PersistInterval:               testBusPersistInterval,
-			UsedUTXOExpiry:                time.Minute,
-			SlabBufferCompletionThreshold: 0,
-		},
+func testBusCfg() config.Bus {
+	return config.Bus{
+		AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
+		Bootstrap:                     false,
+		GatewayAddr:                   "127.0.0.1:0",
+		UsedUTXOExpiry:                time.Minute,
+		SlabBufferCompletionThreshold: 0,
+	}
+}
+
+func testDBCfg() dbConfig {
+	return dbConfig{
 		Database: config.Database{
 			MySQL: config.MySQLConfigFromEnv(),
 		},
@@ -920,7 +1016,14 @@ func testBusCfg() node.BusConfig {
 			IgnoreRecordNotFoundError: true,
 			SlowThreshold:             100 * time.Millisecond,
 		},
-		Network: testNetwork(),
+		RetryTxIntervals: []time.Duration{
+			50 * time.Millisecond,
+			100 * time.Millisecond,
+			200 * time.Millisecond,
+			500 * time.Millisecond,
+			time.Second,
+			5 * time.Second,
+		},
 	}
 }
 
@@ -938,18 +1041,91 @@ func testWorkerCfg() config.Worker {
 	}
 }
 
-func testApCfg() node.AutopilotConfig {
-	return node.AutopilotConfig{
-		ID: api.DefaultAutopilotID,
-		Autopilot: config.Autopilot{
-			AccountsRefillInterval:         time.Second,
-			Heartbeat:                      time.Second,
-			MigrationHealthCutoff:          0.99,
-			MigratorParallelSlabsPerWorker: 1,
-			RevisionSubmissionBuffer:       0,
-			ScannerInterval:                time.Second,
-			ScannerBatchSize:               10,
-			ScannerNumThreads:              1,
-		},
+func testApCfg() config.Autopilot {
+	return config.Autopilot{
+		AccountsRefillInterval:         time.Second,
+		Heartbeat:                      time.Second,
+		ID:                             api.DefaultAutopilotID,
+		MigrationHealthCutoff:          0.99,
+		MigratorParallelSlabsPerWorker: 1,
+		RevisionSubmissionBuffer:       0,
+		ScannerInterval:                time.Second,
+		ScannerBatchSize:               10,
+		ScannerNumThreads:              1,
 	}
+}
+
+func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	// create database connections
+	var dbMain sql.Database
+	var dbMetrics sql.MetricsDatabase
+	if cfg.Database.MySQL.URI != "" {
+		// create MySQL connections
+		connMain, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.Database,
+		)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open MySQL main database: %w", err)
+		}
+		connMetrics, err := mysql.Open(
+			cfg.Database.MySQL.User,
+			cfg.Database.MySQL.Password,
+			cfg.Database.MySQL.URI,
+			cfg.Database.MySQL.MetricsDatabase,
+		)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
+		}
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
+		}
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
+		}
+	} else {
+		// create database directory
+		dbDir := filepath.Join(dir, "db")
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			return stores.Config{}, err
+		}
+
+		// create SQLite connections
+		db, err := sqlite.Open(filepath.Join(dbDir, "db.sqlite"))
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
+		}
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
+		}
+
+		dbm, err := sqlite.Open(filepath.Join(dbDir, "metrics.sqlite"))
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
+		}
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		if err != nil {
+			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
+		}
+	}
+
+	return stores.Config{
+		Alerts:                        alerts.WithOrigin(am, "bus"),
+		DB:                            dbMain,
+		DBMetrics:                     dbMetrics,
+		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
+		Migrate:                       true,
+		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
+		Logger:                        logger,
+		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
+
+		RetryTransactionIntervals: cfg.RetryTxIntervals,
+		LongQueryDuration:         cfg.DatabaseLog.SlowThreshold,
+		LongTxDuration:            cfg.DatabaseLog.SlowThreshold,
+	}, nil
 }

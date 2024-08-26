@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/stores/sql"
 	"lukechampine.com/frand"
 )
 
@@ -149,7 +150,7 @@ func TestContractMetrics(t *testing.T) {
 		}
 		for _, m := range metrics {
 			expectedMetric := fcid2Metric[m.ContractID]
-			expectedMetric.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, unixTimeMS(expectedMetric.Timestamp)))
+			expectedMetric.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, sql.UnixTimeMS(expectedMetric.Timestamp)))
 			if !cmp.Equal(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)) {
 				t.Fatal("unexpected metric", cmp.Diff(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)))
 			}
@@ -181,7 +182,7 @@ func TestContractMetrics(t *testing.T) {
 	}
 	for i, m := range metrics {
 		var expectedMetric api.ContractMetric
-		expectedMetric.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, time.Millisecond, unixTimeMS(metricsTimeAsc[2*i].Timestamp)))
+		expectedMetric.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, time.Millisecond, sql.UnixTimeMS(metricsTimeAsc[2*i].Timestamp)))
 		expectedMetric.ContractID = types.FileContractID{}
 		expectedMetric.HostKey = types.PublicKey{}
 		expectedMetric.RemainingCollateral, _ = metricsTimeAsc[2*i].RemainingCollateral.AddWithOverflow(metricsTimeAsc[2*i+1].RemainingCollateral)
@@ -424,7 +425,7 @@ func TestNormaliseTimestamp(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if result := time.Time(normaliseTimestamp(test.start, test.interval, unixTimeMS(test.ti))); !result.Equal(test.result) {
+		if result := time.Time(normaliseTimestamp(test.start, test.interval, sql.UnixTimeMS(test.ti))); !result.Equal(test.result) {
 			t.Fatalf("expected %v, got %v", test.result, result)
 		}
 	}
@@ -527,6 +528,7 @@ func TestWalletMetrics(t *testing.T) {
 			Confirmed:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Unconfirmed: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 			Spendable:   types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
+			Immature:    types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 		}
 		if err := ss.RecordWalletMetric(context.Background(), metric); err != nil {
 			t.Fatal(err)
@@ -555,13 +557,13 @@ func TestWalletMetrics(t *testing.T) {
 	}
 }
 
-func normaliseTimestamp(start time.Time, interval time.Duration, t unixTimeMS) unixTimeMS {
+func normaliseTimestamp(start time.Time, interval time.Duration, t sql.UnixTimeMS) sql.UnixTimeMS {
 	startMS := start.UnixMilli()
 	toNormaliseMS := time.Time(t).UnixMilli()
 	intervalMS := interval.Milliseconds()
 	if startMS > toNormaliseMS {
-		return unixTimeMS(start)
+		return sql.UnixTimeMS(start)
 	}
 	normalizedMS := (toNormaliseMS-startMS)/intervalMS*intervalMS + start.UnixMilli()
-	return unixTimeMS(time.UnixMilli(normalizedMS))
+	return sql.UnixTimeMS(time.UnixMilli(normalizedMS))
 }

@@ -14,8 +14,8 @@ import (
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
 	"go.sia.tech/hostd/host/settings/pin"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -24,6 +24,43 @@ const (
 	testAutopilotID    = "default"
 	testUpdateInterval = 100 * time.Millisecond
 )
+
+type mockAlerter struct {
+	mu     sync.Mutex
+	alerts []alerts.Alert
+}
+
+func (ma *mockAlerter) Alerts(ctx context.Context, opts alerts.AlertsOpts) (resp alerts.AlertsResponse, err error) {
+	ma.mu.Lock()
+	defer ma.mu.Unlock()
+	return alerts.AlertsResponse{Alerts: ma.alerts}, nil
+}
+
+func (ma *mockAlerter) RegisterAlert(_ context.Context, a alerts.Alert) error {
+	ma.mu.Lock()
+	defer ma.mu.Unlock()
+	for _, alert := range ma.alerts {
+		if alert.ID == a.ID {
+			return nil
+		}
+	}
+	ma.alerts = append(ma.alerts, a)
+	return nil
+}
+
+func (ma *mockAlerter) DismissAlerts(_ context.Context, ids ...types.Hash256) error {
+	ma.mu.Lock()
+	defer ma.mu.Unlock()
+	for _, id := range ids {
+		for i, a := range ma.alerts {
+			if a.ID == id {
+				ma.alerts = append(ma.alerts[:i], ma.alerts[i+1:]...)
+				break
+			}
+		}
+	}
+	return nil
+}
 
 type mockBroadcaster struct {
 	events []webhooks.Event
@@ -37,8 +74,9 @@ func (meb *mockBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Even
 type mockForexAPI struct {
 	s *httptest.Server
 
-	mu   sync.Mutex
-	rate float64
+	mu          sync.Mutex
+	rate        float64
+	unreachable bool
 }
 
 func newTestForexAPI() *mockForexAPI {
@@ -46,6 +84,10 @@ func newTestForexAPI() *mockForexAPI {
 	api.s = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.mu.Lock()
 		defer api.mu.Unlock()
+		if api.unreachable {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(api.rate)
 	}))
 	return api
@@ -55,28 +97,34 @@ func (api *mockForexAPI) Close() {
 	api.s.Close()
 }
 
-func (api *mockForexAPI) updateRate(rate float64) {
+func (api *mockForexAPI) setRate(rate float64) {
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	api.rate = rate
 }
 
-type mockStore struct {
+func (api *mockForexAPI) setUnreachable(unreachable bool) {
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	api.unreachable = unreachable
+}
+
+type mockPinStore struct {
 	mu         sync.Mutex
 	settings   map[string]string
 	autopilots map[string]api.Autopilot
 }
 
-func newTestStore() *mockStore {
-	s := &mockStore{
+func newTestStore() *mockPinStore {
+	s := &mockPinStore{
 		autopilots: make(map[string]api.Autopilot),
 		settings:   make(map[string]string),
 	}
 
 	// add default price pin - and gouging settings
-	b, _ := json.Marshal(build.DefaultPricePinSettings)
+	b, _ := json.Marshal(api.DefaultPricePinSettings)
 	s.settings[api.SettingPricePinning] = string(b)
-	b, _ = json.Marshal(build.DefaultGougingSettings)
+	b, _ = json.Marshal(api.DefaultGougingSettings)
 	s.settings[api.SettingGouging] = string(b)
 
 	// add default autopilot
@@ -92,7 +140,7 @@ func newTestStore() *mockStore {
 	return s
 }
 
-func (ms *mockStore) gougingSettings() api.GougingSettings {
+func (ms *mockPinStore) gougingSettings() api.GougingSettings {
 	val, err := ms.Setting(context.Background(), api.SettingGouging)
 	if err != nil {
 		panic(err)
@@ -104,32 +152,32 @@ func (ms *mockStore) gougingSettings() api.GougingSettings {
 	return gs
 }
 
-func (ms *mockStore) updatPinnedSettings(pps api.PricePinSettings) {
+func (ms *mockPinStore) updatPinnedSettings(pps api.PricePinSettings) {
 	b, _ := json.Marshal(pps)
 	ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
 	time.Sleep(2 * testUpdateInterval)
 }
 
-func (ms *mockStore) Setting(ctx context.Context, key string) (string, error) {
+func (ms *mockPinStore) Setting(ctx context.Context, key string) (string, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.settings[key], nil
 }
 
-func (ms *mockStore) UpdateSetting(ctx context.Context, key, value string) error {
+func (ms *mockPinStore) UpdateSetting(ctx context.Context, key, value string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.settings[key] = value
 	return nil
 }
 
-func (ms *mockStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
+func (ms *mockPinStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.autopilots[id], nil
 }
 
-func (ms *mockStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
+func (ms *mockPinStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.autopilots[autopilot.ID] = autopilot
@@ -140,18 +188,16 @@ func TestPinManager(t *testing.T) {
 	// mock dependencies
 	ms := newTestStore()
 	eb := &mockBroadcaster{}
+	a := &mockAlerter{}
 
 	// mock forex api
 	forex := newTestForexAPI()
 	defer forex.Close()
 
-	// start a pinmanager
-	pm := NewPinManager(eb, ms, ms, testUpdateInterval, time.Minute, zap.NewNop())
-	if err := pm.Run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	// create a pinmanager
+	pm := NewPinManager(a, eb, ms, testUpdateInterval, time.Minute, zap.NewNop())
 	defer func() {
-		if err := pm.Close(context.Background()); err != nil {
+		if err := pm.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}()
@@ -170,7 +216,7 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// enable price pinning
-	pps := build.DefaultPricePinSettings
+	pps := api.DefaultPricePinSettings
 	pps.Enabled = true
 	pps.Currency = "usd"
 	pps.Threshold = 0.5
@@ -183,12 +229,11 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// update exchange rate and fetch current gouging settings
-	forex.updateRate(2.5)
+	forex.setRate(2.5)
 	gs := ms.gougingSettings()
 
 	// configure all pins but disable them for now
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MaxRPCPrice = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
 	ms.updatPinnedSettings(pps)
@@ -214,21 +259,19 @@ func TestPinManager(t *testing.T) {
 
 	// enable the rest of the pins
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	pps.GougingSettingsPins.MaxRPCPrice.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
 	ms.updatPinnedSettings(pps)
 
 	// assert they're all updated
 	if gss := ms.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
-		gss.MaxRPCPrice.Equals(gs.MaxRPCPrice) ||
 		gss.MaxStoragePrice.Equals(gs.MaxStoragePrice) ||
 		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss, gs)
 	}
 
 	// increase rate so average isn't catching up to us
-	forex.updateRate(3)
+	forex.setRate(3)
 
 	// fetch autopilot
 	ap, _ := ms.Autopilot(context.Background(), testAutopilotID)
@@ -256,6 +299,26 @@ func TestPinManager(t *testing.T) {
 	// assert autopilot was updated
 	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
 		t.Fatalf("expected autopilot to be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
+	}
+
+	// make forex API return an error
+	forex.setUnreachable(true)
+
+	// assert alert was registered
+	ms.updatPinnedSettings(pps)
+	res, _ := a.Alerts(context.Background(), alerts.AlertsOpts{})
+	if len(res.Alerts) == 0 {
+		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
+	}
+
+	// make forex API return a valid response
+	forex.setUnreachable(false)
+
+	// assert alert was dismissed
+	ms.updatPinnedSettings(pps)
+	res, _ = a.Alerts(context.Background(), alerts.AlertsOpts{})
+	if len(res.Alerts) != 0 {
+		t.Fatalf("expected 0 alerts, got %d", len(a.alerts))
 	}
 }
 

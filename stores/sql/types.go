@@ -3,6 +3,7 @@ package sql
 import (
 	"database/sql"
 	"database/sql/driver"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,26 +15,33 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/siad/modules"
+	"go.sia.tech/renterd/object"
 )
 
 const (
-	secretKeySize = 32
+	proofHashSize = 32
+)
+
+var (
+	ZeroCurrency = Currency(types.ZeroCurrency)
 )
 
 type (
 	AutopilotConfig api.AutopilotConfig
+	BCurrency       types.Currency
 	BigInt          big.Int
-	CCID            modules.ConsensusChangeID
+	BusSetting      string
 	Currency        types.Currency
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
-	BusSetting      string
+	MerkleProof     struct{ Hashes []types.Hash256 }
 	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
-	SecretKey       []byte
+	EncryptionKey   object.EncryptionKey
+	Uint64Str       uint64
 	UnixTimeMS      time.Time
 	UnixTimeNS      time.Time
 	Unsigned64      uint64
@@ -46,16 +54,17 @@ type scannerValuer interface {
 
 var (
 	_ scannerValuer = (*AutopilotConfig)(nil)
+	_ scannerValuer = (*BCurrency)(nil)
 	_ scannerValuer = (*BigInt)(nil)
 	_ scannerValuer = (*BusSetting)(nil)
-	_ scannerValuer = (*CCID)(nil)
 	_ scannerValuer = (*Currency)(nil)
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
+	_ scannerValuer = (*MerkleProof)(nil)
 	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
-	_ scannerValuer = (*SecretKey)(nil)
+	_ scannerValuer = (*EncryptionKey)(nil)
 	_ scannerValuer = (*UnixTimeMS)(nil)
 	_ scannerValuer = (*UnixTimeNS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
@@ -80,6 +89,28 @@ func (cfg AutopilotConfig) Value() (driver.Value, error) {
 	return json.Marshal(cfg)
 }
 
+// Scan implements the sql.Scanner interface.
+func (sc *BCurrency) Scan(src any) error {
+	buf, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot scan %T to Currency", src)
+	} else if len(buf) != 16 {
+		return fmt.Errorf("cannot scan %d bytes to Currency", len(buf))
+	}
+
+	sc.Hi = binary.BigEndian.Uint64(buf[:8])
+	sc.Lo = binary.BigEndian.Uint64(buf[8:])
+	return nil
+}
+
+// Value implements the driver.Valuer interface.
+func (sc BCurrency) Value() (driver.Value, error) {
+	buf := make([]byte, 16)
+	binary.BigEndian.PutUint64(buf[:8], sc.Hi)
+	binary.BigEndian.PutUint64(buf[8:], sc.Lo)
+	return buf, nil
+}
+
 // Scan scan value into BigInt, implements sql.Scanner interface.
 func (b *BigInt) Scan(value interface{}) error {
 	var s string
@@ -100,22 +131,6 @@ func (b *BigInt) Scan(value interface{}) error {
 // Value returns a BigInt value, implements driver.Valuer interface.
 func (b BigInt) Value() (driver.Value, error) {
 	return (*big.Int)(&b).String(), nil
-}
-
-// Scan scan value into CCID, implements sql.Scanner interface.
-func (c *CCID) Scan(value interface{}) error {
-	switch value := value.(type) {
-	case []byte:
-		copy(c[:], value)
-	default:
-		return fmt.Errorf("failed to unmarshal CCID value: %v %t", value, value)
-	}
-	return nil
-}
-
-// Value returns a publicKey value, implements driver.Valuer interface.
-func (c CCID) Value() (driver.Value, error) {
-	return c[:], nil
 }
 
 // Scan scan value into Currency, implements sql.Scanner interface.
@@ -224,27 +239,54 @@ func (pk PublicKey) Value() (driver.Value, error) {
 	return pk[:], nil
 }
 
+// Scan scans value into a MerkleProof, implements sql.Scanner interface.
+func (mp *MerkleProof) Scan(value interface{}) error {
+	b, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal MerkleProof value:", value))
+	} else if len(b)%proofHashSize != 0 {
+		return fmt.Errorf("failed to unmarshal MerkleProof value due to invalid number of bytes %v: %v", len(b), value)
+	}
+
+	mp.Hashes = make([]types.Hash256, len(b)/proofHashSize)
+	for i := range mp.Hashes {
+		copy(mp.Hashes[i][:], b[i*proofHashSize:])
+	}
+	return nil
+}
+
+// Value returns a MerkleProof value, implements driver.Valuer interface.
+func (mp MerkleProof) Value() (driver.Value, error) {
+	b := make([]byte, len(mp.Hashes)*proofHashSize)
+	for i, h := range mp.Hashes {
+		copy(b[i*proofHashSize:], h[:])
+	}
+	return b, nil
+}
+
 // String implements fmt.Stringer to prevent the key from getting leaked in
 // logs.
-func (k SecretKey) String() string {
+func (k EncryptionKey) String() string {
 	return "*****"
 }
 
 // Scan scans value into key, implements sql.Scanner interface.
-func (k *SecretKey) Scan(value interface{}) error {
+func (k *EncryptionKey) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal secretKey value:", value))
-	} else if len(bytes) != secretKeySize {
-		return fmt.Errorf("failed to unmarshal secretKey value due to invalid number of bytes %v != %v: %v", len(bytes), secretKeySize, value)
+		return errors.New(fmt.Sprint("failed to unmarshal EncryptionKey value:", value))
 	}
-	*k = append(SecretKey{}, SecretKey(bytes)...)
+	var ec object.EncryptionKey
+	if err := ec.UnmarshalBinary(bytes); err != nil {
+		return fmt.Errorf("failed to unmarshal EncryptionKey value): %w", err)
+	}
+	*k = EncryptionKey(ec)
 	return nil
 }
 
 // Value returns an key value, implements driver.Valuer interface.
-func (k SecretKey) Value() (driver.Value, error) {
-	return []byte(k), nil
+func (k EncryptionKey) Value() (driver.Value, error) {
+	return object.EncryptionKey(k).MarshalBinary()
 }
 
 // String implements fmt.Stringer to prevent "s3authentication" settings from
@@ -328,6 +370,61 @@ func (u *UnixTimeNS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u UnixTimeNS) Value() (driver.Value, error) {
 	return time.Time(u).UnixNano(), nil
+}
+
+// Scan scan value into Uint64, implements sql.Scanner interface.
+func (u *Uint64Str) Scan(value interface{}) error {
+	var s string
+	switch value := value.(type) {
+	case string:
+		s = value
+	case []byte:
+		s = string(value)
+	default:
+		return fmt.Errorf("failed to unmarshal Uint64 value: %v %t", value, value)
+	}
+	var val uint64
+	_, err := fmt.Sscan(s, &val)
+	if err != nil {
+		return fmt.Errorf("failed to scan Uint64 value: %v", err)
+	}
+	*u = Uint64Str(val)
+	return nil
+}
+
+// Value returns a Uint64 value, implements driver.Valuer interface.
+func (u Uint64Str) Value() (driver.Value, error) {
+	return fmt.Sprint(u), nil
+}
+
+func UnmarshalEventData(b []byte, t string) (dst wallet.EventData, err error) {
+	switch t {
+	case wallet.EventTypeMinerPayout,
+		wallet.EventTypeSiafundClaim,
+		wallet.EventTypeFoundationSubsidy:
+		var e wallet.EventPayout
+		err = json.Unmarshal(b, &e)
+		dst = e
+	case wallet.EventTypeV1ContractResolution:
+		var e wallet.EventV1ContractResolution
+		err = json.Unmarshal(b, &e)
+		dst = e
+	case wallet.EventTypeV2ContractResolution:
+		var e wallet.EventV2ContractResolution
+		err = json.Unmarshal(b, &e)
+		dst = e
+	case wallet.EventTypeV1Transaction:
+		var e wallet.EventV1Transaction
+		err = json.Unmarshal(b, &e)
+		dst = e
+	case wallet.EventTypeV2Transaction:
+		var e wallet.EventV2Transaction
+		err = json.Unmarshal(b, &e)
+		dst = e
+	default:
+		return nil, fmt.Errorf("unknown event type %v", t)
+	}
+	return
 }
 
 // Scan scan value into Unsigned64, implements sql.Scanner interface.

@@ -10,7 +10,6 @@ import (
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap"
 )
 
 func TestObjectMetadata(t *testing.T) {
@@ -20,8 +19,7 @@ func TestObjectMetadata(t *testing.T) {
 
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: zap.NewNop(),
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 

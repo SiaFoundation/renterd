@@ -269,8 +269,8 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 	return
 }
 
-// RegisterEvent register an event.
-func (c *Client) RegisterEvent(ctx context.Context, e webhooks.Event) (err error) {
+// NotifyEvent notifies the worker of an event.
+func (c *Client) NotifyEvent(ctx context.Context, e webhooks.Event) (err error) {
 	err = c.c.WithContext(ctx).POST("/events", e, nil)
 	return
 }

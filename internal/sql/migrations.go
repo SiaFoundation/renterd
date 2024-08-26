@@ -181,6 +181,30 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00011_host_subnets", log)
 				},
 			},
+			{
+				ID: "00012_peer_store",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00012_peer_store", log)
+				},
+			},
+			{
+				ID: "00013_coreutils_wallet",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00013_coreutils_wallet", log)
+				},
+			},
+			{
+				ID: "00014_hosts_resolvedaddresses",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00014_hosts_resolvedaddresses", log)
+				},
+			},
+			{
+				ID: "00015_reset_drift",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00015_reset_drift", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
@@ -194,6 +218,12 @@ var (
 				ID: "00001_idx_contracts_fcid_timestamp",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00001_idx_contracts_fcid_timestamp", log)
+				},
+			},
+			{
+				ID: "00002_idx_wallet_metrics_immature",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00002_idx_wallet_metrics_immature", log)
 				},
 			},
 		}

@@ -12,7 +12,7 @@ CREATE INDEX `idx_archived_contracts_state` ON `archived_contracts`(`state`);
 CREATE INDEX `idx_archived_contracts_renewed_from` ON `archived_contracts`(`renewed_from`);
 
 -- dbHost
-CREATE TABLE `hosts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`public_key` blob NOT NULL UNIQUE,`settings` text,`price_table` text,`price_table_expiry` datetime,`total_scans` integer,`last_scan` integer,`last_scan_success` numeric,`second_to_last_scan_success` numeric,`scanned` numeric,`uptime` integer,`downtime` integer,`recent_downtime` integer,`recent_scan_failures` integer,`successful_interactions` real,`failed_interactions` real,`lost_sectors` integer,`last_announcement` datetime,`net_address` text,`subnets` text NOT NULL DEFAULT '');
+CREATE TABLE `hosts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`public_key` blob NOT NULL UNIQUE,`settings` text,`price_table` text,`price_table_expiry` datetime,`total_scans` integer,`last_scan` integer,`last_scan_success` numeric,`second_to_last_scan_success` numeric,`scanned` numeric,`uptime` integer,`downtime` integer,`recent_downtime` integer,`recent_scan_failures` integer,`successful_interactions` real,`failed_interactions` real,`lost_sectors` integer,`last_announcement` datetime,`net_address` text,`resolved_addresses` text NOT NULL DEFAULT '');
 CREATE INDEX `idx_hosts_recent_scan_failures` ON `hosts`(`recent_scan_failures`);
 CREATE INDEX `idx_hosts_recent_downtime` ON `hosts`(`recent_downtime`);
 CREATE INDEX `idx_hosts_scanned` ON `hosts`(`scanned`);
@@ -107,7 +107,7 @@ CREATE INDEX `idx_slices_db_multipart_part_id` ON `slices`(`db_multipart_part_id
 CREATE TABLE `host_announcements` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`host_key` blob NOT NULL,`block_height` integer,`block_id` text,`net_address` text);
 
 -- dbConsensusInfo
-CREATE TABLE `consensus_infos` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`cc_id` blob,`height` integer,`block_id` blob);
+CREATE TABLE `consensus_infos` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`height` integer,`block_id` blob);
 
 -- dbBlocklistEntry
 CREATE TABLE `host_blocklist_entries` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`entry` text NOT NULL UNIQUE);
@@ -124,16 +124,6 @@ CREATE INDEX `idx_host_allowlist_entries_entry` ON `host_allowlist_entries`(`ent
 -- dbAllowlistEntry <-> dbHost
 CREATE TABLE `host_allowlist_entry_hosts` (`db_allowlist_entry_id` integer,`db_host_id` integer,PRIMARY KEY (`db_allowlist_entry_id`,`db_host_id`),CONSTRAINT `fk_host_allowlist_entry_hosts_db_allowlist_entry` FOREIGN KEY (`db_allowlist_entry_id`) REFERENCES `host_allowlist_entries`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_host_allowlist_entry_hosts_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts`(`id`) ON DELETE CASCADE);
 CREATE INDEX `idx_host_allowlist_entry_hosts_db_host_id` ON `host_allowlist_entry_hosts`(`db_host_id`);
-
--- dbSiacoinElement
-CREATE TABLE `siacoin_elements` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`value` text,`address` blob,`output_id` blob NOT NULL UNIQUE,`maturity_height` integer);
-CREATE INDEX `idx_siacoin_elements_maturity_height` ON `siacoin_elements`(`maturity_height`);
-CREATE INDEX `idx_siacoin_elements_output_id` ON `siacoin_elements`(`output_id`);
-
--- dbTransaction
-CREATE TABLE `transactions` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`raw` text,`height` integer,`block_id` blob,`transaction_id` blob NOT NULL UNIQUE,`inflow` text,`outflow` text,`timestamp` integer);
-CREATE INDEX `idx_transactions_timestamp` ON `transactions`(`timestamp`);
-CREATE INDEX `idx_transactions_transaction_id` ON `transactions`(`transaction_id`);
 
 -- dbSetting
 CREATE TABLE `settings` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`key` text NOT NULL UNIQUE,`value` text NOT NULL);
@@ -172,6 +162,66 @@ CREATE INDEX `idx_host_checks_score_storage_remaining` ON `host_checks` (`score_
 CREATE INDEX `idx_host_checks_score_uptime` ON `host_checks` (`score_uptime`);
 CREATE INDEX `idx_host_checks_score_version` ON `host_checks` (`score_version`);
 CREATE INDEX `idx_host_checks_score_prices` ON `host_checks` (`score_prices`);
+
+-- dbObject trigger to delete from slices
+CREATE TRIGGER before_delete_on_objects_delete_slices
+BEFORE DELETE ON objects
+BEGIN
+    DELETE FROM slices
+    WHERE slices.db_object_id = OLD.id;
+END;
+
+-- dbMultipartUpload trigger to delete from dbMultipartPart
+CREATE TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
+BEFORE DELETE ON multipart_uploads
+BEGIN
+    DELETE FROM multipart_parts
+    WHERE multipart_parts.db_multipart_upload_id = OLD.id;
+END;
+
+-- dbMultipartPart trigger to delete from slices
+CREATE TRIGGER before_delete_on_multipart_parts_delete_slices
+BEFORE DELETE ON multipart_parts
+BEGIN
+    DELETE FROM slices
+    WHERE slices.db_multipart_part_id = OLD.id;
+END;
+
+-- dbSlices trigger to prune slabs
+CREATE TRIGGER after_delete_on_slices_delete_slabs
+AFTER DELETE ON slices
+BEGIN
+    DELETE FROM slabs
+    WHERE slabs.id = OLD.db_slab_id
+    AND slabs.db_buffered_slab_id IS NULL
+    AND NOT EXISTS (
+        SELECT 1
+        FROM slices
+        WHERE slices.db_slab_id = OLD.db_slab_id
+    );
+END;
+
+-- dbSyncerPeer
+CREATE TABLE `syncer_peers` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`address` text NOT NULL,`first_seen` BIGINT NOT NULL,`last_connect` BIGINT,`synced_blocks` BIGINT,`sync_duration` BIGINT);
+CREATE UNIQUE INDEX `idx_syncer_peers_address` ON `syncer_peers`(`address`);
+
+-- dbSyncerBan
+CREATE TABLE `syncer_bans` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`net_cidr` text  NOT NULL,`reason` text,`expiration` BIGINT NOT NULL);
+CREATE UNIQUE INDEX `idx_syncer_bans_net_cidr` ON `syncer_bans`(`net_cidr`);
+CREATE INDEX `idx_syncer_bans_expiration` ON `syncer_bans`(`expiration`);
+
+-- dbWalletEvent
+CREATE TABLE `wallet_events` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`event_id` blob NOT NULL,`height` integer, `block_id` blob,`inflow` text,`outflow` text,`type` text NOT NULL,`data` longblob NOT NULL,`maturity_height` integer,`timestamp` integer);
+CREATE UNIQUE INDEX `idx_wallet_events_event_id` ON `wallet_events`(`event_id`);
+CREATE INDEX `idx_wallet_events_maturity_height` ON `wallet_events`(`maturity_height`);
+CREATE INDEX `idx_wallet_events_type` ON `wallet_events`(`type`);
+CREATE INDEX `idx_wallet_events_timestamp` ON `wallet_events`(`timestamp`);
+CREATE INDEX `idx_wallet_events_block_id_height` ON `wallet_events`(`block_id`,`height`);
+
+-- dbWalletOutput
+CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`output_id` blob NOT NULL,`leaf_index` integer,`merkle_proof` longblob NOT NULL,`value` text,`address` blob,`maturity_height` integer);
+CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
+CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
 
 -- create default bucket
 INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

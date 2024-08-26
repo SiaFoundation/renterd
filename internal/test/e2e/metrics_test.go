@@ -85,7 +85,6 @@ func TestMetrics(t *testing.T) {
 		if len(wm) == 0 {
 			return errors.New("no wallet metrics")
 		}
-
 		return nil
 	})
 }

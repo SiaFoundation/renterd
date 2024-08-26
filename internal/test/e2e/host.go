@@ -4,66 +4,122 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
 	crhpv2 "go.sia.tech/core/rhp/v2"
 	crhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/hostd/alerts"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/hostd/host/accounts"
 	"go.sia.tech/hostd/host/contracts"
 	"go.sia.tech/hostd/host/registry"
 	"go.sia.tech/hostd/host/settings"
 	"go.sia.tech/hostd/host/storage"
+	"go.sia.tech/hostd/index"
 	"go.sia.tech/hostd/persist/sqlite"
-	"go.sia.tech/hostd/rhp"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
-	"go.sia.tech/hostd/wallet"
-	"go.sia.tech/hostd/webhooks"
-	"go.sia.tech/renterd/bus"
-	"go.sia.tech/renterd/internal/node"
-	"go.sia.tech/siad/modules"
-	mconsensus "go.sia.tech/siad/modules/consensus"
-	"go.sia.tech/siad/modules/gateway"
-	"go.sia.tech/siad/modules/transactionpool"
 	"go.uber.org/zap"
 )
 
-const blocksPerMonth = 144 * 30
+const (
+	blocksPerDay   = 144
+	blocksPerMonth = blocksPerDay * 30
+)
 
-type stubMetricReporter struct{}
-
-func (stubMetricReporter) StartSession(conn *rhp.Conn, proto string, version int) (rhp.UID, func()) {
-	return rhp.UID{}, func() {}
+type ephemeralPeerStore struct {
+	peers map[string]syncer.PeerInfo
+	bans  map[string]time.Time
+	mu    sync.Mutex
 }
-func (stubMetricReporter) StartRPC(rhp.UID, types.Specifier) (rhp.UID, func(contracts.Usage, error)) {
-	return rhp.UID{}, func(contracts.Usage, error) {}
+
+func (eps *ephemeralPeerStore) AddPeer(addr string) error {
+	eps.mu.Lock()
+	defer eps.mu.Unlock()
+	eps.peers[addr] = syncer.PeerInfo{Address: addr}
+	return nil
 }
 
-type stubDataMonitor struct{}
+func (eps *ephemeralPeerStore) Peers() ([]syncer.PeerInfo, error) {
+	eps.mu.Lock()
+	defer eps.mu.Unlock()
+	var peers []syncer.PeerInfo
+	for _, peer := range eps.peers {
+		peers = append(peers, peer)
+	}
+	return peers, nil
+}
 
-func (stubDataMonitor) ReadBytes(n int)  {}
-func (stubDataMonitor) WriteBytes(n int) {}
+func (eps *ephemeralPeerStore) PeerInfo(addr string) (syncer.PeerInfo, error) {
+	eps.mu.Lock()
+	defer eps.mu.Unlock()
+	peer, ok := eps.peers[addr]
+	if !ok {
+		return syncer.PeerInfo{}, syncer.ErrPeerNotFound
+	}
+	return peer, nil
+}
+
+func (eps *ephemeralPeerStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
+	eps.mu.Lock()
+	defer eps.mu.Unlock()
+	peer, ok := eps.peers[addr]
+	if !ok {
+		return syncer.ErrPeerNotFound
+	}
+	fn(&peer)
+	eps.peers[addr] = peer
+	return nil
+}
+
+func (eps *ephemeralPeerStore) Ban(addr string, duration time.Duration, reason string) error {
+	eps.mu.Lock()
+	defer eps.mu.Unlock()
+	eps.bans[addr] = time.Now().Add(duration)
+	return nil
+}
+
+// Banned returns true, nil if the peer is banned.
+func (eps *ephemeralPeerStore) Banned(addr string) (bool, error) {
+	eps.mu.Lock()
+	defer eps.mu.Unlock()
+	t, ok := eps.bans[addr]
+	return ok && time.Now().Before(t), nil
+}
+
+func newEphemeralPeerStore() syncer.PeerStore {
+	return &ephemeralPeerStore{
+		peers: make(map[string]syncer.PeerInfo),
+		bans:  make(map[string]time.Time),
+	}
+}
 
 // A Host is an ephemeral host that can be used for testing.
 type Host struct {
 	dir     string
 	privKey types.PrivateKey
 
-	g  modules.Gateway
-	cs modules.ConsensusSet
-	tp bus.TransactionPool
+	s            *syncer.Syncer
+	syncerCancel context.CancelFunc
+	cm           *chain.Manager
+	chainDB      *coreutils.BoltChainDB
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
 	settings  *settings.ConfigManager
 	storage   *storage.VolumeManager
+	index     *index.Manager
 	registry  *registry.Manager
 	accounts  *accounts.AccountManager
-	contracts *contracts.ContractManager
+	contracts *contracts.Manager
 
 	rhpv2 *rhpv2.SessionHandler
 	rhpv3 *rhpv3.SessionHandler
@@ -97,13 +153,14 @@ func (h *Host) Close() error {
 	h.rhpv2.Close()
 	h.rhpv3.Close()
 	h.settings.Close()
+	h.index.Close()
 	h.wallet.Close()
 	h.contracts.Close()
 	h.storage.Close()
 	h.store.Close()
-	h.tp.Close()
-	h.cs.Close()
-	h.g.Close()
+	h.syncerCancel()
+	h.s.Close()
+	h.chainDB.Close()
 	return nil
 }
 
@@ -119,7 +176,7 @@ func (h *Host) RHPv3Addr() string {
 
 // AddVolume adds a new volume to the host
 func (h *Host) AddVolume(ctx context.Context, path string, size uint64) error {
-	result := make(chan error)
+	result := make(chan error, 1)
 	_, err := h.storage.AddVolume(ctx, path, size, result)
 	if err != nil {
 		return err
@@ -148,7 +205,7 @@ func (h *Host) WalletAddress() types.Address {
 }
 
 // Contracts returns the host's contract manager
-func (h *Host) Contracts() *contracts.ContractManager {
+func (h *Host) Contracts() *contracts.Manager {
 	return h.contracts
 }
 
@@ -157,30 +214,43 @@ func (h *Host) PublicKey() types.PublicKey {
 	return h.privKey.PublicKey()
 }
 
-// GatewayAddr returns the address of the host's gateway.
-func (h *Host) GatewayAddr() string {
-	return string(h.g.Address())
+// SyncerAddr returns the address of the host's syncer.
+func (h *Host) SyncerAddr() string {
+	return string(h.s.Addr())
 }
 
-// NewHost initializes a new test host
-func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, debugLogging bool) (*Host, error) {
-	g, err := gateway.New("localhost:0", false, filepath.Join(dir, "gateway"))
+// NewHost initializes a new test host.
+func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block) (*Host, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create dir: %w", err)
+	}
+	chainDB, err := coreutils.OpenBoltChainDB(filepath.Join(dir, "chain.db"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create gateway: %w", err)
+		return nil, fmt.Errorf("failed to create chaindb: %w", err)
 	}
-	cs, errCh := mconsensus.New(g, false, filepath.Join(dir, "consensus"))
-	if err := <-errCh; err != nil {
-		return nil, fmt.Errorf("failed to create consensus set: %w", err)
-	}
-	tpool, err := transactionpool.New(cs, g, filepath.Join(dir, "transactionpool"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create transaction pool: %w", err)
-	}
-	tp := node.NewTransactionPool(tpool)
-	cm, err := node.NewChainManager(cs, tp, network)
+	dbStore, tipState, err := chain.NewDBStore(chainDB, network, genesisBlock)
 	if err != nil {
 		return nil, err
 	}
+	cm := chain.NewManager(dbStore, tipState)
+
+	l, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create syncer listener: %w", err)
+	}
+	s := syncer.New(l, cm, newEphemeralPeerStore(), gateway.Header{
+		GenesisID:  genesisBlock.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: l.Addr().String(),
+	}, syncer.WithPeerDiscoveryInterval(100*time.Millisecond), syncer.WithSyncInterval(100*time.Millisecond))
+	syncErrChan := make(chan error, 1)
+	syncerCtx, syncerCancel := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			syncerCancel()
+		}
+	}()
+	go func() { syncErrChan <- s.Run(syncerCtx) }()
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
@@ -188,23 +258,17 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 		return nil, fmt.Errorf("failed to create sql store: %w", err)
 	}
 
-	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, db, log.Named("wallet"))
+	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
 
-	wr, err := webhooks.NewManager(db, log.Named("webhooks"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create webhook reporter: %w", err)
-	}
-
-	am := alerts.NewManager(wr, log.Named("alerts"))
-	storage, err := storage.NewVolumeManager(db, am, cm, log.Named("storage"), 0)
+	storage, err := storage.NewVolumeManager(db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage manager: %w", err)
 	}
 
-	contracts, err := contracts.NewManager(db, am, storage, cm, tp, wallet, log.Named("contracts"))
+	contracts, err := contracts.NewManager(db, storage, cm, s, wallet, contracts.WithRejectAfter(10), contracts.WithRevisionSubmissionBuffer(5))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract manager: %w", err)
 	}
@@ -219,29 +283,26 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(
-		settings.WithHostKey(privKey),
-		settings.WithRHP2Addr(rhp2Listener.Addr().String()),
-		settings.WithStore(db),
-		settings.WithChainManager(cm),
-		settings.WithTransactionPool(tp),
-		settings.WithWallet(wallet),
-		settings.WithAlertManager(am),
-		settings.WithLog(log.Named("settings")))
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
+	}
+
+	idx, err := index.NewManager(db, cm, contracts, wallet, settings, storage, index.WithLog(log.Named("index")), index.WithBatchSize(0)) // off-by-one
+	if err != nil {
+		return nil, fmt.Errorf("failed to create index manager: %w", err)
 	}
 
 	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
-	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, tp, wallet, contracts, settings, storage, stubDataMonitor{}, stubMetricReporter{}, log.Named("rhpv2"))
+	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv2 session handler: %w", err)
 	}
 	go rhpv2.Serve()
 
-	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, tp, wallet, accounts, contracts, registry, storage, settings, stubDataMonitor{}, stubMetricReporter{}, log.Named("rhpv3"))
+	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv3 session handler: %w", err)
 	}
@@ -251,13 +312,15 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, d
 		dir:     dir,
 		privKey: privKey,
 
-		g:  g,
-		cs: cs,
-		tp: tp,
+		s:            s,
+		syncerCancel: syncerCancel,
+		cm:           cm,
+		chainDB:      chainDB,
 
 		store:     db,
 		wallet:    wallet,
 		settings:  settings,
+		index:     idx,
 		storage:   storage,
 		registry:  registry,
 		accounts:  accounts,

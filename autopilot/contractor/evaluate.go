@@ -5,15 +5,15 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/worker"
+	"go.sia.tech/renterd/internal/gouging"
 )
 
 var ErrMissingRequiredFields = errors.New("missing required fields in configuration, both allowance and amount must be set")
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Currency, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
-	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
+	gc := gouging.NewChecker(gs, cs, fee, &period, &cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		hc := checkHost(cfg, rs, gc, host, minValidScore)
+		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
 		if hc.Usability.IsUsable() {
 			usables++
 		}
@@ -31,12 +31,12 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, fee types.Cu
 	}
 
 	period := cfg.Contracts.Period
-	gc := worker.NewGougingChecker(gs, cs, fee, period, cfg.Contracts.RenewWindow)
+	gc := gouging.NewChecker(gs, cs, fee, &period, &cfg.Contracts.RenewWindow)
 
 	resp.Hosts = uint64(len(hosts))
 	for i, host := range hosts {
 		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight // ignore block height
-		hc := checkHost(cfg, rs, gc, host, minValidScore)
+		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
 		if hc.Usability.IsUsable() {
 			resp.Usable++
 			continue

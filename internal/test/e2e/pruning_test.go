@@ -20,10 +20,11 @@ func TestHostPruning(t *testing.T) {
 	}
 
 	// create a new test cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
+
+	// convenience variables
 	b := cluster.Bus
-	w := cluster.Worker
 	a := cluster.Autopilot
 	tt := cluster.tt
 
@@ -43,44 +44,19 @@ func TestHostPruning(t *testing.T) {
 		tt.OK(b.RecordHostScans(context.Background(), his))
 	}
 
-	// add a host
-	hosts := cluster.AddHosts(1)
-	h1 := hosts[0]
-
-	// fetch the host
-	h, err := b.Host(context.Background(), h1.PublicKey())
-	tt.OK(err)
-
-	// scan the host (lastScan needs to be > 0 for downtime to start counting)
-	tt.OKAll(w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0))
-
-	// block the host
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1.PublicKey().String()}, nil, false))
-
-	// remove it from the cluster manually
-	cluster.RemoveHost(h1)
-
 	// shut down the worker manually, this will flush any interactions
 	cluster.ShutdownWorker(context.Background())
+
+	// remove it from the cluster manually
+	h1 := cluster.hosts[0]
+	cluster.RemoveHost(h1)
 
 	// record 9 failed interactions, right before the pruning threshold, and
 	// wait for the autopilot loop to finish at least once
 	recordFailedInteractions(9, h1.PublicKey())
 
-	// trigger the autopilot loop twice, failing to trigger it twice shouldn't
-	// fail the test, this avoids an NDF on windows
-	remaining := 2
-	for i := 1; i < 100; i++ {
-		triggered, err := a.Trigger(false)
-		tt.OK(err)
-		if triggered {
-			remaining--
-			if remaining == 0 {
-				break
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// trigger the autopilot
+	tt.OKAll(a.Trigger(true))
 
 	// assert the host was not pruned
 	hostss, err := b.Hosts(context.Background(), api.GetHostsOptions{})
@@ -98,6 +74,7 @@ func TestHostPruning(t *testing.T) {
 		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
+			a.Trigger(true) // trigger autopilot
 			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)
 		}
 		return nil

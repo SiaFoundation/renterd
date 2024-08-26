@@ -17,10 +17,11 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/autopilot/scanner"
 	"go.sia.tech/renterd/build"
+	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/wallet"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -86,7 +87,7 @@ type Bus interface {
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
 	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error)
+	WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
@@ -102,7 +103,7 @@ type Autopilot struct {
 	a *accounts
 	c *contractor.Contractor
 	m *migrator
-	s *scanner
+	s scanner.Scanner
 
 	tickerDuration time.Duration
 	wg             sync.WaitGroup
@@ -123,39 +124,32 @@ type Autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(id string, bus Bus, workers []Worker, logger *zap.Logger, heartbeat time.Duration, scannerScanInterval time.Duration, scannerBatchSize, scannerNumThreads uint64, migrationHealthCutoff float64, accountsRefillInterval time.Duration, revisionSubmissionBuffer, migratorParallelSlabsPerWorker uint64, revisionBroadcastInterval time.Duration) (*Autopilot, error) {
+func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_ *Autopilot, err error) {
+	logger = logger.Named("autopilot").Named(cfg.ID)
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
-
 	ap := &Autopilot{
-		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", id)),
-		id:      id,
+		alerts:  alerts.WithOrigin(bus, fmt.Sprintf("autopilot.%s", cfg.ID)),
+		id:      cfg.ID,
 		bus:     bus,
-		logger:  logger.Sugar().Named("autopilot").Named(id),
+		logger:  logger.Sugar(),
 		workers: newWorkerPool(workers),
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
 
-		tickerDuration: heartbeat,
+		tickerDuration: cfg.Heartbeat,
 
 		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
-	scanner, err := newScanner(
-		ap,
-		scannerBatchSize,
-		scannerNumThreads,
-		scannerScanInterval,
-		scannerTimeoutInterval,
-		scannerTimeoutMinTimeout,
-	)
+
+	ap.s, err = scanner.New(ap.bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	ap.s = scanner
-	ap.c = contractor.New(bus, bus, ap.logger, revisionSubmissionBuffer, revisionBroadcastInterval)
-	ap.m = newMigrator(ap, migrationHealthCutoff, migratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, accountsRefillInterval)
+	ap.c = contractor.New(bus, bus, ap.logger, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval)
+	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
+	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer)
 
 	return ap, nil
 }
@@ -217,11 +211,11 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	jc.Encode(res)
 }
 
-func (ap *Autopilot) Run() error {
+func (ap *Autopilot) Run() {
 	ap.startStopMu.Lock()
 	if ap.isRunning() {
 		ap.startStopMu.Unlock()
-		return errors.New("already running")
+		return
 	}
 	ap.startTime = time.Now()
 	ap.triggerChan = make(chan bool, 1)
@@ -234,7 +228,7 @@ func (ap *Autopilot) Run() error {
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
 		ap.logger.Error("autopilot stopped before it was able to come online")
-		return nil
+		return
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
@@ -242,7 +236,7 @@ func (ap *Autopilot) Run() error {
 		if !errors.Is(err, context.Canceled) {
 			ap.logger.Error(err)
 		}
-		return nil
+		return
 	}
 
 	var forceScan bool
@@ -254,10 +248,9 @@ func (ap *Autopilot) Run() error {
 			defer ap.logger.Info("autopilot iteration ended")
 
 			// initiate a host scan - no need to be synced or configured for scanning
-			ap.s.tryUpdateTimeout()
-			ap.s.tryPerformHostScan(ap.shutdownCtx, w, forceScan)
+			ap.s.Scan(ap.shutdownCtx, w, forceScan)
 
-			// reset forceScan
+			// reset forceScans
 			forceScan = false
 
 			// block until consensus is synced
@@ -270,7 +263,7 @@ func (ap *Autopilot) Run() error {
 				return
 			} else if blocked {
 				if scanning, _ := ap.s.Status(); !scanning {
-					ap.s.tryPerformHostScan(ap.shutdownCtx, w, true)
+					ap.s.Scan(ap.shutdownCtx, w, true)
 				}
 			}
 
@@ -291,8 +284,8 @@ func (ap *Autopilot) Run() error {
 				return
 			}
 
-			// prune hosts that have been offline for too long
-			ap.s.PruneHosts(ap.shutdownCtx, autopilot.Config.Hosts)
+			// update the scanner with the hosts config
+			ap.s.UpdateHostsConfig(autopilot.Config.Hosts)
 
 			// Log worker id chosen for this maintenance iteration.
 			workerID, err := w.ID(ap.shutdownCtx)
@@ -351,7 +344,7 @@ func (ap *Autopilot) Run() error {
 
 		select {
 		case <-ap.shutdownCtx.Done():
-			return nil
+			return
 		case forceScan = <-ap.triggerChan:
 			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.tickerDuration)
@@ -359,11 +352,11 @@ func (ap *Autopilot) Run() error {
 		case <-tickerFired:
 		}
 	}
-	return nil
+	return
 }
 
 // Shutdown shuts down the autopilot.
-func (ap *Autopilot) Shutdown(_ context.Context) error {
+func (ap *Autopilot) Shutdown(ctx context.Context) error {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 
@@ -372,6 +365,7 @@ func (ap *Autopilot) Shutdown(_ context.Context) error {
 		ap.shutdownCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
+		ap.s.Shutdown(ctx)
 		ap.startTime = time.Time{}
 	}
 	return nil
@@ -698,8 +692,16 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 		autopilot.Config = cfg
 	}
 
-	// update the autopilot and interrupt migrations if necessary
-	if err := jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)); err == nil && contractSetChanged {
+	// update the autopilot
+	if jc.Check("failed to update autopilot config", ap.bus.UpdateAutopilot(jc.Request.Context(), autopilot)) != nil {
+		return
+	}
+
+	// update the scanner with the hosts config
+	ap.s.UpdateHostsConfig(cfg.Hosts)
+
+	// interrupt migrations if necessary
+	if contractSetChanged {
 		ap.m.SignalMaintenanceFinished()
 	}
 }
@@ -825,7 +827,6 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 
 		StartTime: api.TimeRFC3339(ap.StartTime()),
 		BuildState: api.BuildState{
-			Network:   build.NetworkName(),
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,

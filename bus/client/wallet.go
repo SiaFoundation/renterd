@@ -10,32 +10,17 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/wallet"
 )
 
-// SendSiacoins is a helper method that sends siacoins to the given outputs.
-func (c *Client) SendSiacoins(ctx context.Context, scos []types.SiacoinOutput, useUnconfirmedTxns bool) (err error) {
-	var value types.Currency
-	for _, sco := range scos {
-		value = value.Add(sco.Value)
-	}
-	txn := types.Transaction{
-		SiacoinOutputs: scos,
-	}
-	toSign, parents, err := c.WalletFund(ctx, &txn, value, useUnconfirmedTxns)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = c.WalletDiscard(ctx, txn)
-		}
-	}()
-	err = c.WalletSign(ctx, &txn, toSign, types.CoveredFields{WholeTransaction: true})
-	if err != nil {
-		return err
-	}
-	return c.BroadcastTransaction(ctx, append(parents, txn))
+// SendSiacoins is a helper method that sends siacoins to the given address.
+func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types.Currency, useUnconfirmedTxns bool) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST("/wallet/send", api.WalletSendRequest{
+		Address:          addr,
+		Amount:           amt,
+		SubtractMinerFee: false,
+		UseUnconfirmed:   useUnconfirmedTxns,
+	}, &txnID)
+	return
 }
 
 // Wallet calls the /wallet endpoint on the bus.
@@ -67,7 +52,7 @@ func (c *Client) WalletFund(ctx context.Context, txn *types.Transaction, amount 
 }
 
 // WalletOutputs returns the set of unspent outputs controlled by the wallet.
-func (c *Client) WalletOutputs(ctx context.Context) (resp []wallet.SiacoinElement, err error) {
+func (c *Client) WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/outputs", &resp)
 	return
 }
@@ -138,7 +123,7 @@ func (c *Client) WalletSign(ctx context.Context, txn *types.Transaction, toSign 
 }
 
 // WalletTransactions returns all transactions relevant to the wallet.
-func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Transaction, err error) {
+func (c *Client) WalletTransactions(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []api.Transaction, err error) {
 	c.c.Custom("GET", "/wallet/transactions", nil, &resp)
 
 	values := url.Values{}

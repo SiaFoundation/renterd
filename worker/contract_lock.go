@@ -51,7 +51,7 @@ func newContractLock(ctx context.Context, fcid types.FileContractID, lockID uint
 	return cl
 }
 
-func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ *contractLock, err error) {
+func (w *Worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ *contractLock, err error) {
 	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (w *worker) acquireContractLock(ctx context.Context, fcid types.FileContrac
 	return newContractLock(w.shutdownCtx, fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
 }
 
-func (w *worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
+func (w *Worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
 	contractLock, err := w.acquireContractLock(ctx, fcid, priority)
 	if err != nil {
 		return err

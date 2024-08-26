@@ -41,6 +41,7 @@ overview of all settings configurable through the CLI.
 | `Directory`                          | Directory for storing node state                     | `.`                               | `--dir`                          | -                                              | `directory`                        |
 | `Seed`                               | Seed for the node                                    | -                                 | -                                | `RENTERD_SEED`                                 | `seed`                              |
 | `AutoOpenWebUI`                      | Automatically open the web UI on startup             | `true`                            | `--openui`                       | -                                              | `autoOpenWebUI`                    |
+| `Network`                            | Network to run on (mainnet/zen/anagami)  | `mainnet`                          | `--network`                       | `RENTERD_NETWORK`                             | `network`                    |
 | `ShutdownTimeout`                    | Timeout for node shutdown                            | `5m`                              | `--node.shutdownTimeout`         | -                                              | `shutdownTimeout`                  |
 | `Log.Level`                          | Global logger level (debug\|info\|warn\|error). Defaults to 'info' | `info`                            | `--log.level`               | `RENTERD_LOG_LEVEL`                          | `log.level`                         |
 | `Log.File.Enabled`                   | Enables logging to disk. Defaults to 'true'          | `true`                            | `--log.file.enabled`              | `RENTERD_LOG_FILE_ENABLED`                   | `log.file.enabled`                  |
@@ -408,14 +409,14 @@ ghcr.io/siafoundation/renterd.
 version: "3.9"
 services:
   renterd:
-    image: ghcr.io/siafoundation/renterd:master-zen
+    image: ghcr.io/siafoundation/renterd:master
     environment:
       - RENTERD_SEED=put your seed here
       - RENTERD_API_PASSWORD=test
     ports:
-      - 9880:9880
-      - 9881:9881
-      - 7070:7070
+      - 9980:9980
+      - 9981:9981
+      - 8080:8080
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -427,22 +428,15 @@ services:
 From within the root of the repo run the following command to build an image of
 `renterd` tagged `renterd`.
 
-#### Mainnet
-
 ```sh
 docker build -t renterd:master -f ./docker/Dockerfile .
-```
-
-#### Testnet
-
-```sh
-docker build --build-arg BUILD_TAGS='netgo testnet' -t renterd:master-zen -f ./docker/Dockerfile .
 ```
 
 ### Run Container
 
 Run `renterd` in the background as a container named `renterd` that exposes its
 API to the host system and the gateway to the world.
+
 
 #### Mainnet
 
@@ -452,9 +446,15 @@ docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEE
 
 #### Testnet
 
+To run `renterd` on testnet use the `RENTERD_NETWORK` environment variable.
+
 ```bash
-docker run -d --name renterd-testnet -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9880:9880/tcp -p :9881:9881/tcp ghcr.io/siafoundation/renterd:master-zen
+docker run -d --name renterd -e RENTERD_API_PASSWORD="<PASSWORD>" -e RENTERD_NETWORK="<network>" -e RENTERD_SEED="<SEED>" -p 127.0.0.1:9980:9980/tcp -p :9981:9981/tcp ghcr.io/siafoundation/renterd:master
 ```
+
+Currently available values for `<network>` are:
+- `zen`
+- `anagami`
 
 ## Architecture
 
@@ -606,10 +606,10 @@ updated using the settings API:
 {
 	"hostBlockHeightLeeway": 6,                                   // 6 blocks
 	"maxContractPrice": "15000000000000000000000000",             // 15 SC per contract
-	"maxDownloadPrice": "3000000000000000000000000000",           // 3000 SC per 1 TiB
+	"maxDownloadPrice": "3000000000000000000000000000",           // 3000 SC per 1 TB
 	"maxRPCPrice": "1000000000000000000000",                      // 1mS per RPC
-	"maxStoragePrice": "631593542824",                            // 3000 SC per TiB per month
-	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TiB
+	"maxStoragePrice": "631593542824",                            // 3000 SC per TB per month
+	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TB
 	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
 	"minAccountExpiry": 86400000000000,                           // 1 day
 	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC

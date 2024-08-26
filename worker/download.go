@@ -13,9 +13,9 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stats"
 	"go.uber.org/zap"
 )
 
@@ -39,8 +39,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
-		statsOverdrivePct                *stats.DataPoints
-		statsSlabDownloadSpeedBytesPerMS *stats.DataPoints
+		statsOverdrivePct                *utils.DataPoints
+		statsSlabDownloadSpeedBytesPerMS *utils.DataPoints
 
 		shutdownCtx context.Context
 
@@ -127,27 +127,26 @@ type (
 	}
 )
 
-func (w *worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) {
+func (w *Worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
-
-	mm := newMemoryManager(logger.Named("memorymanager"), maxMemory)
-	w.downloadManager = newDownloadManager(w.shutdownCtx, w, mm, w.bus, maxOverdrive, overdriveTimeout, logger)
+	w.downloadManager = newDownloadManager(w.shutdownCtx, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(ctx context.Context, hm HostManager, mm MemoryManager, os ObjectStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.SugaredLogger) *downloadManager {
+func newDownloadManager(ctx context.Context, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
+	logger = logger.Named("downloadmanager")
 	return &downloadManager{
 		hm:     hm,
-		mm:     mm,
+		mm:     newMemoryManager(maxMemory, logger),
 		os:     os,
-		logger: logger,
+		logger: logger.Sugar(),
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
 
-		statsOverdrivePct:                stats.NoDecay(),
-		statsSlabDownloadSpeedBytesPerMS: stats.NoDecay(),
+		statsOverdrivePct:                utils.NewDataPoints(0),
+		statsSlabDownloadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		shutdownCtx: ctx,
 
@@ -759,11 +758,11 @@ loop:
 				}
 
 				// handle lost sectors
-				if isSectorNotFound(resp.err) {
+				if rhp3.IsSectorNotFound(resp.err) {
 					if err := s.mgr.os.DeleteHostSector(ctx, resp.req.host.PublicKey(), resp.req.root); err != nil {
 						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root, zap.Error(err))
 					}
-				} else if isPriceTableGouging(resp.err) && s.overpay && !resp.req.overpay {
+				} else if rhp3.IsPriceTableGouging(resp.err) && s.overpay && !resp.req.overpay {
 					resp.req.overpay = true // ensures we don't retry the same request over and over again
 					gouging = append(gouging, resp.req)
 				}

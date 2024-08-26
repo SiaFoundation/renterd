@@ -206,6 +206,7 @@ func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.Contrac
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to delete contract metric: %w", err)
 	}
+	defer deleteStmt.Close()
 
 	for _, metric := range metrics {
 		// delete any existing metric for the same contract that has happened
@@ -365,7 +366,7 @@ func RecordPerformanceMetric(ctx context.Context, tx sql.Tx, metrics ...api.Perf
 }
 
 func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO wallets (created_at, timestamp, confirmed_lo, confirmed_hi, spendable_lo, spendable_hi, unconfirmed_lo, unconfirmed_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO wallets (created_at, timestamp, confirmed_lo, confirmed_hi, spendable_lo, spendable_hi, unconfirmed_lo, unconfirmed_hi, immature_hi, immature_lo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert wallet metric: %w", err)
 	}
@@ -381,6 +382,8 @@ func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMet
 			Unsigned64(metric.Spendable.Hi),
 			Unsigned64(metric.Unconfirmed.Lo),
 			Unsigned64(metric.Unconfirmed.Hi),
+			Unsigned64(metric.Immature.Lo),
+			Unsigned64(metric.Immature.Hi),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert wallet metric: %w", err)
@@ -406,6 +409,7 @@ func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, in
 			(*Unsigned64)(&m.Confirmed.Lo), (*Unsigned64)(&m.Confirmed.Hi),
 			(*Unsigned64)(&m.Spendable.Lo), (*Unsigned64)(&m.Spendable.Hi),
 			(*Unsigned64)(&m.Unconfirmed.Lo), (*Unsigned64)(&m.Unconfirmed.Hi),
+			(*Unsigned64)(&m.Immature.Lo), (*Unsigned64)(&m.Immature.Hi),
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to scan contract set metric: %w", err)
