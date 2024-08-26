@@ -67,7 +67,7 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-tags=testing;-timeout=60m;-count=50;-run=TestSectorPruning"
+          args: "-failfast;-race;-tags=testing;-timeout=90m;-count=125;-run=TestSectorPruning"
       # - name: Test Integration - MySQL
       #   if: matrix.os == 'ubuntu-latest'
       #   uses: n8maninger/action-golang-test@v1
