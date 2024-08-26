@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
 
@@ -433,9 +432,9 @@ func (s *s3) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKe
 func (s *s3) CreateMultipartUpload(ctx context.Context, bucket, key string, meta map[string]string) (gofakes3.UploadID, error) {
 	convertToSiaMetadataHeaders(meta)
 	resp, err := s.b.CreateMultipartUpload(ctx, bucket, "/"+key, api.CreateMultipartOptions{
-		Key:      &object.NoOpKey,
-		MimeType: meta["Content-Type"],
-		Metadata: api.ExtractObjectUserMetadataFrom(meta),
+		DisableClientSideEncryption: true,
+		MimeType:                    meta["Content-Type"],
+		Metadata:                    api.ExtractObjectUserMetadataFrom(meta),
 	})
 	if err != nil {
 		return "", gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
