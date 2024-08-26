@@ -8,12 +8,25 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
 
 type mockAccountMgrBackend struct {
 	contracts []api.ContractMetadata
+}
+
+func (b *mockAccountMgrBackend) Alerts(context.Context, alerts.AlertsOpts) (alerts.AlertsResponse, error) {
+	return alerts.AlertsResponse{}, nil
+}
+
+func (b *mockAccountMgrBackend) DismissAlerts(context.Context, ...types.Hash256) error {
+	return nil
+}
+
+func (b *mockAccountMgrBackend) RegisterAlert(context.Context, alerts.Alert) error {
+	return nil
 }
 
 func (b *mockAccountMgrBackend) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, balance types.Currency) error {
@@ -46,7 +59,7 @@ func TestAccounts(t *testing.T) {
 			},
 		},
 	}
-	mgr, err := NewAccountManager(types.GeneratePrivateKey(), "test", b, b, b, b, time.Second, zap.NewNop())
+	mgr, err := NewAccountManager(types.GeneratePrivateKey(), "test", b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

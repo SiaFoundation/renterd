@@ -1626,7 +1626,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 		panic("priceTables already initialized") // developer error
 	}
 	keyPath := fmt.Sprintf("accounts/%s", w.id)
-	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w.bus, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

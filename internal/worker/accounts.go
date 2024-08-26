@@ -87,11 +87,12 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key types.PrivateKey, owner string, w AccountMgrWorker, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key types.PrivateKey, owner string, alerter alerts.Alerter, w AccountMgrWorker, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	a := &AccountMgr{
+		alerts: alerter,
 		w:      w,
 		cs:     cs,
 		dc:     dc,
