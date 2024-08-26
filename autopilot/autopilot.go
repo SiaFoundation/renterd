@@ -55,7 +55,7 @@ type Bus interface {
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
-	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+	RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 

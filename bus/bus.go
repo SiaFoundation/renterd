@@ -200,7 +200,7 @@ type (
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
-		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
