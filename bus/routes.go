@@ -917,7 +917,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		return indices, nil
 	})
 
-	debuglog.Debugw("pruning contract", "size", utils.HumanReadableSize(int(c.Size)), "contract", c.ID, "duration", time.Since(start), "spending", spending, "pruned", pruned, "remaining", remaining, zap.Error(err))
+	debuglog.Debugw("pruning contract", "size", utils.HumanReadableSize(int(c.Size)), "contract", c.ID, "duration", time.Since(start), "pruned", pruned, "remaining", remaining, zap.Error(err))
 
 	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
 		err = nil // ignore error

@@ -114,6 +114,7 @@ func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 	}); err != nil {
 		return err
 	}
+
 	// upload
 	cost, err := h.client.AppendSector(ctx, sectorRoot, sector, &rev, h.hk, h.siamuxAddr, h.acc.id, pt, h.renterKey)
 	if err != nil {

@@ -246,41 +246,44 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 
 // PrunableContractRoots returns the indices of roots that are not in the
 // contract.
-func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
-	// build select query
-	query := "SELECT ? as idx, ? as root" + strings.Repeat(" UNION ALL SELECT ? AS idx, ?", len(roots)-1)
-	var args []interface{}
+func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (prunable []uint64, err error) {
+	// build query params
+	var params []interface{}
+	params = append(params, FileContractID(fcid))
 	for i, root := range roots {
-		args = append(args, uint64(i), Hash256(root))
+		params = append(params, uint64(i), Hash256(root))
 	}
-	args = append(args, FileContractID(fcid))
 
-	// query indices that are not in the contract
+	// fetch contract roots
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-SELECT idx
-FROM (%s) AS contract_sectors
-LEFT JOIN (
-	SELECT s.root
-	FROM contracts c
-	INNER JOIN contract_sectors cs on cs.db_contract_id = c.id
-	INNER JOIN sectors s on cs.db_sector_id = s.id
-	WHERE c.fcid = ?
-) AS db_sectors ON contract_sectors.root = db_sectors.root  WHERE db_sectors.root IS NULL`, query), args...)
+SELECT s.root
+FROM contracts c
+INNER JOIN contract_sectors cs on cs.db_contract_id = c.id
+INNER JOIN sectors s on cs.db_sector_id = s.id
+WHERE c.fcid = ? AND s.root IN (%s)`, strings.Repeat("?, ", len(roots)-1)+"?"), params...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract diff: %w", err)
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
 	}
 	defer rows.Close()
 
 	// fetch them
+	inDB := make(map[types.Hash256]struct{})
 	for rows.Next() {
-		var index uint64
-		if err := rows.Scan(&index); err != nil {
-			return nil, fmt.Errorf("failed to scan root index: %w", err)
+		var root Hash256
+		if err := rows.Scan(&root); err != nil {
+			return nil, fmt.Errorf("failed to scan root: %w", err)
 		}
-		indices = append(indices, index)
+		inDB[types.Hash256(root)] = struct{}{}
 	}
 
-	return indices, nil
+	// return the indices of roots not in the DB
+	for index, root := range roots {
+		if _, ok := inDB[root]; !ok {
+			prunable = append(prunable, uint64(index))
+		}
+	}
+
+	return
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
