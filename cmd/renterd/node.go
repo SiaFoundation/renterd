@@ -232,7 +232,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		}
 		setupFns = append(setupFns, fn{
 			name: "Autopilot",
-			fn:   func(_ context.Context) error { ap.Run(); return nil },
+			fn:   func(_ context.Context) error { go ap.Run(); return nil },
 		})
 		shutdownFns = append(shutdownFns, fn{
 			name: "Autopilot",
@@ -252,6 +252,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		setupFns:    setupFns,
 		shutdownFns: shutdownFns,
 
+		bus: bc,
 		cfg: cfg,
 
 		logger: logger.Sugar(),
