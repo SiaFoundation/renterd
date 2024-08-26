@@ -162,7 +162,9 @@ func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPr
 
 // PruneContract prunes the given contract.
 func (c *Client) PruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (res api.ContractPruneResponse, err error) {
+	fmt.Println("DEBUG PJ: pruning contract", contractID)
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/prune", contractID), api.ContractPruneRequest{Timeout: api.DurationMS(timeout)}, &res)
+	fmt.Println("DEBUG PJ: pruned contract", contractID, err, res.Error, res.Pruned, res.Remaining)
 	return
 }
 

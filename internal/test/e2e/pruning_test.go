@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
+	"go.uber.org/zap"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -99,7 +100,9 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// create a cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	opts := clusterOptsDefault
+	opts.logger = zap.NewNop()
+	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 
 	// add a helper to check whether a root is in a given slice
@@ -122,13 +125,13 @@ func TestSectorPruning(t *testing.T) {
 	numObjects := 10
 
 	// add hosts
-	hosts := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
+	hosts := cluster.AddHostsBlocking(rs.TotalShards)
 
 	// wait until we have accounts
 	cluster.WaitForAccounts()
 
 	// wait until we have a contract set
-	cluster.WaitForContractSetContracts(cfg.Contracts.Set, int(cfg.Contracts.Amount))
+	cluster.WaitForContractSetContracts(cfg.Contracts.Set, rs.TotalShards)
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {

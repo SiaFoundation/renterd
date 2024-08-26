@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
+	"go.uber.org/zap"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -245,7 +246,7 @@ type (
 
 		// PrunableContractRoots returns the indices of roots that are not in
 		// the contract.
-		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
+		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256, logger *zap.SugaredLogger) (indices []uint64, err error)
 
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error

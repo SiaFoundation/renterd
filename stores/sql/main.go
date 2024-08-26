@@ -2824,6 +2824,7 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 	if err != nil {
 		return fmt.Errorf("failed to record contract spending: %w", err)
 	}
+	fmt.Println("DEBUG PJ: updating contract size", fcid, size)
 	return nil
 }
 

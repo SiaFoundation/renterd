@@ -671,7 +671,7 @@ func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey 
 
 func (s *SQLStore) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		indices, err = tx.PrunableContractRoots(ctx, fcid, roots)
+		indices, err = tx.PrunableContractRoots(ctx, fcid, roots, s.logger.Named("debugpj"))
 		return err
 	})
 	return
