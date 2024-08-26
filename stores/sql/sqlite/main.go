@@ -340,10 +340,6 @@ func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
-func (tx *MainDatabaseTx) ContractRootsDiff(ctx context.Context, fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error) {
-	return ssql.ContractRootsDiff(ctx, tx, fcid, roots, offset)
-}
-
 func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
 	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
 }
@@ -565,6 +561,10 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 		tx:  tx,
 		l:   tx.log.Named("ProcessChainUpdate"),
 	})
+}
+
+func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+	return ssql.PrunableContractRoots(ctx, tx, fcid, roots)
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {

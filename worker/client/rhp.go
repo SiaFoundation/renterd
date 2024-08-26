@@ -15,12 +15,6 @@ func (c *Client) RHPBroadcast(ctx context.Context, contractID types.FileContract
 	return
 }
 
-// RHPContractRoots fetches the roots of the contract with given id.
-func (c *Client) RHPContractRoots(ctx context.Context, contractID types.FileContractID) (roots []types.Hash256, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", contractID), &roots)
-	return
-}
-
 // RHPFund funds an ephemeral account using the supplied contract.
 func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error) {
 	req := api.RHPFundRequest{

@@ -148,7 +148,8 @@ func TestSectorPruning(t *testing.T) {
 	for _, c := range contracts {
 		dbRoots, _, err := b.ContractRoots(context.Background(), c.ID)
 		tt.OK(err)
-		cRoots, err := w.RHPContractRoots(context.Background(), c.ID)
+
+		cRoots, err := cluster.ContractRoots(context.Background(), c.ID)
 		tt.OK(err)
 		if len(dbRoots) != len(cRoots) {
 			t.Fatal("unexpected number of roots", dbRoots, cRoots)

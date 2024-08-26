@@ -283,10 +283,6 @@ func (tx *MainDatabaseTx) ContractRoots(ctx context.Context, fcid types.FileCont
 	return ssql.ContractRoots(ctx, tx, fcid)
 }
 
-func (tx *MainDatabaseTx) ContractRootsDiff(ctx context.Context, fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error) {
-	return ssql.ContractRootsDiff(ctx, tx, fcid, roots, offset)
-}
-
 func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return ssql.Contracts(ctx, tx, opts)
 }
@@ -568,6 +564,10 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 		tx:  tx,
 		l:   tx.log.Named("ProcessChainUpdate"),
 	})
+}
+
+func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+	return ssql.PrunableContractRoots(ctx, tx, fcid, roots)
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {

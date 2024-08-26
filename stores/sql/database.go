@@ -101,10 +101,6 @@ type (
 		// ContractRoots returns the roots of the contract with the given ID.
 		ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error)
 
-		// ContractRootsDiff returns the indices, offset by the given offset, of
-		// roots that are not in the contract.
-		ContractRootsDiff(ctx context.Context, fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error)
-
 		// Contracts returns contract metadata for all active contracts. The
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
@@ -246,6 +242,10 @@ type (
 
 		// ProcessChainUpdate applies the given chain update to the database.
 		ProcessChainUpdate(ctx context.Context, applyFn func(ChainUpdateTx) error) error
+
+		// PrunableContractRoots returns the indices of roots that are not in
+		// the contract.
+		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
 
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error

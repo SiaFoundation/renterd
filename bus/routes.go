@@ -854,15 +854,6 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// fetch the contract from the bus
-	c, err := b.ms.Contract(ctx, fcid)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch contract", err) != nil {
-		return
-	}
-
 	// create gouging checker
 	gp, err := b.gougingParams(ctx)
 	if jc.Check("couldn't fetch gouging parameters", err) != nil {
@@ -889,6 +880,15 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		}
 	}()
 
+	// fetch the contract from the bus
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
 	// build map of uploading sectors
 	pending := make(map[types.Hash256]struct{})
 	for _, root := range b.sectors.Sectors(fcid) {
@@ -896,24 +896,20 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}
 
 	// prune the contract
-	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256, offset uint64) ([]uint64, error) {
-		indexMap := make(map[uint64]types.Hash256)
-		for i, root := range roots {
-			indexMap[offset+uint64(i)] = root
-		}
-
-		indices, err := b.ms.ContractRootsDiff(ctx, fcid, roots, offset)
+	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
 		if err != nil {
 			return nil, err
+		} else if len(indices) > len(roots) {
+			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
 		}
 
 		filtered := indices[:0]
 		for _, index := range indices {
-			_, ok := pending[indexMap[index]]
-			if ok {
-				continue
+			_, ok := pending[roots[index]]
+			if !ok {
+				filtered = append(filtered, index)
 			}
-			filtered = append(filtered, index)
 		}
 		indices = filtered
 		return indices, nil

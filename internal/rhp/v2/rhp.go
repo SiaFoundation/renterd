@@ -69,7 +69,7 @@ var (
 )
 
 type (
-	DiffRootsFn = func(fcid types.FileContractID, roots []types.Hash256, offset uint64) (indices []uint64, err error)
+	PrunableRootsFn = func(fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
 )
 
 type (
@@ -168,7 +168,7 @@ func (c *Client) FormContract(ctx context.Context, hostKey types.PublicKey, host
 	return
 }
 
-func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, diffRootsFn DiffRootsFn) (revision *types.FileContractRevision, spending api.ContractSpending, deleted, remaining uint64, err error) {
+func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, diffRootsFn PrunableRootsFn) (revision *types.FileContractRevision, spending api.ContractSpending, deleted, remaining uint64, err error) {
 	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			// reference the revision
@@ -176,7 +176,7 @@ func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, 
 
 			// fetch roots to delete
 			var indices []uint64
-			indices, spending.SectorRoots, err = c.diffContractRoots(t, renterKey, &rev, settings, diffRootsFn)
+			indices, spending.SectorRoots, err = c.prunableContractRoots(t, renterKey, &rev, settings, diffRootsFn)
 			if err != nil {
 				return err
 			} else if len(indices) == 0 {
@@ -385,7 +385,7 @@ func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.Private
 	return
 }
 
-func (c *Client) diffContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, diffFn DiffRootsFn) (indices []uint64, cost types.Currency, _ error) {
+func (c *Client) prunableContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, prunableRootsFn PrunableRootsFn) (indices []uint64, cost types.Currency, _ error) {
 	numsectors := rev.NumSectors()
 	for offset := uint64(0); offset < numsectors; {
 		// calculate the batch size
@@ -400,14 +400,16 @@ func (c *Client) diffContractRoots(t *rhpv2.Transport, renterKey types.PrivateKe
 			return nil, types.ZeroCurrency, err
 		}
 
-		// diff the batch
-		diff, err := diffFn(rev.ID(), batch, offset)
+		// fetch prunable roots for this batch
+		prunable, err := prunableRootsFn(rev.ID(), batch)
 		if err != nil {
 			return nil, types.ZeroCurrency, err
 		}
 
-		// append the roots
-		indices = append(indices, diff...)
+		// append the roots, make sure to take the offset into account
+		for _, index := range prunable {
+			indices = append(indices, index+offset)
+		}
 		offset += n
 
 		// update the cost

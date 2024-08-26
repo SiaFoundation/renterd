@@ -232,9 +232,9 @@ type (
 		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
-		ContractRootsDiff(ctx context.Context, id types.FileContractID, roots []types.Hash256, offset uint64) ([]uint64, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
+		PrunableContractRoots(ctx context.Context, id types.FileContractID, roots []types.Hash256) ([]uint64, error)
 
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 

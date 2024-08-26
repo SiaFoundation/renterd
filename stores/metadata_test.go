@@ -126,7 +126,7 @@ SET health = (
 	return err
 }
 
-func TestDiffSectors(t *testing.T) {
+func TestPrunableContractRoots(t *testing.T) {
 	// create a SQL store
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -168,7 +168,7 @@ func TestDiffSectors(t *testing.T) {
 	}
 
 	// diff the roots - should be empty
-	indices, err := ss.ContractRootsDiff(context.Background(), fcids[0], roots, 0)
+	indices, err := ss.PrunableContractRoots(context.Background(), fcids[0], roots)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(indices) != 0 {
@@ -191,11 +191,13 @@ func TestDiffSectors(t *testing.T) {
 		t.Fatal("unexpected number of roots", len(updated))
 	}
 
-	// diff the roots again, should return indices 0 and 2, but for testing purposes we pass an offset of 123 so we should get 123 and 125
-	indices, err = ss.ContractRootsDiff(context.Background(), fcids[0], roots, 123)
+	// diff the roots again, should return indices 0 and 2
+	indices, err = ss.PrunableContractRoots(context.Background(), fcids[0], roots)
 	if err != nil {
 		t.Fatal(err)
-	} else if indices[0] != 123 || indices[1] != 125 {
+	} else if len(indices) != 2 {
+		t.Fatal("unexpected number of indices", len(indices))
+	} else if indices[0] != 0 || indices[1] != 2 {
 		t.Fatal("unexpected indices", indices)
 	}
 }
