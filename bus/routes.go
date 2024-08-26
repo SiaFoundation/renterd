@@ -895,6 +895,8 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		pending[root] = struct{}{}
 	}
 
+	debuglog := b.logger.Named("debugpj")
+	start := time.Now()
 	// prune the contract
 	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
 		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
@@ -914,6 +916,9 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		indices = filtered
 		return indices, nil
 	})
+
+	debuglog.Debugw("pruning contract", "size", utils.HumanReadableSize(int(c.Size)), "contract", c.ID, "duration", time.Since(start), "spending", spending, "pruned", pruned, "remaining", remaining, zap.Error(err))
+
 	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
 		err = nil // ignore error
 	} else if !errors.Is(err, context.Canceled) {
