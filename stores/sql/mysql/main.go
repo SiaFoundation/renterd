@@ -572,9 +572,7 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 
 func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
 	// build tmp table name
-	var r [4]byte
-	frand.Read(r[:])
-	tmpTable := strings.ReplaceAll(fmt.Sprintf("diff_%s_%x", fcid.String()[:8], r), ":", "_")
+	tmpTable := strings.ReplaceAll(fmt.Sprintf("tmp_host_roots_%s", fcid.String()[:8]), ":", "_")
 
 	// create temporary table
 	_, err = tx.Exec(ctx, fmt.Sprintf(`
