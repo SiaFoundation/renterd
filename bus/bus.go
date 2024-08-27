@@ -789,8 +789,7 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 		fundAmount := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
 
 		// make sure we don't exceed the max fund amount.
-		// TODO: remove the IsZero check for the v2 change
-		if /*!wprr.MaxFundAmount.IsZero() &&*/ maxFundAmount.Cmp(fundAmount) < 0 {
+		if maxFundAmount.Cmp(fundAmount) < 0 {
 			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, fundAmount, maxFundAmount)
 		}
 
