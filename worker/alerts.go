@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"errors"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -47,6 +48,18 @@ func newUploadFailedAlert(bucket, path, contractSet, mimeType string, minShards,
 	}
 	if multipart {
 		data["multipart"] = true
+	}
+
+	hostErr := err
+	for errors.Unwrap(hostErr) != nil {
+		hostErr = errors.Unwrap(hostErr)
+	}
+	if set, ok := hostErr.(HostErrorSet); ok {
+		hostErrors := make(map[string]string, len(set))
+		for hk, err := range set {
+			hostErrors[hk.String()] = err.Error()
+		}
+		data["hosts"] = hostErrors
 	}
 
 	return alerts.Alert{
