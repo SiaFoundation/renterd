@@ -564,21 +564,6 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *Bus) hostsHandlerGETDeprecated(jc jape.Context) {
-	offset := 0
-	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
-
-	// fetch hosts
-	hosts, err := b.hs.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
-	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
-		return
-	}
-	jc.Encode(hosts)
-}
-
 func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 	var req api.SearchHostsRequest
 	if jc.Decode(&req) != nil {
@@ -602,7 +587,7 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 	case api.HostFilterModeAllowed:
 	case api.HostFilterModeBlocked:
 	case api.HostFilterModeAll:
-		req.FilterMode = api.HostFilterModeAll
+		req.FilterMode = api.HostFilterModeAllowed
 	case "":
 	default:
 		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for no filter", req.FilterMode), http.StatusBadRequest)
