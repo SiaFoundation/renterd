@@ -106,7 +106,7 @@ func (ap *Autopilot) fetchHostContract(fcid types.FileContractID) (host api.Host
 }
 
 func (ap *Autopilot) performContractPruning() {
-	log := ap.logger.Named("contractpruner")
+	log := ap.logger.Named("performContractPruning")
 	log.Info("performing contract pruning")
 
 	// fetch prunable contracts
@@ -138,7 +138,7 @@ func (ap *Autopilot) performContractPruning() {
 		}
 
 		// prune contract
-		n, err := ap.pruneContract(ap.shutdownCtx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release)
+		n, err := ap.pruneContract(ap.shutdownCtx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release, log)
 		if err != nil {
 			log.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
 			continue
@@ -164,9 +164,9 @@ func (ap *Autopilot) performContractPruning() {
 	log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
 }
 
-func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string) (uint64, error) {
+func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
 	// define logger
-	log := ap.logger.Named("contractpruner").With(
+	log := logger.With(
 		zap.Stringer("contract", fcid),
 		zap.Stringer("host", hk),
 		zap.String("version", hostVersion),

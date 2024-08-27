@@ -578,17 +578,16 @@ func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.
 
 	// create temporary table
 	_, err = tx.Exec(ctx, fmt.Sprintf(`
+DROP TABLE IF EXISTS %s;
 CREATE TEMPORARY TABLE %s (idx INT, root blob);
-CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable))
+CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporary table: %w", err)
 	}
 
 	// defer removal
 	defer func() {
-		tx.Exec(ctx, fmt.Sprintf(`
-DROP TABLE IF EXISTS %s;
-DROP INDEX IF EXISTS %s_idx;`, tmpTable, tmpTable))
+		tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable))
 	}()
 
 	// insert roots in batches
