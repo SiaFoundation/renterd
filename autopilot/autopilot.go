@@ -755,11 +755,6 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO: remove on next major release
-	if jc.Check("failed to get host info", compatV105UsabilityFilterModeCheck(req.UsabilityMode)) != nil {
-		return
-	}
-
 	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), api.SearchHostOptions{
 		AutopilotID:     ap.id,
 		Offset:          req.Offset,
@@ -898,18 +893,6 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 		Fee:                    fee,
 		SkipContractFormations: skipContractFormations,
 	}, nil
-}
-
-func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
-	switch usabilityMode {
-	case api.UsabilityFilterModeUsable:
-	case api.UsabilityFilterModeUnusable:
-	case api.UsabilityFilterModeAll:
-	case "":
-	default:
-		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
-	}
-	return nil
 }
 
 func computeNextPeriod(bh, currentPeriod, period uint64) uint64 {
