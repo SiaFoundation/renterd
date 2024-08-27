@@ -57,7 +57,7 @@ func TestWebhooks(t *testing.T) {
 	mux := http.NewServeMux()
 	var events []webhooks.Event
 	var mu sync.Mutex
-	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
 		var event webhooks.Event
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			t.Fatal(err)
