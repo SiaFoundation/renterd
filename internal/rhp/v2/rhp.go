@@ -169,25 +169,36 @@ func (c *Client) FormContract(ctx context.Context, hostKey types.PublicKey, host
 }
 
 func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, diffRootsFn PrunableRootsFn) (revision *types.FileContractRevision, spending api.ContractSpending, deleted, remaining uint64, err error) {
+	log := c.logger.Named("performContractPruning").Named("debugpj")
 	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			// reference the revision
 			revision = &rev.Revision
 
+			start := time.Now()
 			// fetch roots to delete
 			var indices []uint64
-			indices, spending.SectorRoots, err = c.prunableContractRoots(t, renterKey, &rev, settings, diffRootsFn)
+			indices, spending.SectorRoots, err = c.prunableContractRoots(t, renterKey, &rev, settings, func(fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+				startt := time.Now()
+				defer func() {
+					log.Debugf("batch diff roots took %v", time.Since(startt))
+				}()
+				return diffRootsFn(fcid, roots)
+			})
 			if err != nil {
 				return err
 			} else if len(indices) == 0 {
 				return ErrNoSectorsToPrune
 			}
+			log.Debugf("fetched %d sectors to prune in %v", len(indices), time.Since(start))
+			start = time.Now()
 
 			// delete the roots from the contract
 			deleted, spending.Deletions, err = c.deleteContractRoots(t, renterKey, &rev, settings, indices)
 			if deleted < uint64(len(indices)) {
 				remaining = uint64(len(indices)) - deleted
 			}
+			log.Debugf("deleted %d sectors in %v", deleted, time.Since(start))
 
 			// return sizes instead of number of roots
 			deleted *= rhpv2.SectorSize
@@ -386,7 +397,9 @@ func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.Private
 }
 
 func (c *Client) prunableContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, prunableRootsFn PrunableRootsFn) (indices []uint64, cost types.Currency, _ error) {
+	log := c.logger.Named("performContractPruning").Named("debugpj")
 	numsectors := rev.NumSectors()
+	var nBatch uint64
 	for offset := uint64(0); offset < numsectors; {
 		// calculate the batch size
 		n := batchSizeFetchSectors
@@ -395,16 +408,19 @@ func (c *Client) prunableContractRoots(t *rhpv2.Transport, renterKey types.Priva
 		}
 
 		// fetch the batch
+		start := time.Now()
 		batch, batchCost, err := c.fetchContractRootsBatch(t, renterKey, rev, settings, offset, n)
 		if err != nil {
 			return nil, types.ZeroCurrency, err
 		}
-
+		log.Debugw("fetched batch", "batch", batch, "batchSize", n, "duration", time.Since(start))
+		start = time.Now()
 		// fetch prunable roots for this batch
 		prunable, err := prunableRootsFn(rev.ID(), batch)
 		if err != nil {
 			return nil, types.ZeroCurrency, err
 		}
+		log.Debugw("fetched prunable roots", "batch", nBatch, "prunable", len(prunable), "duration", time.Since(start))
 
 		// append the roots, make sure to take the offset into account
 		for _, index := range prunable {
@@ -414,6 +430,7 @@ func (c *Client) prunableContractRoots(t *rhpv2.Transport, renterKey types.Priva
 
 		// update the cost
 		cost = cost.Add(batchCost)
+		nBatch++
 	}
 	return
 }

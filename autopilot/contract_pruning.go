@@ -131,6 +131,7 @@ func (ap *Autopilot) performContractPruning() {
 		// fetch host
 		h, _, err := ap.fetchHostContract(contract.ID)
 		if utils.IsErr(err, api.ErrContractNotFound) {
+			log.Debugw("contract got archived", "contract", contract.ID)
 			continue // contract got archived
 		} else if err != nil {
 			log.Errorw("failed to fetch host", zap.Error(err), "contract", contract.ID)
