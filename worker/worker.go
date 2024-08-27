@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
@@ -96,7 +97,6 @@ type (
 		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
 		UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
 
-		ResetDrift(ctx context.Context, id rhpv3.Account) error
 		SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
 		ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
 	}
@@ -154,7 +154,6 @@ type (
 	Wallet interface {
 		WalletDiscard(ctx context.Context, txn types.Transaction) error
 		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
 		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
 		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
@@ -217,7 +216,7 @@ type Worker struct {
 	uploadManager   *uploadManager
 
 	accounts    *accounts
-	dialer      *iworker.FallbackDialer
+	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
 	priceTables *priceTables
 
@@ -384,61 +383,6 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(hpt)
-}
-
-func (w *Worker) rhpFormHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the request
-	var rfr api.RHPFormRequest
-	if jc.Decode(&rfr) != nil {
-		return
-	}
-
-	// check renter funds is not zero
-	if rfr.RenterFunds.IsZero() {
-		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
-		return
-	}
-
-	// apply a pessimistic timeout on contract formations
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	hostIP, hostKey, renterFunds := rfr.HostIP, rfr.HostKey, rfr.RenterFunds
-	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
-	renterKey := w.deriveRenterKey(hostKey)
-
-	contract, txnSet, err := w.rhp2Client.FormContract(ctx, renterAddress, renterKey, hostKey, hostIP, renterFunds, hostCollateral, endHeight, gc, func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error) {
-		txns, err = w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
-		if err != nil {
-			return nil, nil, err
-		}
-		return txns, func(txn types.Transaction) {
-			_ = w.bus.WalletDiscard(ctx, txn)
-		}, nil
-	})
-	if jc.Check("couldn't form contract", err) != nil {
-		return
-	}
-
-	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil {
-		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
-	}
-
-	jc.Encode(api.RHPFormResponse{
-		ContractID:     contract.ID(),
-		Contract:       contract,
-		TransactionSet: txnSet,
-	})
 }
 
 func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
@@ -637,7 +581,7 @@ func (w *Worker) rhpRenewHandler(jc jape.Context) {
 	var renewed rhpv2.ContractRevision
 	var txnSet []types.Transaction
 	var contractPrice, fundAmount types.Currency
-	if jc.Check("couldn't renew contract", w.withRevision(ctx, defaultRevisionFetchTimeout, rrr.ContractID, rrr.HostKey, rrr.SiamuxAddr, lockingPriorityRenew, func(_ types.FileContractRevision) (err error) {
+	if jc.Check("couldn't renew contract", w.withContractLock(ctx, rrr.ContractID, lockingPriorityRenew, func() (err error) {
 		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
 		renewed, txnSet, contractPrice, fundAmount, err = h.RenewContract(ctx, rrr)
 		return err
@@ -678,24 +622,8 @@ func (w *Worker) rhpFundHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) (err error) {
-		h := w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr)
-		err = h.FundAccount(ctx, rfr.Balance, &rev)
-		if rhp3.IsBalanceMaxExceeded(err) {
-			// sync the account
-			err = h.SyncAccount(ctx, &rev)
-			if err != nil {
-				w.logger.Infof(fmt.Sprintf("failed to sync account: %v", err), "host", rfr.HostKey)
-				return
-			}
-
-			// try funding the account again
-			err = h.FundAccount(ctx, rfr.Balance, &rev)
-			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to fund account after syncing: %v", err), "host", rfr.HostKey, "balance", rfr.Balance)
-			}
-		}
-		return
+	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) error {
+		return w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr).FundAccount(ctx, rfr.Balance, &rev)
 	}))
 }
 
@@ -1287,7 +1215,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
-	dialer := iworker.NewFallbackDialer(b, net.Dialer{}, l)
+	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:                  a,
 		allowPrivateIPs:         cfg.AllowPrivateIPs,
@@ -1332,7 +1260,6 @@ func (w *Worker) Handler() http.Handler {
 		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
 		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
-		"POST   /rhp/form":                   w.rhpFormHandler,
 		"POST   /rhp/renew":                  w.rhpRenewHandler,
 		"POST   /rhp/fund":                   w.rhpFundHandler,
 		"POST   /rhp/sync":                   w.rhpSyncHandler,

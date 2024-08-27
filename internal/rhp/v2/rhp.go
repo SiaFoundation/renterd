@@ -71,8 +71,6 @@ type (
 	Dialer interface {
 		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
 	}
-
-	PrepareFormFn func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error)
 )
 
 type Client struct {
@@ -157,27 +155,9 @@ func (c *Client) Settings(ctx context.Context, hostKey types.PublicKey, hostIP s
 	return
 }
 
-func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterKey types.PrivateKey, hostKey types.PublicKey, hostIP string, renterFunds, hostCollateral types.Currency, endHeight uint64, gougingChecker gouging.Checker, prepareForm PrepareFormFn) (contract rhpv2.ContractRevision, txnSet []types.Transaction, err error) {
+func (c *Client) FormContract(ctx context.Context, hostKey types.PublicKey, hostIP string, renterKey types.PrivateKey, txnSet []types.Transaction) (contract rhpv2.ContractRevision, fullTxnSet []types.Transaction, err error) {
 	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) (err error) {
-		settings, err := rpcSettings(ctx, t)
-		if err != nil {
-			return err
-		}
-
-		if breakdown := gougingChecker.CheckSettings(settings); breakdown.Gouging() {
-			return fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown)
-		}
-
-		renterTxnSet, discardTxn, err := prepareForm(ctx, renterAddress, renterKey.PublicKey(), renterFunds, hostCollateral, hostKey, settings, endHeight)
-		if err != nil {
-			return err
-		}
-
-		contract, txnSet, err = rpcFormContract(ctx, t, renterKey, renterTxnSet)
-		if err != nil {
-			discardTxn(renterTxnSet[len(renterTxnSet)-1])
-			return err
-		}
+		contract, fullTxnSet, err = rpcFormContract(ctx, t, renterKey, txnSet)
 		return
 	})
 	return

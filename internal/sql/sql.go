@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -172,7 +173,11 @@ LOOP:
 		if sleep > maxBackoff {
 			sleep = maxBackoff
 		}
-		log.Warn("database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
+		lvl := zapcore.DebugLevel
+		if time.Since(start) > time.Second {
+			lvl = zapcore.WarnLevel
+		}
+		log.Log(lvl, "database locked", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Stack("stack"), zap.Duration("retry", sleep))
 
 		select {
 		case <-ctx.Done():

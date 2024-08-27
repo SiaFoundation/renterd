@@ -111,8 +111,8 @@ func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 	return rev, nil
 }
 
-func (h *testHost) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, error) {
-	return h.hptFn(), nil
+func (h *testHost) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
+	return h.hptFn(), types.ZeroCurrency, nil
 }
 
 func (h *testHost) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {

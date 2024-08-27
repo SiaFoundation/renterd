@@ -12,13 +12,13 @@ require (
 	github.com/minio/minio-go/v7 v7.0.75
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.4.4-0.20240814175157-ebc804c7119c
-	go.sia.tech/coreutils v0.2.6-0.20240814205841-6bd57953a01b
+	go.sia.tech/core v0.4.4
+	go.sia.tech/coreutils v0.3.0
 	go.sia.tech/gofakes3 v0.0.4
 	go.sia.tech/hostd v1.1.3-0.20240815012637-e8f558df5bfe
 	go.sia.tech/jape v0.12.0
 	go.sia.tech/mux v1.2.0
-	go.sia.tech/web/renterd v0.60.0
+	go.sia.tech/web/renterd v0.60.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.26.0
 	golang.org/x/sys v0.24.0

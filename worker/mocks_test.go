@@ -722,10 +722,6 @@ func (*walletMock) WalletFund(context.Context, *types.Transaction, types.Currenc
 	return nil, nil, nil
 }
 
-func (*walletMock) WalletPrepareForm(context.Context, types.Address, types.PublicKey, types.Currency, types.Currency, types.PublicKey, rhpv2.HostSettings, uint64) ([]types.Transaction, error) {
-	return nil, nil
-}
-
 func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
 	return api.WalletPrepareRenewResponse{}, nil
 }

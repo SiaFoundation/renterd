@@ -80,16 +80,6 @@ type (
 		Error             string `json:"error,omitempty"`
 	}
 
-	// RHPFormRequest is the request type for the /rhp/form endpoint.
-	RHPFormRequest struct {
-		EndHeight      uint64          `json:"endHeight"`
-		HostCollateral types.Currency  `json:"hostCollateral"`
-		HostKey        types.PublicKey `json:"hostKey"`
-		HostIP         string          `json:"hostIP"`
-		RenterFunds    types.Currency  `json:"renterFunds"`
-		RenterAddress  types.Address   `json:"renterAddress"`
-	}
-
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
 	RHPFormResponse struct {
 		ContractID     types.FileContractID   `json:"contractID"`

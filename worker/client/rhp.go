@@ -8,8 +8,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-
-	rhpv2 "go.sia.tech/core/rhp/v2"
 )
 
 // RHPBroadcast broadcasts the latest revision for a contract.
@@ -22,21 +20,6 @@ func (c *Client) RHPBroadcast(ctx context.Context, contractID types.FileContract
 func (c *Client) RHPContractRoots(ctx context.Context, contractID types.FileContractID) (roots []types.Hash256, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contract/%s/roots", contractID), &roots)
 	return
-}
-
-// RHPForm forms a contract with a host.
-func (c *Client) RHPForm(ctx context.Context, endHeight uint64, hostKey types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error) {
-	req := api.RHPFormRequest{
-		EndHeight:      endHeight,
-		HostCollateral: hostCollateral,
-		HostKey:        hostKey,
-		HostIP:         hostIP,
-		RenterFunds:    renterFunds,
-		RenterAddress:  renterAddress,
-	}
-	var resp api.RHPFormResponse
-	err := c.c.WithContext(ctx).POST("/rhp/form", req, &resp)
-	return resp.Contract, resp.TransactionSet, err
 }
 
 // RHPFund funds an ephemeral account using the supplied contract.

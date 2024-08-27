@@ -232,7 +232,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		}
 		setupFns = append(setupFns, fn{
 			name: "Autopilot",
-			fn:   func(_ context.Context) error { ap.Run(); return nil },
+			fn:   func(_ context.Context) error { go ap.Run(); return nil },
 		})
 		shutdownFns = append(shutdownFns, fn{
 			name: "Autopilot",
@@ -252,6 +252,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		setupFns:    setupFns,
 		shutdownFns: shutdownFns,
 
+		bus: bc,
 		cfg: cfg,
 
 		logger: logger.Sugar(),
@@ -375,9 +376,13 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 		}
 	}
 
+	// create master key - we currently derive the same key used by the workers
+	// to ensure contracts formed by the bus can be renewed by the autopilot
+	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
+
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}

@@ -184,9 +184,18 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
 	}
 
-	// Autopilot shouldn't have its prices pinned
+	// PricePinningSettings should have default values
 	pps, err := b.PricePinningSettings(context.Background())
 	tt.OK(err)
+	if pps.ForexEndpointURL == "" {
+		t.Fatal("expected default value for ForexEndpointURL")
+	} else if pps.Currency == "" {
+		t.Fatal("expected default value for Currency")
+	} else if pps.Threshold == 0 {
+		t.Fatal("expected default value for Threshold")
+	}
+
+	// Autopilot shouldn't have its prices pinned
 	if len(pps.Autopilots) != 1 {
 		t.Fatalf("expected 1 autopilot, got %v", len(pps.Autopilots))
 	} else if pin, exists := pps.Autopilots[api.DefaultAutopilotID]; !exists {
@@ -1090,9 +1099,8 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
-	rev, _, err := w.RHPForm(context.Background(), cs.BlockHeight+test.AutopilotConfig.Contracts.Period+test.AutopilotConfig.Contracts.RenewWindow, h.PublicKey, h.NetAddress, wallet.Address, types.Siacoins(1), types.Siacoins(1))
-	tt.OK(err)
-	contract, err := b.AddContract(context.Background(), rev, rev.Revision.MissedHostPayout().Sub(types.Siacoins(1)), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
 	tt.OK(err)
 
 	// assert revision height is 0
@@ -1101,13 +1109,12 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	}
 
 	// broadcast the revision for each contract
-	fcid := contract.ID
-	tt.OK(w.RHPBroadcast(context.Background(), fcid))
+	tt.OK(w.RHPBroadcast(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		c, err := cluster.Bus.Contract(context.Background(), fcid)
+		c, err := cluster.Bus.Contract(context.Background(), contract.ID)
 		tt.OK(err)
 		if c.RevisionHeight == 0 {
 			return fmt.Errorf("contract %v should have been revised", c.ID)
@@ -1122,54 +1129,62 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// Create cluster
-	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
+	// run without autopilot
+	opts := clusterOptsDefault
+	opts.skipRunningAutopilot = true
+
+	// create cluster
+	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
+
+	// convenience variables
+	b := cluster.Bus
+	w := cluster.Worker
 	tt := cluster.tt
 
-	// Shut down the autopilot to prevent it from interfering.
-	cluster.ShutdownAutopilot(context.Background())
+	tt.OK(b.UpdateSetting(context.Background(), api.SettingRedundancy, api.RedundancySettings{
+		MinShards:   1,
+		TotalShards: 1,
+	}))
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
 
-	// Wait for contract and accounts.
-	contract := cluster.WaitForContracts()[0]
-	accounts := cluster.WaitForAccounts()
+	// scan the host
+	tt.OKAll(w.RHPScan(context.Background(), h.PublicKey, h.NetAddress, 10*time.Second))
 
-	// Shut down the autopilot to prevent it from interfering with the test.
-	cluster.ShutdownAutopilot(context.Background())
+	// manually form a contract with the host
+	cs, _ := b.ConsensusState(context.Background())
+	wallet, _ := b.Wallet(context.Background())
+	c, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(2), h.PublicKey, h.NetAddress, types.Siacoins(1), cs.BlockHeight+10)
+	tt.OK(err)
 
-	// Newly created accounts are !cleanShutdown. Simulate a sync to change
-	// that.
-	for _, acc := range accounts {
-		if acc.CleanShutdown {
-			t.Fatal("new account should indicate an unclean shutdown")
-		} else if acc.RequiresSync {
-			t.Fatal("new account should not require a sync")
-		}
-		if err := cluster.Bus.SetBalance(context.Background(), acc.ID, acc.HostKey, types.Siacoins(1).Big()); err != nil {
-			t.Fatal(err)
-		}
-	}
+	tt.OK(b.SetContractSet(context.Background(), test.ContractSet, []types.FileContractID{c.ID}))
 
-	// Fetch accounts again.
+	// fund the account
+	fundAmt := types.Siacoins(1)
+	tt.OK(w.RHPFund(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, fundAmt))
+
+	// fetch accounts
 	accounts, err := cluster.Bus.Accounts(context.Background())
 	tt.OK(err)
 
+	// assert account state
 	acc := accounts[0]
-	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
-		t.Fatalf("wrong balance %v", acc.Balance)
-	}
 	if acc.ID == (rhpv3.Account{}) {
 		t.Fatal("account id not set")
-	}
-	host := cluster.hosts[0]
-	if acc.HostKey != types.PublicKey(host.PublicKey()) {
+	} else if acc.CleanShutdown {
+		t.Fatal("account should indicate an unclean shutdown")
+	} else if !acc.RequiresSync {
+		t.Fatal("account should require a sync")
+	} else if acc.HostKey != h.PublicKey {
 		t.Fatal("wrong host")
-	}
-	if !acc.CleanShutdown {
-		t.Fatal("account should indicate a clean shutdown")
+	} else if acc.Balance.Cmp(types.Siacoins(1).Big()) != 0 {
+		t.Fatalf("wrong balance %v", acc.Balance)
 	}
 
-	// Fetch account from bus directly.
+	// fetch account from bus directly
 	busAccounts, err := cluster.Bus.Accounts(context.Background())
 	tt.OK(err)
 	if len(busAccounts) != 1 {
@@ -1180,12 +1195,11 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatal("bus account doesn't match worker account")
 	}
 
-	// Check that the spending was recorded for the contract. The recorded
+	// check that the spending was recorded for the contract. The recorded
 	// spending should be > the fundAmt since it consists of the fundAmt plus
 	// fee.
-	fundAmt := types.Siacoins(1)
 	tt.Retry(10, testBusFlushInterval, func() error {
-		cm, err := cluster.Bus.Contract(context.Background(), contract.ID)
+		cm, err := cluster.Bus.Contract(context.Background(), c.ID)
 		tt.OK(err)
 
 		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
@@ -1194,7 +1208,24 @@ func TestEphemeralAccounts(t *testing.T) {
 		return nil
 	})
 
-	// Update the balance to create some drift.
+	// sync the account
+	tt.OK(w.RHPSync(context.Background(), c.ID, acc.HostKey, c.HostIP, c.SiamuxAddr))
+
+	// assert account state
+	accounts, err = cluster.Bus.Accounts(context.Background())
+	tt.OK(err)
+
+	// assert account state
+	acc = accounts[0]
+	if !acc.CleanShutdown {
+		t.Fatal("account should indicate a clean shutdown")
+	} else if acc.RequiresSync {
+		t.Fatal("account should not require a sync")
+	} else if acc.Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatalf("account shoult not have drift %v", acc.Drift)
+	}
+
+	// update the balance to create some drift
 	newBalance := fundAmt.Div64(2)
 	newDrift := new(big.Int).Sub(newBalance.Big(), fundAmt.Big())
 	if err := cluster.Bus.SetBalance(context.Background(), busAcc.ID, acc.HostKey, newBalance.Big()); err != nil {
@@ -1208,11 +1239,11 @@ func TestEphemeralAccounts(t *testing.T) {
 		t.Fatalf("drift was %v but should be %v", busAcc.Drift, maxNewDrift)
 	}
 
-	// Reboot cluster.
+	// reboot cluster
 	cluster2 := cluster.Reboot(t)
 	defer cluster2.Shutdown()
 
-	// Check that accounts were loaded from the bus.
+	// check that accounts were loaded from the bus
 	accounts2, err := cluster2.Bus.Accounts(context.Background())
 	tt.OK(err)
 	for _, acc := range accounts2 {
@@ -1225,7 +1256,7 @@ func TestEphemeralAccounts(t *testing.T) {
 		}
 	}
 
-	// Reset drift again.
+	// reset drift again
 	if err := cluster2.Bus.ResetDrift(context.Background(), acc.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1554,7 +1585,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	c := contracts[0]
 
 	// add a contract to the bus
-	_, err = cluster.Bus.AddContract(context.Background(), rhpv2.ContractRevision{
+	_, err = cluster.bs.AddContract(context.Background(), rhpv2.ContractRevision{
 		Revision: types.FileContractRevision{
 			ParentID: types.FileContractID{1},
 			UnlockConditions: types.UnlockConditions{
