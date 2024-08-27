@@ -25,7 +25,7 @@ func (*accountsMock) Accounts(context.Context, string) ([]api.Account, error) {
 	return nil, nil
 }
 
-func (*accountsMock) UpdateAccounts(context.Context, string, []api.Account, bool) error {
+func (*accountsMock) UpdateAccounts(context.Context, []api.Account) error {
 	return nil
 }
 

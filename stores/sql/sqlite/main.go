@@ -714,14 +714,14 @@ func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicK
 	return ssql.ResetLostSectors(ctx, tx, hk)
 }
 
-func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, owner string, accounts []api.Account) error {
+func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
 	// clean_shutdown = 1 after save
 	stmt, err := tx.Prepare(ctx, `
 		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync, owner)
-		VAlUES (?, ?, 1, ?, ?, ?, ?, ?)
+		VAlUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(account_id) DO UPDATE SET
 		account_id = EXCLUDED.account_id,
-		clean_shutdown = 1,
+		clean_shutdown = EXCLUDED.clean_shutdown,
 		host = EXCLUDED.host,
 		balance = EXCLUDED.balance,
 		drift = EXCLUDED.drift,
@@ -733,7 +733,7 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, owner string, accoun
 	defer stmt.Close()
 
 	for _, acc := range accounts {
-		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync, owner)
+		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), acc.CleanShutdown, (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync, acc.Owner)
 		if err != nil {
 			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
 		} else if n, err := res.RowsAffected(); err != nil {

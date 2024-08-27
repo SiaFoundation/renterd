@@ -1727,14 +1727,14 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 	var req api.AccountsSaveRequest
 	if jc.Decode(&req) != nil {
 		return
-	} else if req.Owner == "" {
-		jc.Error(errors.New("owner is required"), http.StatusBadRequest)
-		return
-	} else if b.accounts.SaveAccounts(jc.Request.Context(), req.Owner, req.Accounts) != nil {
-		return
-	} else if !req.SetUnclean {
-		return
-	} else if jc.Check("failed to set accounts unclean", b.accounts.SetUncleanShutdown(jc.Request.Context(), req.Owner)) != nil {
+	}
+	for _, acc := range req.Accounts {
+		if acc.Owner == "" {
+			jc.Error(errors.New("acocunts need to have a valid 'Owner'"), http.StatusBadRequest)
+			return
+		}
+	}
+	if b.accounts.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
 		return
 	}
 }

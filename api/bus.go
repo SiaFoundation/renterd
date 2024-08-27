@@ -46,9 +46,7 @@ type (
 
 type (
 	AccountsSaveRequest struct {
-		Owner      string    `json:"owner"`
-		Accounts   []Account `json:"accounts"`
-		SetUnclean bool      `json:"setUnclean"`
+		Accounts []Account `json:"accounts"`
 	}
 
 	// BusStateResponse is the response type for the /bus/state endpoint.

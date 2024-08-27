@@ -307,8 +307,8 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 
 		// SaveAccounts saves the given accounts in the db, overwriting any
-		// existing ones and setting the clean shutdown flag.
-		SaveAccounts(ctx context.Context, owner string, accounts []api.Account) error
+		// existing ones.
+		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)

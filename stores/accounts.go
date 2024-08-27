@@ -28,8 +28,8 @@ func (s *SQLStore) SetUncleanShutdown(ctx context.Context, owner string) error {
 
 // SaveAccounts saves the given accounts in the db, overwriting any existing
 // ones.
-func (s *SQLStore) SaveAccounts(ctx context.Context, owner string, accounts []api.Account) error {
+func (s *SQLStore) SaveAccounts(ctx context.Context, accounts []api.Account) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.SaveAccounts(ctx, owner, accounts)
+		return tx.SaveAccounts(ctx, accounts)
 	})
 }

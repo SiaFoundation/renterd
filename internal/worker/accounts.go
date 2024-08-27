@@ -38,7 +38,7 @@ type (
 
 	AccountStore interface {
 		Accounts(context.Context, string) ([]api.Account, error)
-		UpdateAccounts(context.Context, string, []api.Account, bool) error
+		UpdateAccounts(context.Context, []api.Account) error
 	}
 
 	ConsensusState interface {
@@ -150,7 +150,7 @@ func (a *AccountMgr) ResetDrift(id rhpv3.Account) error {
 
 func (a *AccountMgr) Shutdown(ctx context.Context) error {
 	accounts := a.Accounts()
-	err := a.s.UpdateAccounts(ctx, a.owner, accounts, false)
+	err := a.s.UpdateAccounts(ctx, accounts)
 	if err != nil {
 		a.logger.Errorf("failed to save %v accounts: %v", len(accounts), err)
 		return err
@@ -246,7 +246,11 @@ func (a *AccountMgr) run() {
 	a.mu.Unlock()
 
 	// mark the shutdown as unclean, this will be overwritten on shutdown
-	err = a.s.UpdateAccounts(a.shutdownCtx, a.owner, nil, true)
+	uncleanAccounts := append([]api.Account(nil), saved...)
+	for i := range uncleanAccounts {
+		uncleanAccounts[i].CleanShutdown = false
+	}
+	err = a.s.UpdateAccounts(a.shutdownCtx, uncleanAccounts)
 	if err != nil {
 		a.logger.Error("failed to mark account shutdown as unclean", zap.Error(err))
 	}

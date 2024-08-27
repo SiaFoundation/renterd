@@ -165,8 +165,7 @@ type (
 	// startup and persisted upon shutdown.
 	AccountStore interface {
 		Accounts(context.Context, string) ([]api.Account, error)
-		SaveAccounts(context.Context, string, []api.Account) error
-		SetUncleanShutdown(context.Context, string) error
+		SaveAccounts(context.Context, []api.Account) error
 	}
 
 	// An AutopilotStore stores autopilots.

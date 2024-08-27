@@ -1174,8 +1174,9 @@ func TestEphemeralAccounts(t *testing.T) {
 		return nil
 	})
 
-	// manuall save accounts in bus
-	tt.OK(cluster.Bus.UpdateAccounts(context.Background(), "owner", []api.Account{acc}, false))
+	// manuall save accounts in bus for 'owner' and mark it clean
+	acc.Owner = "owner"
+	tt.OK(cluster.Bus.UpdateAccounts(context.Background(), []api.Account{acc}))
 
 	// fetch again
 	busAccounts, err := cluster.Bus.Accounts(context.Background(), "owner")
@@ -1192,11 +1193,13 @@ func TestEphemeralAccounts(t *testing.T) {
 	}
 
 	// mark accounts unclean
-	tt.OK(cluster.Bus.UpdateAccounts(context.Background(), "owner", nil, true))
+	uncleanAcc := acc
+	uncleanAcc.CleanShutdown = false
+	tt.OK(cluster.Bus.UpdateAccounts(context.Background(), []api.Account{uncleanAcc}))
 	busAccounts, err = cluster.Bus.Accounts(context.Background(), "owner")
 	tt.OK(err)
 	if len(busAccounts) != 1 || busAccounts[0].ID != acc.ID || busAccounts[0].CleanShutdown {
-		t.Fatalf("expected 1 unclean account, got %v", len(busAccounts))
+		t.Fatalf("expected 1 unclean account, got %v, %v", len(busAccounts), busAccounts[0].CleanShutdown)
 	}
 }
 

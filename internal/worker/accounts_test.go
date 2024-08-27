@@ -38,7 +38,7 @@ func (b *mockAccountMgrBackend) SyncAccount(ctx context.Context, fcid types.File
 func (b *mockAccountMgrBackend) Accounts(context.Context, string) ([]api.Account, error) {
 	return []api.Account{}, nil
 }
-func (b *mockAccountMgrBackend) UpdateAccounts(context.Context, string, []api.Account, bool) error {
+func (b *mockAccountMgrBackend) UpdateAccounts(context.Context, []api.Account) error {
 	return nil
 }
 func (b *mockAccountMgrBackend) ConsensusState(ctx context.Context) (api.ConsensusState, error) {

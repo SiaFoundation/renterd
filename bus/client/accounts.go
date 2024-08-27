@@ -16,11 +16,9 @@ func (c *Client) Accounts(ctx context.Context, owner string) (accounts []api.Acc
 }
 
 // UpdateAccounts saves all accounts.
-func (c *Client) UpdateAccounts(ctx context.Context, owner string, accounts []api.Account, setUnclean bool) (err error) {
+func (c *Client) UpdateAccounts(ctx context.Context, accounts []api.Account) (err error) {
 	err = c.c.WithContext(ctx).POST("/accounts", api.AccountsSaveRequest{
-		Accounts:   accounts,
-		Owner:      owner,
-		SetUnclean: setUnclean,
+		Accounts: accounts,
 	}, nil)
 	return
 }
