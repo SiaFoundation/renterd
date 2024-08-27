@@ -271,7 +271,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 
 // NotifyEvent notifies the worker of an event.
 func (c *Client) NotifyEvent(ctx context.Context, e webhooks.Event) (err error) {
-	err = c.c.WithContext(ctx).POST("/events", e, nil)
+	err = c.c.WithContext(ctx).POST("/event", e, nil)
 	return
 }
 

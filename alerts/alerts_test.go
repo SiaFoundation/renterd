@@ -72,7 +72,7 @@ func TestWebhooks(t *testing.T) {
 	// register a hook
 	wh := webhooks.Webhook{
 		Module: webhookModule,
-		URL:    fmt.Sprintf("http://%v/events", srv.Listener.Addr().String()),
+		URL:    fmt.Sprintf("http://%v/event", srv.Listener.Addr().String()),
 	}
 	if hookID := wh.String(); hookID != fmt.Sprintf("%v.%v.%v", wh.URL, wh.Module, "") {
 		t.Fatalf("wrong result for wh.String(): %v != %v", wh.String(), hookID)
