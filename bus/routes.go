@@ -590,7 +590,7 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 	case "":
 		req.FilterMode = api.HostFilterModeAllowed
 	default:
-		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for no filter", req.FilterMode), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for 'allowed' filter", req.FilterMode), http.StatusBadRequest)
 		return
 	}
 
