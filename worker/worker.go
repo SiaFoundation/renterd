@@ -1111,7 +1111,7 @@ func (w *Worker) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(w.accounts.Accounts())
 }
 
-func (w *Worker) eventsHandlerPOST(jc jape.Context) {
+func (w *Worker) eventHandlerPOST(jc jape.Context) {
 	var event webhooks.Event
 	if jc.Decode(&event) != nil {
 		return
@@ -1204,7 +1204,7 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /account/:hostkey": w.accountHandlerGET,
 		"GET    /id":               w.idHandlerGET,
 
-		"POST   /events": w.eventsHandlerPOST,
+		"POST   /event": w.eventHandlerPOST,
 
 		"GET /memory": w.memoryGET,
 
@@ -1234,7 +1234,7 @@ func (w *Worker) Handler() http.Handler {
 // Setup register event webhooks that enable the worker cache.
 func (w *Worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
 	go func() {
-		eventsURL := fmt.Sprintf("%s/events", apiURL)
+		eventsURL := fmt.Sprintf("%s/event", apiURL)
 		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
 		if err := w.eventSubscriber.Register(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
 			w.logger.Errorw("failed to register webhooks", zap.Error(err))
