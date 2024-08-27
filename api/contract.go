@@ -170,9 +170,10 @@ type (
 	// ContractPruneResponse is the response type for the /contract/:id/prune
 	// endpoint.
 	ContractPruneResponse struct {
-		Pruned    uint64 `json:"pruned"`
-		Remaining uint64 `json:"remaining"`
-		Error     string `json:"error,omitempty"`
+		ContractSize uint64 `json:"size"`
+		Pruned       uint64 `json:"pruned"`
+		Remaining    uint64 `json:"remaining"`
+		Error        string `json:"error,omitempty"`
 	}
 
 	// ContractAcquireRequest is the request type for the /contract/:id/release

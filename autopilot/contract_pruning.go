@@ -106,14 +106,16 @@ func (ap *Autopilot) fetchHostContract(fcid types.FileContractID) (host api.Host
 }
 
 func (ap *Autopilot) performContractPruning() {
-	ap.logger.Info("performing contract pruning")
+	log := ap.logger.Named("pruner")
+	log.Info("performing contract pruning")
 
 	// fetch prunable contracts
 	prunable, err := ap.fetchPrunableContracts()
 	if err != nil {
-		ap.logger.Error(err)
+		log.Error(err)
 		return
 	}
+	log.Debugf("found %d prunable contracts", len(prunable))
 
 	// dismiss alerts for contracts that are no longer prunable
 	ap.dismissPruneAlerts(prunable)
@@ -131,14 +133,14 @@ func (ap *Autopilot) performContractPruning() {
 		if utils.IsErr(err, api.ErrContractNotFound) {
 			continue // contract got archived
 		} else if err != nil {
-			ap.logger.Errorw("failed to fetch host", zap.Error(err), "contract", contract.ID)
+			log.Errorw("failed to fetch host", zap.Error(err), "contract", contract.ID)
 			continue
 		}
 
 		// prune contract
 		n, err := ap.pruneContract(ap.shutdownCtx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release)
 		if err != nil {
-			ap.logger.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
+			log.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
 			continue
 		}
 
@@ -146,11 +148,11 @@ func (ap *Autopilot) performContractPruning() {
 	}
 
 	// log total pruned
-	ap.logger.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
+	log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
 }
 
 func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string) (uint64, error) {
-	log := ap.logger.With("contract", fcid, "host", hk, "version", hostVersion, "release", hostRelease)
+	log := ap.logger.Named("pruner").With("contract", fcid, "host", hk, "version", hostVersion, "release", hostRelease)
 
 	// prune the contract
 	start := time.Now()
@@ -160,7 +162,12 @@ func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractI
 	}
 
 	// decorate logger
-	log = log.With("pruned", res.Pruned, "remaining", res.Remaining, "elapsed", time.Since(start))
+	log = log.With(
+		zap.String("pruned", utils.HumanReadableSize(int(res.Pruned))),
+		zap.String("remaining", utils.HumanReadableSize(int(res.Remaining))),
+		zap.String("size", utils.HumanReadableSize(int(res.ContractSize))),
+		zap.Duration("elapsed", time.Since(start)),
+	)
 
 	// ignore slow pruning until host network is 1.6.0+
 	if res.Error != "" && utils.IsErr(errors.New(res.Error), context.DeadlineExceeded) && res.Pruned > 0 {

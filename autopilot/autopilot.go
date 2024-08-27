@@ -285,6 +285,13 @@ func (ap *Autopilot) Run() {
 				return
 			}
 
+			// pruning
+			if autopilot.Config.Contracts.Prune {
+				ap.tryPerformPruning()
+			} else {
+				ap.logger.Info("pruning disabled")
+			}
+
 			// update the scanner with the hosts config
 			ap.s.UpdateHostsConfig(autopilot.Config.Hosts)
 
@@ -334,13 +341,6 @@ func (ap *Autopilot) Run() {
 
 			// migration
 			ap.m.tryPerformMigrations(ap.workers)
-
-			// pruning
-			if autopilot.Config.Contracts.Prune {
-				ap.tryPerformPruning()
-			} else {
-				ap.logger.Info("pruning disabled")
-			}
 		})
 
 		select {

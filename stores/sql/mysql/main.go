@@ -566,11 +566,7 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 	})
 }
 
-func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256, logger *zap.SugaredLogger) (indices []uint64, err error) {
-	start := time.Now()
-	defer func() {
-		logger.Debugw("PrunableContractRoots took", "fcid", fcid, "batch", len(roots), zap.Duration("duration", time.Since(start)))
-	}()
+func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
 	return ssql.PrunableContractRoots(ctx, tx, fcid, roots)
 }
 

@@ -28,6 +28,8 @@ import (
 	"lukechampine.com/frand"
 )
 
+const batchSizeInsertSectors = 500
+
 var ErrNegativeOffset = errors.New("offset can not be negative")
 
 // helper types
@@ -247,99 +249,59 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 // PrunableContractRoots returns the indices of roots that are not in the
 // contract.
 func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (prunable []uint64, err error) {
-	// 	// build tmp table name
-	// 	var r [4]byte
-	// 	frand.Read(r[:])
-	// 	tmpTable := strings.ReplaceAll(fmt.Sprintf("diff_%s_%x", fcid.String()[:8], r), ":", "_")
+	// build tmp table name
+	var r [4]byte
+	frand.Read(r[:])
+	tmpTable := strings.ReplaceAll(fmt.Sprintf("diff_%s_%x", fcid.String()[:8], r), ":", "_")
 
-	// 	// create temporary table
-	// 	_, err = tx.Exec(ctx, fmt.Sprintf(`
-	// CREATE TEMPORARY TABLE %s (idx INT, root blob);
-	// CREATE INDEX %s_idx ON %s (root);
-	// `, tmpTable, tmpTable, tmpTable))
-	// 	if err != nil {
-	// 		panic(fmt.Errorf("oh no: %w", err))
-	// 		// return nil, fmt.Errorf("failed to create temporary table: %w", err)
-	// 	}
-
-	// 	// defer removal
-	// 	defer func() {
-	// 		tx.Exec(ctx, fmt.Sprintf(`
-	// DROP TABLE IF EXISTS %s;
-	// DROP INDEX IF EXISTS %s_idx;
-	// `, tmpTable, tmpTable))
-	// 	}()
-
-	// 	// batch inserts
-	// 	batchSize := 500
-	// 	for i := 0; i < len(roots); i += batchSize {
-	// 		end := i + batchSize
-	// 		if end > len(roots) {
-	// 			end = len(roots)
-	// 		}
-
-	// 		var params []interface{}
-	// 		for _, r := range roots[i:end] {
-	// 			params = append(params, uint64(i), Hash256(r))
-	// 		}
-	// 		query := fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", "))
-	// 		_, err = tx.Exec(ctx, query, params...)
-
-	// 		if err != nil {
-	// 			return nil, fmt.Errorf("failed to insert into tmp table: %w", err)
-	// 		}
-	// 	}
-	// build insert query
-	// query := "SELECT ? as idx, ? as root" + strings.Repeat(" UNION ALL SELECT ? AS idx, ?", len(roots)-1)
-	// var args []interface{}
-	// for i, root := range roots {
-	// 	args = append(args, uint64(i), Hash256(root))
-	// }
-
-	// build query params
-	var params []interface{}
-	params = append(params, FileContractID(fcid))
-	for i, root := range roots {
-		params = append(params, uint64(i), Hash256(root))
+	// create temporary table
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+CREATE TEMPORARY TABLE %s (idx INT, root blob);
+CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary table: %w", err)
 	}
 
-	// fetch contract roots
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-	SELECT s.root
-	FROM contracts c
-	INNER JOIN contract_sectors cs on cs.db_contract_id = c.id
-	INNER JOIN sectors s on cs.db_sector_id = s.id
-	WHERE c.fcid = ? AND s.root IN (%s)`, strings.Repeat("?, ", len(roots)-1)+"?"), params...)
-	// rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
+	// defer removal
+	defer func() {
+		tx.Exec(ctx, fmt.Sprintf(`
+DROP TABLE IF EXISTS %s;
+DROP INDEX IF EXISTS %s_idx;`, tmpTable, tmpTable))
+	}()
+
+	// insert roots in batches
+	for i := 0; i < len(roots); i += batchSizeInsertSectors {
+		end := i + batchSizeInsertSectors
+		if end > len(roots) {
+			end = len(roots)
+		}
+
+		var params []interface{}
+		for i, r := range roots[i:end] {
+			params = append(params, uint64(i), Hash256(r))
+		}
+
+		_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+		}
+	}
+
+	// execute query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
 	}
 	defer rows.Close()
 
-	// fetch them
-	inDB := make(map[types.Hash256]struct{})
+	// fetch indices
 	for rows.Next() {
-		var root Hash256
-		if err := rows.Scan(&root); err != nil {
-			return nil, fmt.Errorf("failed to scan root: %w", err)
+		var idx uint64
+		if err := rows.Scan(&idx); err != nil {
+			return nil, fmt.Errorf("failed to scan root index: %w", err)
 		}
-		inDB[types.Hash256(root)] = struct{}{}
+		prunable = append(prunable, idx)
 	}
-
-	// return the indices of roots not in the DB
-	for index, root := range roots {
-		if _, ok := inDB[root]; !ok {
-			prunable = append(prunable, uint64(index))
-		}
-	}
-	// for rows.Next() {
-	// 	var idx uint64
-	// 	if err := rows.Scan(&idx); err != nil {
-	// 		return nil, fmt.Errorf("failed to scan root: %w", err)
-	// 	}
-	// 	prunable = append(prunable, idx)
-	// }
-
 	return
 }
 
@@ -2884,7 +2846,6 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 	if err != nil {
 		return fmt.Errorf("failed to record contract spending: %w", err)
 	}
-	fmt.Printf("DEBUG PJ: updating contract %v size %v rev %v | del %v | dl %v | ul %v | fund %v | roots %v \n", fcid, size, revisionNumber, newSpending.Deletions, newSpending.Downloads, newSpending.Uploads, newSpending.FundAccount, newSpending.SectorRoots)
 	return nil
 }
 

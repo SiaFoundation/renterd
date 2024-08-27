@@ -895,8 +895,6 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		pending[root] = struct{}{}
 	}
 
-	debuglog := b.logger.Named("debugpj")
-	start := time.Now()
 	// prune the contract
 	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
 		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
@@ -917,8 +915,6 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		return indices, nil
 	})
 
-	debuglog.Debugw("pruning contract", "size", utils.HumanReadableSize(int(c.Size)), "contract", c.ID, "duration", time.Since(start), "pruned", pruned, "remaining", remaining, zap.Error(err))
-
 	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
 		err = nil // ignore error
 	} else if !errors.Is(err, context.Canceled) {
@@ -929,7 +925,6 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// record spending
 	if !spending.Total().IsZero() {
-		fmt.Println("DEBUG PJ: bus: record contract spending", fcid, rev.RevisionNumber, rev.Filesize)
 		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
 			{
 				ContractSpending: spending,
@@ -945,8 +940,9 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// return response
 	res := api.ContractPruneResponse{
-		Pruned:    pruned,
-		Remaining: remaining,
+		ContractSize: rev.Filesize,
+		Pruned:       pruned,
+		Remaining:    remaining,
 	}
 	if err != nil {
 		res.Error = err.Error()
