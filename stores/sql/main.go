@@ -28,8 +28,6 @@ import (
 	"lukechampine.com/frand"
 )
 
-const batchSizeInsertSectors = 500
-
 var ErrNegativeOffset = errors.New("offset can not be negative")
 
 // helper types
@@ -244,65 +242,6 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 		roots = append(roots, root)
 	}
 	return roots, nil
-}
-
-// PrunableContractRoots returns the indices of roots that are not in the
-// contract.
-func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (prunable []uint64, err error) {
-	// build tmp table name
-	var r [4]byte
-	frand.Read(r[:])
-	tmpTable := strings.ReplaceAll(fmt.Sprintf("diff_%s_%x", fcid.String()[:8], r), ":", "_")
-
-	// create temporary table
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-CREATE TEMPORARY TABLE %s (idx INT, root blob);
-CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// defer removal
-	defer func() {
-		tx.Exec(ctx, fmt.Sprintf(`
-DROP TABLE IF EXISTS %s;
-DROP INDEX IF EXISTS %s_idx;`, tmpTable, tmpTable))
-	}()
-
-	// insert roots in batches
-	for i := 0; i < len(roots); i += batchSizeInsertSectors {
-		end := i + batchSizeInsertSectors
-		if end > len(roots) {
-			end = len(roots)
-		}
-
-		var params []interface{}
-		for i, r := range roots[i:end] {
-			params = append(params, uint64(i), Hash256(r))
-		}
-
-		_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
-		}
-	}
-
-	// execute query
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
-	}
-	defer rows.Close()
-
-	// fetch indices
-	for rows.Next() {
-		var idx uint64
-		if err := rows.Scan(&idx); err != nil {
-			return nil, fmt.Errorf("failed to scan root index: %w", err)
-		}
-		prunable = append(prunable, idx)
-	}
-	return
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
