@@ -28,14 +28,6 @@ func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err err
 	return
 }
 
-// Hosts returns 'limit' hosts at given 'offset'.
-func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []api.Host, err error) {
-	values := url.Values{}
-	opts.Apply(values)
-	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
-	return
-}
-
 // HostsForScanning returns 'limit' host addresses at given 'offset' which
 // haven't been scanned after lastScan.
 func (c *Client) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) (hosts []api.HostAddress, err error) {

@@ -587,8 +587,8 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 	case api.HostFilterModeAllowed:
 	case api.HostFilterModeBlocked:
 	case api.HostFilterModeAll:
-		req.FilterMode = api.HostFilterModeAllowed
 	case "":
+		req.FilterMode = api.HostFilterModeAllowed
 	default:
 		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for no filter", req.FilterMode), http.StatusBadRequest)
 		return
@@ -599,8 +599,8 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
 		return
 	}
-	if req.Limit < 0 {
-		jc.Error(errors.New("limit must be non-negative"), http.StatusBadRequest)
+	if req.Limit < 0 && req.Limit != -1 {
+		jc.Error(errors.New("limit must be non-negative or equal to -1 to indicate no limit"), http.StatusBadRequest)
 		return
 	} else if req.Limit == 0 {
 		req.Limit = -1

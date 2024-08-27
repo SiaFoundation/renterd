@@ -104,10 +104,6 @@ type (
 
 // Option types.
 type (
-	GetHostsOptions struct {
-		Offset int
-		Limit  int
-	}
 	HostsForScanningOptions struct {
 		MaxLastScan TimeRFC3339
 		Limit       int
@@ -124,15 +120,6 @@ type (
 		Offset          int
 	}
 )
-
-func (opts GetHostsOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-}
 
 func (opts HostsForScanningOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {

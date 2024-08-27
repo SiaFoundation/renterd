@@ -59,7 +59,7 @@ func TestHostPruning(t *testing.T) {
 	tt.OKAll(a.Trigger(true))
 
 	// assert the host was not pruned
-	hostss, err := b.Hosts(context.Background(), api.GetHostsOptions{})
+	hostss, err := b.SearchHosts(context.Background(), api.SearchHostOptions{})
 	tt.OK(err)
 	if len(hostss) != 1 {
 		t.Fatal("host was pruned")
@@ -71,7 +71,7 @@ func TestHostPruning(t *testing.T) {
 
 	// assert the host was pruned
 	tt.Retry(10, time.Second, func() error {
-		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
+		hostss, err = b.SearchHosts(context.Background(), api.SearchHostOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
 			a.Trigger(true) // trigger autopilot
