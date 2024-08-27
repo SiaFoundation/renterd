@@ -72,11 +72,14 @@ func TestFormContract(t *testing.T) {
 	})
 
 	// assert the contract is part of the contract set
-	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
-	tt.OK(err)
-	if len(contracts) != 1 {
-		t.Fatalf("expected 1 contract, got %v", len(contracts))
-	} else if contracts[0].ID != renewalID {
-		t.Fatalf("expected contract %v, got %v", contract.ID, contracts[0].ID)
-	}
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
+		tt.OK(err)
+		if len(contracts) != 1 {
+			return fmt.Errorf("expected 1 contract, got %v", len(contracts))
+		} else if contracts[0].ID != renewalID {
+			return fmt.Errorf("expected contract %v, got %v", contract.ID, contracts[0].ID)
+		}
+		return nil
+	})
 }
