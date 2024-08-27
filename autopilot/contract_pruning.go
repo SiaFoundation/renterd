@@ -106,7 +106,7 @@ func (ap *Autopilot) fetchHostContract(fcid types.FileContractID) (host api.Host
 }
 
 func (ap *Autopilot) performContractPruning() {
-	log := ap.logger.Named("pruner")
+	log := ap.logger.Named("contractpruner")
 	log.Info("performing contract pruning")
 
 	// fetch prunable contracts
@@ -144,6 +144,19 @@ func (ap *Autopilot) performContractPruning() {
 			continue
 		}
 
+		// handle alerts
+		ap.mu.Lock()
+		alertID := alerts.IDForContract(alertPruningID, contract.ID)
+		if shouldSendPruneAlert(err, h.Settings.Version, h.Settings.Release) {
+			ap.RegisterAlert(ap.shutdownCtx, newContractPruningFailedAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, contract.ID, err))
+			ap.pruningAlertIDs[contract.ID] = alertID // store id to dismiss stale alerts
+		} else {
+			ap.DismissAlert(ap.shutdownCtx, alertID)
+			delete(ap.pruningAlertIDs, contract.ID)
+		}
+		ap.mu.Unlock()
+
+		// adjust total
 		total += n
 	}
 
@@ -152,7 +165,12 @@ func (ap *Autopilot) performContractPruning() {
 }
 
 func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string) (uint64, error) {
-	log := ap.logger.Named("pruner").With("contract", fcid, "host", hk, "version", hostVersion, "release", hostRelease)
+	// define logger
+	log := ap.logger.Named("contractpruner").With(
+		zap.Stringer("contract", fcid),
+		zap.Stringer("host", hk),
+		zap.String("version", hostVersion),
+		zap.String("release", hostRelease))
 
 	// prune the contract
 	start := time.Now()
@@ -196,18 +214,6 @@ func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractI
 		log.Errorw("unexpected error interrupted pruning", zap.Error(errors.New(res.Error)))
 	} else {
 		log.Info("successfully pruned contract")
-	}
-
-	// handle alerts
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
-	alertID := alerts.IDForContract(alertPruningID, fcid)
-	if shouldSendPruneAlert(err, hostVersion, hostRelease) {
-		ap.RegisterAlert(ctx, newContractPruningFailedAlert(hk, hostVersion, hostRelease, fcid, err))
-		ap.pruningAlertIDs[fcid] = alertID // store id to dismiss stale alerts
-	} else {
-		ap.DismissAlert(ctx, alertID)
-		delete(ap.pruningAlertIDs, fcid)
 	}
 
 	return res.Pruned, nil
