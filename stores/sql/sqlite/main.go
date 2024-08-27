@@ -584,7 +584,9 @@ CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable))
 
 	// defer removal
 	defer func() {
-		tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable))
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable)); err != nil {
+			tx.log.Warnw("failed to drop temporary table", zap.Error(err))
+		}
 	}()
 
 	// insert roots in batches
