@@ -585,9 +585,41 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// TODO: on the next major release:
-	// - properly default search params (currently no defaults are set)
-	// - properly validate and return 400 (currently validation is done in autopilot and the store)
+	// validate the usability mode
+	switch req.UsabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	case "":
+		req.UsabilityMode = api.UsabilityFilterModeAll
+	default:
+		jc.Error(fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", req.UsabilityMode), http.StatusBadRequest)
+		return
+	}
+
+	// validate the filter mode
+	switch req.FilterMode {
+	case api.HostFilterModeAllowed:
+	case api.HostFilterModeBlocked:
+	case api.HostFilterModeAll:
+		req.FilterMode = api.HostFilterModeAll
+	case "":
+	default:
+		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for no filter", req.FilterMode), http.StatusBadRequest)
+		return
+	}
+
+	// validate the offset and limit
+	if req.Offset < 0 {
+		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
+		return
+	}
+	if req.Limit < 0 {
+		jc.Error(errors.New("limit must be non-negative"), http.StatusBadRequest)
+		return
+	} else if req.Limit == 0 {
+		req.Limit = -1
+	}
 
 	hosts, err := b.hs.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
