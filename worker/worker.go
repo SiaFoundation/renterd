@@ -1111,6 +1111,21 @@ func (w *Worker) accountsHandlerGET(jc jape.Context) {
 	jc.Encode(w.accounts.Accounts())
 }
 
+func (w *Worker) accountsResetDriftHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	err := w.accounts.ResetDrift(id)
+	if errors.Is(err, iworker.ErrAccountNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if jc.Check("failed to reset drift", err) != nil {
+		return
+	}
+}
+
 func (w *Worker) eventHandlerPOST(jc jape.Context) {
 	var event webhooks.Event
 	if jc.Decode(&event) != nil {
@@ -1200,9 +1215,10 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *Worker) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts":         w.accountsHandlerGET,
-		"GET    /account/:hostkey": w.accountHandlerGET,
-		"GET    /id":               w.idHandlerGET,
+		"GET    /accounts":               w.accountsHandlerGET,
+		"GET    /account/:hostkey":       w.accountHandlerGET,
+		"POST   /account/:id/resetdrift": w.accountsResetDriftHandlerPOST,
+		"GET    /id":                     w.idHandlerGET,
 
 		"POST   /event": w.eventHandlerPOST,
 
