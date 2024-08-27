@@ -722,16 +722,6 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		return
 	}
 
-	state, err := ap.buildState(jc.Request.Context())
-	if jc.Check("failed to build state", err) != nil {
-		return
-	}
-
-	// TODO: remove on next major release
-	if jc.Check("failed to get host", compatV105Host(jc.Request.Context(), state.ContractsConfig(), ap.bus, hk)) != nil {
-		return
-	}
-
 	hi, err := ap.bus.Host(jc.Request.Context(), hk)
 	if jc.Check("failed to get host info", err) != nil {
 		return
@@ -908,47 +898,6 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 		Fee:                    fee,
 		SkipContractFormations: skipContractFormations,
 	}, nil
-}
-
-// compatV105Host performs some state checks and bus calls we no longer need but
-// are necessary checks to make sure our API is consistent. This should be
-// removed in the next major release.
-func compatV105Host(ctx context.Context, cfg api.ContractsConfig, b Bus, hk types.PublicKey) error {
-	// state checks
-	if cfg.Allowance.IsZero() {
-		return fmt.Errorf("can not score hosts because contracts allowance is zero")
-	}
-	if cfg.Amount == 0 {
-		return fmt.Errorf("can not score hosts because contracts amount is zero")
-	}
-	if cfg.Period == 0 {
-		return fmt.Errorf("can not score hosts because contract period is zero")
-	}
-
-	// fetch host
-	_, err := b.Host(ctx, hk)
-	if err != nil {
-		return fmt.Errorf("failed to fetch requested host from bus: %w", err)
-	}
-
-	// other checks
-	_, err = b.GougingSettings(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
-	}
-	_, err = b.RedundancySettings(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
-	}
-	_, err = b.ConsensusState(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch consensus state from bus: %w", err)
-	}
-	_, err = b.RecommendedFee(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
-	}
-	return nil
 }
 
 func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
