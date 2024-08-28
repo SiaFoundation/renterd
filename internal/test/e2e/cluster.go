@@ -71,6 +71,7 @@ type TestCluster struct {
 
 	network      *consensus.Network
 	genesisBlock types.Block
+	bs           bus.Store
 	cm           *chain.Manager
 	apID         string
 	dbName       string
@@ -85,6 +86,13 @@ type dbConfig struct {
 	Database         config.Database
 	DatabaseLog      config.DatabaseLog
 	RetryTxIntervals []time.Duration
+}
+
+func (tc *TestCluster) Accounts() []api.Account {
+	tc.tt.Helper()
+	accounts, err := tc.Worker.Accounts(context.Background())
+	tc.tt.OK(err)
+	return accounts
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -313,7 +321,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -371,6 +379,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		logger:       logger,
 		network:      network,
 		genesisBlock: genesis,
+		bs:           bs,
 		cm:           cm,
 		tt:           tt,
 		wk:           wk,
@@ -484,23 +493,23 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, error) {
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
 	// create store
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	sqlStore, err := stores.NewSQLStore(storeCfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create webhooks manager
 	wh, err := webhooks.NewManager(sqlStore, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// hookup webhooks <-> alerts
@@ -509,35 +518,35 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 	// create consensus directory
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create chain database
 	chainPath := filepath.Join(consensusDir, "blockchain.db")
 	bdb, err := coreutils.OpenBoltChainDB(chainPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create chain manager
 	network, genesis := testNetwork()
 	store, state, err := chain.NewDBStore(bdb, network, genesis)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	cm := chain.NewManager(store, state)
 
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// create syncer, peers will reject us if our hostname is empty or
 	// unspecified, so use loopback
 	l, err := net.Listen("tcp", cfg.GatewayAddr)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	syncerAddr := l.Addr().String()
 	host, port, _ := net.SplitHostPort(syncerAddr)
@@ -572,11 +581,15 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 		}
 	}
 
+	// create master key - we currently derive the same key used by the workers
+	// to ensure contracts formed by the bus can be renewed by the autopilot
+	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
+
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	shutdownFn := func(ctx context.Context) error {
@@ -589,7 +602,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 			syncerShutdown(ctx),
 		)
 	}
-	return b, shutdownFn, cm, nil
+	return b, shutdownFn, cm, sqlStore, nil
 }
 
 // addStorageFolderToHosts adds a single storage folder to each host.
@@ -701,7 +714,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 	c.waitForHostAccounts(hostsMap)
 
 	// fetch all accounts
-	accounts, err := c.Bus.Accounts(context.Background())
+	accounts, err := c.Worker.Accounts(context.Background())
 	c.tt.OK(err)
 	return accounts
 }
@@ -898,7 +911,7 @@ func (c *TestCluster) Shutdown() {
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		accounts, err := c.Bus.Accounts(context.Background())
+		accounts, err := c.Worker.Accounts(context.Background())
 		if err != nil {
 			return err
 		}
@@ -1029,6 +1042,7 @@ func testDBCfg() dbConfig {
 
 func testWorkerCfg() config.Worker {
 	return config.Worker{
+		AccountsRefillInterval:   time.Second,
 		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
@@ -1043,7 +1057,6 @@ func testWorkerCfg() config.Worker {
 
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
-		AccountsRefillInterval:         time.Second,
 		Heartbeat:                      time.Second,
 		ID:                             api.DefaultAutopilotID,
 		MigrationHealthCutoff:          0.99,

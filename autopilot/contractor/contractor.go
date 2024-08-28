@@ -81,7 +81,6 @@ const (
 )
 
 type Bus interface {
-	AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
 	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -89,6 +88,7 @@ type Bus interface {
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
+	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
@@ -99,7 +99,6 @@ type Bus interface {
 type Worker interface {
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
-	RHPForm(ctx context.Context, endHeight uint64, hk types.PublicKey, hostIP string, renterAddress types.Address, renterFunds types.Currency, hostCollateral types.Currency) (rhpv2.ContractRevision, []types.Transaction, error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
 	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage, windowSize uint64) (api.RHPRenewResponse, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
@@ -133,9 +132,6 @@ type (
 		revisionSubmissionBuffer  uint64
 
 		firstRefreshFailure map[types.FileContractID]time.Time
-
-		shutdownCtx       context.Context
-		shutdownCtxCancel context.CancelFunc
 	}
 
 	scoredHost struct {
@@ -168,7 +164,6 @@ type (
 
 func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
 	logger = logger.Named("contractor")
-	ctx, cancel := context.WithCancel(context.Background())
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
@@ -180,15 +175,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
 		firstRefreshFailure: make(map[types.FileContractID]time.Time),
-
-		shutdownCtx:       ctx,
-		shutdownCtxCancel: cancel,
 	}
-}
-
-func (c *Contractor) Close() error {
-	c.shutdownCtxCancel()
-	return nil
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {
@@ -228,7 +215,7 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	hostCollateral := rhpv2.ContractFormationCollateral(ctx.Period(), expectedStorage, scan.Settings)
 
 	// form contract
-	contract, _, err := w.RHPForm(ctx, endHeight, hk, host.NetAddress, ctx.state.Address, renterFunds, hostCollateral)
+	contract, err := c.bus.FormContract(ctx, ctx.state.Address, renterFunds, hk, host.NetAddress, hostCollateral, endHeight)
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
@@ -241,20 +228,12 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	// update the budget
 	*budget = budget.Sub(renterFunds)
 
-	// persist contract in store
-	contractPrice := contract.Revision.MissedHostPayout().Sub(hostCollateral)
-	formedContract, err := c.bus.AddContract(ctx, contract, contractPrice, renterFunds, cs.BlockHeight, api.ContractStatePending)
-	if err != nil {
-		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
-		return api.ContractMetadata{}, true, err
-	}
-
 	logger.Infow("formation succeeded",
-		"fcid", formedContract.ID,
+		"fcid", contract.ID,
 		"renterFunds", renterFunds.String(),
 		"collateral", hostCollateral.String(),
 	)
-	return formedContract, true, nil
+	return contract, true, nil
 }
 
 func (c *Contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {

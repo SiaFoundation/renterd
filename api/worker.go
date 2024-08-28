@@ -80,29 +80,11 @@ type (
 		Error             string `json:"error,omitempty"`
 	}
 
-	// RHPFormRequest is the request type for the /rhp/form endpoint.
-	RHPFormRequest struct {
-		EndHeight      uint64          `json:"endHeight"`
-		HostCollateral types.Currency  `json:"hostCollateral"`
-		HostKey        types.PublicKey `json:"hostKey"`
-		HostIP         string          `json:"hostIP"`
-		RenterFunds    types.Currency  `json:"renterFunds"`
-		RenterAddress  types.Address   `json:"renterAddress"`
-	}
-
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
 	RHPFormResponse struct {
 		ContractID     types.FileContractID   `json:"contractID"`
 		Contract       rhpv2.ContractRevision `json:"contract"`
 		TransactionSet []types.Transaction    `json:"transactionSet"`
-	}
-
-	// RHPFundRequest is the request type for the /rhp/fund endpoint.
-	RHPFundRequest struct {
-		ContractID types.FileContractID `json:"contractID"`
-		HostKey    types.PublicKey      `json:"hostKey"`
-		SiamuxAddr string               `json:"siamuxAddr"`
-		Balance    types.Currency       `json:"balance"`
 	}
 
 	// RHPPruneContractRequest is the request type for the /rhp/contract/:id/prune

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -26,10 +25,13 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/rhp"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -55,18 +57,6 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
-	AccountManager interface {
-		Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error)
-		Accounts() []api.Account
-		AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
-		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64)
-		ResetDrift(id rhpv3.Account) error
-		SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int)
-		ScheduleSync(id rhpv3.Account, hk types.PublicKey) error
-		Shutdown(context.Context) error
-		UnlockAccount(id rhpv3.Account, lockID uint64) error
-	}
-
 	AlertManager interface {
 		alerts.Alerter
 		RegisterWebhookBroadcaster(b webhooks.Broadcaster)
@@ -174,9 +164,8 @@ type (
 	// are rapidly updated and can be recovered, they are only loaded upon
 	// startup and persisted upon shutdown.
 	AccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
+		Accounts(context.Context, string) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -303,8 +292,8 @@ type (
 
 type Bus struct {
 	startTime time.Time
+	masterKey [32]byte
 
-	accountsMgr AccountManager
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
 	pinMgr      PinManager
@@ -314,11 +303,14 @@ type Bus struct {
 	s           Syncer
 	w           Wallet
 
-	as    AutopilotStore
-	hs    HostStore
-	ms    MetadataStore
-	mtrcs MetricsStore
-	ss    SettingStore
+	accounts AccountStore
+	as       AutopilotStore
+	hs       HostStore
+	ms       MetadataStore
+	mtrcs    MetricsStore
+	ss       SettingStore
+
+	rhp2 *rhp2.Client
 
 	contractLocker        ContractLocker
 	sectors               UploadingSectorsCache
@@ -328,35 +320,33 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
-		s:     s,
-		cm:    cm,
-		w:     w,
-		hs:    store,
-		as:    store,
-		ms:    store,
-		mtrcs: store,
-		ss:    store,
+		startTime: time.Now(),
+		masterKey: masterKey,
+
+		accounts: store,
+		s:        s,
+		cm:       cm,
+		w:        w,
+		hs:       store,
+		as:       store,
+		ms:       store,
+		mtrcs:    store,
+		ss:       store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
 		webhooksMgr: wm,
 		logger:      l.Sugar(),
 
-		startTime: time.Now(),
+		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
 	// init settings
 	if err := b.initSettings(ctx); err != nil {
-		return nil, err
-	}
-
-	// create account manager
-	b.accountsMgr, err = ibus.NewAccountManager(ctx, store, l)
-	if err != nil {
 		return nil, err
 	}
 
@@ -381,14 +371,8 @@ func New(ctx context.Context, am AlertManager, wm WebhooksManager, cm ChainManag
 // Handler returns an HTTP handler that serves the bus API.
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts":                 b.accountsHandlerGET,
-		"POST   /account/:id":              b.accountHandlerGET,
-		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"GET    /accounts": b.accountsHandlerGET,
+		"POST   /accounts": b.accountsHandlerPOST,
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
@@ -411,6 +395,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
+		"POST   /contracts":              b.contractsFormHandler,
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
@@ -507,7 +492,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /wallet/fund":          b.walletFundHandler,
 		"GET    /wallet/outputs":       b.walletOutputsHandler,
 		"GET    /wallet/pending":       b.walletPendingHandler,
-		"POST   /wallet/prepare/form":  b.walletPrepareFormHandler,
 		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
 		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
 		"POST   /wallet/send":          b.walletSendSiacoinsHandler,
@@ -525,11 +509,75 @@ func (b *Bus) Handler() http.Handler {
 func (b *Bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
 		b.walletMetricsRecorder.Shutdown(ctx),
-		b.accountsMgr.Shutdown(ctx),
 		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Shutdown(ctx),
 		b.cs.Shutdown(ctx),
 	)
+}
+
+func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	c, err := b.ms.AddContract(ctx, rev, contractPrice, totalCost, startHeight, state)
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventAdd,
+		Payload: api.EventContractAdd{
+			Added:     c,
+			Timestamp: time.Now().UTC(),
+		},
+	})
+	return c, nil
+}
+
+func (b *Bus) isPassedV2AllowHeight() bool {
+	cs := b.cm.TipState()
+	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
+}
+
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
+	// derive the renter key
+	renterKey := b.deriveRenterKey(hostKey)
+
+	// prepare the transaction
+	cs := b.cm.TipState()
+	fc := rhpv2.PrepareContractFormation(renterKey.PublicKey(), hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
+	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
+
+	// calculate the miner fee
+	fee := b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))
+	txn.MinerFees = []types.Currency{fee}
+
+	// fund the transaction
+	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
+	toSign, err := b.w.FundTransaction(&txn, cost, true)
+	if err != nil {
+		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
+	}
+
+	// sign the transaction
+	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
+
+	// form the contract
+	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
+	if err != nil {
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		return rhpv2.ContractRevision{}, err
+	}
+
+	// add transaction set to the pool
+	_, err = b.cm.AddPoolTransactions(txnSet)
+	if err != nil {
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
+	}
+
+	// broadcast the transaction set
+	go b.s.BroadcastTransactionSet(txnSet)
+
+	return contract, nil
 }
 
 // initSettings loads the default settings if the setting is not already set and
@@ -644,4 +692,22 @@ func (b *Bus) initSettings(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
+	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
+}
+
+func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
+	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }

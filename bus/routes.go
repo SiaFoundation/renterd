@@ -17,6 +17,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/gouging"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -354,10 +355,30 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 		}
 	}
 
-	state := b.cm.TipState()
-	// if the current height is below the v2 hardfork height, send a v1
-	// transaction
-	if state.Index.Height < state.Network.HardforkV2.AllowHeight {
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	if b.isPassedV2AllowHeight() {
+		txn := types.V2Transaction{
+			MinerFee: minerFee,
+			SiacoinOutputs: []types.SiacoinOutput{
+				{Address: req.Address, Value: req.Amount},
+			},
+		}
+		// fund and sign transaction
+		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
+		if jc.Check("failed to fund transaction", err) != nil {
+			return
+		}
+		b.w.SignV2Inputs(state, &txn, toSign)
+		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
+		// verify the transaction and add it to the transaction pool
+		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return
+		}
+		// broadcast the transaction
+		b.s.BroadcastV2TransactionSet(state.Index, txnset)
+		jc.Encode(txn.ID())
+	} else {
 		// build transaction
 		txn := types.Transaction{
 			MinerFees: []types.Currency{minerFee},
@@ -380,28 +401,6 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 		}
 		// broadcast the transaction
 		b.s.BroadcastTransactionSet(txnset)
-		jc.Encode(txn.ID())
-	} else {
-		txn := types.V2Transaction{
-			MinerFee: minerFee,
-			SiacoinOutputs: []types.SiacoinOutput{
-				{Address: req.Address, Value: req.Amount},
-			},
-		}
-		// fund and sign transaction
-		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
-		if jc.Check("failed to fund transaction", err) != nil {
-			return
-		}
-		b.w.SignV2Inputs(state, &txn, toSign)
-		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
-		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
-			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-			return
-		}
-		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(state.Index, txnset)
 		jc.Encode(txn.ID())
 	}
 }
@@ -480,37 +479,6 @@ func (b *Bus) walletDiscardHandler(jc jape.Context) {
 	if jc.Decode(&txn) == nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
-}
-
-func (b *Bus) walletPrepareFormHandler(jc jape.Context) {
-	var wpfr api.WalletPrepareFormRequest
-	if jc.Decode(&wpfr) != nil {
-		return
-	}
-	if wpfr.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("no host key provided"), http.StatusBadRequest)
-		return
-	}
-	if wpfr.RenterKey == (types.PublicKey{}) {
-		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
-		return
-	}
-	cs := b.cm.TipState()
-
-	fc := rhpv2.PrepareContractFormation(wpfr.RenterKey, wpfr.HostKey, wpfr.RenterFunds, wpfr.HostCollateral, wpfr.EndHeight, wpfr.HostSettings, wpfr.RenterAddress)
-	cost := rhpv2.ContractFormationCost(cs, fc, wpfr.HostSettings.ContractPrice)
-	txn := types.Transaction{
-		FileContracts: []types.FileContract{fc},
-	}
-	txn.MinerFees = []types.Currency{b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))}
-	toSign, err := b.w.FundTransaction(&txn, cost.Add(txn.MinerFees[0]), true)
-	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
-
-	jc.Encode(append(b.cm.UnconfirmedParents(txn), txn))
 }
 
 func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
@@ -980,20 +948,10 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	a, err := b.ms.AddContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
+	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
-
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventAdd,
-		Payload: api.EventContractAdd{
-			Added:     a,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-
 	jc.Encode(a)
 }
 
@@ -1753,136 +1711,30 @@ func (b *Bus) handlePOSTAlertsRegister(jc jape.Context) {
 }
 
 func (b *Bus) accountsHandlerGET(jc jape.Context) {
-	jc.Encode(b.accountsMgr.Accounts())
-}
-
-func (b *Bus) accountHandlerGET(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
+	var owner string
+	if jc.DecodeForm("owner", &owner) != nil {
 		return
 	}
-	var req api.AccountHandlerPOST
+	accounts, err := b.accounts.Accounts(jc.Request.Context(), owner)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(accounts)
+}
+
+func (b *Bus) accountsHandlerPOST(jc jape.Context) {
+	var req api.AccountsSaveRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	acc, err := b.accountsMgr.Account(id, req.HostKey)
-	if jc.Check("failed to fetch account", err) != nil {
-		return
+	for _, acc := range req.Accounts {
+		if acc.Owner == "" {
+			jc.Error(errors.New("acocunts need to have a valid 'Owner'"), http.StatusBadRequest)
+			return
+		}
 	}
-	jc.Encode(acc)
-}
-
-func (b *Bus) accountsAddHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsAddBalanceRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if id == (rhpv3.Account{}) {
-		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
-		return
-	}
-	if req.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
-		return
-	}
-	b.accountsMgr.AddAmount(id, req.HostKey, req.Amount)
-}
-
-func (b *Bus) accountsResetDriftHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	err := b.accountsMgr.ResetDrift(id)
-	if errors.Is(err, ibus.ErrAccountNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("failed to reset drift", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) accountsUpdateHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsUpdateBalanceRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if id == (rhpv3.Account{}) {
-		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
-		return
-	}
-	if req.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
-		return
-	}
-	b.accountsMgr.SetBalance(id, req.HostKey, req.Amount)
-}
-
-func (b *Bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsRequiresSyncRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if id == (rhpv3.Account{}) {
-		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
-		return
-	}
-	if req.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
-		return
-	}
-	err := b.accountsMgr.ScheduleSync(id, req.HostKey)
-	if errors.Is(err, ibus.ErrAccountNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("failed to set requiresSync flag on account", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) accountsLockHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsLockHandlerRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	acc, lockID := b.accountsMgr.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
-	jc.Encode(api.AccountsLockHandlerResponse{
-		Account: acc,
-		LockID:  lockID,
-	})
-}
-
-func (b *Bus) accountsUnlockHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsUnlockHandlerRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	err := b.accountsMgr.UnlockAccount(id, req.LockID)
-	if jc.Check("failed to unlock account", err) != nil {
+	if b.accounts.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
 		return
 	}
 }
@@ -2314,4 +2166,93 @@ func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(resp)
+}
+
+func (b *Bus) contractsFormHandler(jc jape.Context) {
+	// apply pessimistic timeout
+	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
+	defer cancel()
+
+	// decode the request
+	var rfr api.ContractFormRequest
+	if jc.Decode(&rfr) != nil {
+		return
+	}
+
+	// validate the request
+	if rfr.EndHeight == 0 {
+		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+		return
+	} else if rfr.HostKey == (types.PublicKey{}) {
+		http.Error(jc.ResponseWriter, "HostKey must be provided", http.StatusBadRequest)
+		return
+	} else if rfr.HostCollateral.IsZero() {
+		http.Error(jc.ResponseWriter, "HostCollateral can not be zero", http.StatusBadRequest)
+		return
+	} else if rfr.HostIP == "" {
+		http.Error(jc.ResponseWriter, "HostIP must be provided", http.StatusBadRequest)
+		return
+	} else if rfr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	} else if rfr.RenterAddress == (types.Address{}) {
+		http.Error(jc.ResponseWriter, "RenterAddress must be provided", http.StatusBadRequest)
+		return
+	}
+
+	// fetch gouging parameters
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// fetch host settings
+	settings, err := b.rhp2.Settings(ctx, rfr.HostKey, rfr.HostIP)
+	if jc.Check("couldn't fetch host settings", err) != nil {
+		return
+	}
+
+	// check gouging
+	breakdown := gc.CheckSettings(settings)
+	if breakdown.Gouging() {
+		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+		return
+	}
+
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	var contract rhpv2.ContractRevision
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		contract, err = b.formContract(
+			ctx,
+			settings,
+			rfr.RenterAddress,
+			rfr.RenterFunds,
+			rfr.HostCollateral,
+			rfr.HostKey,
+			rfr.HostIP,
+			rfr.EndHeight,
+		)
+		if jc.Check("couldn't form contract", err) != nil {
+			return
+		}
+	}
+
+	// store the contract
+	metadata, err := b.addContract(
+		ctx,
+		contract,
+		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
+		rfr.RenterFunds,
+		b.cm.Tip().Height,
+		api.ContractStatePending,
+	)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
+	}
+
+	// return the contract
+	jc.Encode(metadata)
 }
