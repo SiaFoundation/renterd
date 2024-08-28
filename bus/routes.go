@@ -605,11 +605,11 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("maxDowntime must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	if hrr.MinRecentScanFailures == 0 {
-		jc.Error(errors.New("minRecentScanFailures must be non-zero"), http.StatusBadRequest)
+	if hrr.MaxConsecutiveScanFailures == 0 {
+		jc.Error(errors.New("maxConsecutiveScanFailures must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
+	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MaxConsecutiveScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}

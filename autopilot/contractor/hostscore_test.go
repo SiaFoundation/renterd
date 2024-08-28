@@ -26,8 +26,8 @@ var cfg = api.AutopilotConfig{
 		Set: api.DefaultAutopilotID,
 	},
 	Hosts: api.HostsConfig{
-		MaxDowntimeHours:      24 * 7 * 2,
-		MinRecentScanFailures: 10,
+		MaxDowntimeHours:           24 * 7 * 2,
+		MaxConsecutiveScanFailures: 10,
 	},
 }
 
