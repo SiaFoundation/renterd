@@ -498,6 +498,11 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
 	if cfg.Database.MySQL.URI != "" {
+		// check that both main and metrics databases are not the same
+		if cfg.Database.MySQL.Database == cfg.Database.MySQL.MetricsDatabase {
+			return stores.Config{}, errors.New("main and metrics databases cannot be the same")
+		}
+
 		// create MySQL connections
 		connMain, err := mysql.Open(
 			cfg.Database.MySQL.User,
