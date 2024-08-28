@@ -670,7 +670,7 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 	}
 
 	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
-		maxLastScan.UnixNano(), limit, offset)
+		UnixTimeMS(maxLastScan), limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
 	}
@@ -1751,7 +1751,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 
 	now := time.Now()
 	for _, scan := range scans {
-		scanTime := scan.Timestamp.UnixNano()
+		scanTime := scan.Timestamp.UnixMilli()
 		_, err = stmt.Exec(ctx,
 			scan.Success,                                    // scanned
 			scan.Success,                                    // last_scan_success
@@ -2134,7 +2134,7 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var resolvedAddresses string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &resolvedAddresses, &h.Blocked,
@@ -2547,7 +2547,7 @@ func scanWalletEvent(s Scanner) (wallet.Event, error) {
 	var inflow, outflow Currency
 	var edata []byte
 	var etype string
-	var ts UnixTimeNS
+	var ts UnixTimeMS
 	if err := s.Scan(
 		&eventID,
 		&blockID,
