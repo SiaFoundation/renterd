@@ -166,7 +166,7 @@ func (a *AccountMgr) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-ctx.Done():
-		return errors.New("accountMgrShutdown interrupted")
+		return fmt.Errorf("accountMgrShutdown interrupted: %w", context.Cause(ctx))
 	case <-done:
 	}
 	return nil
