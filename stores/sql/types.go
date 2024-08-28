@@ -43,6 +43,7 @@ type (
 	EncryptionKey   object.EncryptionKey
 	Uint64Str       uint64
 	UnixTimeMS      time.Time
+	DurationMS      time.Duration
 	Unsigned64      uint64
 )
 
@@ -65,6 +66,7 @@ var (
 	_ scannerValuer = (*PublicKey)(nil)
 	_ scannerValuer = (*EncryptionKey)(nil)
 	_ scannerValuer = (*UnixTimeMS)(nil)
+	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
 )
 
@@ -338,6 +340,32 @@ func (u *UnixTimeMS) Scan(value interface{}) error {
 // implements driver.Valuer interface.
 func (u UnixTimeMS) Value() (driver.Value, error) {
 	return time.Time(u).UnixMilli(), nil
+}
+
+// Scan scan value into DurationMS, implements sql.Scanner interface.
+func (d *DurationMS) Scan(value interface{}) error {
+	var msec int64
+	var err error
+	switch value := value.(type) {
+	case int64:
+		msec = value
+	case []uint8:
+		msec, err = strconv.ParseInt(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal DurationMS value: %v %T", value, value)
+		}
+	default:
+		return fmt.Errorf("failed to unmarshal DurationMS value: %v %T", value, value)
+	}
+
+	*d = DurationMS(msec) * DurationMS(time.Millisecond)
+	return nil
+}
+
+// Value returns a int64 value representing a duration in milliseconds,
+// implements driver.Valuer interface.
+func (d DurationMS) Value() (driver.Value, error) {
+	return time.Duration(d).Milliseconds(), nil
 }
 
 // Scan scan value into Uint64, implements sql.Scanner interface.
