@@ -158,7 +158,17 @@ func (a *AccountMgr) Shutdown(ctx context.Context) error {
 	a.logger.Infof("successfully saved %v accounts", len(accounts))
 
 	a.shutdownCancel()
-	a.wg.Wait()
+
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-ctx.Done():
+		return errors.New("accountMgrShutdown interrupted")
+	case <-done:
+	}
 	return nil
 }
 
