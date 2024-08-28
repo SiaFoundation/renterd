@@ -183,9 +183,6 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventSettingUpdate:
 		log = log.With("key", e.Key, "ts", e.Timestamp)
 		err = c.handleSettingUpdate(e)
-	case api.EventSettingDelete:
-		log = log.With("key", e.Key, "ts", e.Timestamp)
-		c.handleSettingDelete(e)
 	default:
 		log.Info("unhandled event", e)
 		return
@@ -308,12 +305,6 @@ func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
 	}
 
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
-}
-
-func (c *cache) handleSettingDelete(e api.EventSettingDelete) {
-	if e.Key == api.SettingGouging || e.Key == api.SettingRedundancy {
-		c.cache.Invalidate(cacheKeyGougingParams)
-	}
 }
 
 func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {

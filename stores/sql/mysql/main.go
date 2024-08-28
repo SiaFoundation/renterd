@@ -340,10 +340,6 @@ func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
-func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
-	return ssql.DeleteSettings(ctx, tx, key)
-}
-
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
@@ -821,10 +817,6 @@ func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contr
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
-}
-
-func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
-	return ssql.Settings(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {

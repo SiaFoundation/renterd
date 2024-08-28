@@ -294,9 +294,7 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		DeleteSetting(ctx context.Context, key string) error
 		Setting(ctx context.Context, key string) (string, error)
-		Settings(ctx context.Context) ([]string, error)
 		UpdateSetting(ctx context.Context, key, value string) error
 	}
 
@@ -485,10 +483,16 @@ func (b *Bus) Handler() http.Handler {
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
-		"GET    /settings":     b.settingsHandlerGET,
-		"GET    /setting/:key": b.settingKeyHandlerGET,
-		"PUT    /setting/:key": b.settingKeyHandlerPUT,
-		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+		"GET    /settings/gouging":          b.settingsGougingHandlerGET,
+		"PUT    /settings/gouging":          b.settingsGougingHandlerPUT,
+		"GET    /settings/pinned":           b.settingsPinnedHandlerGET,
+		"PUT    /settings/pinned":           b.settingsPinnedHandlerPUT,
+		"GET    /settings/redundancy":       b.settingsRedundancyHandlerGET,
+		"PUT    /settings/redundancy":       b.settingsRedundancyHandlerPUT,
+		"GET    /settings/s3authentication": b.settingsS3AuthenticationHandlerGET,
+		"PUT    /settings/s3authentication": b.settingsS3AuthenticationHandlerPUT,
+		"GET    /settings/uploadpacking":    b.settingsUploadPackingHandlerGET,
+		"PUT    /settings/uploadpacking":    b.settingsUploadPackingHandlerPUT,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
@@ -737,4 +741,60 @@ func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
 		seed[i] = 0
 	}
 	return pk
+}
+
+func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
+	// testnets have different redundancy settings
+	defaultRedundancySettings := api.DefaultRedundancySettings
+	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
+		defaultRedundancySettings = api.DefaultRedundancySettingsTestnet
+	}
+
+	defaults := map[string]interface{}{
+		api.SettingGouging:       api.DefaultGougingSettings,
+		api.SettingPricePinning:  api.DefaultPricePinSettings,
+		api.SettingRedundancy:    defaultRedundancySettings,
+		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
+	}
+
+	setting, err := b.ss.Setting(ctx, key)
+	if errors.Is(err, api.ErrSettingNotFound) {
+		val, ok := defaults[key]
+		if !ok {
+			return fmt.Errorf("%w: unknown setting '%s'", api.ErrSettingNotFound, key)
+		}
+
+		bytes, _ := json.Marshal(val)
+		if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
+			b.logger.Warn(fmt.Sprintf("failed to update default setting '%s': %v", key, err))
+		}
+		return json.Unmarshal(bytes, &val)
+	} else if err != nil {
+		return err
+	}
+
+	return json.Unmarshal([]byte(setting), &value)
+}
+
+func (b *Bus) updateSetting(ctx context.Context, key string, value string, updatePinMgr bool) error {
+	err := b.ss.UpdateSetting(ctx, key, value)
+	if err != nil {
+		return err
+	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleSetting,
+		Event:  api.EventUpdate,
+		Payload: api.EventSettingUpdate{
+			Key:       key,
+			Update:    value,
+			Timestamp: time.Now().UTC(),
+		},
+	})
+
+	if updatePinMgr {
+		b.pinMgr.TriggerUpdate()
+	}
+
+	return nil
 }

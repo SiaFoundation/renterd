@@ -19,7 +19,6 @@ const (
 
 	EventAdd     = "add"
 	EventUpdate  = "update"
-	EventDelete  = "delete"
 	EventArchive = "archive"
 	EventRenew   = "renew"
 )
@@ -67,11 +66,6 @@ type (
 		Key       string      `json:"key"`
 		Update    interface{} `json:"update"`
 		Timestamp time.Time   `json:"timestamp"`
-	}
-
-	EventSettingDelete struct {
-		Key       string    `json:"key"`
-		Timestamp time.Time `json:"timestamp"`
 	}
 )
 
@@ -138,15 +132,6 @@ var (
 			URL:     url,
 		}
 	}
-
-	WebhookSettingDelete = func(url string, headers map[string]string) webhooks.Webhook {
-		return webhooks.Webhook{
-			Event:   EventDelete,
-			Headers: headers,
-			Module:  ModuleSetting,
-			URL:     url,
-		}
-	}
 )
 
 func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
@@ -201,15 +186,8 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		}
 	case ModuleSetting:
-		switch event.Event {
-		case EventUpdate:
+		if event.Event == EventUpdate {
 			var e EventSettingUpdate
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		case EventDelete:
-			var e EventSettingDelete
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}

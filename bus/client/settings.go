@@ -2,65 +2,72 @@ package client
 
 import (
 	"context"
-	"fmt"
 
 	"go.sia.tech/renterd/api"
 )
 
 // ContractSetSettings returns the contract set settings.
-func (c *Client) ContractSetSettings(ctx context.Context) (gs api.ContractSetSetting, err error) {
-	err = c.Setting(ctx, api.SettingContractSet, &gs)
+func (c *Client) ContractSetSettings(ctx context.Context) (css api.ContractSetSetting, err error) {
+	err = c.c.WithContext(ctx).GET("/setting/contractset", &css)
 	return
 }
 
-// DeleteSetting will delete the setting with given key.
-func (c *Client) DeleteSetting(ctx context.Context, key string) error {
-	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/setting/%s", key))
+// UpdateContractSetSetting updates the given setting.
+func (c *Client) UpdateContractSetSetting(ctx context.Context, css api.ContractSetSetting) error {
+	return c.c.WithContext(ctx).PUT("/setting/contractset", css)
 }
 
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	err = c.Setting(ctx, api.SettingGouging, &gs)
+	err = c.c.WithContext(ctx).GET("/setting/gouging", &gs)
 	return
+}
+
+// UpdateGougingSettings updates the given setting.
+func (c *Client) UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error {
+	return c.c.WithContext(ctx).PUT("/setting/gouging", gs)
 }
 
 // PricePinningSettings returns the contract set settings.
 func (c *Client) PricePinningSettings(ctx context.Context) (pps api.PricePinSettings, err error) {
-	err = c.Setting(ctx, api.SettingPricePinning, &pps)
+	err = c.c.WithContext(ctx).GET("/setting/pinned", &pps)
 	return
+}
+
+// UpdatePinnedSettings updates the given setting.
+func (c *Client) UpdatePinnedSettings(ctx context.Context, pps api.PricePinSettings) error {
+	return c.c.WithContext(ctx).PUT("/setting/pinned", pps)
 }
 
 // RedundancySettings returns the redundancy settings.
 func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
-	err = c.Setting(ctx, api.SettingRedundancy, &rs)
+	err = c.c.WithContext(ctx).GET("/setting/redundancy", &rs)
 	return
+}
+
+// UpdateRedundancySettings updates the given setting.
+func (c *Client) UpdateRedundancySettings(ctx context.Context, rs api.RedundancySettings) error {
+	return c.c.WithContext(ctx).PUT("/setting/redundancy", rs)
 }
 
 // S3AuthenticationSettings returns the S3 authentication settings.
 func (c *Client) S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error) {
-	err = c.Setting(ctx, api.SettingS3Authentication, &as)
+	err = c.c.WithContext(ctx).GET("/setting/s3authentication", &as)
 	return
 }
 
-// Setting returns the value for the setting with given key.
-func (c *Client) Setting(ctx context.Context, key string, value interface{}) (err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/setting/%s", key), &value)
-	return
-}
-
-// Settings returns the keys of all settings.
-func (c *Client) Settings(ctx context.Context) (settings []string, err error) {
-	err = c.c.WithContext(ctx).GET("/settings", &settings)
-	return
-}
-
-// UpdateSetting will update the given setting under the given key.
-func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{}) error {
-	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/setting/%s", key), value)
+// UpdateS3AuthenticationSettings updates the given setting.
+func (c *Client) UpdateS3AuthenticationSettings(ctx context.Context, as api.S3AuthenticationSettings) error {
+	return c.c.WithContext(ctx).PUT("/setting/s3authentication", as)
 }
 
 // UploadPackingSettings returns the upload packing settings.
 func (c *Client) UploadPackingSettings(ctx context.Context) (ups api.UploadPackingSettings, err error) {
-	err = c.Setting(ctx, api.SettingUploadPacking, &ups)
+	err = c.c.WithContext(ctx).GET("/setting/uploadpacking", &ups)
 	return
+}
+
+// UpdateUploadPackingSettings updates the given setting.
+func (c *Client) UpdateUploadPackingSettings(ctx context.Context, ups api.UploadPackingSettings) error {
+	return c.c.WithContext(ctx).PUT("/setting/uploadpacking", ups)
 }

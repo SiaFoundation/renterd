@@ -43,7 +43,6 @@ type Bus interface {
 	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 	S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error)
-	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 

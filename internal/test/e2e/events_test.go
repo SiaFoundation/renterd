@@ -26,7 +26,6 @@ func TestEvents(t *testing.T) {
 		api.WebhookContractRenew,
 		api.WebhookContractSetUpdate,
 		api.WebhookHostUpdate,
-		api.WebhookSettingDelete,
 		api.WebhookSettingUpdate,
 	}
 
@@ -125,10 +124,7 @@ func TestEvents(t *testing.T) {
 	// update settings
 	gs := gp.GougingSettings
 	gs.HostBlockHeightLeeway = 100
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, gs))
-
-	// delete setting
-	tt.OK(b.DeleteSetting(context.Background(), api.SettingRedundancy))
+	tt.OK(b.UpdateGougingSettings(context.Background(), gs))
 
 	// update host setting
 	h := cluster.hosts[0]
@@ -181,10 +177,6 @@ func TestEvents(t *testing.T) {
 			tt.OK(json.Unmarshal(bytes, &update))
 			if update.HostBlockHeightLeeway != 100 {
 				t.Fatalf("unexpected update %+v", update)
-			}
-		case api.EventSettingDelete:
-			if e.Key != api.SettingRedundancy || e.Timestamp.IsZero() {
-				t.Fatalf("unexpected event %+v", e)
 			}
 		}
 	}

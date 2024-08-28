@@ -73,7 +73,6 @@ type Bus interface {
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
 	// settings
-	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
 

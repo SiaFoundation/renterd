@@ -70,7 +70,7 @@ func TestGouging(t *testing.T) {
 	// update the gouging settings to limit the max storage price to 100H
 	gs := test.GougingSettings
 	gs.MaxStoragePrice = types.NewCurrency64(100)
-	if err := b.UpdateSetting(context.Background(), api.SettingGouging, gs); err != nil {
+	if err := b.UpdateGougingSettings(context.Background(), gs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,7 +118,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// set optimised settings
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
+	tt.OK(b.UpdateGougingSettings(context.Background(), resp.Recommendation.GougingSettings))
 
 	// evaluate optimised settings
 	resp, err = cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, resp.Recommendation.GougingSettings, test.RedundancySettings)

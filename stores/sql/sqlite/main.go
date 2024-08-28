@@ -332,10 +332,6 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
 }
 
-func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
-	return ssql.DeleteSettings(ctx, tx, key)
-}
-
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
@@ -820,10 +816,6 @@ func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contr
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
-}
-
-func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
-	return ssql.Settings(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {

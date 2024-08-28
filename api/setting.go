@@ -239,6 +239,15 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
+// Validate returns an error if the upload packing settings are not considered
+// valid.
+func (up UploadPackingSettings) Validate() error {
+	if up.Enabled && up.SlabBufferMaxSizeSoft <= 0 {
+		return errors.New("SlabBufferMaxSizeSoft must be greater than zero when upload packing is enabled")
+	}
+	return nil
+}
+
 // Redundancy returns the effective storage redundancy of the
 // RedundancySettings.
 func (rs RedundancySettings) Redundancy() float64 {

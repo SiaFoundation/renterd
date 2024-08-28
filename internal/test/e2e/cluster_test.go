@@ -1142,7 +1142,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingRedundancy, api.RedundancySettings{
+	tt.OK(b.UpdateRedundancySettings(context.Background(), api.RedundancySettings{
 		MinShards:   1,
 		TotalShards: 1,
 	}))

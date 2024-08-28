@@ -825,7 +825,7 @@ func TestS3SettingsValidate(t *testing.T) {
 		},
 	}
 	for i, test := range tests {
-		err := cluster.Bus.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
+		err := cluster.Bus.UpdateS3AuthenticationSettings(context.Background(), api.S3AuthenticationSettings{
 			V4Keypairs: map[string]string{
 				test.id: test.key,
 			},

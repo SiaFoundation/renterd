@@ -435,7 +435,7 @@ func (n *node) Run() error {
 			as.V4Keypairs[k] = v
 		}
 		// update settings
-		if err := n.bus.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
+		if err := n.bus.UpdateS3AuthenticationSettings(context.Background(), as); err != nil {
 			return fmt.Errorf("failed to update S3 authentication settings: %w", err)
 		}
 	}

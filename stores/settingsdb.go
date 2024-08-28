@@ -7,23 +7,6 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
-// DeleteSetting implements the bus.SettingStore interface.
-func (s *SQLStore) DeleteSetting(ctx context.Context, key string) error {
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-
-	// delete from database first
-	if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.DeleteSettings(ctx, key)
-	}); err != nil {
-		return err
-	}
-
-	// delete from cache
-	delete(s.settings, key)
-	return nil
-}
-
 // Setting implements the bus.SettingStore interface.
 func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	// Check cache first.
@@ -45,15 +28,6 @@ func (s *SQLStore) Setting(ctx context.Context, key string) (string, error) {
 	}
 	s.settings[key] = value
 	return value, nil
-}
-
-// Settings implements the bus.SettingStore interface.
-func (s *SQLStore) Settings(ctx context.Context) (settings []string, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		settings, err = tx.Settings(ctx)
-		return err
-	})
-	return
 }
 
 // UpdateSetting implements the bus.SettingStore interface.

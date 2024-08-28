@@ -150,9 +150,6 @@ type (
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
-		// DeleteSettings deletes the settings with the given key.
-		DeleteSettings(ctx context.Context, key string) error
-
 		// DeleteWebhook deletes the webhook with the matching module, event and
 		// URL of the provided webhook. If the webhook doesn't exist,
 		// webhooks.ErrWebhookNotFound is returned.
@@ -327,9 +324,6 @@ type (
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
-
-		// Settings returns all available settings from the database.
-		Settings(ctx context.Context) ([]string, error)
 
 		// Slab returns the slab with the given ID or api.ErrSlabNotFound.
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)

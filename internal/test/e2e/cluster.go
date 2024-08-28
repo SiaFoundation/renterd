@@ -436,14 +436,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	// Update the bus settings.
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, test.GougingSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, test.ContractSetSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingPricePinning, test.PricePinSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
+	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
+	tt.OK(busClient.UpdateContractSetSetting(ctx, test.ContractSetSettings))
+	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
+	tt.OK(busClient.UpdateRedundancySettings(ctx, test.RedundancySettings))
+	tt.OK(busClient.UpdateS3AuthenticationSettings(ctx, api.S3AuthenticationSettings{
 		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
 	}))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
+	tt.OK(busClient.UpdateUploadPackingSettings(ctx, api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
 		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
 	}))
