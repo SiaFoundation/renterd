@@ -331,8 +331,10 @@ func (u *UnixTimeMS) Scan(value interface{}) error {
 	default:
 		return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
 	}
-
-	*u = UnixTimeMS(time.UnixMilli(msec))
+	*u = UnixTimeMS(time.Time{})
+	if msec > 0 {
+		*u = UnixTimeMS(time.UnixMilli(msec))
+	}
 	return nil
 }
 
