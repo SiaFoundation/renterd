@@ -422,9 +422,6 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// PerformanceMetrics returns performance metrics for the given time range
-		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
-
 		// PruneMetrics deletes metrics of a certain type older than the given
 		// cutoff time.
 		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
@@ -440,9 +437,6 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
-
-		// RecordPerformanceMetric records performance metrics.
-		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
 
 		// RecordWalletMetric records wallet metrics.
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
