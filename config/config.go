@@ -117,6 +117,7 @@ type (
 		Enabled                       bool           `yaml:"enabled,omitempty"`
 		ID                            string         `yaml:"id,omitempty"`
 		Remotes                       []RemoteWorker `yaml:"remotes,omitempty"`
+		AccountsRefillInterval        time.Duration  `yaml:"accountsRefillInterval,omitempty"`
 		AllowPrivateIPs               bool           `yaml:"allowPrivateIPs,omitempty"`
 		BusFlushInterval              time.Duration  `yaml:"busFlushInterval,omitempty"`
 		ContractLockTimeout           time.Duration  `yaml:"contractLockTimeout,omitempty"`
@@ -134,7 +135,6 @@ type (
 	Autopilot struct {
 		Enabled                        bool          `yaml:"enabled,omitempty"`
 		ID                             string        `yaml:"id,omitempty"`
-		AccountsRefillInterval         time.Duration `yaml:"accountsRefillInterval,omitempty"`
 		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
 		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`
 		RevisionBroadcastInterval      time.Duration `yaml:"revisionBroadcastInterval,omitempty"`

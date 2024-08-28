@@ -56,11 +56,11 @@ type (
 
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
-		AllowRedundantIPs     bool                        `json:"allowRedundantIPs"`
-		MaxDowntimeHours      uint64                      `json:"maxDowntimeHours"`
-		MinProtocolVersion    string                      `json:"minProtocolVersion"`
-		MinRecentScanFailures uint64                      `json:"minRecentScanFailures"`
-		ScoreOverrides        map[types.PublicKey]float64 `json:"scoreOverrides"`
+		AllowRedundantIPs          bool                        `json:"allowRedundantIPs"`
+		MaxDowntimeHours           uint64                      `json:"maxDowntimeHours"`
+		MinProtocolVersion         string                      `json:"minProtocolVersion"`
+		MaxConsecutiveScanFailures uint64                      `json:"maxConsecutiveScanFailures"`
+		ScoreOverrides             map[types.PublicKey]float64 `json:"scoreOverrides"`
 	}
 )
 

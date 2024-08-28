@@ -45,6 +45,10 @@ type (
 )
 
 type (
+	AccountsSaveRequest struct {
+		Accounts []Account `json:"accounts"`
+	}
+
 	// BusStateResponse is the response type for the /bus/state endpoint.
 	BusStateResponse struct {
 		StartTime TimeRFC3339 `json:"startTime"`

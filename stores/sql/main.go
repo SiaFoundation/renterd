@@ -97,8 +97,15 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
-func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
-	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts")
+func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, error) {
+	var whereExpr string
+	var args []any
+	if owner != "" {
+		whereExpr = "WHERE owner = ?"
+		args = append(args, owner)
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf("SELECT account_id, clean_shutdown, host, balance, drift, requires_sync, owner FROM ephemeral_accounts %s", whereExpr),
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
 	}
@@ -107,7 +114,7 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 	var accounts []api.Account
 	for rows.Next() {
 		a := api.Account{Balance: new(big.Int), Drift: new(big.Int)} // init big.Int
-		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync, &a.Owner); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
 		accounts = append(accounts, a)
@@ -117,7 +124,7 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 
 func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	rows, err := tx.Query(ctx, `
-		WITH RECURSIVE ancestors AS 
+		WITH RECURSIVE ancestors AS
 		(
 			SELECT *
 			FROM archived_contracts
@@ -708,7 +715,7 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 
 	res, err := tx.Exec(ctx, `
 		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
-		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending, 
+		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending,
 		fund_account_spending, delete_spending, list_spending)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
@@ -2205,20 +2212,12 @@ func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
 	return value, nil
 }
 
-func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
-	if err != nil {
-		return fmt.Errorf("failed to set unclean shutdown: %w", err)
-	}
-	return err
-}
-
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
 	// fetch slab
 	var slabID int64
 	slab := object.Slab{Key: key}
 	err := tx.QueryRow(ctx, `
-		SELECT id, health, min_shards 
+		SELECT id, health, min_shards
 		FROM slabs sla
 		WHERE sla.key = ?
 	`, EncryptionKey(key)).Scan(&slabID, &slab.Health, &slab.MinShards)
