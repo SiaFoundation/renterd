@@ -11,7 +11,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -31,8 +30,7 @@ type Bus interface {
 	webhooks.Broadcaster
 
 	// Accounts
-	Account(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey) (account api.Account, err error)
-	Accounts(ctx context.Context) (accounts []api.Account, err error)
+	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
 
 	// Autopilots
 	Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error)
@@ -100,7 +98,6 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	a *accounts
 	c *contractor.Contractor
 	m *migrator
 	s scanner.Scanner
@@ -149,7 +146,6 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 
 	ap.c = contractor.New(bus, bus, ap.logger, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval)
 	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer)
 
 	return ap, nil
 }
@@ -240,7 +236,6 @@ func (ap *Autopilot) Run() {
 	}
 
 	var forceScan bool
-	var launchAccountRefillsOnce sync.Once
 	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
@@ -323,14 +318,6 @@ func (ap *Autopilot) Run() {
 				ap.m.SignalMaintenanceFinished()
 			}
 
-			// launch account refills after successful contract maintenance.
-			if maintenanceSuccess {
-				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Info("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
-				})
-			}
-
 			// migration
 			ap.m.tryPerformMigrations(ap.workers)
 
@@ -352,7 +339,6 @@ func (ap *Autopilot) Run() {
 		case <-tickerFired:
 		}
 	}
-	return
 }
 
 // Shutdown shuts down the autopilot.

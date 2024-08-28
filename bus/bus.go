@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -59,18 +57,6 @@ func NewClient(addr, password string) *Client {
 }
 
 type (
-	AccountManager interface {
-		Account(id rhpv3.Account, hostKey types.PublicKey) (api.Account, error)
-		Accounts() []api.Account
-		AddAmount(id rhpv3.Account, hk types.PublicKey, amt *big.Int)
-		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64)
-		ResetDrift(id rhpv3.Account) error
-		SetBalance(id rhpv3.Account, hk types.PublicKey, balance *big.Int)
-		ScheduleSync(id rhpv3.Account, hk types.PublicKey) error
-		Shutdown(context.Context) error
-		UnlockAccount(id rhpv3.Account, lockID uint64) error
-	}
-
 	AlertManager interface {
 		alerts.Alerter
 		RegisterWebhookBroadcaster(b webhooks.Broadcaster)
@@ -178,9 +164,8 @@ type (
 	// are rapidly updated and can be recovered, they are only loaded upon
 	// startup and persisted upon shutdown.
 	AccountStore interface {
-		Accounts(context.Context) ([]api.Account, error)
+		Accounts(context.Context, string) ([]api.Account, error)
 		SaveAccounts(context.Context, []api.Account) error
-		SetUncleanShutdown(context.Context) error
 	}
 
 	// An AutopilotStore stores autopilots.
@@ -309,7 +294,6 @@ type Bus struct {
 	startTime time.Time
 	masterKey [32]byte
 
-	accountsMgr AccountManager
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
 	pinMgr      PinManager
@@ -319,11 +303,12 @@ type Bus struct {
 	s           Syncer
 	w           Wallet
 
-	as    AutopilotStore
-	hs    HostStore
-	ms    MetadataStore
-	mtrcs MetricsStore
-	ss    SettingStore
+	accounts AccountStore
+	as       AutopilotStore
+	hs       HostStore
+	ms       MetadataStore
+	mtrcs    MetricsStore
+	ss       SettingStore
 
 	rhp2 *rhp2.Client
 
@@ -342,14 +327,15 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		startTime: time.Now(),
 		masterKey: masterKey,
 
-		s:     s,
-		cm:    cm,
-		w:     w,
-		hs:    store,
-		as:    store,
-		ms:    store,
-		mtrcs: store,
-		ss:    store,
+		accounts: store,
+		s:        s,
+		cm:       cm,
+		w:        w,
+		hs:       store,
+		as:       store,
+		ms:       store,
+		mtrcs:    store,
+		ss:       store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -361,12 +347,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 
 	// init settings
 	if err := b.initSettings(ctx); err != nil {
-		return nil, err
-	}
-
-	// create account manager
-	b.accountsMgr, err = ibus.NewAccountManager(ctx, store, l)
-	if err != nil {
 		return nil, err
 	}
 
@@ -391,14 +371,8 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 // Handler returns an HTTP handler that serves the bus API.
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts":                 b.accountsHandlerGET,
-		"POST   /account/:id":              b.accountHandlerGET,
-		"POST   /account/:id/add":          b.accountsAddHandlerPOST,
-		"POST   /account/:id/lock":         b.accountsLockHandlerPOST,
-		"POST   /account/:id/unlock":       b.accountsUnlockHandlerPOST,
-		"POST   /account/:id/update":       b.accountsUpdateHandlerPOST,
-		"POST   /account/:id/requiressync": b.accountsRequiresSyncHandlerPOST,
-		"POST   /account/:id/resetdrift":   b.accountsResetDriftHandlerPOST,
+		"GET    /accounts": b.accountsHandlerGET,
+		"POST   /accounts": b.accountsHandlerPOST,
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
@@ -535,7 +509,6 @@ func (b *Bus) Handler() http.Handler {
 func (b *Bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
 		b.walletMetricsRecorder.Shutdown(ctx),
-		b.accountsMgr.Shutdown(ctx),
 		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Shutdown(ctx),
 		b.cs.Shutdown(ctx),

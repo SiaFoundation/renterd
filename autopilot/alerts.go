@@ -5,15 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
 
 var (
-	alertAccountRefillID = alerts.RandomAlertID() // constant until restarted
 	alertHealthRefreshID = alerts.RandomAlertID() // constant until restarted
 	alertLowBalanceID    = alerts.RandomAlertID() // constant until restarted
 	alertMigrationID     = alerts.RandomAlertID() // constant until restarted
@@ -50,26 +47,6 @@ func newAccountLowBalanceAlert(address types.Address, balance, allowance types.C
 			"allowance": allowance,
 			"hint":      fmt.Sprintf("The current wallet balance of %v is less than the configured allowance of %v. Ideally, a wallet holds at least one allowance worth of funds to make sure it can renew all its contracts.", balance, allowance),
 		},
-		Timestamp: time.Now(),
-	}
-}
-
-func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err refillError) alerts.Alert {
-	data := map[string]interface{}{
-		"error":      err.Error(),
-		"accountID":  id.String(),
-		"contractID": contract.ID.String(),
-		"hostKey":    contract.HostKey.String(),
-	}
-	for i := 0; i < len(err.keysAndValues); i += 2 {
-		data[fmt.Sprint(err.keysAndValues[i])] = err.keysAndValues[i+1]
-	}
-
-	return alerts.Alert{
-		ID:        alerts.IDForAccount(alertAccountRefillID, id),
-		Severity:  alerts.SeverityError,
-		Message:   "Ephemeral account refill failed",
-		Data:      data,
 		Timestamp: time.Now(),
 	}
 }

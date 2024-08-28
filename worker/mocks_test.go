@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"time"
 
@@ -20,35 +19,13 @@ import (
 	"go.sia.tech/renterd/webhooks"
 )
 
-var _ AccountStore = (*accountsMock)(nil)
-
 type accountsMock struct{}
 
-func (*accountsMock) Accounts(context.Context) ([]api.Account, error) {
+func (*accountsMock) Accounts(context.Context, string) ([]api.Account, error) {
 	return nil, nil
 }
 
-func (*accountsMock) AddBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
-	return nil
-}
-
-func (*accountsMock) LockAccount(context.Context, rhpv3.Account, types.PublicKey, bool, time.Duration) (api.Account, uint64, error) {
-	return api.Account{}, 0, nil
-}
-
-func (*accountsMock) UnlockAccount(context.Context, rhpv3.Account, uint64) error {
-	return nil
-}
-
-func (*accountsMock) ResetDrift(context.Context, rhpv3.Account) error {
-	return nil
-}
-
-func (*accountsMock) SetBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
-	return nil
-}
-
-func (*accountsMock) ScheduleSync(context.Context, rhpv3.Account, types.PublicKey) error {
+func (*accountsMock) UpdateAccounts(context.Context, []api.Account) error {
 	return nil
 }
 
@@ -71,8 +48,6 @@ type chainMock struct {
 func (c *chainMock) ConsensusState(ctx context.Context) (api.ConsensusState, error) {
 	return c.cs, nil
 }
-
-var _ Bus = (*busMock)(nil)
 
 type busMock struct {
 	*alerterMock
@@ -131,7 +106,6 @@ func (c *contractMock) AddSector(root types.Hash256, sector *[rhpv2.SectorSize]b
 	c.mu.Lock()
 	c.sectors[root] = sector
 	c.mu.Unlock()
-	return
 }
 
 func (c *contractMock) Sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
@@ -156,13 +130,12 @@ func newContractLockerMock() *contractLockerMock {
 
 func (cs *contractLockerMock) AcquireContract(_ context.Context, fcid types.FileContractID, _ int, _ time.Duration) (uint64, error) {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	lock, exists := cs.locks[fcid]
 	if !exists {
 		cs.locks[fcid] = new(sync.Mutex)
 		lock = cs.locks[fcid]
 	}
+	cs.mu.Unlock()
 
 	lock.Lock()
 	return 0, nil
@@ -173,7 +146,6 @@ func (cs *contractLockerMock) ReleaseContract(_ context.Context, fcid types.File
 	defer cs.mu.Unlock()
 
 	cs.locks[fcid].Unlock()
-	delete(cs.locks, fcid)
 	return nil
 }
 
