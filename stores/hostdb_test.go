@@ -430,7 +430,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	if host.Interactions != (api.HostInteractions{}) {
-		t.Fatal("mismatch")
+		t.Fatal("mismatch", cmp.Diff(host.Interactions, api.HostInteractions{}))
 	}
 	if host.Settings != (rhpv2.HostSettings{}) {
 		t.Fatal("mismatch")
