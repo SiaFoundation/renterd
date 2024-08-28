@@ -527,8 +527,8 @@ func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.O
 	return ssql.Object(ctx, tx, bucket, key)
 }
 
-func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	return ssql.ObjectEntries(ctx, tx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
+func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	return ssql.ObjectEntries(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
 }
 
 func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {

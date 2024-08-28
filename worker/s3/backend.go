@@ -82,9 +82,6 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "delimiter must be '/' but was "+prefix.Delimiter)
 	}
 
-	// Workaround for empty prefix
-	prefix.HasPrefix = prefix.Prefix != ""
-
 	// Adjust MaxKeys
 	if page.MaxKeys == 0 {
 		page.MaxKeys = maxKeysDefault
@@ -95,59 +92,23 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		page.Marker = "/" + page.Marker
 	}
 
-	var objects []api.ObjectMetadata
-	var err error
-	response := gofakes3.NewObjectList()
-	if prefix.HasDelimiter {
-		// Handle request with delimiter.
-		opts := api.GetObjectOptions{}
-		if page.HasMarker {
-			opts.Marker = page.Marker
-			opts.Limit = int(page.MaxKeys)
-		}
-		var path string // root of bucket
-		adjustedPrefix := prefix.Prefix
-		if idx := strings.LastIndex(adjustedPrefix, prefix.Delimiter); idx != -1 {
-			path = adjustedPrefix[:idx+1]
-			adjustedPrefix = adjustedPrefix[idx+1:]
-		}
-		if adjustedPrefix != "" {
-			opts.Prefix = adjustedPrefix
-		}
-		var res api.ObjectsResponse
-		res, err = s.b.Object(ctx, bucketName, path, opts)
-		if utils.IsErr(err, api.ErrBucketNotFound) {
-			return nil, gofakes3.BucketNotFound(bucketName)
-		} else if err != nil {
-			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-		}
-		objects = res.Entries
-		response.IsTruncated = res.HasMore
-		if response.IsTruncated {
-			response.NextMarker = objects[len(objects)-1].Name
-		}
-	} else {
-		// Handle request without delimiter.
-		opts := api.ListObjectOptions{
-			Limit:  int(page.MaxKeys),
-			Marker: page.Marker,
-			Prefix: "/" + prefix.Prefix,
-		}
-
-		var res api.ObjectsListResponse
-		res, err = s.b.ListObjects(ctx, bucketName, opts)
-		if utils.IsErr(err, api.ErrBucketNotFound) {
-			return nil, gofakes3.BucketNotFound(bucketName)
-		} else if err != nil {
-			return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
-		}
-		objects = res.Objects
-		response.IsTruncated = res.HasMore
-		response.NextMarker = res.NextMarker
-	}
-	if err != nil {
+	resp, err := s.b.Objects(ctx, bucketName, api.ListObjectOptions{
+		Delimiter: prefix.Delimiter,
+		Limit:     int(page.MaxKeys),
+		Marker:    page.Marker,
+		Prefix:    prefix.Prefix,
+	})
+	if utils.IsErr(err, api.ErrBucketNotFound) {
+		return nil, gofakes3.BucketNotFound(bucketName)
+	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
+	objects := resp.Objects
+
+	// prepare response
+	response := gofakes3.NewObjectList()
+	response.IsTruncated = resp.HasMore
+	response.NextMarker = resp.NextMarker
 
 	// Remove the leading slash from the marker since we also do that for the
 	// name of each object
@@ -306,9 +267,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 // HeadObject should return a NotFound() error if the object does not
 // exist.
 func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.w.HeadObject(ctx, bucketName, objectName, api.HeadObjectOptions{
-		IgnoreDelim: true,
-	})
+	res, err := s.w.HeadObject(ctx, bucketName, objectName, api.HeadObjectOptions{})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		return nil, gofakes3.KeyNotFound(objectName)
 	} else if err != nil {

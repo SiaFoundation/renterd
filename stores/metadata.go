@@ -318,14 +318,6 @@ func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, 
 	return
 }
 
-func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		metadata, hasMore, err = tx.ObjectEntries(ctx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-		return err
-	})
-	return
-}
-
 func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		obj, err = tx.Object(ctx, bucket, path)
@@ -794,12 +786,15 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 	}
 }
 
-// TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
-// a delimiter for now (see backend.go) but it would be interesting to have
-// arbitrary 'delim' support in ListObjects.
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
+		if delim == "" {
+			resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
+		} else if delim == "/" {
+			resp, err = tx.ObjectEntries(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
+		} else {
+			return fmt.Errorf("unsupported delimiter: '%s'", delim)
+		}
 		return err
 	})
 	return

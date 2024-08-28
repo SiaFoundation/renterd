@@ -226,10 +226,9 @@ type (
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucketName, prefix, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectMetadata(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, path string) error
@@ -440,12 +439,12 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
-		"GET    /objects/*path":  b.objectsHandlerGET,
-		"PUT    /objects/*path":  b.objectsHandlerPUT,
-		"DELETE /objects/*path":  b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
-		"POST   /objects/list":   b.objectsListHandlerPOST,
+		"GET    /object/*key":     b.objectHandlerGET,
+		"GET    /objects/*prefix": b.objectsHandlerPOST,
+		"PUT    /objects/*path":   b.objectsHandlerPUT,
+		"DELETE /objects/*path":   b.objectsHandlerDELETE,
+		"POST   /objects/copy":    b.objectsCopyHandlerPOST,
+		"POST   /objects/rename":  b.objectsRenameHandlerPOST,
 
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,

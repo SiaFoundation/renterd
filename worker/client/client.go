@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -175,21 +174,6 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) 
 	values := make(url.Values)
 	values.Set("contractset", set)
 	err = c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, &res)
-	return
-}
-
-// ObjectEntries returns the entries at the given path, which must end in /.
-func (c *Client) ObjectEntries(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (entries []api.ObjectMetadata, err error) {
-	path = api.ObjectPathEscape(path)
-	body, _, err := c.object(ctx, bucket, path, api.DownloadObjectOptions{
-		GetObjectOptions: opts,
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer io.Copy(io.Discard, body)
-	defer body.Close()
-	err = json.NewDecoder(body).Decode(&entries)
 	return
 }
 

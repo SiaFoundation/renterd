@@ -47,6 +47,10 @@ var (
 	// ErrSlabNotFound is returned when a slab can't be retrieved from the
 	// database.
 	ErrSlabNotFound = errors.New("slab not found")
+
+	// ErrUnsupportedDelimiter is returned when an unsupported delimiter is
+	// provided.
+	ErrUnsupportedDelimiter = errors.New("unsupported delimiter")
 )
 
 type (
@@ -97,16 +101,6 @@ type (
 		Range        *ContentRange
 		Size         int64
 		Metadata     ObjectUserMetadata
-	}
-
-	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
-	ObjectsListRequest struct {
-		Bucket  string `json:"bucket"`
-		Limit   int    `json:"limit"`
-		SortBy  string `json:"sortBy"`
-		SortDir string `json:"sortDir"`
-		Prefix  string `json:"prefix"`
-		Marker  string `json:"marker"`
 	}
 
 	// ObjectsListResponse is the response type for the /bus/objects/list endpoint.
@@ -207,32 +201,24 @@ type (
 	}
 
 	HeadObjectOptions struct {
-		IgnoreDelim bool
-		Range       *DownloadRange
+		Range *DownloadRange
 	}
 
 	DownloadObjectOptions struct {
-		GetObjectOptions
 		Range *DownloadRange
 	}
 
 	GetObjectOptions struct {
-		Prefix       string
-		Offset       int
-		Limit        int
-		IgnoreDelim  bool
-		Marker       string
 		OnlyMetadata bool
-		SortBy       string
-		SortDir      string
 	}
 
 	ListObjectOptions struct {
-		Prefix  string
-		Marker  string
-		Limit   int
-		SortBy  string
-		SortDir string
+		Delimiter string
+		Limit     int
+		Marker    string
+		Prefix    string
+		SortBy    string
+		SortDir   string
 	}
 
 	SearchObjectOptions struct {
@@ -297,7 +283,6 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 }
 
 func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
-	opts.GetObjectOptions.Apply(values)
 }
 
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
@@ -317,9 +302,6 @@ func (opts DeleteObjectOptions) Apply(values url.Values) {
 }
 
 func (opts HeadObjectOptions) Apply(values url.Values) {
-	if opts.IgnoreDelim {
-		values.Set("ignoreDelim", "true")
-	}
 }
 
 func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
@@ -333,23 +315,23 @@ func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
 }
 
 func (opts GetObjectOptions) Apply(values url.Values) {
-	if opts.Prefix != "" {
-		values.Set("prefix", opts.Prefix)
+	if opts.OnlyMetadata {
+		values.Set("onlyMetadata", "true")
 	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
+}
+
+func (opts ListObjectOptions) Apply(values url.Values) {
+	if opts.Delimiter != "" {
+		values.Set("delimiter", opts.Delimiter)
 	}
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
-	if opts.IgnoreDelim {
-		values.Set("ignoreDelim", "true")
-	}
 	if opts.Marker != "" {
 		values.Set("marker", opts.Marker)
 	}
-	if opts.OnlyMetadata {
-		values.Set("onlymetadata", "true")
+	if opts.Prefix != "" {
+		values.Set("prefix", opts.Prefix)
 	}
 	if opts.SortBy != "" {
 		values.Set("sortBy", opts.SortBy)

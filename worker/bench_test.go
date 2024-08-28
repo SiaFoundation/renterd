@@ -42,10 +42,10 @@ func BenchmarkDownloaderSingleObject(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	b.SetBytes(o.Object.Size)
+	b.SetBytes(o.Size)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = w.downloadManager.DownloadObject(context.Background(), io.Discard, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
+		err = w.downloadManager.DownloadObject(context.Background(), io.Discard, *o.Object, 0, uint64(o.Size), w.Contracts())
 		if err != nil {
 			b.Fatal(err)
 		}

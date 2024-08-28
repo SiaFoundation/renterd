@@ -83,8 +83,8 @@ func TestS3Basic(t *testing.T) {
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
-	} else if busObject.Object.ETag != uploadInfo.ETag {
-		t.Fatalf("expected ETag %q, got %q", uploadInfo.ETag, busObject.Object.ETag)
+	} else if busObject.ETag != uploadInfo.ETag {
+		t.Fatalf("expected ETag %q, got %q", uploadInfo.ETag, busObject.ETag)
 	}
 
 	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})

@@ -34,7 +34,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
-	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 )
@@ -70,8 +69,6 @@ func NewClient(address, password string) *Client {
 
 type (
 	Bus interface {
-		s3.Bus
-
 		alerts.Alerter
 		gouging.ConsensusState
 		webhooks.Broadcaster
@@ -122,7 +119,7 @@ type (
 
 		// NOTE: used by worker
 		Bucket(_ context.Context, bucket string) (api.Bucket, error)
-		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
+		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.Object, error)
 		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
@@ -764,8 +761,7 @@ func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 
 	// fetch object metadata
 	hor, err := w.HeadObject(jc.Request.Context(), bucket, path, api.HeadObjectOptions{
-		IgnoreDelim: ignoreDelim,
-		Range:       &dr,
+		Range: &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -820,27 +816,9 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	opts := api.GetObjectOptions{
-		Prefix:      prefix,
-		Marker:      marker,
-		Offset:      off,
-		Limit:       limit,
-		IgnoreDelim: ignoreDelim,
-		SortBy:      sortBy,
-		SortDir:     sortDir,
-	}
-
 	path := jc.PathParam("path")
-	if path == "" || strings.HasSuffix(path, "/") {
-		// list directory
-		res, err := w.bus.Object(ctx, bucket, path, opts)
-		if utils.IsErr(err, api.ErrObjectNotFound) {
-			jc.Error(err, http.StatusNotFound)
-			return
-		} else if jc.Check("couldn't get object or entries", err) != nil {
-			return
-		}
-		jc.Encode(res.Entries)
+	if path == "" {
+		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
 		return
 	}
 
@@ -857,8 +835,7 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 	}
 
 	gor, err := w.GetObject(ctx, bucket, path, api.DownloadObjectOptions{
-		GetObjectOptions: opts,
-		Range:            &dr,
+		Range: &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1387,16 +1364,15 @@ func isErrHostUnreachable(err error) bool {
 		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
-func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.ObjectsResponse, error) {
+func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.Object, error) {
 	// fetch object
 	res, err := w.bus.Object(ctx, bucket, path, api.GetObjectOptions{
-		IgnoreDelim:  opts.IgnoreDelim,
 		OnlyMetadata: onlyMetadata,
 	})
 	if err != nil {
-		return nil, api.ObjectsResponse{}, fmt.Errorf("couldn't fetch object: %w", err)
+		return nil, api.Object{}, fmt.Errorf("couldn't fetch object: %w", err)
 	} else if res.Object == nil {
-		return nil, api.ObjectsResponse{}, errors.New("object is a directory")
+		return nil, api.Object{}, errors.New("object is a directory")
 	}
 
 	// adjust length
@@ -1404,21 +1380,21 @@ func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 		opts.Range = &api.DownloadRange{Offset: 0, Length: -1}
 	}
 	if opts.Range.Length == -1 {
-		opts.Range.Length = res.Object.Size - opts.Range.Offset
+		opts.Range.Length = res.Size - opts.Range.Offset
 	}
 
 	// check size of object against range
-	if opts.Range.Offset+opts.Range.Length > res.Object.Size {
-		return nil, api.ObjectsResponse{}, http_range.ErrInvalid
+	if opts.Range.Offset+opts.Range.Length > res.Size {
+		return nil, api.Object{}, http_range.ErrInvalid
 	}
 
 	return &api.HeadObjectResponse{
-		ContentType:  res.Object.MimeType,
-		Etag:         res.Object.ETag,
-		LastModified: res.Object.ModTime,
-		Range:        opts.Range.ContentRange(res.Object.Size),
-		Size:         res.Object.Size,
-		Metadata:     res.Object.Metadata,
+		ContentType:  res.MimeType,
+		Etag:         res.ETag,
+		LastModified: res.ModTime,
+		Range:        opts.Range.ContentRange(res.Size),
+		Size:         res.Size,
+		Metadata:     res.Metadata,
 	}, res, nil
 }
 
@@ -1459,13 +1435,12 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	// head object
 	hor, res, err := w.headObject(ctx, bucket, path, false, api.HeadObjectOptions{
-		IgnoreDelim: opts.IgnoreDelim,
-		Range:       opts.Range,
+		Range: opts.Range,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch object: %w", err)
 	}
-	obj := *res.Object.Object
+	obj := *res.Object
 
 	// adjust range
 	if opts.Range == nil {
@@ -1502,7 +1477,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, path, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}

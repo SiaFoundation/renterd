@@ -49,21 +49,8 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api
 	return
 }
 
-// ListOBjects lists objects in the given bucket.
-func (c *Client) ListObjects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
-	err = c.c.WithContext(ctx).POST("/objects/list", api.ObjectsListRequest{
-		Bucket:  bucket,
-		Limit:   opts.Limit,
-		Prefix:  opts.Prefix,
-		Marker:  opts.Marker,
-		SortBy:  opts.SortBy,
-		SortDir: opts.SortDir,
-	}, &resp)
-	return
-}
-
 // Objects returns the object at given path.
-func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.ObjectsResponse, err error) {
+func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.Object, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
@@ -71,7 +58,16 @@ func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetOb
 	path = api.ObjectPathEscape(path)
 	path += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &res)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", path), &res)
+	return
+}
+
+// Objects lists objects in the given bucket.
+func (c *Client) Objects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
+	values := url.Values{}
+	values.Set("bucket", bucket)
+	opts.Apply(values)
+	err = c.c.WithContext(ctx).GET("/objects?"+values.Encode(), &resp)
 	return
 }
 

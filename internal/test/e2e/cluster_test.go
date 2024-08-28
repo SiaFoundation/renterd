@@ -117,7 +117,7 @@ func TestListObjects(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
 			Prefix:  test.prefix,
 			SortBy:  test.sortBy,
 			SortDir: test.sortDir,
@@ -136,7 +136,7 @@ func TestListObjects(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+				res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
 					Prefix:  test.prefix,
 					SortBy:  test.sortBy,
 					SortDir: test.sortDir,
@@ -162,7 +162,7 @@ func TestListObjects(t *testing.T) {
 	}
 
 	// list invalid marker
-	_, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+	_, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
 		Marker: "invalid",
 		SortBy: api.ObjectSortByHealth,
 	})
@@ -481,34 +481,37 @@ func TestObjectEntries(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-			Prefix:  test.prefix,
-			SortBy:  test.sortBy,
-			SortDir: test.sortDir,
+		res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+			Delimiter: "/",
+			Prefix:    test.path + test.prefix,
+			SortBy:    test.sortBy,
+			SortDir:   test.sortDir,
 		})
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
-		assertMetadata(res.Entries)
+		assertMetadata(res.Objects)
 
-		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
-			t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Entries, test.want)
+		if !(len(res.Objects) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Objects, test.want) {
+			t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Objects, test.want)
 		}
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-				Prefix:  test.prefix,
+			res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+				Prefix:  test.path + test.prefix,
 				SortBy:  test.sortBy,
 				SortDir: test.sortDir,
-				Offset:  offset,
+				Marker:  marker,
 				Limit:   1,
 			})
+			marker = res.NextMarker
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertMetadata(res.Entries)
+			assertMetadata(res.Objects)
 
-			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
-				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Entries, test.want[offset])
+			if len(res.Objects) != 1 || res.Objects[0] != test.want[offset] {
+				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Objects, test.want[offset])
 			}
 			moreRemaining := len(test.want)-offset-1 > 0
 			if res.HasMore != moreRemaining {
@@ -520,8 +523,8 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			res, err = b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-				Prefix:  test.prefix,
+			res, err = b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+				Prefix:  test.path + test.prefix,
 				SortBy:  test.sortBy,
 				SortDir: test.sortDir,
 				Marker:  test.want[offset].Name,
@@ -530,40 +533,15 @@ func TestObjectEntries(t *testing.T) {
 			if err != nil {
 				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %vmarker: %v\n\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, err)
 			}
-			assertMetadata(res.Entries)
+			assertMetadata(res.Objects)
 
-			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
-				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
+			if len(res.Objects) != 1 || res.Objects[0] != test.want[offset+1] {
+				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Objects, test.want[offset+1])
 			}
 
 			moreRemaining = len(test.want)-offset-2 > 0
 			if res.HasMore != moreRemaining {
 				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", res.HasMore, test.want[offset].Name, test)
-			}
-		}
-
-		// use the worker client
-		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-			Prefix:  test.prefix,
-			SortBy:  test.sortBy,
-			SortDir: test.sortDir,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertMetadata(got)
-
-		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
-		}
-		for _, entry := range got {
-			if !strings.HasSuffix(entry.Name, "/") {
-				buf := new(bytes.Buffer)
-				if err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
-					t.Fatal(err)
-				} else if buf.Len() != int(entry.Size) {
-					t.Fatal("unexpected", buf.Len(), entry.Size)
-				}
 			}
 		}
 	}
@@ -574,10 +552,12 @@ func TestObjectEntries(t *testing.T) {
 	}
 
 	// assert root dir is empty
-	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.GetObjectOptions{}); err != nil {
+	if resp, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		Prefix: "/",
+	}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 0 {
-		t.Fatal("there should be no entries left", entries)
+	} else if len(resp.Objects) != 0 {
+		t.Fatal("there should be no entries left", resp.Objects)
 	}
 }
 
@@ -788,37 +768,33 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{})
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		Delimiter: "/",
+		Prefix:    "fileś/",
+	})
 	tt.OK(err)
 
-	if len(entries) != 2 {
-		t.Fatal("expected two entries to be returned", len(entries))
+	if len(resp.Objects) != 2 {
+		t.Fatal("expected two entries to be returned", len(resp.Objects))
 	}
-	for _, entry := range entries {
+	for _, entry := range resp.Objects {
 		if entry.MimeType != "application/octet-stream" {
 			t.Fatal("wrong mime type", entry.MimeType)
 		}
 	}
 
 	// fetch entries with "file" prefix
-	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{Prefix: "file"})
+	res, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{Prefix: "file"})
 	tt.OK(err)
-	if len(res.Entries) != 2 {
-		t.Fatal("expected two entry to be returned", len(entries))
+	if len(res.Objects) != 2 {
+		t.Fatal("expected two entry to be returned", len(res.Objects))
 	}
 
 	// fetch entries with "fileś" prefix
-	res, err = cluster.Bus.Object(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{Prefix: "foo"})
+	res, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{Prefix: "fileś/"})
 	tt.OK(err)
-	if len(res.Entries) != 0 {
-		t.Fatal("expected no entries to be returned", len(entries))
-	}
-
-	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", api.GetObjectOptions{})
-	tt.OK(err)
-	if len(entries) != 0 {
-		t.Fatal("expected no entries to be returned", len(entries))
+	if len(res.Objects) != 0 {
+		t.Fatal("expected no entries to be returned", len(res.Objects))
 	}
 
 	// prepare two files, a small one and a large one
@@ -971,11 +947,9 @@ func TestUploadDownloadSpending(t *testing.T) {
 			tt.OK(err)
 
 			var found bool
-			for _, entry := range res.Entries {
-				if entry.Name == fmt.Sprintf("/%s", path) {
-					found = true
-					break
-				}
+			if res.Name == fmt.Sprintf("/%s", path) {
+				found = true
+				break
 			}
 			if !found {
 				t.Fatal("uploaded object not found in bus")
@@ -1422,7 +1396,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload 3 objects so every host has 3 sectors
 	var err error
-	var res api.ObjectsResponse
+	var res api.Object
 	shards := make(map[types.PublicKey][]object.Sector)
 	for i := 0; i < 3; i++ {
 		// upload object
@@ -1448,7 +1422,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
-	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "frankenstein", api.DownloadObjectOptions{}))
@@ -1708,15 +1682,17 @@ func TestUploadPacking(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.Object.Size != int64(len(data)) {
-			t.Fatal("unexpected size after upload", res.Object.Size, len(data))
+		if res.Size != int64(len(data)) {
+			t.Fatal("unexpected size after upload", res.Size, len(data))
 		}
-		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.GetObjectOptions{})
+		resp, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+			Delimiter: "/",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		var found bool
-		for _, entry := range entries {
+		for _, entry := range resp.Objects {
 			if entry.Name == "/"+name {
 				if entry.Size != int64(len(data)) {
 					t.Fatal("unexpected size after upload", entry.Size, len(data))
@@ -1726,7 +1702,7 @@ func TestUploadPacking(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Fatal("object not found in list", name, entries)
+			t.Fatal("object not found in list", name, resp.Objects)
 		}
 	}
 

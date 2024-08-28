@@ -218,7 +218,7 @@ type (
 		Object(ctx context.Context, bucket, key string) (api.Object, error)
 
 		// ObjectEntries queries the database for objects in a given dir.
-		ObjectEntries(ctx context.Context, bucket, key, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
+		ObjectEntries(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)

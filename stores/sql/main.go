@@ -1353,17 +1353,15 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 	return id, nil
 }
 
-func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	// sanity check we are passing a directory
-	if !strings.HasSuffix(path, "/") {
-		panic("path must end in /")
+func ObjectEntries(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// split prefix into path and object prefix
+	path := "/" // root of bucket
+	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
+		path = prefix[:idx+1]
+		prefix = prefix[idx+1:]
 	}
-
-	// sanity check we are passing sane paging parameters
-	usingMarker := marker != ""
-	usingOffset := offset > 0
-	if usingMarker && usingOffset {
-		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
+	if !strings.HasSuffix(path, "/") {
+		panic("path must end with /")
 	}
 
 	// fetch one more to see if there are more entries
@@ -1384,9 +1382,9 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	// fetch directory id
 	dirID, err := dirID(ctx, tx, path)
 	if errors.Is(err, dsql.ErrNoRows) {
-		return []api.ObjectMetadata{}, false, nil
+		return api.ObjectsListResponse{}, nil
 	} else if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch directory id: %w", err)
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch directory id: %w", err)
 	}
 
 	args := []any{
@@ -1443,7 +1441,7 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 		}
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to query marker: %w", err)
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to query marker: %w", err)
 	} else if len(markerExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
 	}
@@ -1452,11 +1450,11 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	// apply sorting
 	orderByExprs, err := orderByObject(sortBy, sortDir)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to apply sorting: %w", err)
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
 	}
 
 	// apply offset and limit
-	args = append(args, limit, offset)
+	args = append(args, limit)
 
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
@@ -1481,7 +1479,7 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 		) AS o
 		%s
 		ORDER BY %s
-		LIMIT ? OFFSET ?
+		LIMIT ?
 	`,
 		tx.SelectObjectMetadataExpr(),
 		prefixExpr,
@@ -1491,7 +1489,7 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 		strings.Join(orderByExprs, ", "),
 	), args...)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch objects: %w", err)
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
 	}
 	defer rows.Close()
 
@@ -1499,19 +1497,27 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	for rows.Next() {
 		om, err := tx.ScanObjectMetadata(rows)
 		if err != nil {
-			return nil, false, fmt.Errorf("failed to scan object metadata: %w", err)
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
 		}
 		objects = append(objects, om)
 	}
 
 	// trim last element if we have more
 	var hasMore bool
+	var nextMarker string
 	if len(objects) == limit {
-		hasMore = true
 		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Name
+		}
 	}
 
-	return objects, hasMore, nil
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
+	}, nil
 }
 
 func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {

@@ -429,18 +429,18 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 	return []object.SlabSlice{ss}, os.totalSlabBufferSize() > os.slabBufferMaxSizeSoft, nil
 }
 
-func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error) {
+func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.Object, error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
 	// check if the bucket exists
 	if _, exists := os.objects[bucket]; !exists {
-		return api.ObjectsResponse{}, api.ErrBucketNotFound
+		return api.Object{}, api.ErrBucketNotFound
 	}
 
 	// check if the object exists
 	if _, exists := os.objects[bucket][path]; !exists {
-		return api.ObjectsResponse{}, api.ErrObjectNotFound
+		return api.Object{}, api.ErrObjectNotFound
 	}
 
 	// clone to ensure the store isn't unwillingly modified
@@ -451,10 +451,10 @@ func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts
 		panic(err)
 	}
 
-	return api.ObjectsResponse{Object: &api.Object{
+	return api.Object{
 		ObjectMetadata: api.ObjectMetadata{Name: path, Size: o.TotalSize()},
 		Object:         &o,
-	}}, nil
+	}, nil
 }
 
 func (os *objectStoreMock) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {

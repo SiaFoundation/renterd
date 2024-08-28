@@ -1035,16 +1035,8 @@ func (b *Bus) searchObjectsHandlerGET(jc jape.Context) {
 	jc.Encode(keys)
 }
 
-func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
-		return
-	}
-	path := jc.PathParam("path")
-	if strings.HasSuffix(path, "/") && !ignoreDelim {
-		b.objectEntriesHandlerGET(jc, path)
-		return
-	}
+func (b *Bus) objectHandlerGET(jc jape.Context) {
+	path := jc.PathParam("key")
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
@@ -1056,6 +1048,7 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 
 	var o api.Object
 	var err error
+
 	if onlymetadata {
 		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, path)
 	} else {
@@ -1070,48 +1063,40 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	jc.Encode(api.ObjectsResponse{Object: &o})
 }
 
-func (b *Bus) objectEntriesHandlerGET(jc jape.Context, path string) {
+func (b *Bus) objectsHandlerPOST(jc jape.Context) {
+	var limit int
+	var marker, delim, prefix, sortBy, sortDir string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-
-	var prefix string
+	if jc.DecodeForm("delimiter", &limit) != nil {
+		return
+	}
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	}
+	if jc.DecodeForm("marker", &marker) != nil {
+		return
+	}
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
 	}
-
-	var sortBy string
 	if jc.DecodeForm("sortBy", &sortBy) != nil {
 		return
 	}
-
-	var sortDir string
 	if jc.DecodeForm("sortDir", &sortDir) != nil {
 		return
 	}
 
-	var marker string
-	if jc.DecodeForm("marker", &marker) != nil {
+	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, prefix, delim, sortBy, sortDir, marker, limit)
+	if errors.Is(err, api.ErrUnsupportedDelimiter) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to query objects", err) != nil {
 		return
 	}
-
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
-		return
-	}
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
-
-	// look for object entries
-	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-	if jc.Check("couldn't list object entries", err) != nil {
-		return
-	}
-
-	jc.Encode(api.ObjectsResponse{Entries: entries, HasMore: hasMore})
+	jc.Encode(resp)
 }
 
 func (b *Bus) objectsHandlerPUT(jc jape.Context) {
@@ -1137,24 +1122,6 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("Last-Modified", om.ModTime.Std().Format(http.TimeFormat))
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(om.ETag))
 	jc.Encode(om)
-}
-
-func (b *Bus) objectsListHandlerPOST(jc jape.Context) {
-	var req api.ObjectsListRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
-	}
-	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.SortBy, req.SortDir, req.Marker, req.Limit)
-	if errors.Is(err, api.ErrMarkerNotFound) {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	} else if jc.Check("couldn't list objects", err) != nil {
-		return
-	}
-	jc.Encode(resp)
 }
 
 func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
