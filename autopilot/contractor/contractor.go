@@ -131,9 +131,6 @@ type (
 		revisionSubmissionBuffer  uint64
 
 		firstRefreshFailure map[types.FileContractID]time.Time
-
-		shutdownCtx       context.Context
-		shutdownCtxCancel context.CancelFunc
 	}
 
 	scoredHost struct {
@@ -166,7 +163,6 @@ type (
 
 func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
 	logger = logger.Named("contractor")
-	ctx, cancel := context.WithCancel(context.Background())
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
@@ -178,15 +174,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
 		firstRefreshFailure: make(map[types.FileContractID]time.Time),
-
-		shutdownCtx:       ctx,
-		shutdownCtxCancel: cancel,
 	}
-}
-
-func (c *Contractor) Close() error {
-	c.shutdownCtxCancel()
-	return nil
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {

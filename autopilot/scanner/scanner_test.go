@@ -51,10 +51,10 @@ func (hs *mockHostStore) HostsForScanning(ctx context.Context, opts api.HostsFor
 	return hostAddresses, nil
 }
 
-func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
+func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
-	hs.removals = append(hs.removals, fmt.Sprintf("%d-%d", minRecentScanFailures, maxDowntime))
+	hs.removals = append(hs.removals, fmt.Sprintf("%d-%d", maxConsecutiveScanFailures, maxDowntime))
 	return 0, nil
 }
 
@@ -146,8 +146,8 @@ func TestScanner(t *testing.T) {
 
 	// update the hosts config
 	s.UpdateHostsConfig(api.HostsConfig{
-		MinRecentScanFailures: 10,
-		MaxDowntimeHours:      1,
+		MaxConsecutiveScanFailures: 10,
+		MaxDowntimeHours:           1,
 	})
 
 	s.Scan(context.Background(), w, true)

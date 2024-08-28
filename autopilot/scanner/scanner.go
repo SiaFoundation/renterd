@@ -20,7 +20,7 @@ const (
 type (
 	HostStore interface {
 		HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
-		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
 
 	Scanner interface {
@@ -268,12 +268,12 @@ func (s *scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 
 	s.logger.Infow("removing offline hosts",
 		"maxDowntime", maxDowntime,
-		"minRecentScanFailures", s.hostsCfg.MinRecentScanFailures)
+		"maxConsecutiveScanFailures", s.hostsCfg.MaxConsecutiveScanFailures)
 
 	var err error
-	removed, err = s.hs.RemoveOfflineHosts(ctx, s.hostsCfg.MinRecentScanFailures, maxDowntime)
+	removed, err = s.hs.RemoveOfflineHosts(ctx, s.hostsCfg.MaxConsecutiveScanFailures, maxDowntime)
 	if err != nil {
-		s.logger.Errorw("removing offline hosts failed", zap.Error(err), "maxDowntime", maxDowntime, "minRecentScanFailures", s.hostsCfg.MinRecentScanFailures)
+		s.logger.Errorw("removing offline hosts failed", zap.Error(err), "maxDowntime", maxDowntime, "maxConsecutiveScanFailures", s.hostsCfg.MaxConsecutiveScanFailures)
 		return
 	}
 

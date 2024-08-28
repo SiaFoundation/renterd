@@ -22,18 +22,6 @@ func (c *Client) RHPContractRoots(ctx context.Context, contractID types.FileCont
 	return
 }
 
-// RHPFund funds an ephemeral account using the supplied contract.
-func (c *Client) RHPFund(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string, balance types.Currency) (err error) {
-	req := api.RHPFundRequest{
-		ContractID: contractID,
-		HostKey:    hostKey,
-		SiamuxAddr: siamuxAddr,
-		Balance:    balance,
-	}
-	err = c.c.WithContext(ctx).POST("/rhp/fund", req, nil)
-	return
-}
-
 // RHPPriceTable fetches a price table for a host.
 func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (pt api.HostPriceTable, err error) {
 	req := api.RHPPriceTableRequest{
@@ -68,16 +56,5 @@ func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP st
 		HostIP:  hostIP,
 		Timeout: api.DurationMS(timeout),
 	}, &resp)
-	return
-}
-
-// RHPSync funds an ephemeral account using the supplied contract.
-func (c *Client) RHPSync(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, hostIP, siamuxAddr string) (err error) {
-	req := api.RHPSyncRequest{
-		ContractID: contractID,
-		HostKey:    hostKey,
-		SiamuxAddr: siamuxAddr,
-	}
-	err = c.c.WithContext(ctx).POST("/rhp/sync", req, nil)
 	return
 }

@@ -542,7 +542,7 @@ formed.
 	"hosts": {
 		"allowRedundantIPs": false,
 		"maxDowntimeHours": 1440,
-		"minRecentScanFailures": 20,
+		"maxConsecutiveScanFailures": 20,
 		"scoreOverrides": {}
 	},
 	"contracts": {

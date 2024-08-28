@@ -87,14 +87,6 @@ type (
 		TransactionSet []types.Transaction    `json:"transactionSet"`
 	}
 
-	// RHPFundRequest is the request type for the /rhp/fund endpoint.
-	RHPFundRequest struct {
-		ContractID types.FileContractID `json:"contractID"`
-		HostKey    types.PublicKey      `json:"hostKey"`
-		SiamuxAddr string               `json:"siamuxAddr"`
-		Balance    types.Currency       `json:"balance"`
-	}
-
 	// RHPPruneContractRequest is the request type for the /rhp/contract/:id/prune
 	// endpoint.
 	RHPPruneContractRequest struct {
