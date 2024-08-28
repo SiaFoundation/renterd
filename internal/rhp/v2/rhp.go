@@ -169,7 +169,7 @@ func (c *Client) FormContract(ctx context.Context, hostKey types.PublicKey, host
 }
 
 func (c *Client) PruneContract(ctx context.Context, renterKey types.PrivateKey, gougingChecker gouging.Checker, hostIP string, hostKey types.PublicKey, fcid types.FileContractID, lastKnownRevisionNumber uint64, diffRootsFn PrunableRootsFn) (revision *types.FileContractRevision, spending api.ContractSpending, deleted, remaining uint64, err error) {
-	log := c.logger.Named("performContractPruning").Named("debugpj")
+	log := c.logger.Named("performContractPruning")
 	err = c.withTransport(ctx, hostKey, hostIP, func(t *rhpv2.Transport) error {
 		return c.withRevisionV2(renterKey, gougingChecker, t, fcid, lastKnownRevisionNumber, func(t *rhpv2.Transport, rev rhpv2.ContractRevision, settings rhpv2.HostSettings) (err error) {
 			// reference the revision
@@ -397,7 +397,7 @@ func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.Private
 }
 
 func (c *Client) prunableContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, prunableRootsFn PrunableRootsFn) (indices []uint64, cost types.Currency, _ error) {
-	log := c.logger.Named("performContractPruning").Named("debugpj")
+	log := c.logger.Named("performContractPruning")
 	numsectors := rev.NumSectors()
 	var nBatch uint64
 	for offset := uint64(0); offset < numsectors; {
