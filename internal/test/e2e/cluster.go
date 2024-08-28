@@ -435,18 +435,25 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}))
 	}
 
-	// Update the bus settings.
-	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
-	tt.OK(busClient.UpdateContractSetSetting(ctx, test.ContractSetSettings))
-	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
-	tt.OK(busClient.UpdateRedundancySettings(ctx, test.RedundancySettings))
-	tt.OK(busClient.UpdateS3AuthenticationSettings(ctx, api.S3AuthenticationSettings{
-		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
-	}))
-	tt.OK(busClient.UpdateUploadPackingSettings(ctx, api.UploadPackingSettings{
+	// Build upload settings.
+	us := test.UploadSettings
+	us.Packing = api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
 		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
-	}))
+	}
+
+	// Build S3 settings.
+	s3 := api.S3Settings{
+		Authentication: api.S3AuthenticationSettings{
+			V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
+		},
+	}
+
+	// Update the bus settings.
+	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
+	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
+	tt.OK(busClient.UpdateUploadSettings(ctx, us))
+	tt.OK(busClient.UpdateS3Settings(ctx, s3))
 
 	// Fund the bus.
 	if funding {

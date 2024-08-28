@@ -178,10 +178,10 @@ func TestNewTestCluster(t *testing.T) {
 	tt := cluster.tt
 
 	// Upload packing should be disabled by default.
-	ups, err := b.UploadPackingSettings(context.Background())
+	us, err := b.UploadSettings(context.Background())
 	tt.OK(err)
-	if ups.Enabled {
-		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
+	if us.Packing.Enabled {
+		t.Fatalf("expected upload packing to be disabled by default, got %v", us.Packing.Enabled)
 	}
 
 	// PricePinningSettings should have default values
@@ -1142,10 +1142,13 @@ func TestEphemeralAccounts(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	tt.OK(b.UpdateRedundancySettings(context.Background(), api.RedundancySettings{
+	us := test.UploadSettings
+	us.Redundancy = api.RedundancySettings{
 		MinShards:   1,
 		TotalShards: 1,
-	}))
+	}
+	tt.OK(b.UpdateUploadSettings(context.Background(), us))
+
 	// add a host
 	hosts := cluster.AddHosts(1)
 	h, err := b.Host(context.Background(), hosts[0].PublicKey())

@@ -11,7 +11,6 @@ import (
 	"math/big"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -357,11 +356,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
-	// init settings
-	if err := b.initSettings(ctx); err != nil {
-		return nil, err
-	}
-
 	// create account manager
 	b.accountsMgr, err = ibus.NewAccountManager(ctx, store, l)
 	if err != nil {
@@ -483,16 +477,14 @@ func (b *Bus) Handler() http.Handler {
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
-		"GET    /settings/gouging":          b.settingsGougingHandlerGET,
-		"PUT    /settings/gouging":          b.settingsGougingHandlerPUT,
-		"GET    /settings/pinned":           b.settingsPinnedHandlerGET,
-		"PUT    /settings/pinned":           b.settingsPinnedHandlerPUT,
-		"GET    /settings/redundancy":       b.settingsRedundancyHandlerGET,
-		"PUT    /settings/redundancy":       b.settingsRedundancyHandlerPUT,
-		"GET    /settings/s3authentication": b.settingsS3AuthenticationHandlerGET,
-		"PUT    /settings/s3authentication": b.settingsS3AuthenticationHandlerPUT,
-		"GET    /settings/uploadpacking":    b.settingsUploadPackingHandlerGET,
-		"PUT    /settings/uploadpacking":    b.settingsUploadPackingHandlerPUT,
+		"GET    /settings/gouging": b.settingsGougingHandlerGET,
+		"PUT    /settings/gouging": b.settingsGougingHandlerPUT,
+		"GET    /settings/pinned":  b.settingsPinnedHandlerGET,
+		"PUT    /settings/pinned":  b.settingsPinnedHandlerPUT,
+		"GET    /settings/s3":      b.settingsS3HandlerGET,
+		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
+		"GET    /settings/uploads": b.settingsRedundancyHandlerGET,
+		"PUT    /settings/uploads": b.settingsRedundancyHandlerPUT,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
@@ -611,120 +603,6 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	return contract, nil
 }
 
-// initSettings loads the default settings if the setting is not already set and
-// ensures the settings are valid
-func (b *Bus) initSettings(ctx context.Context) error {
-	// testnets have different redundancy settings
-	defaultRedundancySettings := api.DefaultRedundancySettings
-	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
-		defaultRedundancySettings = api.DefaultRedundancySettingsTestnet
-	}
-
-	// load default settings if the setting is not already set
-	for key, value := range map[string]interface{}{
-		api.SettingGouging:       api.DefaultGougingSettings,
-		api.SettingPricePinning:  api.DefaultPricePinSettings,
-		api.SettingRedundancy:    defaultRedundancySettings,
-		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
-	} {
-		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
-			if bytes, err := json.Marshal(value); err != nil {
-				panic("failed to marshal default settings") // should never happen
-			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
-				return err
-			}
-		}
-	}
-
-	// check redundancy settings for validity
-	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		return err
-	} else if err := rs.Validate(); err != nil {
-		b.logger.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(defaultRedundancySettings)
-		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
-			return err
-		}
-	}
-
-	// check gouging settings for validity
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		return err
-	} else if err := gs.Validate(); err != nil {
-		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
-		if err := gs.Validate(); err == nil {
-			b.logger.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
-			bytes, _ := json.Marshal(gs)
-			if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-				return err
-			}
-		} else {
-			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
-			if err := gs.Validate(); err == nil {
-				b.logger.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
-				bytes, _ := json.Marshal(gs)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return err
-				}
-			} else {
-				b.logger.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(api.DefaultGougingSettings)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	// compat: default price pin settings
-	var pps api.PricePinSettings
-	if pss, err := b.ss.Setting(ctx, api.SettingPricePinning); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(pss), &pps); err != nil {
-		return err
-	} else if err := pps.Validate(); err != nil {
-		// overwrite values with defaults
-		var updates []string
-		if pps.ForexEndpointURL == "" {
-			pps.ForexEndpointURL = api.DefaultPricePinSettings.ForexEndpointURL
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.ForexEndpointURL to %v", pps.ForexEndpointURL))
-		}
-		if pps.Currency == "" {
-			pps.Currency = api.DefaultPricePinSettings.Currency
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.Currency to %v", pps.Currency))
-		}
-		if pps.Threshold == 0 {
-			pps.Threshold = api.DefaultPricePinSettings.Threshold
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.Threshold to %v", pps.Threshold))
-		}
-
-		var updated []byte
-		if err := pps.Validate(); err == nil {
-			b.logger.Info(fmt.Sprintf("updating price pinning settings with default values: %v", strings.Join(updates, ", ")))
-			updated, _ = json.Marshal(pps)
-		} else {
-			b.logger.Warn(fmt.Sprintf("updated price pinning settings are invalid (%v), they have been overwritten with the default settings", err))
-			updated, _ = json.Marshal(api.DefaultPricePinSettings)
-		}
-
-		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
 	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
 	pk := types.NewPrivateKeyFromSeed(seed[:])
@@ -744,17 +622,15 @@ func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
 }
 
 func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
-	// testnets have different redundancy settings
-	defaultRedundancySettings := api.DefaultRedundancySettings
-	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
-		defaultRedundancySettings = api.DefaultRedundancySettingsTestnet
+	defaults := map[string]interface{}{
+		api.SettingGouging: api.DefaultGougingSettings,
+		api.SettingPinned:  api.DefaultPricePinSettings,
+		api.SettingUploads: api.DefaultUploadSettings,
 	}
 
-	defaults := map[string]interface{}{
-		api.SettingGouging:       api.DefaultGougingSettings,
-		api.SettingPricePinning:  api.DefaultPricePinSettings,
-		api.SettingRedundancy:    defaultRedundancySettings,
-		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
+	// testnets have different redundancy settings
+	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
+		defaults[api.SettingUploads] = api.DefaultRedundancySettingsTestnet
 	}
 
 	setting, err := b.ss.Setting(ctx, key)

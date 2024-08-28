@@ -103,10 +103,10 @@ func (pm *pinManager) averageRate() decimal.Decimal {
 	return decimal.NewFromFloat(median)
 }
 
-func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings, error) {
-	var ps api.PricePinSettings
-	if pss, err := pm.s.Setting(ctx, api.SettingPricePinning); err != nil {
-		return api.PricePinSettings{}, err
+func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PinnedSettings, error) {
+	var ps api.PinnedSettings
+	if pss, err := pm.s.Setting(ctx, api.SettingPinned); err != nil {
+		return api.PinnedSettings{}, err
 	} else if err := json.Unmarshal([]byte(pss), &ps); err != nil {
 		pm.logger.Panicf("failed to unmarshal pinned settings '%s': %v", pss, err)
 	}

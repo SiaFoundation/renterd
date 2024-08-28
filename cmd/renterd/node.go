@@ -413,30 +413,31 @@ func (n *node) Run() error {
 
 	// set initial S3 keys
 	if n.cfg.S3.Enabled && !n.cfg.S3.DisableAuth {
-		as, err := n.bus.S3AuthenticationSettings(context.Background())
+		s3s, err := n.bus.S3Settings(context.Background())
 		if err != nil && !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
-			return fmt.Errorf("failed to fetch S3 authentication settings: %w", err)
-		} else if as.V4Keypairs == nil {
-			as.V4Keypairs = make(map[string]string)
+			return fmt.Errorf("failed to fetch S3 settings: %w", err)
+		} else if s3s.Authentication.V4Keypairs == nil {
+			s3s.Authentication.V4Keypairs = make(map[string]string)
 		}
 
 		// S3 key pair validation was broken at one point, we need to remove the
 		// invalid key pairs here to ensure we don't fail when we update the
 		// setting below.
-		for k, v := range as.V4Keypairs {
+		for k, v := range s3s.Authentication.V4Keypairs {
 			if err := (api.S3AuthenticationSettings{V4Keypairs: map[string]string{k: v}}).Validate(); err != nil {
 				n.logger.Infof("removing invalid S3 keypair for AccessKeyID %s, reason: %v", k, err)
-				delete(as.V4Keypairs, k)
+				delete(s3s.Authentication.V4Keypairs, k)
 			}
 		}
 
 		// merge keys
 		for k, v := range n.cfg.S3.KeypairsV4 {
-			as.V4Keypairs[k] = v
+			s3s.Authentication.V4Keypairs[k] = v
 		}
+
 		// update settings
-		if err := n.bus.UpdateS3AuthenticationSettings(context.Background(), as); err != nil {
-			return fmt.Errorf("failed to update S3 authentication settings: %w", err)
+		if err := n.bus.UpdateS3Settings(context.Background(), s3s); err != nil {
+			return fmt.Errorf("failed to update S3 settings: %w", err)
 		}
 	}
 

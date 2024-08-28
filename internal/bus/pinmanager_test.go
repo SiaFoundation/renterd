@@ -123,7 +123,7 @@ func newTestStore() *mockPinStore {
 
 	// add default price pin - and gouging settings
 	b, _ := json.Marshal(api.DefaultPricePinSettings)
-	s.settings[api.SettingPricePinning] = string(b)
+	s.settings[api.SettingPinned] = string(b)
 	b, _ = json.Marshal(api.DefaultGougingSettings)
 	s.settings[api.SettingGouging] = string(b)
 
@@ -152,9 +152,9 @@ func (ms *mockPinStore) gougingSettings() api.GougingSettings {
 	return gs
 }
 
-func (ms *mockPinStore) updatPinnedSettings(pps api.PricePinSettings) {
+func (ms *mockPinStore) updatPinnedSettings(pps api.PinnedSettings) {
 	b, _ := json.Marshal(pps)
-	ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
+	ms.UpdateSetting(context.Background(), api.SettingPinned, string(b))
 	time.Sleep(2 * testUpdateInterval)
 }
 

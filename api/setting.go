@@ -10,12 +10,10 @@ import (
 )
 
 const (
-	SettingContractSet      = "contractset"
-	SettingGouging          = "gouging"
-	SettingPricePinning     = "pricepinning"
-	SettingRedundancy       = "redundancy"
-	SettingS3Authentication = "s3authentication"
-	SettingUploadPacking    = "uploadpacking"
+	SettingGouging = "gouging"
+	SettingPinned  = "pinned"
+	SettingS3      = "s3"
+	SettingUploads = "uploads"
 )
 
 const (
@@ -53,11 +51,16 @@ var (
 	// DefaultPricePinSettings define the default price pin settings the bus is
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
-	DefaultPricePinSettings = PricePinSettings{
+	DefaultPricePinSettings = PinnedSettings{
 		Enabled:          false,
 		Currency:         "usd",
 		ForexEndpointURL: "https://api.siascan.com/exchange-rate/siacoin",
 		Threshold:        0.05,
+	}
+
+	DefaultUploadSettings = UploadSettings{
+		Packing:    DefaultUploadPackingSettings,
+		Redundancy: DefaultRedundancySettings,
 	}
 
 	// DefaultUploadPackingSettings define the default upload packing settings
@@ -86,12 +89,6 @@ var (
 )
 
 type (
-	// ContractSetSetting contains the default contract set used by the worker for
-	// uploads and migrations.
-	ContractSetSetting struct {
-		Default string `json:"default"`
-	}
-
 	// GougingSettings contain some price settings used in price gouging.
 	GougingSettings struct {
 		// MaxRPCPrice is the maximum allowed base price for RPCs
@@ -132,10 +129,10 @@ type (
 		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
-	// PricePinSettings holds the configuration for pinning certain settings to
-	// a specific currency (e.g., USD). It uses a Forex API to fetch the current
+	// PinnedSettings holds the configuration for pinning certain settings to a
+	// specific currency (e.g., USD). It uses a Forex API to fetch the current
 	// exchange rate, allowing users to set prices in USD instead of SC.
-	PricePinSettings struct {
+	PinnedSettings struct {
 		// Enabled can be used to either enable or temporarily disable price
 		// pinning. If enabled, both the currency and the Forex endpoint URL
 		// must be valid.
@@ -160,6 +157,23 @@ type (
 		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins"`
 	}
 
+	// UploadSettings contains various settings related to uploads.
+	UploadSettings struct {
+		DefaultContractSet string                `json:"defaultContractSet"`
+		Packing            UploadPackingSettings `json:"packing"`
+		Redundancy         RedundancySettings    `json:"redundancy"`
+	}
+
+	UploadPackingSettings struct {
+		Enabled               bool  `json:"enabled"`
+		SlabBufferMaxSizeSoft int64 `json:"slabBufferMaxSizeSoft"`
+	}
+
+	RedundancySettings struct {
+		MinShards   int `json:"minShards"`
+		TotalShards int `json:"totalShards"`
+	}
+
 	// AutopilotPins contains the available autopilot settings that can be
 	// pinned.
 	AutopilotPins struct {
@@ -180,21 +194,14 @@ type (
 		Value  float64 `json:"value"`
 	}
 
-	// RedundancySettings contain settings that dictate an object's redundancy.
-	RedundancySettings struct {
-		MinShards   int `json:"minShards"`
-		TotalShards int `json:"totalShards"`
+	// S3Settings contains various settings related to the S3 API.
+	S3Settings struct {
+		Authentication S3AuthenticationSettings `json:"authentication"`
 	}
 
 	// S3AuthenticationSettings contains S3 auth settings.
 	S3AuthenticationSettings struct {
 		V4Keypairs map[string]string `json:"v4Keypairs"`
-	}
-
-	// UploadPackingSettings contains upload packing settings.
-	UploadPackingSettings struct {
-		Enabled               bool  `json:"enabled"`
-		SlabBufferMaxSizeSoft int64 `json:"slabBufferMaxSizeSoft"`
 	}
 )
 
@@ -204,7 +211,7 @@ func (p Pin) IsPinned() bool {
 }
 
 // Validate returns an error if the price pin settings are not considered valid.
-func (pps PricePinSettings) Validate() error {
+func (pps PinnedSettings) Validate() error {
 	if pps.ForexEndpointURL == "" {
 		return fmt.Errorf("price pin settings must have a forex endpoint URL")
 	}
@@ -281,8 +288,12 @@ func (rs RedundancySettings) Validate() error {
 
 // Validate returns an error if the authentication settings are not considered
 // valid.
-func (s3as S3AuthenticationSettings) Validate() error {
-	for accessKeyID, secretAccessKey := range s3as.V4Keypairs {
+func (s3s S3Settings) Validate() error {
+	return s3s.Authentication.Validate()
+}
+
+func (s3a S3AuthenticationSettings) Validate() error {
+	for accessKeyID, secretAccessKey := range s3a.V4Keypairs {
 		if accessKeyID == "" {
 			return fmt.Errorf("AccessKeyID cannot be empty")
 		} else if len(accessKeyID) < S3MinAccessKeyLen || len(accessKeyID) > S3MaxAccessKeyLen {

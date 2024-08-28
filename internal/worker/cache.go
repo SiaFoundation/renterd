@@ -333,7 +333,7 @@ func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {
 
 		gp.GougingSettings = gs
 		c.cache.Set(cacheKeyGougingParams, gp)
-	case api.SettingRedundancy:
+	case api.SettingUploads:
 		var rs api.RedundancySettings
 		if err := json.Unmarshal(data, &rs); err != nil {
 			return fmt.Errorf("couldn't update redundancy settings, invalid request body, %t", e.Update)

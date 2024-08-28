@@ -33,10 +33,7 @@ var (
 		},
 	}
 
-	ContractSet         = "testset"
-	ContractSetSettings = api.ContractSetSetting{
-		Default: ContractSet,
-	}
+	ContractSet = "testset"
 
 	GougingSettings = api.GougingSettings{
 		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
@@ -57,6 +54,11 @@ var (
 	RedundancySettings = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 3,
+	}
+
+	UploadSettings = api.UploadSettings{
+		DefaultContractSet: ContractSet,
+		Redundancy:         RedundancySettings,
 	}
 
 	S3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"
