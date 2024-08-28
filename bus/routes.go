@@ -606,11 +606,11 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("maxDowntime must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	if hrr.MinRecentScanFailures == 0 {
-		jc.Error(errors.New("minRecentScanFailures must be non-zero"), http.StatusBadRequest)
+	if hrr.MaxConsecutiveScanFailures == 0 {
+		jc.Error(errors.New("maxConsecutiveScanFailures must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
+	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MaxConsecutiveScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}
@@ -1823,136 +1823,30 @@ func (b *Bus) handlePOSTAlertsRegister(jc jape.Context) {
 }
 
 func (b *Bus) accountsHandlerGET(jc jape.Context) {
-	jc.Encode(b.accountsMgr.Accounts())
-}
-
-func (b *Bus) accountHandlerGET(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
+	var owner string
+	if jc.DecodeForm("owner", &owner) != nil {
 		return
 	}
-	var req api.AccountHandlerPOST
+	accounts, err := b.accounts.Accounts(jc.Request.Context(), owner)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(accounts)
+}
+
+func (b *Bus) accountsHandlerPOST(jc jape.Context) {
+	var req api.AccountsSaveRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
-	acc, err := b.accountsMgr.Account(id, req.HostKey)
-	if jc.Check("failed to fetch account", err) != nil {
-		return
+	for _, acc := range req.Accounts {
+		if acc.Owner == "" {
+			jc.Error(errors.New("acocunts need to have a valid 'Owner'"), http.StatusBadRequest)
+			return
+		}
 	}
-	jc.Encode(acc)
-}
-
-func (b *Bus) accountsAddHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsAddBalanceRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if id == (rhpv3.Account{}) {
-		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
-		return
-	}
-	if req.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
-		return
-	}
-	b.accountsMgr.AddAmount(id, req.HostKey, req.Amount)
-}
-
-func (b *Bus) accountsResetDriftHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	err := b.accountsMgr.ResetDrift(id)
-	if errors.Is(err, ibus.ErrAccountNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("failed to reset drift", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) accountsUpdateHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsUpdateBalanceRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if id == (rhpv3.Account{}) {
-		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
-		return
-	}
-	if req.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
-		return
-	}
-	b.accountsMgr.SetBalance(id, req.HostKey, req.Amount)
-}
-
-func (b *Bus) accountsRequiresSyncHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsRequiresSyncRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if id == (rhpv3.Account{}) {
-		jc.Error(errors.New("account id needs to be set"), http.StatusBadRequest)
-		return
-	}
-	if req.HostKey == (types.PublicKey{}) {
-		jc.Error(errors.New("host needs to be set"), http.StatusBadRequest)
-		return
-	}
-	err := b.accountsMgr.ScheduleSync(id, req.HostKey)
-	if errors.Is(err, ibus.ErrAccountNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("failed to set requiresSync flag on account", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) accountsLockHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsLockHandlerRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	acc, lockID := b.accountsMgr.LockAccount(jc.Request.Context(), id, req.HostKey, req.Exclusive, time.Duration(req.Duration))
-	jc.Encode(api.AccountsLockHandlerResponse{
-		Account: acc,
-		LockID:  lockID,
-	})
-}
-
-func (b *Bus) accountsUnlockHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.AccountsUnlockHandlerRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	err := b.accountsMgr.UnlockAccount(id, req.LockID)
-	if jc.Check("failed to unlock account", err) != nil {
+	if b.accounts.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
 		return
 	}
 }
