@@ -451,7 +451,6 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 		)
 	`, strings.Repeat("?, ", len(fcids)-1)+"?"), args...)
 	if err != nil {
-		fmt.Println(strings.Repeat("?, ", len(fcids)-1) + "?")
 		return 0, err
 	}
 	return res.RowsAffected()
