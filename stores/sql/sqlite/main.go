@@ -586,6 +586,13 @@ CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable))
 		}
 	}()
 
+	// prepare insert statement
+	insertStmt, err := tx.Prepare(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", batchSizeInsertSectors), ", ")))
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement to insert contract roots: %w", err)
+	}
+	defer insertStmt.Close()
+
 	// insert roots in batches
 	for i := 0; i < len(roots); i += batchSizeInsertSectors {
 		end := i + batchSizeInsertSectors
@@ -598,10 +605,18 @@ CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable))
 			params = append(params, uint64(i), ssql.Hash256(r))
 		}
 
-		_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+		if len(params) == batchSizeInsertSectors {
+			_, err := insertStmt.Exec(ctx, params...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+			}
+		} else {
+			_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+			}
 		}
+
 	}
 
 	// execute query
