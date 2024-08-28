@@ -826,10 +826,6 @@ func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
 	return ssql.Settings(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context, owner string) error {
-	return ssql.SetUncleanShutdown(ctx, tx, owner)
-}
-
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
 	return ssql.Slab(ctx, tx, key)
 }

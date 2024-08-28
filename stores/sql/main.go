@@ -124,7 +124,7 @@ func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, erro
 
 func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	rows, err := tx.Query(ctx, `
-		WITH RECURSIVE ancestors AS 
+		WITH RECURSIVE ancestors AS
 		(
 			SELECT *
 			FROM archived_contracts
@@ -722,7 +722,7 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 
 	res, err := tx.Exec(ctx, `
 		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
-		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending, 
+		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending,
 		fund_account_spending, delete_spending, list_spending)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
@@ -2236,20 +2236,12 @@ func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
 	return settings, nil
 }
 
-func SetUncleanShutdown(ctx context.Context, tx sql.Tx, owner string) error {
-	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1 WHERE owner = ?", owner)
-	if err != nil {
-		return fmt.Errorf("failed to set unclean shutdown: %w", err)
-	}
-	return err
-}
-
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
 	// fetch slab
 	var slabID int64
 	slab := object.Slab{Key: key}
 	err := tx.QueryRow(ctx, `
-		SELECT id, health, min_shards 
+		SELECT id, health, min_shards
 		FROM slabs sla
 		WHERE sla.key = ?
 	`, EncryptionKey(key)).Scan(&slabID, &slab.Health, &slab.MinShards)

@@ -29,10 +29,6 @@ func (*accountsMock) UpdateAccounts(context.Context, []api.Account) error {
 	return nil
 }
 
-func (*accountsMock) SetUncleanShutdown(context.Context, string) error {
-	return nil
-}
-
 var _ alerts.Alerter = (*alerterMock)(nil)
 
 type alerterMock struct{}

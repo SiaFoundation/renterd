@@ -317,10 +317,6 @@ type (
 		// substring.
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 
-		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
-		// 'false' and also marks them as requiring a resync.
-		SetUncleanShutdown(ctx context.Context, owner string) error
-
 		// SetContractSet creates the contract set with the given name and
 		// associates it with the provided contract IDs.
 		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
