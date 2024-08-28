@@ -1060,10 +1060,10 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 	} else if jc.Check("couldn't load object", err) != nil {
 		return
 	}
-	jc.Encode(api.ObjectsResponse{Object: &o})
+	jc.Encode(o)
 }
 
-func (b *Bus) objectsHandlerPOST(jc jape.Context) {
+func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	var limit int
 	var marker, delim, prefix, sortBy, sortDir string
 	bucket := api.DefaultBucketName
@@ -1106,7 +1106,7 @@ func (b *Bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
 
 func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1165,9 +1165,9 @@ func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
 	}
 	var err error
 	if batch {
-		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("path"))
+		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("key"))
 	} else {
-		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("path"))
+		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("key"))
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
