@@ -75,7 +75,6 @@ func TestFormContract(t *testing.T) {
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
 		tt.OK(err)
-
 		if len(contracts) != 1 {
 			return fmt.Errorf("expected 1 contract, got %v", len(contracts))
 		} else if contracts[0].ID != renewalID {
