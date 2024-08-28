@@ -393,7 +393,6 @@ func (c *Client) deleteContractRoots(t *rhpv2.Transport, renterKey types.Private
 }
 
 func (c *Client) prunableContractRoots(t *rhpv2.Transport, renterKey types.PrivateKey, rev *rhpv2.ContractRevision, settings rhpv2.HostSettings, prunableRootsFn PrunableRootsFn) (indices []uint64, cost types.Currency, _ error) {
-	log := c.logger.Named("performContractPruning")
 	numsectors := rev.NumSectors()
 	for offset := uint64(0); offset < numsectors; {
 		// calculate the batch size
