@@ -558,29 +558,6 @@ formed.
 }
 ```
 
-### Gouging
-
-The default gouging settings are listed below. The gouging settings can be
-updated using the settings API:
-
-- `GET /api/bus/settings/gouging`
-- `PUT /api/bus/settings/gouging`
-
-```json
-{
-	"hostBlockHeightLeeway": 6,                                   // 6 blocks
-	"maxContractPrice": "15000000000000000000000000",             // 15 SC per contract
-	"maxDownloadPrice": "3000000000000000000000000000",           // 3000 SC per 1 TB
-	"maxRPCPrice": "1000000000000000000000",                      // 1mS per RPC
-	"maxStoragePrice": "631593542824",                            // 3000 SC per TB per month
-	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TB
-	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
-	"minAccountExpiry": 86400000000000,                           // 1 day
-	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
-	"minPriceTableValidity": 300000000000                         // 5 minutes
-}
-```
-
 ### Blocklist
 
 Unfortunately the Sia blockchain is subject to hosts that announced themselves

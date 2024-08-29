@@ -446,7 +446,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	us := test.UploadSettings
 	us.Packing = api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
-		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
+		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB,
 	}
 
 	// Build S3 settings.

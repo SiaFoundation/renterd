@@ -120,7 +120,7 @@ func newTestStore() *mockPinStore {
 	s := &mockPinStore{
 		autopilots: make(map[string]api.Autopilot),
 		gs:         api.DefaultGougingSettings,
-		ps:         api.DefaultPricePinSettings,
+		ps:         api.DefaultPinnedSettings,
 	}
 
 	// add default autopilot
@@ -208,7 +208,7 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// enable price pinning
-	pps := api.DefaultPricePinSettings
+	pps := api.DefaultPinnedSettings
 	pps.Enabled = true
 	pps.Currency = "usd"
 	pps.Threshold = 0.5

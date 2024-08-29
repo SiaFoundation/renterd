@@ -49,7 +49,7 @@ var (
 		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
 	}
 
-	PricePinSettings = api.DefaultPricePinSettings
+	PricePinSettings = api.DefaultPinnedSettings
 
 	RedundancySettings = api.RedundancySettings{
 		MinShards:   2,

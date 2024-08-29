@@ -32,9 +32,7 @@ var (
 	ErrSettingNotFound = errors.New("setting not found")
 
 	// DefaultGougingSettings define the default gouging settings the bus is
-	// configured with on startup. These values can be adjusted using the
-	// settings API.
-	//
+	// configured with on startup.
 	DefaultGougingSettings = GougingSettings{
 		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                    // 1mS per RPC
 		MaxContractPrice:              types.Siacoins(15),                               // 15 SC per contract
@@ -48,40 +46,31 @@ var (
 		MigrationSurchargeMultiplier:  10,                                               // 10x
 	}
 
-	// DefaultPricePinSettings define the default price pin settings the bus is
-	// configured with on startup. These values can be adjusted using the
-	// settings API.
-	DefaultPricePinSettings = PinnedSettings{
+	// DefaultPinnedSettings define the default pin settings the bus is
+	// configured with on startup.
+	DefaultPinnedSettings = PinnedSettings{
 		Enabled:          false,
 		Currency:         "usd",
 		ForexEndpointURL: "https://api.siascan.com/exchange-rate/siacoin",
 		Threshold:        0.05,
 	}
 
+	// DefaultUploadSettings define the default upload settings the bus is
+	// configured with on startup.
 	DefaultUploadSettings = UploadSettings{
-		Packing:    DefaultUploadPackingSettings,
-		Redundancy: DefaultRedundancySettings,
+		Packing: UploadPackingSettings{
+			Enabled:               true,
+			SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
+		},
+		Redundancy: RedundancySettings{
+			MinShards:   10,
+			TotalShards: 30,
+		},
 	}
 
-	// DefaultUploadPackingSettings define the default upload packing settings
-	// the bus is configured with on startup.
-	DefaultUploadPackingSettings = UploadPackingSettings{
-		Enabled:               true,
-		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
-	}
-
-	// DefaultRedundancySettings define the default redundancy settings the bus
-	// is configured with on startup. These values can be adjusted using the
-	// settings API.
-	//
-	// NOTE: default redundancy settings for testnet are different from mainnet.
-	DefaultRedundancySettings = RedundancySettings{
-		MinShards:   10,
-		TotalShards: 30,
-	}
-
-	// Same as DefaultRedundancySettings but for running on testnet networks due
-	// to their reduced number of hosts.
+	// DefaultRedundancySettingsTestnet defines redundancy settings for the
+	// testnet, these are lower due to the reduced number of hosts on the
+	// testnet.
 	DefaultRedundancySettingsTestnet = RedundancySettings{
 		MinShards:   2,
 		TotalShards: 6,

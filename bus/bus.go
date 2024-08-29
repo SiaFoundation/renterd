@@ -638,7 +638,7 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 	if err := b.ss.Setting(ctx, "pricepinning", &pps); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		return err
 	} else if errors.Is(err, api.ErrSettingNotFound) {
-		if err := b.ss.UpdatePinnedSettings(ctx, api.DefaultPricePinSettings); err != nil {
+		if err := b.ss.UpdatePinnedSettings(ctx, api.DefaultPinnedSettings); err != nil {
 			return err
 		}
 	} else {
