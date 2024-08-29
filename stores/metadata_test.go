@@ -1431,9 +1431,9 @@ func TestObjectHealth(t *testing.T) {
 	}
 }
 
-// TestListObjectsWithPrefix is a test for the TestListObjects method
-// with '/' as the prefix.
-func TestListObjectsWithPrefix(t *testing.T) {
+// TestListObjectsWithDelimiterSlash is a test for the
+// TestListObjects method with '/' as the prefix.
+func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -1532,7 +1532,7 @@ func TestListObjectsWithPrefix(t *testing.T) {
 		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
 	}
 	for _, test := range tests {
-		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", -1)
+		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1545,7 +1545,7 @@ func TestListObjectsWithPrefix(t *testing.T) {
 
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, marker, 1)
+			resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, marker, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1567,10 +1567,11 @@ func TestListObjectsWithPrefix(t *testing.T) {
 				continue
 			}
 
-			resp, err = ss.ListObjects(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, 1)
+			resp, err = ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, test.want[offset].Name, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
+			got = resp.Objects
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset+1] {
@@ -1633,14 +1634,14 @@ func TestListObjectsExplicitDir(t *testing.T) {
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Name: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
 	for _, test := range tests {
-		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", -1)
+		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for i := range got.Objects {
 			got.Objects[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
 		}
-		if !reflect.DeepEqual(got, test.want) {
+		if !reflect.DeepEqual(got.Objects, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 	}
@@ -3565,7 +3566,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 }
 
-func TestListObjectsNoPrefix(t *testing.T) {
+func TestListObjectsNoDelimiter(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	objects := []struct {
