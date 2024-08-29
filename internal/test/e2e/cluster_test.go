@@ -941,17 +941,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 			// Should be registered in bus.
-			res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "", api.GetObjectOptions{})
+			_, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
 			tt.OK(err)
-
-			var found bool
-			if res.Name == fmt.Sprintf("/%s", path) {
-				found = true
-				break
-			}
-			if !found {
-				t.Fatal("uploaded object not found in bus")
-			}
 
 			// download the data
 			var buffer bytes.Buffer
