@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -20,9 +19,13 @@ import (
 type (
 	Store interface {
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Setting(ctx context.Context, key string) (string, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
-		UpdateSetting(ctx context.Context, key, value string) error
+
+		GougingSettings(ctx context.Context) (api.GougingSettings, error)
+		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
+
+		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, pps api.PinnedSettings) error
 	}
 )
 
@@ -104,16 +107,6 @@ func (pm *pinManager) averageRate() decimal.Decimal {
 
 	median, _ := stats.Median(pm.rates)
 	return decimal.NewFromFloat(median)
-}
-
-func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PinnedSettings, error) {
-	var ps api.PinnedSettings
-	if pss, err := pm.s.Setting(ctx, api.SettingPinned); err != nil {
-		return api.PinnedSettings{}, err
-	} else if err := json.Unmarshal([]byte(pss), &ps); err != nil {
-		pm.logger.Panicf("failed to unmarshal pinned settings '%s': %v", pss, err)
-	}
-	return ps, nil
 }
 
 func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
@@ -241,11 +234,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	var updated bool
 
 	// fetch gouging settings
-	var gs api.GougingSettings
-	if gss, err := pm.s.Setting(ctx, api.SettingGouging); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		pm.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
+	gs, err := pm.s.GougingSettings(ctx)
+	if err != nil {
 		return err
 	}
 
@@ -292,15 +282,14 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	}
 
 	// validate settings
-	err := gs.Validate()
+	err = gs.Validate()
 	if err != nil {
 		pm.logger.Warnw("failed to update gouging setting, new settings make the setting invalid", zap.Error(err))
 		return err
 	}
 
 	// update settings
-	bytes, _ := json.Marshal(gs)
-	err = pm.s.UpdateSetting(ctx, api.SettingGouging, string(bytes))
+	err = pm.s.UpdateGougingSettings(ctx, gs)
 
 	// broadcast event
 	if err == nil {
@@ -309,7 +298,7 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
 				Key:       api.SettingGouging,
-				Update:    string(bytes),
+				Update:    gs,
 				Timestamp: time.Now().UTC(),
 			},
 		})
@@ -322,7 +311,7 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	pm.logger.Debugw("updating prices", zap.Bool("forced", forced))
 
 	// fetch pinned settings
-	settings, err := pm.pinnedSettings(ctx)
+	settings, err := pm.s.PinnedSettings(ctx)
 	if errors.Is(err, api.ErrSettingNotFound) {
 		pm.logger.Debug("price pinning not configured, skipping price update")
 		return nil

@@ -150,6 +150,9 @@ type (
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
+		// DeleteSetting deletes the setting with the given key.
+		DeleteSetting(ctx context.Context, key string) error
+
 		// DeleteWebhook deletes the webhook with the matching module, event and
 		// URL of the provided webhook. If the webhook doesn't exist,
 		// webhooks.ErrWebhookNotFound is returned.

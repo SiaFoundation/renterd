@@ -246,6 +246,13 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
+func (us UploadSettings) Validate() error {
+	return errors.Join(
+		us.Packing.Validate(),
+		us.Redundancy.Validate(),
+	)
+}
+
 // Validate returns an error if the upload packing settings are not considered
 // valid.
 func (up UploadPackingSettings) Validate() error {

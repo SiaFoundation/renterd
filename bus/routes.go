@@ -1253,8 +1253,7 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
-	var gs api.GougingSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingGouging, &gs); errors.Is(err, api.ErrSettingNotFound) {
+	if gs, err := b.ss.GougingSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if jc.Check("failed to get gouging settings", err) == nil {
 		jc.Encode(gs)
@@ -1268,24 +1267,22 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 	} else if err := gs.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 		return
-	}
-
-	// marshal the setting
-	data, err := json.Marshal(gs)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// update the setting
-	if jc.Check("could not update gouging settings", b.updateSetting(jc.Request.Context(), api.SettingGouging, string(data), true)) != nil {
-		return
+	} else if jc.Check("could not update gouging settings", b.ss.UpdateGougingSettings(jc.Request.Context(), gs)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventUpdate,
+			Payload: api.EventSettingUpdate{
+				Key:       api.SettingGouging,
+				Update:    gs,
+				Timestamp: time.Now().UTC(),
+			},
+		})
+		b.pinMgr.TriggerUpdate()
 	}
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	var pps api.PinnedSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingPinned, &pps); errors.Is(err, api.ErrSettingNotFound) {
+	if pps, err := b.ss.PinnedSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if jc.Check("failed to get price pinning settings", err) == nil {
 		// populate the Autopilots map with the current autopilots
@@ -1315,79 +1312,73 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 			return
 		}
 	}
-
-	// marshal the setting
-	data, err := json.Marshal(pps)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// update the setting
-	if jc.Check("could not update price pinning settings", b.updateSetting(jc.Request.Context(), api.SettingPinned, string(data), true)) != nil {
-		return
+	if jc.Check("could not update price pinning settings", b.ss.UpdatePinnedSettings(jc.Request.Context(), pps)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventUpdate,
+			Payload: api.EventSettingUpdate{
+				Key:       api.SettingPinned,
+				Update:    pps,
+				Timestamp: time.Now().UTC(),
+			},
+		})
+		b.pinMgr.TriggerUpdate()
 	}
 }
 
-func (b *Bus) settingsRedundancyHandlerGET(jc jape.Context) {
-	var rs api.RedundancySettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploads, &rs); errors.Is(err, api.ErrSettingNotFound) {
+func (b *Bus) settingsUploadsHandlerGET(jc jape.Context) {
+	if us, err := b.ss.UploadSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get redundancy settings", err) == nil {
-		jc.Encode(rs)
+	} else if jc.Check("failed to get upload settings", err) == nil {
+		jc.Encode(us)
 	}
 }
 
-func (b *Bus) settingsRedundancyHandlerPUT(jc jape.Context) {
-	var rs api.RedundancySettings
-	if jc.Decode(&rs) != nil {
+func (b *Bus) settingsUploadsHandlerPUT(jc jape.Context) {
+	var us api.UploadSettings
+	if jc.Decode(&us) != nil {
 		return
-	} else if err := rs.Validate(); err != nil {
-		jc.Error(fmt.Errorf("couldn't update redundancy settings, error: %v", err), http.StatusBadRequest)
+	} else if err := us.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update upload settings, error: %v", err), http.StatusBadRequest)
 		return
-	}
-
-	// marshal the setting
-	data, err := json.Marshal(rs)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// update the setting
-	if jc.Check("could not update redundancy settings", b.updateSetting(jc.Request.Context(), api.SettingUploads, string(data), false)) != nil {
-		return
+	} else if jc.Check("could not update upload settings", b.ss.UpdateUploadSettings(jc.Request.Context(), us)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventUpdate,
+			Payload: api.EventSettingUpdate{
+				Key:       api.SettingUploads,
+				Update:    us,
+				Timestamp: time.Now().UTC(),
+			},
+		})
 	}
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
-	var s3as api.S3Settings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingS3, &s3as); errors.Is(err, api.ErrSettingNotFound) {
+	if s3s, err := b.ss.S3Settings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get s3 authentication settings", err) == nil {
-		jc.Encode(s3as)
+	} else if jc.Check("failed to get S3 settings", err) == nil {
+		jc.Encode(s3s)
 	}
 }
 
 func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
-	var s3as api.S3Settings
-	if jc.Decode(&s3as) != nil {
+	var s3s api.S3Settings
+	if jc.Decode(&s3s) != nil {
 		return
-	} else if err := s3as.Validate(); err != nil {
-		jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
+	} else if err := s3s.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update S3 settings, error: %v", err), http.StatusBadRequest)
 		return
-	}
-
-	// marshal the setting
-	data, err := json.Marshal(s3as)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// update the setting
-	if jc.Check("could not update s3 authentication settings", b.updateSetting(jc.Request.Context(), api.SettingS3, string(data), false)) != nil {
-		return
+	} else if jc.Check("could not update S3 settings", b.ss.UpdateS3Settings(jc.Request.Context(), s3s)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleSetting,
+			Event:  api.EventUpdate,
+			Payload: api.EventSettingUpdate{
+				Key:       api.SettingS3,
+				Update:    s3s,
+				Timestamp: time.Now().UTC(),
+			},
+		})
 	}
 }
 
@@ -1524,8 +1515,8 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to add partial slab", err) != nil {
 		return
 	}
-	var us api.UploadSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploads, &us); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	us, err := b.ss.UploadSettings(jc.Request.Context())
+	if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
 		return
 	}
@@ -1559,8 +1550,8 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 
 	var uploadPacking bool
 	var contractSet string
-	var us api.UploadSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploads, &us); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	us, err := b.ss.UploadSettings(jc.Request.Context())
+	if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(fmt.Errorf("could not get upload settings: %w", err), http.StatusInternalServerError)
 		return
 	} else if err == nil {
@@ -1604,18 +1595,14 @@ func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 }
 
 func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
+	gs, err := b.ss.GougingSettings(ctx)
+	if err != nil {
 		return api.GougingParams{}, err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 	}
 
-	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, api.SettingUploads); err != nil {
+	us, err := b.ss.UploadSettings(ctx)
+	if err != nil {
 		return api.GougingParams{}, err
-	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
 	cs, err := b.consensusState(ctx)
@@ -1626,7 +1613,7 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	return api.GougingParams{
 		ConsensusState:     cs,
 		GougingSettings:    gs,
-		RedundancySettings: rs,
+		RedundancySettings: us.Redundancy,
 		TransactionFee:     b.cm.RecommendedFee(),
 	}, nil
 }

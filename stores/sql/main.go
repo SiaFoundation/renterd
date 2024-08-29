@@ -548,6 +548,13 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 	return err
 }
 
+func DeleteSetting(ctx context.Context, tx sql.Tx, key string) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
+		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
+	}
+	return nil
+}
+
 func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
 	if err != nil {

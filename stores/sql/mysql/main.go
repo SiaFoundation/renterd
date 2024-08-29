@@ -340,6 +340,10 @@ func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
+func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
+	return ssql.DeleteSetting(ctx, tx, key)
+}
+
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }

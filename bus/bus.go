@@ -5,7 +5,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -278,8 +277,21 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		Setting(ctx context.Context, key string) (string, error)
-		UpdateSetting(ctx context.Context, key, value string) error
+		GougingSettings(ctx context.Context) (api.GougingSettings, error)
+		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
+
+		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, pps api.PinnedSettings) error
+
+		UploadSettings(ctx context.Context) (api.UploadSettings, error)
+		UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error
+
+		S3Settings(ctx context.Context) (api.S3Settings, error)
+		UpdateS3Settings(ctx context.Context, s3as api.S3Settings) error
+
+		// required for compat
+		Setting(ctx context.Context, key string, out interface{}) error
+		DeleteSetting(ctx context.Context, key string) error
 	}
 
 	WalletMetricsRecorder interface {
@@ -356,6 +368,11 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
+
+	// migrate settings to V2 types
+	if err := b.compatV2Settings(ctx); err != nil {
+		return nil, err
+	}
 
 	return b, nil
 }
@@ -457,8 +474,8 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /settings/pinned":  b.settingsPinnedHandlerPUT,
 		"GET    /settings/s3":      b.settingsS3HandlerGET,
 		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
-		"GET    /settings/uploads": b.settingsRedundancyHandlerGET,
-		"PUT    /settings/uploads": b.settingsRedundancyHandlerPUT,
+		"GET    /settings/uploads": b.settingsUploadsHandlerGET,
+		"PUT    /settings/uploads": b.settingsUploadsHandlerPUT,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
@@ -594,56 +611,75 @@ func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
 	return pk
 }
 
-func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
-	defaults := map[string]interface{}{
-		api.SettingGouging: api.DefaultGougingSettings,
-		api.SettingPinned:  api.DefaultPricePinSettings,
-		api.SettingUploads: api.DefaultUploadSettings,
+func (b *Bus) compatV2Settings(ctx context.Context) error {
+	// escape early if all settings are present
+	if !errors.Is(errors.Join(
+		b.ss.Setting(ctx, api.SettingGouging, struct{}{}),
+		b.ss.Setting(ctx, api.SettingPinned, struct{}{}),
+		b.ss.Setting(ctx, api.SettingS3, struct{}{}),
+		b.ss.Setting(ctx, api.SettingUploads, struct{}{}),
+	), api.ErrAutopilotNotFound) {
+		return nil
 	}
 
-	// testnets have different redundancy settings
-	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
-		defaults[api.SettingUploads] = api.DefaultRedundancySettingsTestnet
-	}
-
-	setting, err := b.ss.Setting(ctx, key)
-	if errors.Is(err, api.ErrSettingNotFound) {
-		val, ok := defaults[key]
-		if !ok {
-			return fmt.Errorf("%w: unknown setting '%s'", api.ErrSettingNotFound, key)
-		}
-
-		bytes, _ := json.Marshal(val)
-		if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
-			b.logger.Warn(fmt.Sprintf("failed to update default setting '%s': %v", key, err))
-		}
-		return json.Unmarshal(bytes, &val)
-	} else if err != nil {
+	// migrate S3 settings
+	var s3as api.S3AuthenticationSettings
+	if err := b.ss.Setting(ctx, "s3authentication", &s3as); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		return err
+	} else if err == nil {
+		s3s := api.S3Settings{Authentication: s3as}
+		if err := b.ss.UpdateS3Settings(ctx, s3s); err != nil {
+			return err
+		}
 	}
 
-	return json.Unmarshal([]byte(setting), &value)
-}
-
-func (b *Bus) updateSetting(ctx context.Context, key string, value string, updatePinMgr bool) error {
-	err := b.ss.UpdateSetting(ctx, key, value)
-	if err != nil {
+	// migrate pinned settings
+	var pps api.PinnedSettings
+	if err := b.ss.Setting(ctx, "pricepinning", &pps); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		return err
+	} else if errors.Is(err, api.ErrSettingNotFound) {
+		if err := b.ss.UpdatePinnedSettings(ctx, api.DefaultPricePinSettings); err != nil {
+			return err
+		}
+	} else {
+		if err := b.ss.UpdatePinnedSettings(ctx, pps); err != nil {
+			return err
+		}
 	}
 
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleSetting,
-		Event:  api.EventUpdate,
-		Payload: api.EventSettingUpdate{
-			Key:       key,
-			Update:    value,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-
-	if updatePinMgr {
-		b.pinMgr.TriggerUpdate()
+	// migrate upload settings
+	us := api.DefaultUploadSettings
+	var css struct {
+		Default string `json:"default"`
 	}
 
-	return nil
+	// override default contract set on default upload settings
+	if err := b.ss.Setting(ctx, "contractset", &css); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		return err
+	} else if err == nil {
+		us.DefaultContractSet = css.Default
+	}
+
+	// override redundancy settings on default upload settings
+	var rs api.RedundancySettings
+	if err := b.ss.Setting(ctx, "redundancy", &rs); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		return err
+	} else if errors.Is(err, api.ErrSettingNotFound) {
+		// default redundancy settings for testnet are different from mainnet
+		if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
+			us.Redundancy = api.DefaultRedundancySettingsTestnet
+		}
+	} else {
+		us.Redundancy = rs
+	}
+
+	// override upload packing settings on default upload settings
+	var ups api.UploadPackingSettings
+	if err := b.ss.Setting(ctx, "uploadpacking", &ups); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		return err
+	} else if err == nil {
+		us.Packing = ups
+	}
+
+	return b.ss.UpdateUploadSettings(ctx, us)
 }

@@ -332,6 +332,10 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
 }
 
+func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
+	return ssql.DeleteSetting(ctx, tx, key)
+}
+
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
