@@ -785,15 +785,21 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 	}
 
-	// fetch entries with "file" prefix
-	res, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{Prefix: "file"})
+	// fetch entries in /fileś starting with "file"
+	res, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		Delimiter: "/",
+		Prefix:    "fileś/file",
+	})
 	tt.OK(err)
 	if len(res.Objects) != 2 {
 		t.Fatal("expected two entry to be returned", len(res.Objects))
 	}
 
-	// fetch entries with "fileś" prefix
-	res, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{Prefix: "fileś/"})
+	// fetch entries in /fileś starting with "foo"
+	res, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		Delimiter: "/",
+		Prefix:    "fileś/foo",
+	})
 	tt.OK(err)
 	if len(res.Objects) != 0 {
 		t.Fatal("expected no entries to be returned", len(res.Objects))
