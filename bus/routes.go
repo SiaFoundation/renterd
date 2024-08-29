@@ -968,17 +968,13 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	}
 
 	// add renewal contract to store
-	r, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
+	metadata, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
 
 	// send the response
-	jc.Encode(api.ContractRenewResponse{
-		Renewal:       r,
-		FundAmount:    fundAmount,
-		NewCollateral: newRevision.Revision.MissedHostPayout().Sub(contractPrice),
-	})
+	jc.Encode(metadata)
 }
 
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {

@@ -177,14 +177,6 @@ type (
 		RenterFunds        types.Currency `json:"renterFunds"`
 	}
 
-	// ContractRenewResponse is the response type for the /contract/:id/renew
-	// endpoint.
-	ContractRenewResponse struct {
-		Renewal       ContractMetadata `json:"renewal"`
-		FundAmount    types.Currency   `json:"fundAmount"`
-		NewCollateral types.Currency   `json:"newCollateral"`
-	}
-
 	// ContractRenewedRequest is the request type for the /contract/:id/renewed
 	// endpoint.
 	ContractRenewedRequest struct {
