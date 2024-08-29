@@ -117,8 +117,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-			Prefix:  test.prefix,
+		res, err := b.Objects(context.Background(), api.DefaultBucketName, test.prefix, api.ListObjectOptions{
 			SortBy:  test.sortBy,
 			SortDir: test.sortDir,
 			Limit:   -1,
@@ -136,8 +135,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-					Prefix:  test.prefix,
+				res, err := b.Objects(context.Background(), api.DefaultBucketName, test.prefix, api.ListObjectOptions{
 					SortBy:  test.sortBy,
 					SortDir: test.sortDir,
 					Marker:  marker,
@@ -162,7 +160,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 	}
 
 	// list invalid marker
-	_, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+	_, err := b.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{
 		Marker: "invalid",
 		SortBy: api.ObjectSortByHealth,
 	})
@@ -481,9 +479,8 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		res, err := b.Objects(context.Background(), api.DefaultBucketName, test.path+test.prefix, api.ListObjectOptions{
 			Delimiter: "/",
-			Prefix:    test.path + test.prefix,
 			SortBy:    test.sortBy,
 			SortDir:   test.sortDir,
 		})
@@ -497,9 +494,8 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 		}
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+			res, err := b.Objects(context.Background(), api.DefaultBucketName, test.path+test.prefix, api.ListObjectOptions{
 				Delimiter: "/",
-				Prefix:    test.path + test.prefix,
 				SortBy:    test.sortBy,
 				SortDir:   test.sortDir,
 				Marker:    marker,
@@ -524,9 +520,8 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 				continue
 			}
 
-			res, err = b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+			res, err = b.Objects(context.Background(), api.DefaultBucketName, test.path+test.prefix, api.ListObjectOptions{
 				Delimiter: "/",
-				Prefix:    test.path + test.prefix,
 				SortBy:    test.sortBy,
 				SortDir:   test.sortDir,
 				Marker:    test.want[offset].Name,
@@ -554,9 +549,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	}
 
 	// assert root dir is empty
-	if resp, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-		Prefix: "/",
-	}); err != nil {
+	if resp, err := b.Objects(context.Background(), api.DefaultBucketName, "/", api.ListObjectOptions{}); err != nil {
 		t.Fatal(err)
 	} else if len(resp.Objects) != 0 {
 		t.Fatal("there should be no entries left", resp.Objects)
@@ -770,9 +763,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "fileś/", api.ListObjectOptions{
 		Delimiter: "/",
-		Prefix:    "fileś/",
 	})
 	tt.OK(err)
 
@@ -786,9 +778,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "file"
-	res, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+	res, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "fileś/file", api.ListObjectOptions{
 		Delimiter: "/",
-		Prefix:    "fileś/file",
 	})
 	tt.OK(err)
 	if len(res.Objects) != 2 {
@@ -796,9 +787,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "foo"
-	res, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+	res, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "fileś/foo", api.ListObjectOptions{
 		Delimiter: "/",
-		Prefix:    "fileś/foo",
 	})
 	tt.OK(err)
 	if len(res.Objects) != 0 {
@@ -1693,7 +1683,7 @@ func TestUploadPacking(t *testing.T) {
 		if res.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", res.Size, len(data))
 		}
-		resp, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+		resp, err := b.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{
 			Delimiter: "/",
 		})
 		if err != nil {

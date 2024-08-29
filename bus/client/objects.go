@@ -63,15 +63,15 @@ func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObj
 }
 
 // Objects lists objects in the given bucket.
-func (c *Client) Objects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
+func (c *Client) Objects(ctx context.Context, bucket string, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	opts.Prefix = api.ObjectPathEscape(opts.Prefix)
-	opts.Prefix += "?" + values.Encode()
+	prefix = api.ObjectPathEscape(prefix)
+	prefix += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", opts.Prefix), &resp)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", prefix), &resp)
 	return
 }
 

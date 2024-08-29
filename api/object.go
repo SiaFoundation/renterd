@@ -216,7 +216,6 @@ type (
 		Delimiter string
 		Limit     int
 		Marker    string
-		Prefix    string
 		SortBy    string
 		SortDir   string
 	}
@@ -329,9 +328,6 @@ func (opts ListObjectOptions) Apply(values url.Values) {
 	}
 	if opts.Marker != "" {
 		values.Set("marker", opts.Marker)
-	}
-	if opts.Prefix != "" {
-		values.Set("prefix", opts.Prefix)
 	}
 	if opts.SortBy != "" {
 		values.Set("sortBy", opts.SortBy)
