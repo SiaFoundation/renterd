@@ -50,15 +50,15 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api
 }
 
 // Objects returns the object at given path.
-func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.Object, err error) {
+func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (res api.Object, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = api.ObjectPathEscape(path)
-	path += "?" + values.Encode()
+	key = api.ObjectPathEscape(key)
+	key += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", path), &res)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", key), &res)
 	return
 }
 
@@ -67,7 +67,11 @@ func (c *Client) Objects(ctx context.Context, bucket string, opts api.ListObject
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
-	err = c.c.WithContext(ctx).GET("/objects?"+values.Encode(), &resp)
+
+	opts.Prefix = api.ObjectPathEscape(opts.Prefix)
+	opts.Prefix += "?" + values.Encode()
+
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", opts.Prefix), &resp)
 	return
 }
 

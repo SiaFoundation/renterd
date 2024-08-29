@@ -1064,7 +1064,7 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var marker, delim, prefix, sortBy, sortDir string
+	var marker, delim, sortBy, sortDir string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
@@ -1079,9 +1079,6 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
 	}
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
 	if jc.DecodeForm("sortBy", &sortBy) != nil {
 		return
 	}
@@ -1089,7 +1086,7 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, prefix, delim, sortBy, sortDir, marker, limit)
+	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), delim, sortBy, sortDir, marker, limit)
 	if errors.Is(err, api.ErrUnsupportedDelimiter) {
 		jc.Error(err, http.StatusBadRequest)
 		return

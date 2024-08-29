@@ -439,12 +439,12 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
-		"GET    /object/*key":    b.objectHandlerGET,
-		"GET    /objects":        b.objectsHandlerGET,
-		"PUT    /objects/*key":   b.objectsHandlerPUT,
-		"DELETE /objects/*key":   b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
+		"GET    /object/*key":     b.objectHandlerGET,
+		"GET    /objects/*prefix": b.objectsHandlerGET,
+		"PUT    /objects/*key":    b.objectsHandlerPUT,
+		"DELETE /objects/*key":    b.objectsHandlerDELETE,
+		"POST   /objects/copy":    b.objectsCopyHandlerPOST,
+		"POST   /objects/rename":  b.objectsRenameHandlerPOST,
 
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
