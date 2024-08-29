@@ -726,17 +726,9 @@ func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
-		return
-	}
 
 	// parse path
-	path := jc.PathParam("path")
-	if !ignoreDelim && (path == "" || strings.HasSuffix(path, "/")) {
-		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
-		return
-	}
+	path := jc.PathParam("key")
 
 	var off int
 	if jc.DecodeForm("offset", &off) != nil {
@@ -816,7 +808,7 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	path := jc.PathParam("path")
+	path := jc.PathParam("key")
 	if path == "" {
 		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
 		return
@@ -857,7 +849,7 @@ func (w *Worker) objectsHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// grab the path
-	path := jc.PathParam("path")
+	path := jc.PathParam("key")
 
 	// decode the contract set from the query string
 	var contractset string
@@ -1020,7 +1012,7 @@ func (w *Worker) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), api.DeleteObjectOptions{Batch: batch})
+	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("key"), api.DeleteObjectOptions{Batch: batch})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1213,10 +1205,10 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
-		"HEAD   /objects/*path": w.objectsHandlerHEAD,
-		"GET    /objects/*path": w.objectsHandlerGET,
-		"PUT    /objects/*path": w.objectsHandlerPUT,
-		"DELETE /objects/*path": w.objectsHandlerDELETE,
+		"HEAD   /objects/*key": w.objectsHandlerHEAD,
+		"GET    /objects/*key": w.objectsHandlerGET,
+		"PUT    /objects/*key": w.objectsHandlerPUT,
+		"DELETE /objects/*key": w.objectsHandlerDELETE,
 
 		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
 

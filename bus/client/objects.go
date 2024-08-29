@@ -58,7 +58,7 @@ func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObj
 	key = api.ObjectPathEscape(key)
 	key += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", key), &res)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", key), &res)
 	return
 }
 
@@ -71,7 +71,7 @@ func (c *Client) Objects(ctx context.Context, bucket string, prefix string, opts
 	prefix = api.ObjectPathEscape(prefix)
 	prefix += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", prefix), &resp)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/listobjects/%s", prefix), &resp)
 	return
 }
 
