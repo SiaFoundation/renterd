@@ -156,8 +156,16 @@ func (ms *mockPinStore) PinnedSettings(ctx context.Context) (api.PinnedSettings,
 }
 
 func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+	b, err := json.Marshal(ps)
+	if err != nil {
+		return err
+	}
+	var cloned api.PinnedSettings
+	if err := json.Unmarshal(b, &cloned); err != nil {
+		return err
+	}
 	ms.mu.Lock()
-	ms.ps = ps
+	ms.ps = cloned
 	ms.mu.Unlock()
 	time.Sleep(2 * testUpdateInterval)
 	return nil
