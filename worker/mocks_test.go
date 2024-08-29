@@ -10,7 +10,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -692,10 +691,6 @@ func (*walletMock) WalletDiscard(context.Context, types.Transaction) error {
 
 func (*walletMock) WalletFund(context.Context, *types.Transaction, types.Currency, bool) ([]types.Hash256, []types.Transaction, error) {
 	return nil, nil, nil
-}
-
-func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
-	return api.WalletPrepareRenewResponse{}, nil
 }
 
 func (*walletMock) WalletSign(context.Context, *types.Transaction, []types.Hash256, types.CoveredFields) error {

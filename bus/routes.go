@@ -14,7 +14,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
@@ -481,63 +480,6 @@ func (b *Bus) walletDiscardHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
-	var wprr api.WalletPrepareRenewRequest
-	if jc.Decode(&wprr) != nil {
-		return
-	}
-	if wprr.RenterKey == nil {
-		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
-		return
-	}
-	cs := b.cm.TipState()
-
-	// Create the final revision from the provided revision.
-	finalRevision := wprr.Revision
-	finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
-	finalRevision.Filesize = 0
-	finalRevision.FileMerkleRoot = types.Hash256{}
-	finalRevision.RevisionNumber = math.MaxUint64
-
-	// Prepare the new contract.
-	fc, basePrice, err := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.MinNewCollateral, wprr.PriceTable, wprr.ExpectedNewStorage, wprr.EndHeight)
-	if jc.Check("couldn't prepare contract renewal", err) != nil {
-		return
-	}
-
-	// Create the transaction containing both the final revision and new
-	// contract.
-	txn := types.Transaction{
-		FileContracts:         []types.FileContract{fc},
-		FileContractRevisions: []types.FileContractRevision{finalRevision},
-		MinerFees:             []types.Currency{wprr.PriceTable.TxnFeeMaxRecommended.Mul64(4096)},
-	}
-
-	// Compute how much renter funds to put into the new contract.
-	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
-
-	// Make sure we don't exceed the max fund amount.
-	// TODO: remove the IsZero check for the v2 change
-	if /*!wprr.MaxFundAmount.IsZero() &&*/ wprr.MaxFundAmount.Cmp(cost) < 0 {
-		jc.Error(fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, wprr.MaxFundAmount), http.StatusBadRequest)
-		return
-	}
-
-	// Fund the txn. We are not signing it yet since it's not complete. The host
-	// still needs to complete it and the revision + contract are signed with
-	// the renter key by the worker.
-	toSign, err := b.w.FundTransaction(&txn, cost, true)
-	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	jc.Encode(api.WalletPrepareRenewResponse{
-		FundAmount:     cost,
-		ToSign:         toSign,
-		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
-	})
-}
-
 func (b *Bus) walletPendingHandler(jc jape.Context) {
 	isRelevant := func(txn types.Transaction) bool {
 		addr := b.w.Address()
@@ -955,6 +897,86 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	jc.Encode(a)
 }
 
+func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
+	// apply pessimistic timeout
+	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
+	defer cancel()
+
+	// decode contract id
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode request
+	var rrr api.ContractRenewRequest
+	if jc.Decode(&rrr) != nil {
+		return
+	}
+
+	// validate the request
+	if rrr.EndHeight == 0 {
+		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+	} else if rrr.ExpectedNewStorage == 0 {
+		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
+	} else if rrr.MaxFundAmount.IsZero() {
+		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
+	} else if rrr.MinNewCollateral.IsZero() {
+		http.Error(jc.ResponseWriter, "MinNewCollateral can not be zero", http.StatusBadRequest)
+	} else if rrr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	}
+
+	// fetch the contract
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch the host
+	h, err := b.hs.Host(ctx, c.HostKey)
+	if jc.Check("couldn't fetch host", err) != nil {
+		return
+	}
+
+	// fetch consensus state
+	cs := b.cm.TipState()
+
+	// fetch gouging parameters
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	var newRevision rhpv2.ContractRevision
+	var contractPrice, fundAmount types.Currency
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		newRevision, contractPrice, fundAmount, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
+			jc.Error(err, http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't renew contract", err) != nil {
+			return
+		}
+	}
+
+	// add renewal contract to store
+	metadata, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
+	}
+
+	// send the response
+	jc.Encode(metadata)
+}
+
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractRenewedRequest
@@ -972,20 +994,10 @@ func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	if req.State == "" {
 		req.State = api.ContractStatePending
 	}
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
+	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
-
-	b.sectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventRenew,
-		Payload: api.EventContractRenew{
-			Renewal:   r,
-			Timestamp: time.Now().UTC(),
-		},
-	})
 
 	jc.Encode(r)
 }

@@ -167,6 +167,16 @@ type (
 		LockID uint64 `json:"lockID"`
 	}
 
+	// ContractRenewRequest is the request type for the /contract/:id/renew
+	// endpoint.
+	ContractRenewRequest struct {
+		EndHeight          uint64         `json:"endHeight"`
+		ExpectedNewStorage uint64         `json:"expectedNewStorage"`
+		MaxFundAmount      types.Currency `json:"maxFundAmount"`
+		MinNewCollateral   types.Currency `json:"minNewCollateral"`
+		RenterFunds        types.Currency `json:"renterFunds"`
+	}
+
 	// ContractRenewedRequest is the request type for the /contract/:id/renewed
 	// endpoint.
 	ContractRenewedRequest struct {

@@ -108,31 +108,6 @@ type (
 		Timeout    DurationMS      `json:"timeout"`
 	}
 
-	// RHPRenewRequest is the request type for the /rhp/renew endpoint.
-	RHPRenewRequest struct {
-		ContractID         types.FileContractID `json:"contractID"`
-		EndHeight          uint64               `json:"endHeight"`
-		ExpectedNewStorage uint64               `json:"expectedNewStorage"`
-		HostAddress        types.Address        `json:"hostAddress"`
-		HostKey            types.PublicKey      `json:"hostKey"`
-		MaxFundAmount      types.Currency       `json:"maxFundAmount"`
-		MinNewCollateral   types.Currency       `json:"minNewCollateral"`
-		SiamuxAddr         string               `json:"siamuxAddr"`
-		RenterAddress      types.Address        `json:"renterAddress"`
-		RenterFunds        types.Currency       `json:"renterFunds"`
-		WindowSize         uint64               `json:"windowSize"`
-	}
-
-	// RHPRenewResponse is the response type for the /rhp/renew endpoint.
-	RHPRenewResponse struct {
-		Error          string                 `json:"error"`
-		ContractID     types.FileContractID   `json:"contractID"`
-		Contract       rhpv2.ContractRevision `json:"contract"`
-		ContractPrice  types.Currency         `json:"contractPrice"`
-		FundAmount     types.Currency         `json:"fundAmount"`
-		TransactionSet []types.Transaction    `json:"transactionSet"`
-	}
-
 	// RHPScanRequest is the request type for the /rhp/scan endpoint.
 	RHPScanRequest struct {
 		HostKey types.PublicKey `json:"hostKey"`
