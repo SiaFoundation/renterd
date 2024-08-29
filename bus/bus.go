@@ -622,13 +622,28 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 		return nil
 	}
 
+	// migrate gouging settings
+	if _, err := b.ss.GougingSettings(ctx); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+		return err
+	} else if errors.Is(err, api.ErrSettingNotFound) {
+		if err := b.ss.UpdateGougingSettings(ctx, api.DefaultGougingSettings); err != nil {
+			return err
+		}
+	}
+
 	// migrate S3 settings
 	var s3as api.S3AuthenticationSettings
 	if err := b.ss.Setting(ctx, "s3authentication", &s3as); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		return err
+	} else if errors.Is(err, api.ErrSettingNotFound) {
+		if err := b.ss.UpdateS3Settings(ctx, api.DefaultS3Settings); err != nil {
+			return err
+		}
 	} else if err == nil {
 		s3s := api.S3Settings{Authentication: s3as}
-		if err := b.ss.UpdateS3Settings(ctx, s3s); err != nil {
+		if err := s3s.Validate(); err != nil {
+			return fmt.Errorf("failed to migrate S3 setting: %w", err)
+		} else if err := b.ss.UpdateS3Settings(ctx, s3s); err != nil {
 			return err
 		}
 	}
@@ -642,7 +657,9 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 			return err
 		}
 	} else {
-		if err := b.ss.UpdatePinnedSettings(ctx, pps); err != nil {
+		if err := pps.Validate(); err != nil {
+			return fmt.Errorf("failed to migrate pinned setting: %w", err)
+		} else if err := b.ss.UpdatePinnedSettings(ctx, pps); err != nil {
 			return err
 		}
 	}
@@ -681,5 +698,11 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 		us.Packing = ups
 	}
 
-	return b.ss.UpdateUploadSettings(ctx, us)
+	if err := us.Validate(); err != nil {
+		return fmt.Errorf("failed to migrate upload setting: %w", err)
+	} else if err := b.ss.UpdateUploadSettings(ctx, us); err != nil {
+		return err
+	}
+
+	return nil
 }

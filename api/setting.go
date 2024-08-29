@@ -30,7 +30,9 @@ var (
 	// ErrSettingNotFound is returned if a requested setting is not present in the
 	// database.
 	ErrSettingNotFound = errors.New("setting not found")
+)
 
+var (
 	// DefaultGougingSettings define the default gouging settings the bus is
 	// configured with on startup.
 	DefaultGougingSettings = GougingSettings{
@@ -55,6 +57,22 @@ var (
 		Threshold:        0.05,
 	}
 
+	// DefaultRedundancySettingsTestnet defines redundancy settings for the
+	// testnet, these are lower due to the reduced number of hosts on the
+	// testnet.
+	DefaultRedundancySettingsTestnet = RedundancySettings{
+		MinShards:   2,
+		TotalShards: 6,
+	}
+
+	// DefaultS3Settings defines the 3 settings the bus is configured with on
+	// startup.
+	DefaultS3Settings = S3Settings{
+		Authentication: S3AuthenticationSettings{
+			V4Keypairs: map[string]string{},
+		},
+	}
+
 	// DefaultUploadSettings define the default upload settings the bus is
 	// configured with on startup.
 	DefaultUploadSettings = UploadSettings{
@@ -66,14 +84,6 @@ var (
 			MinShards:   10,
 			TotalShards: 30,
 		},
-	}
-
-	// DefaultRedundancySettingsTestnet defines redundancy settings for the
-	// testnet, these are lower due to the reduced number of hosts on the
-	// testnet.
-	DefaultRedundancySettingsTestnet = RedundancySettings{
-		MinShards:   2,
-		TotalShards: 6,
 	}
 )
 
@@ -235,20 +245,12 @@ func (gs GougingSettings) Validate() error {
 	return nil
 }
 
+// Validate returns an error if the upload settings are not considered valid.
 func (us UploadSettings) Validate() error {
-	return errors.Join(
-		us.Packing.Validate(),
-		us.Redundancy.Validate(),
-	)
-}
-
-// Validate returns an error if the upload packing settings are not considered
-// valid.
-func (up UploadPackingSettings) Validate() error {
-	if up.Enabled && up.SlabBufferMaxSizeSoft <= 0 {
+	if us.Packing.Enabled && us.Packing.SlabBufferMaxSizeSoft <= 0 {
 		return errors.New("SlabBufferMaxSizeSoft must be greater than zero when upload packing is enabled")
 	}
-	return nil
+	return us.Redundancy.Validate()
 }
 
 // Redundancy returns the effective storage redundancy of the
@@ -285,11 +287,7 @@ func (rs RedundancySettings) Validate() error {
 // Validate returns an error if the authentication settings are not considered
 // valid.
 func (s3s S3Settings) Validate() error {
-	return s3s.Authentication.Validate()
-}
-
-func (s3a S3AuthenticationSettings) Validate() error {
-	for accessKeyID, secretAccessKey := range s3a.V4Keypairs {
+	for accessKeyID, secretAccessKey := range s3s.Authentication.V4Keypairs {
 		if accessKeyID == "" {
 			return fmt.Errorf("AccessKeyID cannot be empty")
 		} else if len(accessKeyID) < S3MinAccessKeyLen || len(accessKeyID) > S3MaxAccessKeyLen {
