@@ -76,7 +76,9 @@ type (
 		gouging.ConsensusState
 		webhooks.Broadcaster
 
+		AccountFunder
 		iworker.AccountStore
+
 		ContractLocker
 		ContractStore
 		HostStore
@@ -86,6 +88,10 @@ type (
 
 		Syncer
 		Wallet
+	}
+
+	AccountFunder interface {
+		FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
 	}
 
 	ContractStore interface {
@@ -1370,38 +1376,33 @@ func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 	}, res, nil
 }
 
-func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, balance types.Currency) error {
-	// attach gouging checker
-	gp, err := w.cache.GougingParams(ctx)
-	if err != nil {
-		return fmt.Errorf("couldn't get gouging parameters; %w", err)
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// fund the account
-	err = w.withRevision(ctx, defaultRevisionFetchTimeout, fcid, hk, siamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) (err error) {
-		h := w.Host(hk, rev.ParentID, siamuxAddr)
-		err = h.FundAccount(ctx, balance, &rev)
-		if rhp3.IsBalanceMaxExceeded(err) {
-			// sync the account
-			err = h.SyncAccount(ctx, &rev)
-			if err != nil {
-				w.logger.Infof(fmt.Sprintf("failed to sync account: %v", err), "host", hk)
-				return
-			}
-
-			// try funding the account again
-			err = h.FundAccount(ctx, balance, &rev)
-			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to fund account after syncing: %v", err), "host", hk, "balance", balance)
-			}
+func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
+	// calculate the deposit amount
+	acc := w.accounts.ForHost(hk)
+	return acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
+		// return early if we have the desired balance
+		if balance.Cmp(desired) >= 0 {
+			return types.ZeroCurrency, nil
 		}
-		return
+		deposit := desired.Sub(balance)
+
+		// fund the account
+		var err error
+		deposit, err = w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
+		if err != nil {
+			if rhp3.IsBalanceMaxExceeded(err) {
+				acc.ScheduleSync()
+			}
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
+		}
+
+		// log the account balance after funding
+		w.logger.Debugw("fund account succeeded",
+			"balance", balance.ExactString(),
+			"deposit", deposit.ExactString(),
+		)
+		return deposit, nil
 	})
-	if err != nil {
-		return fmt.Errorf("couldn't fund account; %w", err)
-	}
-	return nil
 }
 
 func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
@@ -1450,7 +1451,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, path, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -1590,7 +1591,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 		panic("priceTables already initialized") // developer error
 	}
 	keyPath := fmt.Sprintf("accounts/%s", w.id)
-	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w.bus, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

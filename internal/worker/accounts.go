@@ -31,8 +31,11 @@ var (
 )
 
 type (
-	AccountMgrWorker interface {
-		FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, balance types.Currency) error
+	AccountFunder interface {
+		FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error
+	}
+
+	AccountSyncer interface {
 		SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error
 	}
 
@@ -53,7 +56,8 @@ type (
 type (
 	AccountMgr struct {
 		alerts                   alerts.Alerter
-		w                        AccountMgrWorker
+		funder                   AccountFunder
+		syncer                   AccountSyncer
 		dc                       DownloadContracts
 		cs                       ConsensusState
 		s                        AccountStore
@@ -87,13 +91,14 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key types.PrivateKey, owner string, alerter alerts.Alerter, w AccountMgrWorker, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key types.PrivateKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	a := &AccountMgr{
 		alerts: alerter,
-		w:      w,
+		funder: funder,
+		syncer: syncer,
 		cs:     cs,
 		dc:     dc,
 		s:      s,
@@ -384,7 +389,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	// check if a resync is needed
 	if account.RequiresSync {
 		// sync the account
-		err := a.w.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+		err := a.syncer.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
 		if err != nil {
 			return fmt.Errorf("failed to sync account's balance: %w", err)
 		}
@@ -399,7 +404,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	}
 
 	// fund the account
-	err := a.w.FundAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, maxBalance)
+	err := a.funder.FundAccount(ctx, contract.ID, contract.HostKey, maxBalance)
 	if err != nil {
 		return fmt.Errorf("failed to fund account: %w", err)
 	}

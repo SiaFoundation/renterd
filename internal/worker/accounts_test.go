@@ -29,7 +29,7 @@ func (b *mockAccountMgrBackend) RegisterAlert(context.Context, alerts.Alert) err
 	return nil
 }
 
-func (b *mockAccountMgrBackend) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, balance types.Currency) error {
+func (b *mockAccountMgrBackend) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, balance types.Currency) error {
 	return nil
 }
 func (b *mockAccountMgrBackend) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
@@ -59,7 +59,7 @@ func TestAccounts(t *testing.T) {
 			},
 		},
 	}
-	mgr, err := NewAccountManager(types.GeneratePrivateKey(), "test", b, b, b, b, b, time.Second, zap.NewNop())
+	mgr, err := NewAccountManager(types.GeneratePrivateKey(), "test", b, b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

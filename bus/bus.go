@@ -297,7 +297,7 @@ type (
 
 type Bus struct {
 	startTime time.Time
-	masterKey [32]byte
+	masterKey types.PrivateKey
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -326,7 +326,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey types.PrivateKey, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
@@ -378,8 +378,9 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 // Handler returns an HTTP handler that serves the bus API.
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts": b.accountsHandlerGET,
-		"POST   /accounts": b.accountsHandlerPOST,
+		"GET    /accounts":      b.accountsHandlerGET,
+		"POST   /accounts":      b.accountsHandlerPOST,
+		"POST   /accounts/fund": b.accountsFundHandler,
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,

@@ -13,7 +13,7 @@ func randomAlertID() types.Hash256 {
 	return frand.Entropy256()
 }
 
-func newDownloadFailedAlert(bucket, path, prefix, marker string, offset, length, contracts int64, err error) alerts.Alert {
+func newDownloadFailedAlert(bucket, path string, offset, length, contracts int64, err error) alerts.Alert {
 	return alerts.Alert{
 		ID:       randomAlertID(),
 		Severity: alerts.SeverityError,
@@ -21,8 +21,6 @@ func newDownloadFailedAlert(bucket, path, prefix, marker string, offset, length,
 		Data: map[string]any{
 			"bucket":    bucket,
 			"path":      path,
-			"prefix":    prefix,
-			"marker":    marker,
 			"offset":    offset,
 			"length":    length,
 			"contracts": contracts,

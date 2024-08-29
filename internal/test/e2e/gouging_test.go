@@ -171,22 +171,17 @@ func TestAccountFunding(t *testing.T) {
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
 	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
-	c, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
+	_, err = b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
 	tt.OK(err)
-
-	// fund the account
-	tt.OK(b.FundAccount(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1).Div64(2)))
 
 	// update host so it's gouging
 	settings := hosts[0].settings.Settings()
 	settings.StoragePrice = types.Siacoins(1)
 	tt.OK(hosts[0].UpdateSettings(settings))
 
-	// ensure the price table expires so the worker is forced to fetch it
-	time.Sleep(defaultHostSettings.PriceTableValidity)
-
 	// fund the account again
-	tt.OK(b.FundAccount(context.Background(), c.ID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1)))
+	panic("fund account")
+	// tt.OK(b.FundAccount(context.Background(), accID, c.HostKey, c.HostIP, c.SiamuxAddr, types.Siacoins(1)))
 }
 
 func TestHostMinVersion(t *testing.T) {

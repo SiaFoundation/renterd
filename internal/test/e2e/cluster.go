@@ -587,7 +587,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey[:], alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

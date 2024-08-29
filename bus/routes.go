@@ -44,15 +44,11 @@ func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) e
 }
 
 func (b *Bus) accountsFundHandler(jc jape.Context) {
-	b.gougingParams(jc.Request.Context())
-
-	var req struct {
-		AccountID  rhpv3.Account        `json:"accountID"`
-		Amount     types.Currency       `json:"amount"`
-		ContractID types.FileContractID `json:"contractID"`
+	var req api.AccountsFundRequest
+	if jc.Decode(&req) != nil {
+		return
 	}
-	var rk types.PrivateKey
-	var client *rhp3.Client
+
 	const lockingPriorityFunding = 40
 
 	// contract metadata
@@ -62,28 +58,74 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// acquire contract
-	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), 40, req.ContractID, math.MaxInt64)
+	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), lockingPriorityFunding, req.ContractID, math.MaxInt64)
 	if jc.Check("failed to acquire lock", err) != nil {
 		return
 	}
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
 	// latest revision
-	rev, err := client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+	rev, err := b.rhp3.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
 	if jc.Check("failed to fetch contract revision", err) != nil {
 		return
 	}
 
+	// ensure we have at least 2H in the contract to cover the costs
+	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
+		jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
+		return
+	}
+
 	// price table
-	pt, err := client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, b.masterKey))
 	if jc.Check("failed to fetch price table", err) != nil {
 		return
 	}
 
-	err = client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, req.Amount, req.AccountID, pt.HostPriceTable, rk)
+	// check price table for gouging
+	gp, err := b.gougingParams(jc.Request.Context())
+	if jc.Check("failed to fetch gouging params", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	if jc.Check("gouging check failed", gc.CheckUnusedDefaults(pt.HostPriceTable)) != nil {
+		return
+	}
+
+	// cap the deposit by what's left in the contract
+	deposit := req.Amount
+	cost := types.NewCurrency64(1)
+	availableFunds := rev.ValidRenterPayout().Sub(cost)
+	if deposit.Cmp(availableFunds) > 0 {
+		deposit = availableFunds
+	}
+
+	// fund the account
+	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, b.masterKey)
 	if jc.Check("failed to fund account", err) != nil {
 		return
 	}
+
+	// record spending
+	err = b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+		{
+			ContractSpending: api.ContractSpending{
+				FundAccount: deposit.Add(cost),
+			},
+			ContractID:     rev.ParentID,
+			RevisionNumber: rev.RevisionNumber,
+			Size:           rev.Filesize,
+
+			MissedHostPayout:  rev.MissedHostPayout(),
+			ValidRenterPayout: rev.ValidRenterPayout(),
+		},
+	})
+	if err != nil {
+		b.logger.Error("failed to record contract spending", zap.Error(err))
+	}
+	jc.Encode(api.AccountsFundResponse{
+		Deposit: deposit,
+	})
 }
 
 func (b *Bus) consensusAcceptBlock(jc jape.Context) {
