@@ -52,7 +52,7 @@ func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, pps api.PinnedSetti
 }
 
 func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, _ error) {
-	value, err := s.fetchSetting(ctx, api.SettingUploads)
+	value, err := s.fetchSetting(ctx, api.SettingUpload)
 	if err != nil {
 		return api.UploadSettings{}, err
 	}
@@ -69,7 +69,7 @@ func (s *SQLStore) UpdateUploadSettings(ctx context.Context, us api.UploadSettin
 	if err != nil {
 		return fmt.Errorf("couldn't marshal the given value, error: %v", err)
 	}
-	return s.updateSetting(ctx, api.SettingUploads, string(data))
+	return s.updateSetting(ctx, api.SettingUpload, string(data))
 }
 
 func (s *SQLStore) S3Settings(ctx context.Context) (ss api.S3Settings, _ error) {

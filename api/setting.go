@@ -13,7 +13,7 @@ const (
 	SettingGouging = "gouging"
 	SettingPinned  = "pinned"
 	SettingS3      = "s3"
-	SettingUploads = "uploads"
+	SettingUpload  = "upload"
 )
 
 const (

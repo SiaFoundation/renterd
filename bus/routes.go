@@ -1290,6 +1290,9 @@ func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 		if jc.Check("failed to fetch autopilots", err) != nil {
 			return
 		}
+		if pps.Autopilots == nil {
+			pps.Autopilots = make(map[string]api.AutopilotPins)
+		}
 		for _, ap := range aps {
 			if _, exists := pps.Autopilots[ap.ID]; !exists {
 				pps.Autopilots[ap.ID] = api.AutopilotPins{}
@@ -1326,7 +1329,7 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *Bus) settingsUploadsHandlerGET(jc jape.Context) {
+func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 	if us, err := b.ss.UploadSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
 	} else if jc.Check("failed to get upload settings", err) == nil {
@@ -1334,7 +1337,7 @@ func (b *Bus) settingsUploadsHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) settingsUploadsHandlerPUT(jc jape.Context) {
+func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 	var us api.UploadSettings
 	if jc.Decode(&us) != nil {
 		return
@@ -1346,7 +1349,7 @@ func (b *Bus) settingsUploadsHandlerPUT(jc jape.Context) {
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingUploads,
+				Key:       api.SettingUpload,
 				Update:    us,
 				Timestamp: time.Now().UTC(),
 			},

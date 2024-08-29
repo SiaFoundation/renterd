@@ -474,8 +474,8 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /settings/pinned":  b.settingsPinnedHandlerPUT,
 		"GET    /settings/s3":      b.settingsS3HandlerGET,
 		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
-		"GET    /settings/uploads": b.settingsUploadsHandlerGET,
-		"PUT    /settings/uploads": b.settingsUploadsHandlerPUT,
+		"GET    /settings/upload":  b.settingsUploadHandlerGET,
+		"PUT    /settings/upload":  b.settingsUploadHandlerPUT,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
@@ -617,8 +617,8 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 		b.ss.Setting(ctx, api.SettingGouging, struct{}{}),
 		b.ss.Setting(ctx, api.SettingPinned, struct{}{}),
 		b.ss.Setting(ctx, api.SettingS3, struct{}{}),
-		b.ss.Setting(ctx, api.SettingUploads, struct{}{}),
-	), api.ErrAutopilotNotFound) {
+		b.ss.Setting(ctx, api.SettingUpload, struct{}{}),
+	), api.ErrSettingNotFound) {
 		return nil
 	}
 
