@@ -506,6 +506,41 @@ func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
 	jc.Encode(res)
 }
 
+func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode fcid
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	// fetch the contract from the bus
+	c, err := w.bus.Contract(ctx, id)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch gouging params
+	gp, err := w.bus.GougingParams(ctx)
+	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
+		return
+	}
+	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
+
+	// fetch the roots from the host
+	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, id, c.RevisionNumber)
+	if jc.Check("couldn't fetch contract roots from host", err) != nil {
+		return
+	} else if rev != nil {
+		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{SectorRoots: cost})
+	}
+	jc.Encode(roots)
+}
+
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -1141,6 +1176,7 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
 		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
+		"GET /rhp/contract/:id/roots":        w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
 
