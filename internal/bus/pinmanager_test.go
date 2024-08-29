@@ -157,8 +157,8 @@ func (ms *mockPinStore) PinnedSettings(ctx context.Context) (api.PinnedSettings,
 
 func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
 	ms.mu.Lock()
-	defer ms.mu.Unlock()
 	ms.ps = ps
+	ms.mu.Unlock()
 	time.Sleep(2 * testUpdateInterval)
 	return nil
 }
