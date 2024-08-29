@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -281,7 +282,7 @@ type (
 		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
 
 		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
-		UpdatePinnedSettings(ctx context.Context, pps api.PinnedSettings) error
+		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
 
 		UploadSettings(ctx context.Context) (api.UploadSettings, error)
 		UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error
@@ -614,10 +615,10 @@ func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
 func (b *Bus) compatV2Settings(ctx context.Context) error {
 	// escape early if all settings are present
 	if !errors.Is(errors.Join(
-		b.ss.Setting(ctx, api.SettingGouging, struct{}{}),
-		b.ss.Setting(ctx, api.SettingPinned, struct{}{}),
-		b.ss.Setting(ctx, api.SettingS3, struct{}{}),
-		b.ss.Setting(ctx, api.SettingUpload, struct{}{}),
+		b.ss.Setting(ctx, stores.SettingGouging, nil),
+		b.ss.Setting(ctx, stores.SettingPinned, nil),
+		b.ss.Setting(ctx, stores.SettingS3, nil),
+		b.ss.Setting(ctx, stores.SettingUpload, nil),
 	), api.ErrSettingNotFound) {
 		return nil
 	}
@@ -649,17 +650,17 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 	}
 
 	// migrate pinned settings
-	var pps api.PinnedSettings
-	if err := b.ss.Setting(ctx, "pricepinning", &pps); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	var ps api.PinnedSettings
+	if err := b.ss.Setting(ctx, "pricepinning", &ps); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
 		return err
 	} else if errors.Is(err, api.ErrSettingNotFound) {
 		if err := b.ss.UpdatePinnedSettings(ctx, api.DefaultPinnedSettings); err != nil {
 			return err
 		}
 	} else {
-		if err := pps.Validate(); err != nil {
+		if err := ps.Validate(); err != nil {
 			return fmt.Errorf("failed to migrate pinned setting: %w", err)
-		} else if err := b.ss.UpdatePinnedSettings(ctx, pps); err != nil {
+		} else if err := b.ss.UpdatePinnedSettings(ctx, ps); err != nil {
 			return err
 		}
 	}
@@ -704,5 +705,10 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 		return err
 	}
 
-	return nil
+	// delete old settings
+	return errors.Join(
+		b.ss.DeleteSetting(ctx, "contractset"),
+		b.ss.DeleteSetting(ctx, "pricepinning"),
+		b.ss.DeleteSetting(ctx, "uploadpacking"),
+	)
 }

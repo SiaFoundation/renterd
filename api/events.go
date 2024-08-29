@@ -50,22 +50,24 @@ type (
 		Timestamp time.Time        `json:"timestamp"`
 	}
 
-	EventHostUpdate struct {
-		HostKey   types.PublicKey `json:"hostKey"`
-		NetAddr   string          `json:"netAddr"`
-		Timestamp time.Time       `json:"timestamp"`
-	}
-
 	EventContractSetUpdate struct {
 		Name        string                 `json:"name"`
 		ContractIDs []types.FileContractID `json:"contractIDs"`
 		Timestamp   time.Time              `json:"timestamp"`
 	}
 
+	EventHostUpdate struct {
+		HostKey   types.PublicKey `json:"hostKey"`
+		NetAddr   string          `json:"netAddr"`
+		Timestamp time.Time       `json:"timestamp"`
+	}
+
 	EventSettingUpdate struct {
-		Key       string      `json:"key"`
-		Update    interface{} `json:"update"`
-		Timestamp time.Time   `json:"timestamp"`
+		GougingSettings *GougingSettings `json:"gougingSettings,omitempty"`
+		PinnedSettings  *PinnedSettings  `json:"pinnedSettings,omitempty"`
+		S3Settings      *S3Settings      `json:"s3Settings,omitempty"`
+		UploadSettings  *UploadSettings  `json:"uploadSettings,omitempty"`
+		Timestamp       time.Time        `json:"timestamp"`
 	}
 )
 

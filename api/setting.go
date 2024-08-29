@@ -10,13 +10,6 @@ import (
 )
 
 const (
-	SettingGouging = "gouging"
-	SettingPinned  = "pinned"
-	SettingS3      = "s3"
-	SettingUpload  = "upload"
-)
-
-const (
 	S3MinAccessKeyLen = 16
 	S3MaxAccessKeyLen = 128
 	S3SecretKeyLen    = 40

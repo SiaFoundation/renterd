@@ -9,8 +9,15 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
+const (
+	SettingGouging = "gouging"
+	SettingPinned  = "pinned"
+	SettingS3      = "s3"
+	SettingUpload  = "upload"
+)
+
 func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, _ error) {
-	value, err := s.fetchSetting(ctx, api.SettingGouging)
+	value, err := s.fetchSetting(ctx, SettingGouging)
 	if err != nil {
 		return api.GougingSettings{}, err
 	}
@@ -27,32 +34,32 @@ func (s *SQLStore) UpdateGougingSettings(ctx context.Context, gs api.GougingSett
 	if err != nil {
 		return fmt.Errorf("couldn't marshal the given value, error: %v", err)
 	}
-	return s.updateSetting(ctx, api.SettingGouging, string(data))
+	return s.updateSetting(ctx, SettingGouging, string(data))
 }
 
-func (s *SQLStore) PinnedSettings(ctx context.Context) (pps api.PinnedSettings, _ error) {
-	value, err := s.fetchSetting(ctx, api.SettingPinned)
+func (s *SQLStore) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, _ error) {
+	value, err := s.fetchSetting(ctx, SettingPinned)
 	if err != nil {
 		return api.PinnedSettings{}, err
 	}
 
-	if err := json.Unmarshal([]byte(value), &pps); err != nil {
+	if err := json.Unmarshal([]byte(value), &ps); err != nil {
 		s.logger.Panicf("failed to unmarshal pinned settings '%s': %v", value, err)
 		return api.PinnedSettings{}, err
 	}
 	return
 }
 
-func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, pps api.PinnedSettings) error {
-	data, err := json.Marshal(pps)
+func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+	data, err := json.Marshal(ps)
 	if err != nil {
 		return fmt.Errorf("couldn't marshal the given value, error: %v", err)
 	}
-	return s.updateSetting(ctx, api.SettingPinned, string(data))
+	return s.updateSetting(ctx, SettingPinned, string(data))
 }
 
 func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, _ error) {
-	value, err := s.fetchSetting(ctx, api.SettingUpload)
+	value, err := s.fetchSetting(ctx, SettingUpload)
 	if err != nil {
 		return api.UploadSettings{}, err
 	}
@@ -69,11 +76,11 @@ func (s *SQLStore) UpdateUploadSettings(ctx context.Context, us api.UploadSettin
 	if err != nil {
 		return fmt.Errorf("couldn't marshal the given value, error: %v", err)
 	}
-	return s.updateSetting(ctx, api.SettingUpload, string(data))
+	return s.updateSetting(ctx, SettingUpload, string(data))
 }
 
 func (s *SQLStore) S3Settings(ctx context.Context) (ss api.S3Settings, _ error) {
-	value, err := s.fetchSetting(ctx, api.SettingS3)
+	value, err := s.fetchSetting(ctx, SettingS3)
 	if err != nil {
 		return api.S3Settings{}, err
 	}
@@ -90,7 +97,7 @@ func (s *SQLStore) UpdateS3Settings(ctx context.Context, ss api.S3Settings) erro
 	if err != nil {
 		return fmt.Errorf("couldn't marshal the given value, error: %v", err)
 	}
-	return s.updateSetting(ctx, api.SettingS3, string(data))
+	return s.updateSetting(ctx, SettingS3, string(data))
 }
 
 func (s *SQLStore) DeleteSetting(ctx context.Context, key string) (err error) {

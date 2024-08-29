@@ -1272,9 +1272,8 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingGouging,
-				Update:    gs,
-				Timestamp: time.Now().UTC(),
+				GougingSettings: &gs,
+				Timestamp:       time.Now().UTC(),
 			},
 		})
 		b.pinMgr.TriggerUpdate()
@@ -1284,7 +1283,7 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 	if pps, err := b.ss.PinnedSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
 		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get price pinning settings", err) == nil {
+	} else if jc.Check("failed to get pinned settings", err) == nil {
 		// populate the Autopilots map with the current autopilots
 		aps, err := b.as.Autopilots(jc.Request.Context())
 		if jc.Check("failed to fetch autopilots", err) != nil {
@@ -1303,26 +1302,25 @@ func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
-	var pps api.PinnedSettings
-	if jc.Decode(&pps) != nil {
+	var ps api.PinnedSettings
+	if jc.Decode(&ps) != nil {
 		return
-	} else if err := pps.Validate(); err != nil {
-		jc.Error(fmt.Errorf("couldn't update price pinning settings, error: %v", err), http.StatusBadRequest)
+	} else if err := ps.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update pinned settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if pps.Enabled {
-		if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
-			jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
+	} else if ps.Enabled {
+		if _, err := ibus.NewForexClient(ps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), ps.Currency); err != nil {
+			jc.Error(fmt.Errorf("couldn't update pinned settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
 			return
 		}
 	}
-	if jc.Check("could not update price pinning settings", b.ss.UpdatePinnedSettings(jc.Request.Context(), pps)) == nil {
+	if jc.Check("could not update pinned settings", b.ss.UpdatePinnedSettings(jc.Request.Context(), ps)) == nil {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingPinned,
-				Update:    pps,
-				Timestamp: time.Now().UTC(),
+				PinnedSettings: &ps,
+				Timestamp:      time.Now().UTC(),
 			},
 		})
 		b.pinMgr.TriggerUpdate()
@@ -1349,9 +1347,8 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingUpload,
-				Update:    us,
-				Timestamp: time.Now().UTC(),
+				UploadSettings: &us,
+				Timestamp:      time.Now().UTC(),
 			},
 		})
 	}
@@ -1377,9 +1374,8 @@ func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingS3,
-				Update:    s3s,
-				Timestamp: time.Now().UTC(),
+				S3Settings: &s3s,
+				Timestamp:  time.Now().UTC(),
 			},
 		})
 	}

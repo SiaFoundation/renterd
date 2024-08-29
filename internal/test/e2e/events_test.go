@@ -169,14 +169,8 @@ func TestEvents(t *testing.T) {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventSettingUpdate:
-			if e.Key != api.SettingGouging || e.Timestamp.IsZero() {
+			if e.GougingSettings == nil || e.GougingSettings.HostBlockHeightLeeway != 100 || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
-			}
-			var update api.GougingSettings
-			bytes, _ := json.Marshal(e.Update)
-			tt.OK(json.Unmarshal(bytes, &update))
-			if update.HostBlockHeightLeeway != 100 {
-				t.Fatalf("unexpected update %+v", update)
 			}
 		}
 	}

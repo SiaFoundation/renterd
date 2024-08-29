@@ -25,7 +25,7 @@ type (
 		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
 
 		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
-		UpdatePinnedSettings(ctx context.Context, pps api.PinnedSettings) error
+		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
 	}
 )
 
@@ -297,9 +297,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingGouging,
-				Update:    gs,
-				Timestamp: time.Now().UTC(),
+				GougingSettings: &gs,
+				Timestamp:       time.Now().UTC(),
 			},
 		})
 	}
