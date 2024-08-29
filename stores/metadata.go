@@ -788,13 +788,7 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 
 func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		if delim == "" {
-			resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
-		} else if delim == "/" {
-			resp, err = tx.ObjectEntries(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
-		} else {
-			return fmt.Errorf("unsupported delimiter: '%s'", delim)
-		}
+		resp, err = tx.ListObjects(ctx, bucket, prefix, delim, sortBy, sortDir, marker, limit)
 		return err
 	})
 	return

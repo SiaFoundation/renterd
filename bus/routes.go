@@ -1064,15 +1064,15 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var limit int
 	var marker, delim, prefix, sortBy, sortDir string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	if jc.DecodeForm("delimiter", &limit) != nil {
+	if jc.DecodeForm("delimiter", &delim) != nil {
 		return
 	}
+	limit := -1
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}

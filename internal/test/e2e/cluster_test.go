@@ -34,7 +34,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestListObjects(t *testing.T) {
+func TestListObjectsWithNoDelimiter(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -378,11 +378,11 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
-// TestObjectEntries is an integration test that verifies objects are uploaded,
-// download and deleted from and to the paths we would expect. It is similar to
-// the TestObjectEntries unit test, but uses the worker and bus client to verify
-// paths are passed correctly.
-func TestObjectEntries(t *testing.T) {
+// TestListObjectsWithDelimiterSlash is an integration test that verifies
+// objects are uploaded, download and deleted from and to the paths we
+// would expect. It is similar to the TestObjectEntries unit test, but uses
+// the worker and bus client to verify paths are passed correctly.
+func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -498,11 +498,12 @@ func TestObjectEntries(t *testing.T) {
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
 			res, err := b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-				Prefix:  test.path + test.prefix,
-				SortBy:  test.sortBy,
-				SortDir: test.sortDir,
-				Marker:  marker,
-				Limit:   1,
+				Delimiter: "/",
+				Prefix:    test.path + test.prefix,
+				SortBy:    test.sortBy,
+				SortDir:   test.sortDir,
+				Marker:    marker,
+				Limit:     1,
 			})
 			marker = res.NextMarker
 			if err != nil {
@@ -524,11 +525,12 @@ func TestObjectEntries(t *testing.T) {
 			}
 
 			res, err = b.Objects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-				Prefix:  test.path + test.prefix,
-				SortBy:  test.sortBy,
-				SortDir: test.sortDir,
-				Marker:  test.want[offset].Name,
-				Limit:   1,
+				Delimiter: "/",
+				Prefix:    test.path + test.prefix,
+				SortBy:    test.sortBy,
+				SortDir:   test.sortDir,
+				Marker:    test.want[offset].Name,
+				Limit:     1,
 			})
 			if err != nil {
 				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %vmarker: %v\n\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, err)
