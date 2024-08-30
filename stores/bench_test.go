@@ -27,7 +27,7 @@ const (
 // BenchmarkPrunableContractRoots benchmarks diffing the roots of a contract
 // with a given set of roots to determine which roots are prunable.
 //
-// 14.47 MB/s | M1 Max | 8625f711
+// 15.32 MB/s | M1 Max | cd32fad7 (diff ~2TiB of contract data per second)
 func BenchmarkPrunableContractRoots(b *testing.B) {
 	// create database
 	db, err := newTestDB(context.Background(), b.TempDir())
@@ -50,7 +50,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 
 	// start benchmark
 	b.ResetTimer()
-	b.SetBytes(int64(len(batch)) * 32)
+	b.SetBytes(batchSize * 32)
 	for i := 0; i < b.N; i++ {
 		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			indices, err := tx.PrunableContractRoots(context.Background(), fcid, batch)
