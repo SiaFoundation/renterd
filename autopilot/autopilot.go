@@ -671,6 +671,9 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
 			contractSetChanged = true
