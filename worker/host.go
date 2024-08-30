@@ -214,16 +214,13 @@ func (h *host) SyncAccount(ctx context.Context, rev *types.FileContractRevision)
 		return err
 	}
 
-	// check only the unused defaults
-	gc, err := GougingCheckerFromContext(ctx, false)
-	if err != nil {
-		return err
-	} else if err := gc.CheckUnusedDefaults(pt.HostPriceTable); err != nil {
-		return fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, err)
+	// check only the AccountBalanceCost
+	if types.NewCurrency64(1).Cmp(pt.AccountBalanceCost) < 0 {
+		return fmt.Errorf("%w: host is gouging on AccountBalanceCost", gouging.ErrPriceTableGouging)
 	}
 
 	return h.acc.WithSync(func() (types.Currency, error) {
-		return h.client.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.ID(), pt.UID, h.renterKey)
+		return h.client.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.ID(), pt.HostPriceTable, h.renterKey)
 	})
 }
 
