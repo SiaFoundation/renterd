@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +60,7 @@ func TestAccounts(t *testing.T) {
 			},
 		},
 	}
-	mgr, err := NewAccountManager(types.GeneratePrivateKey(), "test", b, b, b, b, b, b, time.Second, zap.NewNop())
+	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

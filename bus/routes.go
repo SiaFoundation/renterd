@@ -49,13 +49,13 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		return
 	}
 
-	const lockingPriorityFunding = 40
-
 	// contract metadata
 	cm, err := b.ms.Contract(jc.Request.Context(), req.ContractID)
 	if jc.Check("failed to fetch contract metadata", err) != nil {
 		return
 	}
+
+	rk := b.masterKey.DeriveContractKey(cm.HostKey)
 
 	// acquire contract
 	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), lockingPriorityFunding, req.ContractID, math.MaxInt64)
@@ -77,7 +77,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// price table
-	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, b.masterKey))
+	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
 	if jc.Check("failed to fetch price table", err) != nil {
 		return
 	}
@@ -101,7 +101,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// fund the account
-	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, b.masterKey)
+	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
 	if jc.Check("failed to fund account", err) != nil {
 		return
 	}

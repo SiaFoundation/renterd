@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +62,7 @@ type (
 		dc                       DownloadContracts
 		cs                       ConsensusState
 		s                        AccountStore
-		key                      types.PrivateKey
+		key                      utils.AccountsKey
 		logger                   *zap.SugaredLogger
 		owner                    string
 		refillInterval           time.Duration
@@ -91,7 +92,7 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key types.PrivateKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -182,7 +183,7 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 	defer a.mu.Unlock()
 
 	// Derive account key.
-	accKey := deriveAccountKey(a.key, hk)
+	accKey := a.key.DeriveAccountKey(hk)
 	accID := rhpv3.Account(accKey.PublicKey())
 
 	// Create account if it doesn't exist.
@@ -244,7 +245,7 @@ func (a *AccountMgr) run() {
 	a.mu.Lock()
 	accounts := make(map[rhpv3.Account]*Account, len(saved))
 	for _, acc := range saved {
-		accKey := deriveAccountKey(a.key, acc.HostKey)
+		accKey := a.key.DeriveAccountKey(acc.HostKey)
 		if rhpv3.Account(accKey.PublicKey()) != acc.ID {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
@@ -590,29 +591,6 @@ func (a *Account) setBalance(balance *big.Int) {
 		zap.Bool("firstDrift", a.acc.Drift.Cmp(big.NewInt(0)) != 0 && prevDrift.Cmp(big.NewInt(0)) == 0),
 		zap.Bool("cleanshutdown", a.acc.CleanShutdown),
 		zap.Stringer("drift", drift))
-}
-
-// deriveAccountKey derives an account plus key for a given host and worker.
-// Each worker has its own account for a given host. That makes concurrency
-// around keeping track of an accounts balance and refilling it a lot easier in
-// a multi-worker setup.
-func deriveAccountKey(mgrKey types.PrivateKey, hostKey types.PublicKey) types.PrivateKey {
-	index := byte(0) // not used yet but can be used to derive more than 1 account per host
-
-	// Append the host for which to create it and the index to the
-	// corresponding sub-key.
-	subKey := mgrKey
-	data := make([]byte, 0, len(subKey)+len(hostKey)+1)
-	data = append(data, subKey[:]...)
-	data = append(data, hostKey[:]...)
-	data = append(data, index)
-
-	seed := types.HashBytes(data)
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
 }
 
 func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {

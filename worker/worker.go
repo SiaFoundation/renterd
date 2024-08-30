@@ -36,7 +36,6 @@ import (
 	"go.sia.tech/renterd/worker/client"
 	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -156,18 +155,6 @@ type (
 	}
 )
 
-// deriveSubKey can be used to derive a sub-masterkey from the worker's
-// masterkey to use for a specific purpose. Such as deriving more keys for
-// ephemeral accounts.
-func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
 // TODO: deriving the renter key from the host key using the master key only
 // works if we persist a hash of the renter's master key in the database and
 // compare it on startup, otherwise there's no way of knowing the derived key is
@@ -181,12 +168,7 @@ func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
 func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(w.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
+	return w.masterKey.DeriveContractKey(hostKey)
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -200,7 +182,7 @@ type Worker struct {
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
-	masterKey       [32]byte
+	masterKey       utils.MasterKey
 	startTime       time.Time
 
 	eventSubscriber iworker.EventSubscriber
@@ -1590,8 +1572,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	keyPath := fmt.Sprintf("accounts/%s", w.id)
-	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 
