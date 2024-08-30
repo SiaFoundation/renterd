@@ -1718,46 +1718,6 @@ func Peers(ctx context.Context, tx sql.Tx) ([]syncer.PeerInfo, error) {
 	return peers, nil
 }
 
-// TODO PJ: remove unused in-mem diff implementation
-func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
-	// build query params
-	var params []interface{}
-	params = append(params, FileContractID(fcid))
-	for _, root := range roots {
-		params = append(params, Hash256(root))
-	}
-
-	// fetch contract roots
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-SELECT s.root
-FROM contracts c
-INNER JOIN contract_sectors cs on cs.db_contract_id = c.id
-INNER JOIN sectors s on cs.db_sector_id = s.id
-WHERE c.fcid = ? AND s.root IN (%s)`, strings.Repeat("?, ", len(roots)-1)+"?"), params...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
-	}
-	defer rows.Close()
-
-	// fetch them
-	inDB := make(map[types.Hash256]struct{})
-	for rows.Next() {
-		var root Hash256
-		if err := rows.Scan(&root); err != nil {
-			return nil, fmt.Errorf("failed to scan root: %w", err)
-		}
-		inDB[types.Hash256(root)] = struct{}{}
-	}
-
-	// return the indices of roots not in the DB
-	for index, root := range roots {
-		if _, ok := inDB[root]; !ok {
-			indices = append(indices, uint64(index))
-		}
-	}
-	return
-}
-
 func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
 	if len(scans) == 0 {
 		return nil
