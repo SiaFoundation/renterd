@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -31,8 +32,11 @@ var (
 )
 
 type (
-	AccountMgrWorker interface {
-		FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, balance types.Currency) error
+	AccountFunder interface {
+		FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error
+	}
+
+	AccountSyncer interface {
 		SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error
 	}
 
@@ -53,11 +57,12 @@ type (
 type (
 	AccountMgr struct {
 		alerts                   alerts.Alerter
-		w                        AccountMgrWorker
+		funder                   AccountFunder
+		syncer                   AccountSyncer
 		dc                       DownloadContracts
 		cs                       ConsensusState
 		s                        AccountStore
-		key                      types.PrivateKey
+		key                      utils.AccountsKey
 		logger                   *zap.SugaredLogger
 		owner                    string
 		refillInterval           time.Duration
@@ -87,13 +92,14 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key types.PrivateKey, owner string, alerter alerts.Alerter, w AccountMgrWorker, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	a := &AccountMgr{
 		alerts: alerter,
-		w:      w,
+		funder: funder,
+		syncer: syncer,
 		cs:     cs,
 		dc:     dc,
 		s:      s,
@@ -177,7 +183,7 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 	defer a.mu.Unlock()
 
 	// Derive account key.
-	accKey := deriveAccountKey(a.key, hk)
+	accKey := a.key.DeriveAccountKey(hk)
 	accID := rhpv3.Account(accKey.PublicKey())
 
 	// Create account if it doesn't exist.
@@ -239,7 +245,7 @@ func (a *AccountMgr) run() {
 	a.mu.Lock()
 	accounts := make(map[rhpv3.Account]*Account, len(saved))
 	for _, acc := range saved {
-		accKey := deriveAccountKey(a.key, acc.HostKey)
+		accKey := a.key.DeriveAccountKey(acc.HostKey)
 		if rhpv3.Account(accKey.PublicKey()) != acc.ID {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
@@ -384,7 +390,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	// check if a resync is needed
 	if account.RequiresSync {
 		// sync the account
-		err := a.w.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
+		err := a.syncer.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
 		if err != nil {
 			return fmt.Errorf("failed to sync account's balance: %w", err)
 		}
@@ -399,7 +405,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	}
 
 	// fund the account
-	err := a.w.FundAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr, maxBalance)
+	err := a.funder.FundAccount(ctx, contract.ID, contract.HostKey, maxBalance)
 	if err != nil {
 		return fmt.Errorf("failed to fund account: %w", err)
 	}
@@ -585,29 +591,6 @@ func (a *Account) setBalance(balance *big.Int) {
 		zap.Bool("firstDrift", a.acc.Drift.Cmp(big.NewInt(0)) != 0 && prevDrift.Cmp(big.NewInt(0)) == 0),
 		zap.Bool("cleanshutdown", a.acc.CleanShutdown),
 		zap.Stringer("drift", drift))
-}
-
-// deriveAccountKey derives an account plus key for a given host and worker.
-// Each worker has its own account for a given host. That makes concurrency
-// around keeping track of an accounts balance and refilling it a lot easier in
-// a multi-worker setup.
-func deriveAccountKey(mgrKey types.PrivateKey, hostKey types.PublicKey) types.PrivateKey {
-	index := byte(0) // not used yet but can be used to derive more than 1 account per host
-
-	// Append the host for which to create it and the index to the
-	// corresponding sub-key.
-	subKey := mgrKey
-	data := make([]byte, 0, len(subKey)+len(hostKey)+1)
-	data = append(data, subKey[:]...)
-	data = append(data, hostKey[:]...)
-	data = append(data, index)
-
-	seed := types.HashBytes(data)
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
 }
 
 func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {

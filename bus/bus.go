@@ -31,6 +31,7 @@ import (
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
@@ -44,6 +45,7 @@ const (
 	defaultPinRateWindow              = 6 * time.Hour
 
 	lockingPriorityPruning = 20
+	lockingPriorityFunding = 40
 	lockingPriorityRenew   = 80
 
 	stdTxnSize = 1200 // bytes
@@ -301,7 +303,7 @@ type (
 
 type Bus struct {
 	startTime time.Time
-	masterKey [32]byte
+	masterKey utils.MasterKey
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -382,8 +384,9 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 // Handler returns an HTTP handler that serves the bus API.
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts": b.accountsHandlerGET,
-		"POST   /accounts": b.accountsHandlerPOST,
+		"GET    /accounts":      b.accountsHandlerGET,
+		"POST   /accounts":      b.accountsHandlerPOST,
+		"POST   /accounts/fund": b.accountsFundHandler,
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
