@@ -4,7 +4,7 @@
 
 `renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
 to cater to both casual users seeking straightforward data storage and
-developers requiring a robust API for building apps on Sia.
+developers requiring a robust API for building apps on Sia
 
 ## Overview
 
