@@ -1718,9 +1718,8 @@ func Peers(ctx context.Context, tx sql.Tx) ([]syncer.PeerInfo, error) {
 	return peers, nil
 }
 
+// TODO PJ: remove unused in-mem diff implementation
 func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
-	panic("TODO: remove me")
-
 	// build query params
 	var params []interface{}
 	params = append(params, FileContractID(fcid))

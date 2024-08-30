@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -61,26 +60,6 @@ func (c *Client) WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, 
 func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/pending", &resp)
 	return
-}
-
-// WalletPrepareRenew funds and signs a contract renewal transaction.
-func (c *Client) WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error) {
-	req := api.WalletPrepareRenewRequest{
-		Revision:           revision,
-		EndHeight:          endHeight,
-		ExpectedNewStorage: expectedStorage,
-		HostAddress:        hostAddress,
-		PriceTable:         pt,
-		MaxFundAmount:      maxFundAmount,
-		MinNewCollateral:   minNewCollateral,
-		RenterAddress:      renterAddress,
-		RenterFunds:        renterFunds,
-		RenterKey:          renterKey,
-		WindowSize:         windowSize,
-	}
-	var resp api.WalletPrepareRenewResponse
-	err := c.c.WithContext(ctx).POST("/wallet/prepare/renew", req, &resp)
-	return resp, err
 }
 
 // WalletRedistribute broadcasts a transaction that redistributes the money in
