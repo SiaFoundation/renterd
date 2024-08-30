@@ -470,8 +470,8 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 	return ssql.ListBuckets(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, delim, sortBy, sortDir, marker, limit)
+func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
@@ -754,10 +754,6 @@ func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md 
 
 func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
 	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
-}
-
-func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	return ssql.SearchObjects(ctx, tx, bucket, substring, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {

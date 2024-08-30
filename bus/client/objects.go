@@ -103,16 +103,6 @@ func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string, for
 	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeMulti, force)
 }
 
-// SearchObjects returns all objects that contains a sub-string in their key.
-func (c *Client) SearchObjects(ctx context.Context, bucket string, opts api.SearchObjectOptions) (entries []api.ObjectMetadata, err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	opts.Apply(values)
-
-	err = c.c.WithContext(ctx).GET("/search/objects?"+values.Encode(), &entries)
-	return
-}
-
 func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string, force bool) (err error) {
 	err = c.c.WithContext(ctx).POST("/objects/rename", api.ObjectsRenameRequest{
 		Bucket: bucket,

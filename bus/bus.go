@@ -231,7 +231,7 @@ type (
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectMetadata(ctx context.Context, bucketName, path string) (api.Object, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
@@ -240,7 +240,6 @@ type (
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
 		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
-		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
 
 		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
@@ -461,8 +460,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
-		"GET    /search/objects": b.searchObjectsHandlerGET,
+		"POST   /search/hosts": b.searchHostsHandlerPOST,
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 

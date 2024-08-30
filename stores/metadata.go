@@ -310,14 +310,6 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 	return
 }
 
-func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) (objects []api.ObjectMetadata, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		objects, err = tx.SearchObjects(ctx, bucket, substring, offset, limit)
-		return err
-	})
-	return
-}
-
 func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		obj, err = tx.Object(ctx, bucket, path)
@@ -786,9 +778,9 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 	}
 }
 
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		resp, err = tx.ListObjects(ctx, bucket, prefix, delim, sortBy, sortDir, marker, limit)
+		resp, err = tx.ListObjects(ctx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 		return err
 	})
 	return

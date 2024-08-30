@@ -959,20 +959,20 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{})
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{})
 	tt.OK(err)
-	if len(objects) != 2 {
-		t.Fatalf("should have 2 objects but got %v", len(objects))
+	if len(resp.Objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(resp.Objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "ata"})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "ata"})
 	tt.OK(err)
-	if len(objects) != 2 {
-		t.Fatalf("should have 2 objects but got %v", len(objects))
+	if len(resp.Objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(resp.Objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "1258"})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "1258"})
 	tt.OK(err)
-	if len(objects) != 1 {
-		t.Fatalf("should have 1 objects but got %v", len(objects))
+	if len(resp.Objects) != 1 {
+		t.Fatalf("should have 1 objects but got %v", len(resp.Objects))
 	}
 
 	// renew contracts.
@@ -1204,28 +1204,29 @@ func TestParallelUpload(t *testing.T) {
 	wg.Wait()
 
 	// Check if objects exist.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/dir/", Limit: 100})
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/dir/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 3 {
-		t.Fatal("wrong number of objects", len(objects))
+	if len(resp.Objects) != 3 {
+		t.Fatal("wrong number of objects", len(resp.Objects))
 	}
 
 	// Upload one more object.
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), api.DefaultBucketName, "/foo", api.UploadObjectOptions{}))
 
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 4 {
-		t.Fatal("wrong number of objects", len(objects))
+	if len(resp.Objects) != 4 {
+		t.Fatal("wrong number of objects", len(resp.Objects))
 	}
 
 	// Delete all objects under /dir/.
 	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/dir/", api.DeleteObjectOptions{Batch: true}); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
+	cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 1 {
+	if len(resp.Objects) != 1 {
 		t.Fatal("objects weren't deleted")
 	}
 
@@ -1233,9 +1234,10 @@ func TestParallelUpload(t *testing.T) {
 	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/", api.DeleteObjectOptions{Batch: true}); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
+	cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 0 {
+	if len(resp.Objects) != 0 {
 		t.Fatal("objects weren't deleted")
 	}
 }

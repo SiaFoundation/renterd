@@ -1013,9 +1013,9 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	return orderByExprs, nil
 }
 
-func ListObjects(ctx context.Context, tx Tx, bucket, prefix, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
 	if delim == "" {
-		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
 	} else if delim == "/" {
 		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
 	} else {
@@ -2369,35 +2369,6 @@ func scanStateElement(s Scanner) (types.StateElement, error) {
 	}, nil
 }
 
-func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	if limit <= -1 {
-		limit = math.MaxInt
-	}
-
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON o.db_bucket_id = b.id
-		WHERE INSTR(o.object_id, ?) > 0 AND b.name = ?
-		ORDER BY o.object_id ASC
-		LIMIT ? OFFSET ?
-	`, tx.SelectObjectMetadataExpr()), substring, bucket, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-	return objects, nil
-}
-
 func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT %s
@@ -2667,7 +2638,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 	}, nil
 }
 
-func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -2691,6 +2662,12 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sort
 	if prefix != "" {
 		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
 		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
+	}
+
+	// apply substring
+	if prefix != "" {
+		whereExprs = append(whereExprs, "INSTR(o.object_id, ?) > 0")
+		whereArgs = append(whereArgs, substring)
 	}
 
 	// apply sorting

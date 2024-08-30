@@ -193,7 +193,7 @@ type (
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 		// ListObjects returns a list of objects from the given bucket.
-		ListObjects(ctx context.Context, bucket, prefix, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
+		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -309,10 +309,6 @@ type (
 
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
-
-		// SearchObjects returns a list of objects that contain the provided
-		// substring.
-		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 
 		// SetContractSet creates the contract set with the given name and
 		// associates it with the provided contract IDs.

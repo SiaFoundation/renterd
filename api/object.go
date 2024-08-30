@@ -218,6 +218,7 @@ type (
 		Marker    string
 		SortBy    string
 		SortDir   string
+		Substring string
 	}
 
 	SearchObjectOptions struct {
@@ -330,6 +331,9 @@ func (opts ListObjectOptions) Apply(values url.Values) {
 	}
 	if opts.SortDir != "" {
 		values.Set("sortDir", opts.SortDir)
+	}
+	if opts.Substring != "" {
+		values.Set("substring", opts.Substring)
 	}
 }
 

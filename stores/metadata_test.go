@@ -1379,7 +1379,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	resp, err := ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "", "", "", "", -1)
+	resp, err := ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "", "", "", "", "", -1)
 	entries := resp.Objects
 	if err != nil {
 		t.Fatal(err)
@@ -1390,10 +1390,10 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	entries, err = ss.SearchObjects(context.Background(), api.DefaultBucketName, "foo", 0, -1)
+	resp, err = ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "foo", "", "", "", "", -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("wrong number of entries", len(entries))
 	} else if entries[0].Health != expectedHealth {
 		t.Fatal("wrong health", entries[0].Health)
@@ -1532,7 +1532,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
 	}
 	for _, test := range tests {
-		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, "", -1)
+		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1545,7 +1545,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, marker, 1)
+			resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1567,7 +1567,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 				continue
 			}
 
-			resp, err = ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, test.want[offset].Name, 1)
+			resp, err = ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Name, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1634,7 +1634,7 @@ func TestListObjectsExplicitDir(t *testing.T) {
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Name: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
 	for _, test := range tests {
-		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "/", test.sortBy, test.sortDir, "", -1)
+		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1647,8 +1647,9 @@ func TestListObjectsExplicitDir(t *testing.T) {
 	}
 }
 
-// TestSearchObjects is a test for the SearchObjects method.
-func TestSearchObjects(t *testing.T) {
+// TestListObjectsSubstring is a test for the ListObjects fuzzy
+// search via the "substring" argument.
+func TestListObjectsSubstring(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	objects := []struct {
@@ -1701,18 +1702,22 @@ func TestSearchObjects(t *testing.T) {
 		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, 0, -1)
+		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", test.path, "", "", "", "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
+		got := resp.Objects
 		assertEqual(got, test.want)
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			if got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, offset, 1); err != nil {
+			if resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", test.path, "", "", "", marker, 1); err != nil {
 				t.Fatal(err)
-			} else if len(got) != 1 {
+			} else if got := resp.Objects; len(got) != 1 {
 				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.path, len(got))
 			} else if !metadataEquals(got[0], test.want[offset]) {
 				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want[offset])
+			} else {
+				marker = resp.NextMarker
 			}
 		}
 	}
@@ -2550,16 +2555,16 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	objs, err := ss.SearchObjects(ctx, api.DefaultBucketName, "/", 0, 100)
+	resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", "/", "", "", "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(objs) != len(objectsAfter) {
-		t.Fatal("unexpected number of objects", len(objs), len(objectsAfter))
+	if len(resp.Objects) != len(objectsAfter) {
+		t.Fatal("unexpected number of objects", len(resp.Objects), len(objectsAfter))
 	}
 
 	// Assert paths are correct.
-	for _, obj := range objs {
+	for _, obj := range resp.Objects {
 		if _, exists := objectsAfterMap[obj.Name]; !exists {
 			t.Fatal("unexpected path", obj.Name)
 		}
@@ -3327,13 +3332,13 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// List the objects in the buckets.
-	if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3342,15 +3347,15 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// Search the objects in the buckets.
-	if objects, err := ss.SearchObjects(context.Background(), b1, "", 0, -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b1, "", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 2 {
+	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 3 || objects[1].Size != 1 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
-	} else if objects, err := ss.SearchObjects(context.Background(), b2, "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 2 {
+	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 4 || objects[1].Size != 2 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
@@ -3359,13 +3364,13 @@ func TestBucketObjects(t *testing.T) {
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
 	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3376,13 +3381,13 @@ func TestBucketObjects(t *testing.T) {
 	// Rename foo/bar in bucket 2 using the batch rename.
 	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Name != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Name)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3395,28 +3400,28 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.RemoveObjectBlocking(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if err := ss.RemoveObjectsBlocking(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3467,7 +3472,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if om, err := ss.CopyObject(ctx, "src", "src", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(ctx, "src", "/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(ctx, "src", "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3480,7 +3485,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if om, err := ss.CopyObject(ctx, "src", "dst", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(ctx, "dst", "/", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(ctx, "dst", "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3640,7 +3645,7 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 		}
 	}
 	for _, test := range tests {
-		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", test.sortBy, test.sortDir, "", -1)
+		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", "", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3655,7 +3660,7 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", test.sortBy, test.sortDir, marker, 1)
+				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1)
 				if err != nil {
 					t.Fatal(err)
 				}

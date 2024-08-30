@@ -1029,24 +1029,6 @@ func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
-func (b *Bus) searchObjectsHandlerGET(jc jape.Context) {
-	offset := 0
-	limit := -1
-	var key string
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-	keys, err := b.ms.SearchObjects(jc.Request.Context(), bucket, key, offset, limit)
-	if jc.Check("couldn't list objects", err) != nil {
-		return
-	}
-	jc.Encode(keys)
-}
-
 func (b *Bus) objectHandlerGET(jc jape.Context) {
 	path := jc.PathParam("key")
 	bucket := api.DefaultBucketName
@@ -1076,7 +1058,7 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var marker, delim, sortBy, sortDir string
+	var marker, delim, sortBy, sortDir, substring string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
@@ -1097,8 +1079,11 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("sortDir", &sortDir) != nil {
 		return
 	}
+	if jc.DecodeForm("substring", &substring) != nil {
+		return
+	}
 
-	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), delim, sortBy, sortDir, marker, limit)
+	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
 	if errors.Is(err, api.ErrUnsupportedDelimiter) {
 		jc.Error(err, http.StatusBadRequest)
 		return
