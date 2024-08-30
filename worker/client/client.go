@@ -274,7 +274,6 @@ func (c *Client) NotifyEvent(ctx context.Context, e webhooks.Event) (err error) 
 func (c *Client) object(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (_ io.ReadCloser, _ http.Header, err error) {
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
-	opts.ApplyValues(values)
 	path += "?" + values.Encode()
 
 	c.c.Custom("GET", fmt.Sprintf("/objects/%s", path), nil, (*[]api.ObjectMetadata)(nil))

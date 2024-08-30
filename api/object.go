@@ -280,10 +280,6 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 		values.Set("contractset", opts.ContractSet)
 	}
 }
-
-func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
-}
-
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 	if opts.Range != nil {
 		if opts.Range.Length == -1 {

@@ -1674,9 +1674,7 @@ func TestUploadPacking(t *testing.T) {
 		if res.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", res.Size, len(data))
 		}
-		resp, err := b.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{
-			Delimiter: "/",
-		})
+		resp, err := b.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
