@@ -82,19 +82,15 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		return
 	}
 
-	// check price table for gouging
-	gp, err := b.gougingParams(jc.Request.Context())
-	if jc.Check("failed to fetch gouging params", err) != nil {
-		return
-	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
-	if jc.Check("gouging check failed", gc.CheckUnusedDefaults(pt.HostPriceTable)) != nil {
+	// check only the FundAccountCost
+	if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
+		jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
 		return
 	}
 
 	// cap the deposit by what's left in the contract
 	deposit := req.Amount
-	cost := types.NewCurrency64(1)
+	cost := pt.FundAccountCost
 	availableFunds := rev.ValidRenterPayout().Sub(cost)
 	if deposit.Cmp(availableFunds) > 0 {
 		deposit = availableFunds
