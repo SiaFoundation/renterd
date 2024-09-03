@@ -161,7 +161,7 @@ func TestEvents(t *testing.T) {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventContractSetUpdate:
-			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || e.ToAdd[0] != c.ID || len(e.ToAdd) != 0 || e.Timestamp.IsZero() {
+			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || e.ToAdd[0] != c.ID || len(e.ToRemove) != 0 || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventConsensusUpdate:
