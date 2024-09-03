@@ -842,51 +842,56 @@ func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 	return "o.object_id, o.size, o.health, o.mime_type, DATETIME(o.created_at), o.etag"
 }
 
-func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
+func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
 	var csID int64
 	err := tx.QueryRow(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET id = id RETURNING id", name).Scan(&csID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract set id: %w", err)
 	}
 
-	// handle empty set
-	if len(contractIds) == 0 {
-		_, err := tx.Exec(ctx, "DELETE FROM contract_set_contracts WHERE db_contract_set_id = ?", csID)
-		return err
+	// if no changes are needed, return after creating the set
+	if len(toAdd)+len(toRemove) == 0 {
+		return nil
 	}
 
-	// prepare fcid args and query
-	fcidQuery := strings.Repeat("?, ", len(contractIds)-1) + "?"
-	fcidArgs := make([]interface{}, len(contractIds))
-	for i, fcid := range contractIds {
-		fcidArgs[i] = ssql.FileContractID(fcid)
+	prepareQuery := func(fcids []types.FileContractID) (string, []any) {
+		args := []any{csID}
+		query := strings.Repeat("?, ", len(fcids)-1) + "?"
+		for _, fcid := range fcids {
+			args = append(args, ssql.FileContractID(fcid))
+		}
+		return query, args
 	}
 
-	// remove unwanted contracts
-	args := []interface{}{csID}
-	args = append(args, fcidArgs...)
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		DELETE FROM contract_set_contracts
-		WHERE db_contract_set_id = ? AND db_contract_id NOT IN (
-			SELECT id
-			FROM contracts
-			WHERE contracts.fcid IN (%s)
-		)
-	`, fcidQuery), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete contract set contracts: %w", err)
+	// remove unwanted contracts first
+	if len(toRemove) > 0 {
+		query, args := prepareQuery(toRemove)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			DELETE FROM contract_set_contracts
+			WHERE db_contract_set_id = ? AND db_contract_id NOT IN (
+				SELECT id
+				FROM contracts
+				WHERE contracts.fcid IN (%s)
+			)
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to delete contract set contracts: %w", err)
+		}
 	}
 
-	// add missing contracts
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
-		SELECT ?, c.id
-		FROM contracts c
-		WHERE c.fcid IN (%s)
-		ON CONFLICT(db_contract_set_id, db_contract_id) DO NOTHING
-	`, fcidQuery), args...)
-	if err != nil {
-		return fmt.Errorf("failed to add contract set contracts: %w", err)
+	// add new contracts
+	if len(toAdd) > 0 {
+		query, args := prepareQuery(toRemove)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
+			SELECT ?, c.id
+			FROM contracts c
+			WHERE c.fcid IN (%s)
+			ON CONFLICT(db_contract_set_id, db_contract_id) DO NOTHING
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to add contract set contracts: %w", err)
+		}
 	}
 	return nil
 }

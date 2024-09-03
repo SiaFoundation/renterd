@@ -321,9 +321,10 @@ type (
 		// substring.
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 
-		// SetContractSet creates the contract set with the given name and
-		// associates it with the provided contract IDs.
-		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't eist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)

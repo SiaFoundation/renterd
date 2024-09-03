@@ -802,22 +802,23 @@ func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
-	var contractIds []types.FileContractID
+	var req api.ContractSetUpdateRequest
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
 		return
-	} else if jc.Decode(&contractIds) != nil {
+	} else if jc.Decode(&req) != nil {
 		return
-	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
+	} else if jc.Check("could not add contracts to set", b.ms.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
 	} else {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleContractSet,
 			Event:  api.EventUpdate,
 			Payload: api.EventContractSetUpdate{
-				Name:        set,
-				ContractIDs: contractIds,
-				Timestamp:   time.Now().UTC(),
+				Name:      set,
+				ToAdd:     req.ToAdd,
+				ToRemove:  req.ToRemove,
+				Timestamp: time.Now().UTC(),
 			},
 		})
 	}
