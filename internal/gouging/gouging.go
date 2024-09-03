@@ -188,7 +188,11 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	}
 
 	// check LatestRevisionCost - expect sane value
-	maxRevisionCost, overflow := gs.MaxRPCPrice.AddWithOverflow(gs.MaxDownloadPrice.Mul64(2048))
+	twoKiBMax, overflow := gs.MaxDownloadPrice.Mul64WithOverflow(2048)
+	if overflow {
+		twoKiBMax = types.MaxCurrency
+	}
+	maxRevisionCost, overflow := gs.MaxRPCPrice.AddWithOverflow(twoKiBMax)
 	if overflow {
 		maxRevisionCost = types.MaxCurrency
 	}
