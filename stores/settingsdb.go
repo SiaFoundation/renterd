@@ -16,16 +16,8 @@ const (
 	SettingUpload  = "upload"
 )
 
-func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, _ error) {
-	value, err := s.fetchSetting(ctx, SettingGouging)
-	if err != nil {
-		return api.GougingSettings{}, err
-	}
-
-	if err := json.Unmarshal([]byte(value), &gs); err != nil {
-		s.logger.Panicf("failed to unmarshal gouging settings '%s': %v", value, err)
-		return api.GougingSettings{}, err
-	}
+func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
+	err = s.fetchSetting(ctx, SettingGouging, &gs)
 	return
 }
 
@@ -37,16 +29,8 @@ func (s *SQLStore) UpdateGougingSettings(ctx context.Context, gs api.GougingSett
 	return s.updateSetting(ctx, SettingGouging, string(data))
 }
 
-func (s *SQLStore) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, _ error) {
-	value, err := s.fetchSetting(ctx, SettingPinned)
-	if err != nil {
-		return api.PinnedSettings{}, err
-	}
-
-	if err := json.Unmarshal([]byte(value), &ps); err != nil {
-		s.logger.Panicf("failed to unmarshal pinned settings '%s': %v", value, err)
-		return api.PinnedSettings{}, err
-	}
+func (s *SQLStore) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
+	err = s.fetchSetting(ctx, SettingPinned, ps)
 	return
 }
 
@@ -58,16 +42,8 @@ func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettin
 	return s.updateSetting(ctx, SettingPinned, string(data))
 }
 
-func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, _ error) {
-	value, err := s.fetchSetting(ctx, SettingUpload)
-	if err != nil {
-		return api.UploadSettings{}, err
-	}
-
-	if err := json.Unmarshal([]byte(value), &us); err != nil {
-		s.logger.Panicf("failed to unmarshal upload settings '%s': %v", value, err)
-		return api.UploadSettings{}, err
-	}
+func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, err error) {
+	err = s.fetchSetting(ctx, SettingUpload, us)
 	return
 }
 
@@ -79,16 +55,8 @@ func (s *SQLStore) UpdateUploadSettings(ctx context.Context, us api.UploadSettin
 	return s.updateSetting(ctx, SettingUpload, string(data))
 }
 
-func (s *SQLStore) S3Settings(ctx context.Context) (ss api.S3Settings, _ error) {
-	value, err := s.fetchSetting(ctx, SettingS3)
-	if err != nil {
-		return api.S3Settings{}, err
-	}
-
-	if err := json.Unmarshal([]byte(value), &ss); err != nil {
-		s.logger.Panicf("failed to unmarshal s3 settings '%s': %v", value, err)
-		return api.S3Settings{}, err
-	}
+func (s *SQLStore) S3Settings(ctx context.Context) (ss api.S3Settings, err error) {
+	err = s.fetchSetting(ctx, SettingS3, ss)
 	return
 }
 
@@ -119,26 +87,29 @@ func (s *SQLStore) Setting(ctx context.Context, key string, out interface{}) (er
 	return json.Unmarshal([]byte(value), &out)
 }
 
-func (s *SQLStore) fetchSetting(ctx context.Context, key string) (string, error) {
-	// check cache first
+func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}) error {
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
+
 	value, ok := s.settings[key]
-	if ok {
-		return value, nil
+	if !ok {
+		var err error
+		if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			value, err = tx.Setting(ctx, key)
+			return err
+		}); err != nil {
+			return fmt.Errorf("failed to fetch setting from db: %w", err)
+		}
+		s.settings[key] = value
 	}
 
-	// check database
-	var err error
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		value, err = tx.Setting(ctx, key)
+	// unmarshal setting
+	if err := json.Unmarshal([]byte(value), &out); err != nil {
+		s.logger.Panicf("failed to unmarshal %s setting '%s': %v", key, value, err)
 		return err
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch setting from db: %w", err)
 	}
-	s.settings[key] = value
-	return value, nil
+
+	return nil
 }
 
 func (s *SQLStore) updateSetting(ctx context.Context, key, value string) error {
