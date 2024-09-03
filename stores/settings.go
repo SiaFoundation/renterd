@@ -19,7 +19,7 @@ const (
 )
 
 func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	err = s.fetchSetting(ctx, SettingPinned, &gs)
+	err = s.fetchSetting(ctx, SettingGouging, &gs)
 	return
 }
 
