@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -23,8 +25,11 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
@@ -37,6 +42,8 @@ const (
 	defaultWalletRecordMetricInterval = 5 * time.Minute
 	defaultPinUpdateInterval          = 5 * time.Minute
 	defaultPinRateWindow              = 6 * time.Hour
+	lockingPriorityFunding            = 40
+	lockingPriorityRenew              = 80
 	stdTxnSize                        = 1200 // bytes
 )
 
@@ -302,7 +309,7 @@ type (
 
 type Bus struct {
 	startTime time.Time
-	masterKey [32]byte
+	masterKey utils.MasterKey
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -321,6 +328,7 @@ type Bus struct {
 	ss       SettingStore
 
 	rhp2 *rhp2.Client
+	rhp3 *rhp3.Client
 
 	contractLocker        ContractLocker
 	sectors               UploadingSectorsCache
@@ -353,6 +361,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		logger:      l.Sugar(),
 
 		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
+		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
 	// create contract locker
@@ -381,8 +390,9 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 // Handler returns an HTTP handler that serves the bus API.
 func (b *Bus) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /accounts": b.accountsHandlerGET,
-		"POST   /accounts": b.accountsHandlerPOST,
+		"GET    /accounts":      b.accountsHandlerGET,
+		"POST   /accounts":      b.accountsHandlerPOST,
+		"POST   /accounts/fund": b.accountsFundHandler,
 
 		"GET    /alerts":          b.handleGETAlerts,
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
@@ -421,6 +431,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
@@ -501,16 +512,15 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 
-		"GET    /wallet":               b.walletHandler,
-		"POST   /wallet/discard":       b.walletDiscardHandler,
-		"POST   /wallet/fund":          b.walletFundHandler,
-		"GET    /wallet/outputs":       b.walletOutputsHandler,
-		"GET    /wallet/pending":       b.walletPendingHandler,
-		"POST   /wallet/prepare/renew": b.walletPrepareRenewHandler,
-		"POST   /wallet/redistribute":  b.walletRedistributeHandler,
-		"POST   /wallet/send":          b.walletSendSiacoinsHandler,
-		"POST   /wallet/sign":          b.walletSignHandler,
-		"GET    /wallet/transactions":  b.walletTransactionsHandler,
+		"GET    /wallet":              b.walletHandler,
+		"POST   /wallet/discard":      b.walletDiscardHandler,
+		"POST   /wallet/fund":         b.walletFundHandler,
+		"GET    /wallet/outputs":      b.walletOutputsHandler,
+		"GET    /wallet/pending":      b.walletPendingHandler,
+		"POST   /wallet/redistribute": b.walletRedistributeHandler,
+		"POST   /wallet/send":         b.walletSendSiacoinsHandler,
+		"POST   /wallet/sign":         b.walletSignHandler,
+		"GET    /wallet/transactions": b.walletTransactionsHandler,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
@@ -546,70 +556,22 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 	return c, nil
 }
 
-func (b *Bus) isPassedV2AllowHeight() bool {
-	cs := b.cm.TipState()
-	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
-}
-
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
-	// derive the renter key
-	renterKey := b.deriveRenterKey(hostKey)
-
-	// prepare the transaction
-	cs := b.cm.TipState()
-	fc := rhpv2.PrepareContractFormation(renterKey.PublicKey(), hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-
-	// calculate the miner fee
-	fee := b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))
-	txn.MinerFees = []types.Currency{fee}
-
-	// fund the transaction
-	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
-	toSign, err := b.w.FundTransaction(&txn, cost, true)
+func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
 	if err != nil {
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
+		return api.ContractMetadata{}, err
 	}
 
-	// sign the transaction
-	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
-
-	// form the contract
-	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
-	if err != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, err
-	}
-
-	// add transaction set to the pool
-	_, err = b.cm.AddPoolTransactions(txnSet)
-	if err != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
-	}
-
-	// broadcast the transaction set
-	go b.s.BroadcastTransactionSet(txnSet)
-
-	return contract, nil
-}
-
-func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
-func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
+	b.sectors.HandleRenewal(r.ID, r.RenewedFrom)
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleContract,
+		Event:  api.EventRenew,
+		Payload: api.EventContractRenew{
+			Renewal:   r,
+			Timestamp: time.Now().UTC(),
+		},
+	})
+	return r, nil
 }
 
 func (b *Bus) compatV2Settings(ctx context.Context) error {
@@ -711,4 +673,150 @@ func (b *Bus) compatV2Settings(ctx context.Context) error {
 		b.ss.DeleteSetting(ctx, "pricepinning"),
 		b.ss.DeleteSetting(ctx, "uploadpacking"),
 	)
+}
+
+func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
+	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
+}
+
+func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
+	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
+}
+
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
+	// derive the renter key
+	renterKey := b.deriveRenterKey(hostKey)
+
+	// prepare the transaction
+	cs := b.cm.TipState()
+	fc := rhpv2.PrepareContractFormation(renterKey.PublicKey(), hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
+	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
+
+	// calculate the miner fee
+	fee := b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))
+	txn.MinerFees = []types.Currency{fee}
+
+	// fund the transaction
+	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
+	toSign, err := b.w.FundTransaction(&txn, cost, true)
+	if err != nil {
+		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
+	}
+
+	// sign the transaction
+	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
+
+	// form the contract
+	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
+	if err != nil {
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		return rhpv2.ContractRevision{}, err
+	}
+
+	// add transaction set to the pool
+	_, err = b.cm.AddPoolTransactions(txnSet)
+	if err != nil {
+		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
+	}
+
+	// broadcast the transaction set
+	go b.s.BroadcastTransactionSet(txnSet)
+
+	return contract, nil
+}
+
+func (b *Bus) isPassedV2AllowHeight() bool {
+	cs := b.cm.TipState()
+	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
+}
+
+func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
+	return func(pt rhpv3.HostPriceTable) ([]types.Hash256, []types.Transaction, types.Currency, rhp3.DiscardTxnFn, error) {
+		// create the final revision from the provided revision
+		finalRevision := revision
+		finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
+		finalRevision.Filesize = 0
+		finalRevision.FileMerkleRoot = types.Hash256{}
+		finalRevision.RevisionNumber = math.MaxUint64
+
+		// prepare the new contract
+		fc, basePrice, err := rhpv3.PrepareContractRenewal(revision, hostAddress, renterAddress, renterFunds, minNewCollateral, pt, expectedStorage, endHeight)
+		if err != nil {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't prepare contract renewal: %w", err)
+		}
+
+		// prepare the transaction
+		txn := types.Transaction{
+			FileContracts:         []types.FileContract{fc},
+			FileContractRevisions: []types.FileContractRevision{finalRevision},
+			MinerFees:             []types.Currency{pt.TxnFeeMaxRecommended.Mul64(4096)},
+		}
+
+		// compute how much renter funds to put into the new contract
+		fundAmount := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
+
+		// make sure we don't exceed the max fund amount.
+		if maxFundAmount.Cmp(fundAmount) < 0 {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, fundAmount, maxFundAmount)
+		}
+
+		// fund the transaction, we are not signing it yet since it's not
+		// complete. The host still needs to complete it and the revision +
+		// contract are signed with the renter key by the worker.
+		toSign, err := b.w.FundTransaction(&txn, fundAmount, true)
+		if err != nil {
+			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't fund transaction: %w", err)
+		}
+
+		return toSign, append(b.cm.UnconfirmedParents(txn), txn), fundAmount, func(err *error) {
+			if *err == nil {
+				return
+			}
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+		}, nil
+	}
+}
+
+func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
+	if err != nil {
+		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't acquire contract lock; %w", err)
+	}
+	defer func() {
+		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch the revision
+	rev, err := b.rhp3.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	if err != nil {
+		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
+	}
+
+	// renew contract
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	renterKey := b.deriveRenterKey(c.HostKey)
+	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, maxFundAmount, endHeight, expectedNewStorage)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	if err != nil {
+		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
+	}
+
+	// broadcast the transaction set
+	b.s.BroadcastTransactionSet(txnSet)
+
+	return newRevision, contractPrice, fundAmount, nil
 }

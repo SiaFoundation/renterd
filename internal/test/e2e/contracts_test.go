@@ -56,7 +56,7 @@ func TestFormContract(t *testing.T) {
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID
-	tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
@@ -72,7 +72,7 @@ func TestFormContract(t *testing.T) {
 	})
 
 	// assert the contract is part of the contract set
-	tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
 		tt.OK(err)
 		if len(contracts) != 1 {

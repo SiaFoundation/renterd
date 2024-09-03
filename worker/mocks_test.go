@@ -81,6 +81,10 @@ func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *
 	}
 }
 
+func (b *busMock) FundAccount(ctx context.Context, acc rhpv3.Account, fcid types.FileContractID, desired types.Currency) (types.Currency, error) {
+	return types.ZeroCurrency, nil
+}
+
 type contractMock struct {
 	rev      types.FileContractRevision
 	metadata api.ContractMetadata
@@ -692,10 +696,6 @@ func (*walletMock) WalletDiscard(context.Context, types.Transaction) error {
 
 func (*walletMock) WalletFund(context.Context, *types.Transaction, types.Currency, bool) ([]types.Hash256, []types.Transaction, error) {
 	return nil, nil, nil
-}
-
-func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
-	return api.WalletPrepareRenewResponse{}, nil
 }
 
 func (*walletMock) WalletSign(context.Context, *types.Transaction, []types.Hash256, types.CoveredFields) error {

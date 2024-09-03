@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	s3aws "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
@@ -61,6 +65,7 @@ type TestCluster struct {
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
 	Worker    *worker.Client
+	S3Aws     *s3aws.S3
 	S3        *minio.Client
 	S3Core    *minio.Core
 
@@ -319,6 +324,18 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	})
 	tt.OK(err)
 
+	mySession := session.Must(session.NewSession())
+	s3AWSClient := s3aws.New(mySession, aws.NewConfig().
+		WithEndpoint(s3Client.EndpointURL().String()).
+		WithRegion("dummy").
+		WithS3ForcePathStyle(true).
+		WithCredentials(credentials.NewCredentials(&credentials.StaticProvider{
+			Value: credentials.Value{
+				AccessKeyID:     test.S3AccessKeyID,
+				SecretAccessKey: test.S3SecretAccessKey,
+			},
+		})))
+
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
 	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
@@ -388,6 +405,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Bus:       busClient,
 		Worker:    workerClient,
 		S3:        s3Client,
+		S3Aws:     s3AWSClient,
 		S3Core:    s3Core,
 
 		workerShutdownFns:    workerShutdownFns,
