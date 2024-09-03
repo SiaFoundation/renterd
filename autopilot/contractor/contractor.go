@@ -92,7 +92,7 @@ type Bus interface {
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
-	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
 
@@ -1343,7 +1343,17 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	for _, contract := range newSet {
 		newSetIDs = append(newSetIDs, contract.ID)
 	}
-	if err := bus.SetContractSet(ctx, ctx.ContractSet(), newSetIDs); err != nil {
+	inNewSet := make(map[types.FileContractID]struct{})
+	for _, c := range newSet {
+		inNewSet[c.ID] = struct{}{}
+	}
+	var toRemove []types.FileContractID
+	for _, c := range oldSet {
+		if _, exists := inNewSet[c.ID]; !exists {
+			toRemove = append(toRemove, c.ID)
+		}
+	}
+	if err := bus.UpdateContractSet(ctx, ctx.ContractSet(), newSetIDs, toRemove); err != nil {
 		return false, fmt.Errorf("failed to update contract set: %w", err)
 	}
 
