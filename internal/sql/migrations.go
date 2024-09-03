@@ -206,9 +206,15 @@ var (
 				},
 			},
 			{
-				ID: "00016_gouging_units",
+				ID: "00016_account_owner",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00016_gouging_units", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00016_account_owner", log)
+				},
+			},
+			{
+				ID: "00017_gouging_units",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_gouging_units", log)
 				},
 			},
 		}

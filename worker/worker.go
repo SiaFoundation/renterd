@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -27,6 +26,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
@@ -36,7 +36,6 @@ import (
 	"go.sia.tech/renterd/worker/client"
 	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -76,7 +75,9 @@ type (
 		gouging.ConsensusState
 		webhooks.Broadcaster
 
-		AccountStore
+		AccountFunder
+		iworker.AccountStore
+
 		ContractLocker
 		ContractStore
 		HostStore
@@ -88,16 +89,8 @@ type (
 		Wallet
 	}
 
-	// An AccountStore manages ephemaral accounts state.
-	AccountStore interface {
-		Accounts(ctx context.Context) ([]api.Account, error)
-		AddBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
-
-		LockAccount(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey, exclusive bool, duration time.Duration) (api.Account, uint64, error)
-		UnlockAccount(ctx context.Context, id rhpv3.Account, lockID uint64) error
-
-		SetBalance(ctx context.Context, id rhpv3.Account, hk types.PublicKey, amt *big.Int) error
-		ScheduleSync(ctx context.Context, id rhpv3.Account, hk types.PublicKey) error
+	AccountFunder interface {
+		FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
 	}
 
 	ContractStore interface {
@@ -153,8 +146,6 @@ type (
 	Wallet interface {
 		WalletDiscard(ctx context.Context, txn types.Transaction) error
 		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletPrepareForm(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, err error)
-		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
 		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
 
@@ -163,18 +154,6 @@ type (
 		UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
 )
-
-// deriveSubKey can be used to derive a sub-masterkey from the worker's
-// masterkey to use for a specific purpose. Such as deriving more keys for
-// ephemeral accounts.
-func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
 
 // TODO: deriving the renter key from the host key using the master key only
 // works if we persist a hash of the renter's master key in the database and
@@ -189,12 +168,7 @@ func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
 func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(w.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
+	return w.masterKey.DeriveContractKey(hostKey)
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -208,15 +182,15 @@ type Worker struct {
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
-	masterKey       [32]byte
+	masterKey       utils.MasterKey
 	startTime       time.Time
 
 	eventSubscriber iworker.EventSubscriber
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
 
-	accounts    *accounts
-	dialer      *iworker.FallbackDialer
+	accounts    *iworker.AccountMgr
+	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
 	priceTables *priceTables
 
@@ -383,61 +357,6 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(hpt)
-}
-
-func (w *Worker) rhpFormHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the request
-	var rfr api.RHPFormRequest
-	if jc.Decode(&rfr) != nil {
-		return
-	}
-
-	// check renter funds is not zero
-	if rfr.RenterFunds.IsZero() {
-		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
-		return
-	}
-
-	// apply a pessimistic timeout on contract formations
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	hostIP, hostKey, renterFunds := rfr.HostIP, rfr.HostKey, rfr.RenterFunds
-	renterAddress, endHeight, hostCollateral := rfr.RenterAddress, rfr.EndHeight, rfr.HostCollateral
-	renterKey := w.deriveRenterKey(hostKey)
-
-	contract, txnSet, err := w.rhp2Client.FormContract(ctx, renterAddress, renterKey, hostKey, hostIP, renterFunds, hostCollateral, endHeight, gc, func(ctx context.Context, renterAddress types.Address, renterKey types.PublicKey, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostSettings rhpv2.HostSettings, endHeight uint64) (txns []types.Transaction, discard func(types.Transaction), err error) {
-		txns, err = w.bus.WalletPrepareForm(ctx, renterAddress, renterKey, renterFunds, hostCollateral, hostKey, hostSettings, endHeight)
-		if err != nil {
-			return nil, nil, err
-		}
-		return txns, func(txn types.Transaction) {
-			_ = w.bus.WalletDiscard(ctx, txn)
-		}, nil
-	})
-	if jc.Check("couldn't form contract", err) != nil {
-		return
-	}
-
-	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil {
-		w.logger.Errorf("failed to broadcast formation txn set: %v", err)
-	}
-
-	jc.Encode(api.RHPFormResponse{
-		ContractID:     contract.ID(),
-		Contract:       contract,
-		TransactionSet: txnSet,
-	})
 }
 
 func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
@@ -608,101 +527,6 @@ func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
 		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{SectorRoots: cost})
 	}
 	jc.Encode(roots)
-}
-
-func (w *Worker) rhpRenewHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode request
-	var rrr api.RHPRenewRequest
-	if jc.Decode(&rrr) != nil {
-		return
-	}
-
-	// check renter funds is not zero
-	if rrr.RenterFunds.IsZero() {
-		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
-		return
-	}
-
-	// attach gouging checker
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// renew the contract
-	var renewed rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	var contractPrice, fundAmount types.Currency
-	if jc.Check("couldn't renew contract", w.withContractLock(ctx, rrr.ContractID, lockingPriorityRenew, func() (err error) {
-		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
-		renewed, txnSet, contractPrice, fundAmount, err = h.RenewContract(ctx, rrr)
-		return err
-	})) != nil {
-		return
-	}
-
-	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil {
-		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
-	}
-
-	// send the response
-	jc.Encode(api.RHPRenewResponse{
-		ContractID:     renewed.ID(),
-		Contract:       renewed,
-		ContractPrice:  contractPrice,
-		FundAmount:     fundAmount,
-		TransactionSet: txnSet,
-	})
-}
-
-func (w *Worker) rhpFundHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode request
-	var rfr api.RHPFundRequest
-	if jc.Decode(&rfr) != nil {
-		return
-	}
-
-	// attach gouging checker
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// fund the account
-	jc.Check("couldn't fund account", w.withRevision(ctx, defaultRevisionFetchTimeout, rfr.ContractID, rfr.HostKey, rfr.SiamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) error {
-		return w.Host(rfr.HostKey, rev.ParentID, rfr.SiamuxAddr).FundAccount(ctx, rfr.Balance, &rev)
-	}))
-}
-
-func (w *Worker) rhpSyncHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the request
-	var rsr api.RHPSyncRequest
-	if jc.Decode(&rsr) != nil {
-		return
-	}
-
-	// attach gouging checker
-	up, err := w.bus.UploadParams(ctx)
-	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// sync the account
-	h := w.Host(rsr.HostKey, rsr.ContractID, rsr.SiamuxAddr)
-	jc.Check("couldn't sync account", w.withRevision(ctx, defaultRevisionFetchTimeout, rsr.ContractID, rsr.HostKey, rsr.SiamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
-		return h.SyncAccount(ctx, &rev)
-	}))
 }
 
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
@@ -1216,11 +1040,30 @@ func (w *Worker) accountHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	account := rhpv3.Account(w.accounts.deriveAccountKey(hostKey).PublicKey())
+	account := rhpv3.Account(w.accounts.ForHost(hostKey).ID())
 	jc.Encode(account)
 }
 
-func (w *Worker) eventsHandlerPOST(jc jape.Context) {
+func (w *Worker) accountsHandlerGET(jc jape.Context) {
+	jc.Encode(w.accounts.Accounts())
+}
+
+func (w *Worker) accountsResetDriftHandlerPOST(jc jape.Context) {
+	var id rhpv3.Account
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+	err := w.accounts.ResetDrift(id)
+	if errors.Is(err, iworker.ErrAccountNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	if jc.Check("failed to reset drift", err) != nil {
+		return
+	}
+}
+
+func (w *Worker) eventHandlerPOST(jc jape.Context) {
 	var event webhooks.Event
 	if jc.Decode(&event) != nil {
 		return
@@ -1246,6 +1089,10 @@ func (w *Worker) stateHandlerGET(jc jape.Context) {
 
 // New returns an HTTP handler that serves the worker API.
 func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, error) {
+	if cfg.ID == "" {
+		return nil, errors.New("worker ID cannot be empty")
+	}
+
 	l = l.Named("worker").Named(cfg.ID)
 
 	if cfg.ContractLockTimeout == 0 {
@@ -1270,7 +1117,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
-	dialer := iworker.NewFallbackDialer(b, net.Dialer{}, l)
+	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:                  a,
 		allowPrivateIPs:         cfg.AllowPrivateIPs,
@@ -1290,7 +1137,9 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		shutdownCtxCancel:       shutdownCancel,
 	}
 
-	w.initAccounts(b)
+	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
+		return nil, fmt.Errorf("failed to initialize accounts; %w", err)
+	}
 	w.initPriceTables()
 
 	w.initDownloadManager(cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
@@ -1303,22 +1152,20 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 // Handler returns an HTTP handler that serves the worker API.
 func (w *Worker) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /account/:hostkey": w.accountHandlerGET,
-		"GET    /id":               w.idHandlerGET,
+		"GET    /accounts":               w.accountsHandlerGET,
+		"GET    /account/:hostkey":       w.accountHandlerGET,
+		"POST   /account/:id/resetdrift": w.accountsResetDriftHandlerPOST,
+		"GET    /id":                     w.idHandlerGET,
 
-		"POST   /events": w.eventsHandlerPOST,
+		"POST   /event": w.eventHandlerPOST,
 
 		"GET /memory": w.memoryGET,
 
 		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
 		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
 		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
-		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
+		"GET /rhp/contract/:id/roots":        w.rhpContractRootsHandlerGET,
 		"POST   /rhp/scan":                   w.rhpScanHandler,
-		"POST   /rhp/form":                   w.rhpFormHandler,
-		"POST   /rhp/renew":                  w.rhpRenewHandler,
-		"POST   /rhp/fund":                   w.rhpFundHandler,
-		"POST   /rhp/sync":                   w.rhpSyncHandler,
 		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
@@ -1339,7 +1186,7 @@ func (w *Worker) Handler() http.Handler {
 // Setup register event webhooks that enable the worker cache.
 func (w *Worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
 	go func() {
-		eventsURL := fmt.Sprintf("%s/events", apiURL)
+		eventsURL := fmt.Sprintf("%s/event", apiURL)
 		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
 		if err := w.eventSubscriber.Register(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
 			w.logger.Errorw("failed to register webhooks", zap.Error(err))
@@ -1357,6 +1204,9 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// stop uploads and downloads
 	w.downloadManager.Stop()
 	w.uploadManager.Stop()
+
+	// stop account manager
+	w.accounts.Shutdown(ctx)
 
 	// stop recorders
 	w.contractSpendingRecorder.Stop(ctx)
@@ -1389,7 +1239,7 @@ func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey ty
 
 		// fetch the host pricetable
 		scanCtx, cancel = timeoutCtx()
-		pt, err := w.rhp3Client.PriceTableUnpaid(ctx, hostKey, settings.SiamuxAddr())
+		pt, err := w.rhp3Client.PriceTableUnpaid(scanCtx, hostKey, settings.SiamuxAddr())
 		cancel()
 		if err != nil {
 			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
@@ -1508,6 +1358,35 @@ func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 	}, res, nil
 }
 
+func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
+	// calculate the deposit amount
+	acc := w.accounts.ForHost(hk)
+	return acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
+		// return early if we have the desired balance
+		if balance.Cmp(desired) >= 0 {
+			return types.ZeroCurrency, nil
+		}
+		deposit := desired.Sub(balance)
+
+		// fund the account
+		var err error
+		deposit, err = w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
+		if err != nil {
+			if rhp3.IsBalanceMaxExceeded(err) {
+				acc.ScheduleSync()
+			}
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
+		}
+
+		// log the account balance after funding
+		w.logger.Debugw("fund account succeeded",
+			"balance", balance.ExactString(),
+			"deposit", deposit.ExactString(),
+		)
+		return deposit, nil
+	})
+}
+
 func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	// head object
 	hor, res, err := w.headObject(ctx, bucket, path, false, api.HeadObjectOptions{
@@ -1554,7 +1433,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, path, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -1577,6 +1456,25 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 func (w *Worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
 	res, _, err := w.headObject(ctx, bucket, path, true, opts)
 	return res, err
+}
+
+func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
+	// attach gouging checker
+	gp, err := w.cache.GougingParams(ctx)
+	if err != nil {
+		return fmt.Errorf("couldn't get gouging parameters; %w", err)
+	}
+	ctx = WithGougingChecker(ctx, w.bus, gp)
+
+	// sync the account
+	h := w.Host(hk, fcid, siamuxAddr)
+	err = w.withRevision(ctx, defaultRevisionFetchTimeout, fcid, hk, siamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+		return h.SyncAccount(ctx, &rev)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to sync account; %w", err)
+	}
+	return nil
 }
 
 func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
@@ -1668,6 +1566,14 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	return &api.UploadMultipartUploadPartResponse{
 		ETag: eTag,
 	}, nil
+}
+
+func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
+	if w.accounts != nil {
+		panic("priceTables already initialized") // developer error
+	}
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	return err
 }
 
 func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, contractSet string, minShards, totalShards int) (api.UploadParams, error) {

@@ -130,6 +130,19 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 	return
 }
 
+// FormContract forms a contract with a host and adds it to the bus.
+func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
+	err = c.c.WithContext(ctx).POST("/contracts", api.ContractFormRequest{
+		EndHeight:      endHeight,
+		HostCollateral: hostCollateral,
+		HostKey:        hostKey,
+		HostIP:         hostIP,
+		RenterFunds:    renterFunds,
+		RenterAddress:  renterAddress,
+	}, &contract)
+	return
+}
+
 // KeepaliveContract extends the duration on an already acquired lock on a
 // contract.
 func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileContractID, lockID uint64, d time.Duration) (err error) {
@@ -144,6 +157,19 @@ func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileCon
 // the amount of data that can be pruned.
 func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/prunable", &prunableData)
+	return
+}
+
+// RenewContract renews an existing contract with a host and adds it to the bus.
+func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
+	req := api.ContractRenewRequest{
+		EndHeight:          endHeight,
+		ExpectedNewStorage: expectedStorage,
+		MaxFundAmount:      maxFundAmount,
+		MinNewCollateral:   minNewCollateral,
+		RenterFunds:        renterFunds,
+	}
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renew", contractID), req, &renewal)
 	return
 }
 
