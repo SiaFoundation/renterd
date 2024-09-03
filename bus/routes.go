@@ -262,11 +262,7 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	tip, err := b.w.Tip()
-	if jc.Check("couldn't fetch wallet scan height", err) != nil {
-		return
-	}
-
+	tip := b.w.Tip()
 	jc.Encode(api.WalletResponse{
 		ScanHeight:  tip.Height,
 		Address:     address,
@@ -437,19 +433,23 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 			},
 		}
 		// fund and sign transaction
-		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
+		basis, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
 		if jc.Check("failed to fund transaction", err) != nil {
 			return
 		}
-		b.w.SignV2Inputs(state, &txn, toSign)
-		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
+		b.w.SignV2Inputs(&txn, toSign)
+		basis, txnset, err := b.cm.V2TransactionSet(basis, txn)
+		if jc.Check("failed to get parents for funded transaction", err) != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return
+		}
 		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+		if _, err := b.cm.AddV2PoolTransactions(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
 			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
 			return
 		}
 		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(state.Index, txnset)
+		b.s.BroadcastV2TransactionSet(basis, txnset)
 		jc.Encode(txn.ID())
 	} else {
 		// build transaction
@@ -533,7 +533,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 
 		for i := 0; i < len(txns); i++ {
-			b.w.SignV2Inputs(state, &txns[i], toSign[i])
+			b.w.SignV2Inputs(&txns[i], toSign[i])
 			ids = append(ids, txns[i].ID())
 		}
 
