@@ -1604,49 +1604,11 @@ func TestWalletTransactions(t *testing.T) {
 		t.Fatal("transactions don't match", cmp.Diff(txns, allTxns[2:]))
 	}
 
-	// Find the first index that has a different timestamp than the first.
-	var txnIdx int
-	for i := 1; i < len(allTxns); i++ {
-		if allTxns[i].Timestamp.Unix() != allTxns[0].Timestamp.Unix() {
-			txnIdx = i
-			break
-		}
-	}
-	medianTxnTimestamp := allTxns[txnIdx].Timestamp
-
 	// Limit the number of transactions to 5.
 	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithLimit(5))
 	tt.OK(err)
 	if len(txns) != 5 {
 		t.Fatalf("expected exactly 5 transactions, got %v", len(txns))
-	}
-
-	// Fetch txns before and since median.
-	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithBefore(medianTxnTimestamp))
-	tt.OK(err)
-	if len(txns) == 0 {
-		for _, txn := range allTxns {
-			fmt.Println(txn.Timestamp.Unix())
-		}
-		t.Fatal("expected at least 1 transaction before median timestamp", medianTxnTimestamp.Unix())
-	}
-	for _, txn := range txns {
-		if txn.Timestamp.Unix() >= medianTxnTimestamp.Unix() {
-			t.Fatal("expected only transactions before median timestamp")
-		}
-	}
-	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithSince(medianTxnTimestamp))
-	tt.OK(err)
-	if len(txns) == 0 {
-		for _, txn := range allTxns {
-			fmt.Println(txn.Timestamp.Unix())
-		}
-		t.Fatal("expected at least 1 transaction after median timestamp")
-	}
-	for _, txn := range txns {
-		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
-			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
-		}
 	}
 }
 

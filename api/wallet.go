@@ -78,18 +78,6 @@ type (
 // WalletTransactionsOption is an option for the WalletTransactions method.
 type WalletTransactionsOption func(url.Values)
 
-func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("before", before.Format(time.RFC3339))
-	}
-}
-
-func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("since", since.Format(time.RFC3339))
-	}
-}
-
 func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
 	return func(q url.Values) {
 		q.Set("limit", fmt.Sprint(limit))
