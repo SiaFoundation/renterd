@@ -1,9 +1,9 @@
 module go.sia.tech/renterd
 
-go 1.22.5
+go 1.23.0
 
 require (
-	github.com/aws/aws-sdk-go-v2/config v1.27.31
+	github.com/aws/aws-sdk-go v1.55.5
 	github.com/gabriel-vasile/mimetype v1.4.5
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/go-cmp v0.6.0
@@ -16,7 +16,7 @@ require (
 	go.sia.tech/core v0.4.6
 	go.sia.tech/coreutils v0.3.2
 	go.sia.tech/gofakes3 v0.0.4
-	go.sia.tech/hostd v1.1.3-0.20240807214810-c2d8ed84dc45
+	go.sia.tech/hostd v1.1.3-0.20240903081107-6e044db95238
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.2.0
 	go.sia.tech/web/renterd v0.60.1
@@ -31,20 +31,7 @@ require (
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da // indirect
-	github.com/aws/aws-sdk-go v1.55.5 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.30.4 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.30 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.12 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.16 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.16 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.18 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.22.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.30.5 // indirect
-	github.com/aws/smithy-go v1.20.4 // indirect
-	github.com/cloudflare/cloudflare-go v0.101.0 // indirect
+	github.com/cloudflare/cloudflare-go v0.103.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
@@ -66,5 +53,5 @@ require (
 	golang.org/x/text v0.17.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
-	nhooyr.io/websocket v1.8.11 // indirect
+	nhooyr.io/websocket v1.8.17 // indirect
 )
