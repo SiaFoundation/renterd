@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	s3aws "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -37,7 +38,7 @@ func TestS3Basic(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// delete default bucket before testing.
-	s3 := cluster.S3
+	s3 := cluster.S3Aws
 	tt := cluster.tt
 	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
@@ -46,145 +47,164 @@ func TestS3Basic(t *testing.T) {
 	// create bucket
 	bucket := "bucket"
 	objPath := "obj#ct" // special char to check escaping
-	tt.OK(s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{}))
+	tt.OKAll(s3.CreateBucket(&s3aws.CreateBucketInput{
+		Bucket: &bucket,
+	}))
 
 	// list buckets
-	buckets, err := s3.ListBuckets(context.Background())
+	lbo, err := s3.ListBuckets(&s3aws.ListBucketsInput{})
 	tt.OK(err)
-	if len(buckets) != 1 {
+	if buckets := lbo.Buckets; len(buckets) != 1 {
 		t.Fatalf("unexpected number of buckets, %d != 1", len(buckets))
-	} else if buckets[0].Name != bucket {
-		t.Fatalf("unexpected bucket name, %s != %s", buckets[0].Name, bucket)
+	} else if *buckets[0].Name != bucket {
+		t.Fatalf("unexpected bucket name, %s != %s", *buckets[0].Name, bucket)
 	} else if buckets[0].CreationDate.IsZero() {
 		t.Fatal("expected non-zero creation date")
 	}
 
 	// exist buckets
-	exists, err := s3.BucketExists(context.Background(), bucket)
+	_, err = s3.HeadBucket(&s3aws.HeadBucketInput{Bucket: &bucket})
 	tt.OK(err)
-	if !exists {
-		t.Fatal("expected bucket to exist")
-	}
-	exists, err = s3.BucketExists(context.Background(), bucket+"nonexistent")
-	tt.OK(err)
-	if exists {
-		t.Fatal("expected bucket to not exist")
-	}
+	nonexistentBucket := "nonexistent"
+	_, err = s3.HeadBucket(&s3aws.HeadBucketInput{Bucket: &nonexistentBucket})
+	tt.AssertContains(err, "NotFound")
 
 	// add object to the bucket
 	data := frand.Bytes(10)
 	etag := md5.Sum(data)
-	uploadInfo, err := s3.PutObject(context.Background(), bucket, objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	uploadInfo, err := s3.PutObject(&s3aws.PutObjectInput{
+		Body:   bytes.NewReader(data),
+		Bucket: &bucket,
+		Key:    &objPath,
+	})
 	tt.OK(err)
-	if uploadInfo.ETag != hex.EncodeToString(etag[:]) {
-		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), uploadInfo.ETag)
+	if *uploadInfo.ETag != api.FormatETag(hex.EncodeToString(etag[:])) {
+		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), *uploadInfo.ETag)
 	}
 	busObject, err := cluster.Bus.Object(context.Background(), bucket, objPath, api.GetObjectOptions{})
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
-	} else if busObject.ETag != uploadInfo.ETag {
-		t.Fatalf("expected ETag %q, got %q", uploadInfo.ETag, busObject.ETag)
+	} else if api.FormatETag(busObject.ETag) != *uploadInfo.ETag {
+		t.Fatalf("expected ETag %v, got %v", uploadInfo.ETag, busObject.ETag)
 	}
 
-	_, err = s3.PutObject(context.Background(), bucket+"nonexistent", objPath, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	_, err = s3.PutObject(&s3aws.PutObjectInput{
+		Body:   bytes.NewReader(data),
+		Bucket: &nonexistentBucket,
+		Key:    &objPath,
+	})
 	tt.AssertIs(err, errBucketNotExists)
 
 	// get object
-	obj, err := s3.GetObject(context.Background(), bucket, objPath, minio.GetObjectOptions{})
+	obj, err := s3.GetObject(&s3aws.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &objPath,
+	})
 	tt.OK(err)
-	if b, err := io.ReadAll(obj); err != nil {
+	if b, err := io.ReadAll(obj.Body); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(b, data) {
 		t.Fatal("data mismatch")
-	} else if info, err := obj.Stat(); err != nil {
-		t.Fatal(err)
-	} else if info.ETag != uploadInfo.ETag {
-		t.Fatal("unexpected ETag:", info.ETag, uploadInfo.ETag)
+	} else if *obj.ETag != *uploadInfo.ETag {
+		t.Fatal("unexpected ETag:", *obj.ETag, *uploadInfo.ETag)
 	}
 
 	// stat object
-	info, err := s3.StatObject(context.Background(), bucket, objPath, minio.StatObjectOptions{})
+	info, err := s3.HeadObject(&s3aws.HeadObjectInput{
+		Bucket: &bucket,
+		Key:    &objPath,
+	})
 	tt.OK(err)
-	if info.Size != int64(len(data)) {
+	if *info.ContentLength != int64(len(data)) {
 		t.Fatal("size mismatch")
-	} else if info.ETag != uploadInfo.ETag {
+	} else if *info.ETag != *uploadInfo.ETag {
 		t.Fatal("unexpected ETag:", info.ETag)
 	}
 
 	// stat object that doesn't exist
-	_, err = s3.StatObject(context.Background(), bucket, "nonexistent", minio.StatObjectOptions{})
-	if err == nil || !strings.Contains(err.Error(), "The specified key does not exist") {
-		t.Fatal(err)
-	}
+	info, err = s3.HeadObject(&s3aws.HeadObjectInput{
+		Bucket: &nonexistentBucket,
+		Key:    &objPath,
+	})
+	tt.AssertContains(err, "NotFound")
 
 	// add another bucket
-	tt.OK(s3.MakeBucket(context.Background(), bucket+"2", minio.MakeBucketOptions{}))
+	bucket2 := "bucket2"
+	tt.OKAll(s3.CreateBucket(&s3aws.CreateBucketInput{
+		Bucket: &bucket2,
+	}))
 
 	// copy our object into the new bucket.
-	res, err := s3.CopyObject(context.Background(), minio.CopyDestOptions{
-		Bucket: bucket + "2",
-		Object: objPath,
-	}, minio.CopySrcOptions{
-		Bucket: bucket,
-		Object: objPath,
+	src := fmt.Sprintf("%s/%s", bucket, objPath)
+	res, err := s3.CopyObject(&s3aws.CopyObjectInput{
+		CopySource: &src,
+		Bucket:     &bucket2,
+		Key:        &objPath,
 	})
 	tt.OK(err)
-	if res.LastModified.IsZero() {
+	if res.CopyObjectResult.LastModified.IsZero() {
 		t.Fatal("expected LastModified to be non-zero")
-	} else if !res.LastModified.After(start.UTC()) {
+	} else if !res.CopyObjectResult.LastModified.After(start.UTC()) {
 		t.Fatal("expected LastModified to be after the start of our test")
-	} else if res.ETag == "" {
-		t.Fatal("expected ETag to be set")
+	} else if *res.CopyObjectResult.ETag != *uploadInfo.ETag {
+		t.Fatal("expected correct ETag to be set")
 	}
 
 	// get copied object
-	obj, err = s3.GetObject(context.Background(), bucket+"2", objPath, minio.GetObjectOptions{})
+	obj, err = s3.GetObject(&s3aws.GetObjectInput{
+		Bucket: &bucket2,
+		Key:    &objPath,
+	})
 	tt.OK(err)
-	if b, err := io.ReadAll(obj); err != nil {
+	if b, err := io.ReadAll(obj.Body); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(b, data) {
 		t.Fatal("data mismatch")
 	}
 
 	// assert deleting the bucket fails because it's not empty
-	err = s3.RemoveBucket(context.Background(), bucket)
+	_, err = s3.DeleteBucket(&s3aws.DeleteBucketInput{Bucket: &bucket})
 	tt.AssertIs(err, gofakes3.ErrBucketNotEmpty)
 
 	// assert deleting the bucket fails because it doesn't exist
-	err = s3.RemoveBucket(context.Background(), bucket+"nonexistent")
+	_, err = s3.DeleteBucket(&s3aws.DeleteBucketInput{Bucket: &nonexistentBucket})
 	tt.AssertIs(err, errBucketNotExists)
 
 	// remove the object
-	tt.OK(s3.RemoveObject(context.Background(), bucket, objPath, minio.RemoveObjectOptions{}))
+	tt.OKAll(s3.DeleteObject(&s3aws.DeleteObjectInput{Bucket: &bucket, Key: &objPath}))
 
 	// try to get object
-	obj, err = s3.GetObject(context.Background(), bucket, objPath, minio.GetObjectOptions{})
-	tt.OK(err)
-	_, err = io.ReadAll(obj)
-	tt.AssertContains(err, "The specified key does not exist")
+	obj, err = s3.GetObject(&s3aws.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &objPath,
+	})
+	tt.AssertContains(err, "NoSuchKey")
 
 	// add a few objects to the bucket.
-	tt.OKAll(s3.PutObject(context.Background(), bucket, "dir/", bytes.NewReader(frand.Bytes(10)), 10, minio.PutObjectOptions{}))
-	tt.OKAll(s3.PutObject(context.Background(), bucket, "dir/file", bytes.NewReader(frand.Bytes(10)), 10, minio.PutObjectOptions{}))
+	tmpObj1 := "dir/"
+	body := frand.Bytes(10)
+	tt.OKAll(s3.PutObject(&s3aws.PutObjectInput{
+		Body:   bytes.NewReader(body),
+		Bucket: &bucket,
+		Key:    &tmpObj1,
+	}))
+	tmpObj2 := "dir/file"
+	tt.OKAll(s3.PutObject(&s3aws.PutObjectInput{
+		Body:   bytes.NewReader(body),
+		Bucket: &bucket,
+		Key:    &tmpObj2,
+	}))
 
 	// delete them using the multi delete endpoint.
-	objectsCh := make(chan minio.ObjectInfo, 3)
-	objectsCh <- minio.ObjectInfo{Key: "dir/file"}
-	objectsCh <- minio.ObjectInfo{Key: "dir/"}
-	close(objectsCh)
-	results := s3.RemoveObjects(context.Background(), bucket, objectsCh, minio.RemoveObjectsOptions{})
-	for res := range results {
-		tt.OK(res.Err)
-	}
+	tt.OKAll(s3.DeleteObject(&s3aws.DeleteObjectInput{Bucket: &bucket, Key: &tmpObj1}))
+	tt.OKAll(s3.DeleteObject(&s3aws.DeleteObjectInput{Bucket: &bucket, Key: &tmpObj2}))
 
 	// delete bucket
-	tt.OK(s3.RemoveBucket(context.Background(), bucket))
-	exists, err = s3.BucketExists(context.Background(), bucket)
+	_, err = s3.DeleteBucket(&s3aws.DeleteBucketInput{Bucket: &bucket})
 	tt.OK(err)
-	if exists {
-		t.Fatal("expected bucket to not exist")
-	}
+	_, err = s3.HeadBucket(&s3aws.HeadBucketInput{Bucket: &bucket})
+	tt.AssertContains(err, "NotFound")
 }
 
 func TestS3ObjectMetadata(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -78,6 +79,10 @@ func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *
 		walletMock:             &walletMock{},
 		webhookBroadcasterMock: &webhookBroadcasterMock{},
 	}
+}
+
+func (b *busMock) FundAccount(ctx context.Context, acc rhpv3.Account, fcid types.FileContractID, desired types.Currency) (types.Currency, error) {
+	return types.ZeroCurrency, nil
 }
 
 type contractMock struct {

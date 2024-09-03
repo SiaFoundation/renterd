@@ -167,13 +167,13 @@ func (c *Client) Renew(ctx context.Context, gc gouging.Checker, rev types.FileCo
 	return
 }
 
-func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.SettingsID, rk types.PrivateKey) (balance types.Currency, _ error) {
+func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.HostPriceTable, rk types.PrivateKey) (balance types.Currency, _ error) {
 	return balance, c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		payment, err := payByContract(rev, types.NewCurrency64(1), accID, rk)
+		payment, err := payByContract(rev, pt.AccountBalanceCost, accID, rk)
 		if err != nil {
 			return err
 		}
-		balance, err = rpcAccountBalance(ctx, t, &payment, accID, pt)
+		balance, err = rpcAccountBalance(ctx, t, &payment, accID, pt.UID)
 		return err
 	})
 }

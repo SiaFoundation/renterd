@@ -2665,7 +2665,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	}
 
 	// apply substring
-	if prefix != "" {
+	if substring != "" {
 		whereExprs = append(whereExprs, "INSTR(o.object_id, ?) > 0")
 		whereArgs = append(whereArgs, substring)
 	}
