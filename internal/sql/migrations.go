@@ -205,6 +205,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00015_reset_drift", log)
 				},
 			},
+			{
+				ID: "00016_gouging_units",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00016_gouging_units", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
