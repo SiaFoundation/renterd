@@ -253,10 +253,10 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 
 	// update max download price
 	if pins.MaxDownload.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxDownload.Value), rate)
+		maxDownloadCurr, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxDownload.Value), rate)
 		if err != nil {
 			pm.logger.Warn("failed to convert max download price to currency")
-		} else if !gs.MaxDownloadPrice.Equals(update) {
+		} else if update := maxDownloadCurr.Div64(1e12); !gs.MaxDownloadPrice.Equals(update) {
 			gs.MaxDownloadPrice = update
 			pm.logger.Infow("updating max download price", "old", gs.MaxDownloadPrice, "new", update, "rate", rate)
 			updated = true
@@ -277,10 +277,10 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 
 	// update max upload price
 	if pins.MaxUpload.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxUpload.Value), rate)
+		maxUploadCurr, err := convertCurrencyToSC(decimal.NewFromFloat(pins.MaxUpload.Value), rate)
 		if err != nil {
 			pm.logger.Warnw("failed to convert max upload price to currency", zap.Error(err))
-		} else if !gs.MaxUploadPrice.Equals(update) {
+		} else if update := maxUploadCurr.Div64(1e12); !gs.MaxUploadPrice.Equals(update) {
 			pm.logger.Infow("updating max upload price", "old", gs.MaxUploadPrice, "new", update, "rate", rate)
 			gs.MaxUploadPrice = update
 			updated = true
