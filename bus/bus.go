@@ -201,12 +201,12 @@ type (
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
+		Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
@@ -442,6 +442,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 
+		"POST   /hosts":                          b.hostsHandlerPOST,
 		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
 		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
@@ -479,7 +480,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
 		"GET    /search/objects": b.searchObjectsHandlerGET,
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,

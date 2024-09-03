@@ -564,8 +564,8 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(relevant)
 }
 
-func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
+func (b *Bus) hostsHandlerPOST(jc jape.Context) {
+	var req api.HostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
@@ -606,7 +606,7 @@ func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
 		req.Limit = -1
 	}
 
-	hosts, err := b.hs.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	hosts, err := b.hs.Hosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
