@@ -290,13 +290,6 @@ func (b *Bus) walletTransactionsHandler(jc jape.Context) {
 		return
 	}
 
-	// TODO: deprecate these parameters when moving to v2.0.0
-	var before, since time.Time
-	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
-		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil {
-		return
-	}
-
 	// convertToTransaction converts wallet event data to a Transaction.
 	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
 		ok = true
@@ -339,32 +332,10 @@ func (b *Bus) walletTransactionsHandler(jc jape.Context) {
 		return transactions
 	}
 
-	if before.IsZero() && since.IsZero() {
-		events, err := b.w.Events(offset, limit)
-		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(convertToTransactions(events))
-		}
-		return
-	}
-
-	// TODO: remove this when 'before' and 'since' are deprecated, until then we
-	// fetch all transactions and paginate manually if either is specified
-	events, err := b.w.Events(0, -1)
-	if jc.Check("couldn't load transactions", err) != nil {
-		return
-	}
-	filtered := events[:0]
-	for _, txn := range events {
-		if (before.IsZero() || txn.Timestamp.Before(before)) &&
-			(since.IsZero() || txn.Timestamp.After(since)) {
-			filtered = append(filtered, txn)
-		}
-	}
-	events = filtered
-	if limit == 0 || limit == -1 {
-		jc.Encode(convertToTransactions(events[offset:]))
-	} else {
-		jc.Encode(convertToTransactions(events[offset : offset+limit]))
+	// fetch events
+	events, err := b.w.Events(offset, limit)
+	if jc.Check("couldn't load transactions", err) == nil {
+		jc.Encode(convertToTransactions(events))
 	}
 }
 

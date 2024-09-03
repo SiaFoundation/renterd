@@ -1015,7 +1015,6 @@ func (w *Worker) rhpContractsHandlerGET(jc jape.Context) {
 	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
-		resp.Error = errs.Error()
 		resp.Errors = make(map[types.PublicKey]string)
 		for pk, err := range errs {
 			resp.Errors[pk] = err.Error()

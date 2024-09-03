@@ -58,9 +58,6 @@ type (
 	ContractsResponse struct {
 		Contracts []Contract                 `json:"contracts"`
 		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
-
-		// deprecated
-		Error string `json:"error,omitempty"`
 	}
 
 	MemoryResponse struct {

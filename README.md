@@ -54,10 +54,6 @@ overview of all settings configurable through the CLI.
 | `Log.Database.Level`                 | Logger level for database queries (info\|warn\|error). Defaults to 'warn' | `warn`                            | `--log.database.level`          | `RENTERD_LOG_DATABASE_LEVEL`, `RENTERD_LOG_LEVEL` | `log.database.level`           |
 | `Log.Database.IgnoreRecordNotFoundError` | Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' | `true`                            | `--log.database.ignoreRecordNotFoundError` | `RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR` | `log.database.ignoreRecordNotFoundError` |
 | `Log.Database.SlowThreshold`         | Threshold for slow queries in logger. Defaults to 100ms | `100ms`                          | `--log.database.slowThreshold`  | `RENTERD_LOG_DATABASE_SLOW_THRESHOLD`         | `log.database.slowThreshold`        |
-| `Log.Database.Level (DEPRECATED)`    | Logger level                                        | `warn`                            | `--db.logger.logLevel`           | `RENTERD_DB_LOGGER_LOG_LEVEL`                  | `log.database.level`               |
-| `Log.Database.IgnoreRecordNotFoundError (DEPRECATED)` | Ignores 'not found' errors in logger    | `true`                            | `--db.logger.ignoreNotFoundError`| `RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR`     | `log.ignoreRecordNotFoundError` |
-| `Log.Database.SlowThreshold (DEPRECATED)`    | Threshold for slow queries in logger    | `100ms`                          | `--db.logger.slowThreshold`      | `RENTERD_DB_LOGGER_SLOW_THRESHOLD`             | `log.slowThreshold`       |
-| `Log.Path (DEPRECATED)`              | Path to directory for logs                          | -                                 | `--log-path`                     | `RENTERD_LOG_PATH`                             | `log.path`                         |
 | `Database.MySQL.URI`                 | Database URI for the bus                             | -                                 | `--db.uri`                      | `RENTERD_DB_URI`                              | `database.mysql.uri`                |
 | `Database.MySQL.User`                | Database username for the bus                        | `renterd`                         | `--db.user`                     | `RENTERD_DB_USER`                             | `database.mysql.user`               |
 | `Database.MySQL.Password`            | Database password for the bus                        | -                                 | -                               | `RENTERD_DB_PASSWORD`                         | `database.mysql.password`           |
@@ -102,7 +98,6 @@ overview of all settings configurable through the CLI.
 | `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
 | `S3.HostBucketBases`       | Enables bucket rewriting in the router for the provided bases  | -                                 | `--s3.hostBucketBases`           | `RENTERD_S3_HOST_BUCKET_BASES`               | `s3.hostBucketBases`              |
 | `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
-| `S3.KeypairsV4 (DEPRECATED)`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
 
 ### Single-Node Setup
 
