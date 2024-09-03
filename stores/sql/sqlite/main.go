@@ -795,7 +795,7 @@ func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, to
 		query, args := prepareQuery(toRemove)
 		_, err = tx.Exec(ctx, fmt.Sprintf(`
 			DELETE FROM contract_set_contracts
-			WHERE db_contract_set_id = ? AND db_contract_id NOT IN (
+			WHERE db_contract_set_id = ? AND db_contract_id IN (
 				SELECT id
 				FROM contracts
 				WHERE contracts.fcid IN (%s)
@@ -808,7 +808,7 @@ func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, to
 
 	// add new contracts
 	if len(toAdd) > 0 {
-		query, args := prepareQuery(toRemove)
+		query, args := prepareQuery(toAdd)
 		_, err = tx.Exec(ctx, fmt.Sprintf(`
 			INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
 			SELECT ?, c.id
