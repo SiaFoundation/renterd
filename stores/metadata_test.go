@@ -1438,7 +1438,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// update contract to impact the object's health
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3], fcids[4]}, nil); err != nil {
+	if err := ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3], fcids[4]}, []types.FileContractID{fcids[1]}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.RefreshHealth(context.Background()); err != nil {
@@ -1451,7 +1451,7 @@ func TestObjectHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
-		t.Fatal("wrong health", obj.Health)
+		t.Fatal("wrong health", obj.Health, expectedHealth)
 	}
 
 	// assert health is returned correctly by ObjectEntries
@@ -1475,7 +1475,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// update contract set again to make sure the 2nd slab has even worse health
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3]}, nil); err != nil {
+	if err := ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3]}, []types.FileContractID{fcids[4]}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.RefreshHealth(context.Background()); err != nil {
@@ -4072,7 +4072,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	refreshHealth(s1, s2)
 
 	// switch out the contract set with two new contracts
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids[2:], nil); err != nil {
+	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids[2:], fcids[:2]); err != nil {
 		t.Fatal(err)
 	}
 	assertHealthValid(s1, false)
@@ -4204,7 +4204,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// update contract set to not contain the first contract
-	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids[1:], nil)
+	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids[1:], fcids[:1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4220,7 +4220,7 @@ func TestRefreshHealth(t *testing.T) {
 
 	// update contract set again to increase health of o1 again and lower health
 	// of o2
-	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids[:6], nil)
+	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids[:6], fcids[6:])
 	if err != nil {
 		t.Fatal(err)
 	}
