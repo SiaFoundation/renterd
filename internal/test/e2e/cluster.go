@@ -526,7 +526,8 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 		return nil, nil, nil, nil, err
 	}
 
-	sqlStore, err := stores.NewSQLStore(storeCfg)
+	network, genesis := testNetwork()
+	sqlStore, err := stores.NewSQLStore(storeCfg, network)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -554,7 +555,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 	}
 
 	// create chain manager
-	network, genesis := testNetwork()
 	store, state, err := chain.NewDBStore(bdb, network, genesis)
 	if err != nil {
 		return nil, nil, nil, nil, err

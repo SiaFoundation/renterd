@@ -28,7 +28,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var ErrNegativeOffset = errors.New("offset can not be negative")
+var (
+	ErrNegativeOffset  = errors.New("offset can not be negative")
+	ErrSettingNotFound = errors.New("setting not found")
+)
 
 // helper types
 type (
@@ -2212,7 +2215,7 @@ func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
 	var value string
 	err := tx.QueryRow(ctx, "SELECT value FROM settings WHERE `key` = ?", key).Scan((*BusSetting)(&value))
 	if errors.Is(err, dsql.ErrNoRows) {
-		return "", api.ErrSettingNotFound
+		return "", ErrSettingNotFound
 	} else if err != nil {
 		return "", fmt.Errorf("failed to fetch setting '%s': %w", key, err)
 	}

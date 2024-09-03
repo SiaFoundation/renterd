@@ -1348,9 +1348,8 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
-	if gs, err := b.ss.GougingSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get gouging settings", err) == nil {
+	gs, err := b.ss.GougingSettings(jc.Request.Context())
+	if jc.Check("failed to get gouging settings", err) == nil {
 		jc.Encode(gs)
 	}
 }
@@ -1376,9 +1375,8 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	if pps, err := b.ss.PinnedSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get pinned settings", err) == nil {
+	pps, err := b.ss.PinnedSettings(jc.Request.Context())
+	if jc.Check("failed to get pinned settings", err) == nil {
 		// populate the Autopilots map with the current autopilots
 		aps, err := b.as.Autopilots(jc.Request.Context())
 		if jc.Check("failed to fetch autopilots", err) != nil {
@@ -1423,9 +1421,8 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
-	if us, err := b.ss.UploadSettings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get upload settings", err) == nil {
+	us, err := b.ss.UploadSettings(jc.Request.Context())
+	if jc.Check("failed to get upload settings", err) == nil {
 		jc.Encode(us)
 	}
 }
@@ -1450,9 +1447,8 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
-	if s3s, err := b.ss.S3Settings(jc.Request.Context()); errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-	} else if jc.Check("failed to get S3 settings", err) == nil {
+	s3s, err := b.ss.S3Settings(jc.Request.Context())
+	if jc.Check("failed to get S3 settings", err) == nil {
 		jc.Encode(s3s)
 	}
 }
@@ -1610,7 +1606,7 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 		return
 	}
 	us, err := b.ss.UploadSettings(jc.Request.Context())
-	if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	if err != nil {
 		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
 		return
 	}
@@ -1645,10 +1641,7 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 	var uploadPacking bool
 	var contractSet string
 	us, err := b.ss.UploadSettings(jc.Request.Context())
-	if err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(fmt.Errorf("could not get upload settings: %w", err), http.StatusInternalServerError)
-		return
-	} else if err == nil {
+	if jc.Check("could not get upload settings", err) == nil {
 		contractSet = us.DefaultContractSet
 		uploadPacking = us.Packing.Enabled
 	}

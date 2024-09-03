@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
@@ -19,10 +20,6 @@ var (
 	// ErrInvalidRedundancySettings is returned if the redundancy settings are
 	// not valid
 	ErrInvalidRedundancySettings = errors.New("invalid redundancy settings")
-
-	// ErrSettingNotFound is returned if a requested setting is not present in the
-	// database.
-	ErrSettingNotFound = errors.New("setting not found")
 )
 
 var (
@@ -65,10 +62,12 @@ var (
 			V4Keypairs: map[string]string{},
 		},
 	}
+)
 
-	// DefaultUploadSettings define the default upload settings the bus is
-	// configured with on startup.
-	DefaultUploadSettings = UploadSettings{
+// DefaultUploadSettings define the default upload settings the bus is
+// configured with on startup.
+func DefaultUploadSettings(network *consensus.Network) UploadSettings {
+	return UploadSettings{
 		Packing: UploadPackingSettings{
 			Enabled:               true,
 			SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
@@ -78,7 +77,7 @@ var (
 			TotalShards: 30,
 		},
 	}
-)
+}
 
 type (
 	// GougingSettings contain some price settings used in price gouging.

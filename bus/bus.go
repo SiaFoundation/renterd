@@ -31,7 +31,6 @@ import (
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -297,9 +296,7 @@ type (
 		S3Settings(ctx context.Context) (api.S3Settings, error)
 		UpdateS3Settings(ctx context.Context, s3as api.S3Settings) error
 
-		// required for compat
-		Setting(ctx context.Context, key string, out interface{}) error
-		DeleteSetting(ctx context.Context, key string) error
+		MigrateV2Settings(ctx context.Context) error
 	}
 
 	WalletMetricsRecorder interface {
@@ -364,6 +361,11 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
+	// migrate settings store
+	if err := store.MigrateV2Settings(ctx); err != nil {
+		return nil, err
+	}
+
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
@@ -378,11 +380,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
-
-	// migrate settings to V2 types
-	if err := b.compatV2Settings(ctx); err != nil {
-		return nil, err
-	}
 
 	return b, nil
 }
@@ -572,107 +569,6 @@ func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileCont
 		},
 	})
 	return r, nil
-}
-
-func (b *Bus) compatV2Settings(ctx context.Context) error {
-	// escape early if all settings are present
-	if !errors.Is(errors.Join(
-		b.ss.Setting(ctx, stores.SettingGouging, nil),
-		b.ss.Setting(ctx, stores.SettingPinned, nil),
-		b.ss.Setting(ctx, stores.SettingS3, nil),
-		b.ss.Setting(ctx, stores.SettingUpload, nil),
-	), api.ErrSettingNotFound) {
-		return nil
-	}
-
-	// migrate gouging settings
-	if _, err := b.ss.GougingSettings(ctx); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		return err
-	} else if errors.Is(err, api.ErrSettingNotFound) {
-		if err := b.ss.UpdateGougingSettings(ctx, api.DefaultGougingSettings); err != nil {
-			return err
-		}
-	}
-
-	// migrate S3 settings
-	var s3as api.S3AuthenticationSettings
-	if err := b.ss.Setting(ctx, "s3authentication", &s3as); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		return err
-	} else if errors.Is(err, api.ErrSettingNotFound) {
-		if err := b.ss.UpdateS3Settings(ctx, api.DefaultS3Settings); err != nil {
-			return err
-		}
-	} else if err == nil {
-		s3s := api.S3Settings{Authentication: s3as}
-		if err := s3s.Validate(); err != nil {
-			return fmt.Errorf("failed to migrate S3 setting: %w", err)
-		} else if err := b.ss.UpdateS3Settings(ctx, s3s); err != nil {
-			return err
-		}
-	}
-
-	// migrate pinned settings
-	var ps api.PinnedSettings
-	if err := b.ss.Setting(ctx, "pricepinning", &ps); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		return err
-	} else if errors.Is(err, api.ErrSettingNotFound) {
-		if err := b.ss.UpdatePinnedSettings(ctx, api.DefaultPinnedSettings); err != nil {
-			return err
-		}
-	} else {
-		if err := ps.Validate(); err != nil {
-			return fmt.Errorf("failed to migrate pinned setting: %w", err)
-		} else if err := b.ss.UpdatePinnedSettings(ctx, ps); err != nil {
-			return err
-		}
-	}
-
-	// migrate upload settings
-	us := api.DefaultUploadSettings
-	var css struct {
-		Default string `json:"default"`
-	}
-
-	// override default contract set on default upload settings
-	if err := b.ss.Setting(ctx, "contractset", &css); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		return err
-	} else if err == nil {
-		us.DefaultContractSet = css.Default
-	}
-
-	// override redundancy settings on default upload settings
-	var rs api.RedundancySettings
-	if err := b.ss.Setting(ctx, "redundancy", &rs); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		return err
-	} else if errors.Is(err, api.ErrSettingNotFound) {
-		// default redundancy settings for testnet are different from mainnet
-		if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
-			us.Redundancy = api.DefaultRedundancySettingsTestnet
-		}
-	} else {
-		us.Redundancy = rs
-	}
-
-	// override upload packing settings on default upload settings
-	var ups api.UploadPackingSettings
-	if err := b.ss.Setting(ctx, "uploadpacking", &ups); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		return err
-	} else if err == nil {
-		us.Packing = ups
-	}
-
-	if err := us.Validate(); err != nil {
-		return fmt.Errorf("failed to migrate upload setting: %w", err)
-	} else if err := b.ss.UpdateUploadSettings(ctx, us); err != nil {
-		return err
-	}
-
-	// delete old settings
-	return errors.Join(
-		b.ss.DeleteSetting(ctx, "contractset"),
-		b.ss.DeleteSetting(ctx, "pricepinning"),
-		b.ss.DeleteSetting(ctx, "uploadpacking"),
-	)
 }
 
 func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
