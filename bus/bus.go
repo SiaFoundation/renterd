@@ -412,7 +412,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"POST   /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,

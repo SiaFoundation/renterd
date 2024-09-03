@@ -195,9 +195,9 @@ func (c *Client) ReleaseContract(ctx context.Context, contractID types.FileContr
 
 // UpdateContractSet adds the given contracts to the given set.
 func (c *Client) UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contracts/set/%s", set), api.ContractSetUpdateRequest{
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contracts/set/%s", set), api.ContractSetUpdateRequest{
 		ToAdd:    toAdd,
 		ToRemove: toRemove,
-	})
+	}, nil)
 	return
 }
