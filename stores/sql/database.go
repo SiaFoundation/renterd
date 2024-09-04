@@ -319,7 +319,7 @@ type (
 
 		// UpdateContractSet adds/removes the provided contract ids to/from
 		// the contract set. The contract set is created in the process if
-		// it doesn't eist already.
+		// it doesn't exist already.
 		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
