@@ -2,8 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"net/url"
 
 	"go.sia.tech/core/types"
@@ -50,21 +48,10 @@ func (c *Client) WalletRedistribute(ctx context.Context, outputs int, amount typ
 
 // WalletEvents returns all events relevant to the wallet.
 func (c *Client) WalletEvents(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Event, err error) {
-	c.c.Custom("GET", "/wallet/events", nil, &resp)
-
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
-	u, err := url.Parse(fmt.Sprintf("%v/wallet/transactions", c.c.BaseURL))
-	if err != nil {
-		panic(err)
-	}
-	u.RawQuery = values.Encode()
-	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), http.NoBody)
-	if err != nil {
-		panic(err)
-	}
-	err = c.do(req, &resp)
+	err = c.c.WithContext(ctx).GET("/wallet/events?"+values.Encode(), &resp)
 	return
 }

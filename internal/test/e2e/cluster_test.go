@@ -1568,7 +1568,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	})
 }
 
-func TestWalletTransactions(t *testing.T) {
+func TestWalletEvents(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
