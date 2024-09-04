@@ -1335,26 +1335,14 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		return false, fmt.Errorf("failed to fetch old contract set: %w", err)
 	}
 
-	// STEP 4: update contract set
+	// merge kept and formed contracts into new set
 	newSet := make([]api.ContractMetadata, 0, len(keptContracts)+len(formedContracts))
 	newSet = append(newSet, keptContracts...)
 	newSet = append(newSet, formedContracts...)
-	var newSetIDs []types.FileContractID
-	for _, contract := range newSet {
-		newSetIDs = append(newSetIDs, contract.ID)
-	}
-	inNewSet := make(map[types.FileContractID]struct{})
-	for _, c := range newSet {
-		inNewSet[c.ID] = struct{}{}
-	}
-	var toRemove []types.FileContractID
-	for _, c := range oldSet {
-		if _, exists := inNewSet[c.ID]; !exists {
-			toRemove = append(toRemove, c.ID)
-		}
-	}
-	if err := bus.UpdateContractSet(ctx, ctx.ContractSet(), newSetIDs, toRemove); err != nil {
-		return false, fmt.Errorf("failed to update contract set: %w", err)
+
+	// STEP 4: update contract set
+	if err := updateContractSet(ctx, bus, oldSet, newSet); err != nil {
+		return false, err
 	}
 
 	// STEP 5: perform minor maintenance such as cleanups and broadcasting
@@ -1365,4 +1353,32 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 	// STEP 6: log changes and register alerts
 	return computeContractSetChanged(ctx, alerter, bus, churn, logger, oldSet, newSet, churnReasons)
+}
+
+func updateContractSet(ctx *mCtx, bus Bus, oldSet, newSet []api.ContractMetadata) error {
+	var newSetIDs []types.FileContractID
+	for _, contract := range newSet {
+		newSetIDs = append(newSetIDs, contract.ID)
+	}
+	inOldSet := make(map[types.FileContractID]struct{})
+	for _, c := range oldSet {
+		inOldSet[c.ID] = struct{}{}
+	}
+	var toAdd []types.FileContractID
+	for _, c := range newSet {
+		if _, ok := inOldSet[c.ID]; !ok {
+			toAdd = append(toAdd, c.ID)
+		}
+		// only keep contracts that are in the old but not the new set
+		delete(inOldSet, c.ID)
+	}
+
+	var toRemove []types.FileContractID
+	for id := range inOldSet {
+		toRemove = append(toRemove, id)
+	}
+	if err := bus.UpdateContractSet(ctx, ctx.ContractSet(), newSetIDs, toRemove); err != nil {
+		return fmt.Errorf("failed to update contract set: %w", err)
+	}
+	return nil
 }
