@@ -214,7 +214,7 @@ var (
 			{
 				ID: "00017_unix_ms",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00016_unix_ms", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
 				},
 			},
 		}
