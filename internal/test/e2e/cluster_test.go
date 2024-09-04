@@ -1803,30 +1803,30 @@ func TestWallet(t *testing.T) {
 		t.Fatal("wallet address should be set")
 	}
 
-	// Send 1 SC to an address outside our wallet. We manually do this to be in
-	// control of the miner fees.
+	// Send 1 SC to an address outside our wallet.
 	sendAmt := types.HastingsPerSiacoin
-	txnID, err := b.SendSiacoins(context.Background(), types.VoidAddress, sendAmt, false)
+	_, err = b.SendSiacoins(context.Background(), types.Address{1, 2, 3}, sendAmt, false)
 	tt.OK(err)
 
 	txns, err := b.WalletEvents(context.Background())
 	tt.OK(err)
 
-	var minerFee types.Currency
-	for _, txn := range txns {
-		if types.TransactionID(txn.ID) == txnID {
-			switch txn := txn.Data.(type) {
-			case *wallet.EventV1Transaction:
-				for _, fee := range txn.Transaction.MinerFees {
-					minerFee = minerFee.Add(fee)
-				}
-			case *wallet.EventV2Transaction:
-				minerFee = minerFee.Add(txn.MinerFee)
-			}
-		}
+	txns, err = b.WalletPending(context.Background())
+	tt.OK(err)
+	if len(txns) != 1 {
+		t.Fatalf("expected 1 txn got %v", len(txns))
 	}
-	if minerFee.IsZero() {
-		t.Fatal("miner fee should not be zero")
+
+	var minerFee types.Currency
+	switch txn := txns[0].Data.(type) {
+	case wallet.EventV1Transaction:
+		for _, fee := range txn.Transaction.MinerFees {
+			minerFee = minerFee.Add(fee)
+		}
+	case wallet.EventV2Transaction:
+		minerFee = txn.MinerFee
+	default:
+		t.Fatalf("unexpected event %T", txn)
 	}
 
 	// The wallet should still have the same confirmed balance, a lower
