@@ -1113,7 +1113,7 @@ func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
 }
 
 func (b *Bus) objectHandlerGET(jc jape.Context) {
-	path := jc.PathParam("key")
+	key := jc.PathParam("key")
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
@@ -1127,9 +1127,9 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 	var err error
 
 	if onlymetadata {
-		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, path)
+		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, key)
 	} else {
-		o, err = b.ms.Object(jc.Request.Context(), bucket, path)
+		o, err = b.ms.Object(jc.Request.Context(), bucket, key)
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1191,7 +1191,7 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	}
-	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath, orr.MimeType, orr.Metadata)
+	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourceKey, orr.DestinationKey, orr.MimeType, orr.Metadata)
 	if jc.Check("couldn't copy object", err) != nil {
 		return
 	}

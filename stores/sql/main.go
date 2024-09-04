@@ -1014,11 +1014,12 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 }
 
 func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
-	if delim == "" {
+	switch delim {
+	case "":
 		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
-	} else if delim == "/" {
+	case "/":
 		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
-	} else {
+	default:
 		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
 	}
 	return

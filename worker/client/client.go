@@ -62,7 +62,7 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
 	return
 }
@@ -73,7 +73,7 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, bucket, path s
 		return errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	body, _, err := c.object(ctx, bucket, path, opts)
 	if err != nil {
 		return err
@@ -96,7 +96,7 @@ func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.H
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
 	opts.Apply(values)
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	path += "?" + values.Encode()
 
 	// TODO: support HEAD in jape client
@@ -134,7 +134,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, path string, opts api.Do
 		return nil, errors.New("the given path is a directory, use ObjectEntries instead")
 	}
 
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	body, header, err := c.object(ctx, bucket, path, opts)
 	if err != nil {
 		return nil, err
@@ -185,7 +185,7 @@ func (c *Client) State() (state api.WorkerStateResponse, err error) {
 
 // UploadMultipartUploadPart uploads part of the data for a multipart upload.
 func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/multipart/%s", path), []byte{}, nil)
 
 	values := make(url.Values)
@@ -224,7 +224,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", path), []byte{}, nil)
 
 	values := make(url.Values)

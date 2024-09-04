@@ -80,13 +80,6 @@ type (
 	// well
 	ObjectUserMetadata map[string]string
 
-	// ObjectsResponse is the response type for the /bus/objects endpoint.
-	ObjectsResponse struct {
-		HasMore bool             `json:"hasMore"`
-		Entries []ObjectMetadata `json:"entries,omitempty"`
-		Object  *Object          `json:"object,omitempty"`
-	}
-
 	// GetObjectResponse is the response type for the GET /worker/object endpoint.
 	GetObjectResponse struct {
 		Content io.ReadCloser `json:"content"`
@@ -187,10 +180,10 @@ type (
 	// CopyObjectsRequest is the request type for the /bus/objects/copy endpoint.
 	CopyObjectsRequest struct {
 		SourceBucket string `json:"sourceBucket"`
-		SourcePath   string `json:"sourcePath"`
+		SourceKey    string `json:"sourcePath"`
 
 		DestinationBucket string `json:"destinationBucket"`
-		DestinationPath   string `json:"destinationPath"`
+		DestinationKey    string `json:"destinationPath"`
 
 		MimeType string             `json:"mimeType"`
 		Metadata ObjectUserMetadata `json:"metadata"`
@@ -353,6 +346,6 @@ func FormatETag(eTag string) string {
 	return fmt.Sprintf("%q", eTag)
 }
 
-func ObjectPathEscape(path string) string {
-	return url.PathEscape(strings.TrimPrefix(path, "/"))
+func ObjectKeyEscape(key string) string {
+	return url.PathEscape(strings.TrimPrefix(key, "/"))
 }

@@ -11,7 +11,7 @@ import (
 
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error) {
-	path = api.ObjectPathEscape(path)
+	path = api.ObjectKeyEscape(path)
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
 		Bucket:      bucket,
 		ContractSet: contractSet,
@@ -25,37 +25,37 @@ func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string
 
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
-func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
+func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
 	err = c.c.WithContext(ctx).POST("/objects/copy", api.CopyObjectsRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
-		SourcePath:        srcPath,
-		DestinationPath:   dstPath,
+		SourceKey:         srcKey,
+		DestinationKey:    dstKey,
 		MimeType:          opts.MimeType,
 		Metadata:          opts.Metadata,
 	}, &om)
 	return
 }
 
-// DeleteObject either deletes the object at the given path or if batch=true
-// deletes all objects that start with the given path.
-func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error) {
+// DeleteObject either deletes the object at the given key or if batch=true
+// deletes all objects that start with the given key.
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) (err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = api.ObjectPathEscape(path)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
+	key = api.ObjectKeyEscape(key)
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), key))
 	return
 }
 
-// Objects returns the object at given path.
+// Objects returns the object at given key.
 func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (res api.Object, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	key = api.ObjectPathEscape(key)
+	key = api.ObjectKeyEscape(key)
 	key += "?" + values.Encode()
 
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", key), &res)
@@ -68,7 +68,7 @@ func (c *Client) Objects(ctx context.Context, bucket string, prefix string, opts
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	prefix = api.ObjectPathEscape(prefix)
+	prefix = api.ObjectKeyEscape(prefix)
 	prefix += "?" + values.Encode()
 
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/listobjects/%s", prefix), &resp)
