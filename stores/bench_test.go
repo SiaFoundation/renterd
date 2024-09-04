@@ -17,18 +17,17 @@ import (
 	"lukechampine.com/frand"
 )
 
-const (
-	batchSize    = 25600   // 100GiB of contract data
-	contractSize = 1 << 40 // 1TiB contract
-	sectorSize   = 4 << 20 // 4MiB sector
-	numSectors   = contractSize / sectorSize
-)
-
 // BenchmarkPrunableContractRoots benchmarks diffing the roots of a contract
 // with a given set of roots to determine which roots are prunable.
 //
 // 15.32 MB/s | M1 Max | cd32fad7 (diff ~2TiB of contract data per second)
 func BenchmarkPrunableContractRoots(b *testing.B) {
+	// define parameters
+	batchSize := int64(25600) // 100GiB of contract data
+	contractSize := 1 << 40   // 1TiB contract
+	sectorSize := 4 << 20     // 4MiB sector
+	numSectors := contractSize / sectorSize
+
 	// create database
 	db, err := newTestDB(context.Background(), b.TempDir())
 	if err != nil {
