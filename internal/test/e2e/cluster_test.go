@@ -1089,7 +1089,6 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// convenience variables
-	w := cluster.Worker
 	b := cluster.Bus
 	tt := cluster.tt
 
@@ -1111,7 +1110,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	}
 
 	// broadcast the revision for each contract
-	tt.OK(w.RHPBroadcast(context.Background(), contract.ID))
+	tt.OK(b.BroadcastRevision(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.
@@ -1789,18 +1788,18 @@ func TestWallet(t *testing.T) {
 	tt := cluster.tt
 
 	// Check wallet info is sane after startup.
-	wallet, err := b.Wallet(context.Background())
+	wr, err := b.Wallet(context.Background())
 	tt.OK(err)
-	if wallet.Confirmed.IsZero() {
+	if wr.Confirmed.IsZero() {
 		t.Fatal("wallet confirmed balance should not be zero")
 	}
-	if !wallet.Spendable.Equals(wallet.Confirmed) {
+	if !wr.Spendable.Equals(wr.Confirmed) {
 		t.Fatal("wallet spendable balance should match confirmed")
 	}
-	if !wallet.Unconfirmed.IsZero() {
+	if !wr.Unconfirmed.IsZero() {
 		t.Fatal("wallet unconfirmed balance should be zero")
 	}
-	if wallet.Address == (types.Address{}) {
+	if wr.Address == (types.Address{}) {
 		t.Fatal("wallet address should be set")
 	}
 
@@ -1815,9 +1814,14 @@ func TestWallet(t *testing.T) {
 
 	var minerFee types.Currency
 	for _, txn := range txns {
-		if txn.ID == txnID {
-			for _, fee := range txn.Raw.MinerFees {
-				minerFee = minerFee.Add(fee)
+		if types.TransactionID(txn.ID) == txnID {
+			switch txn := txn.Data.(type) {
+			case *wallet.EventV1Transaction:
+				for _, fee := range txn.Transaction.MinerFees {
+					minerFee = minerFee.Add(fee)
+				}
+			case *wallet.EventV2Transaction:
+				minerFee = minerFee.Add(txn.MinerFee)
 			}
 		}
 	}
@@ -1830,18 +1834,18 @@ func TestWallet(t *testing.T) {
 	tt.Retry(600, 100*time.Millisecond, func() error {
 		updated, err := b.Wallet(context.Background())
 		tt.OK(err)
-		if !updated.Confirmed.Equals(wallet.Confirmed) {
-			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", updated.Confirmed, wallet.Confirmed)
+		if !updated.Confirmed.Equals(wr.Confirmed) {
+			return fmt.Errorf("wr confirmed balance should not have changed: %v %v", updated.Confirmed, wr.Confirmed)
 		}
 
 		// The diffs of the spendable balance and unconfirmed balance should add up
 		// to the amount of money sent as well as the miner fees used.
-		spendableDiff := wallet.Spendable.Sub(updated.Spendable)
+		spendableDiff := wr.Spendable.Sub(updated.Spendable)
 		if updated.Unconfirmed.Cmp(spendableDiff) > 0 {
 			t.Fatalf("unconfirmed balance can't be greater than the difference in spendable balance here: \nconfirmed %v (%v) - >%v (%v) \nunconfirmed %v (%v) -> %v (%v) \nspendable %v (%v) -> %v (%v) \nfee %v (%v)",
-				wallet.Confirmed, wallet.Confirmed.ExactString(), updated.Confirmed, updated.Confirmed.ExactString(),
-				wallet.Unconfirmed, wallet.Unconfirmed.ExactString(), updated.Unconfirmed, updated.Unconfirmed.ExactString(),
-				wallet.Spendable, wallet.Spendable.ExactString(), updated.Spendable, updated.Spendable.ExactString(),
+				wr.Confirmed, wr.Confirmed.ExactString(), updated.Confirmed, updated.Confirmed.ExactString(),
+				wr.Unconfirmed, wr.Unconfirmed.ExactString(), updated.Unconfirmed, updated.Unconfirmed.ExactString(),
+				wr.Spendable, wr.Spendable.ExactString(), updated.Spendable, updated.Spendable.ExactString(),
 				minerFee, minerFee.ExactString())
 		}
 		withdrawnAmt := spendableDiff.Sub(updated.Unconfirmed)
@@ -2540,11 +2544,20 @@ func TestWalletRedistribute(t *testing.T) {
 
 	utxos := make(map[types.SiacoinOutputID]struct{})
 	for _, txn := range txns {
-		for i := range txn.Raw.SiacoinOutputs {
-			utxos[txn.Raw.SiacoinOutputID(i)] = struct{}{}
-		}
-		for _, sci := range txn.Raw.SiacoinInputs {
-			delete(utxos, sci.ParentID)
+		if v1Txn, ok := txn.Data.(*wallet.EventV1Transaction); ok {
+			for i := range v1Txn.SpentSiacoinElements {
+				utxos[v1Txn.Transaction.SiacoinOutputID(i)] = struct{}{}
+			}
+			for _, sci := range v1Txn.Transaction.SiacoinInputs {
+				delete(utxos, sci.ParentID)
+			}
+		} else if v2Txn, ok := txn.Data.(*wallet.EventV1Transaction); ok {
+			for i := range v2Txn.SpentSiacoinElements {
+				utxos[v2Txn.Transaction.SiacoinOutputID(i)] = struct{}{}
+			}
+			for _, sci := range v2Txn.Transaction.SiacoinInputs {
+				delete(utxos, sci.ParentID)
+			}
 		}
 	}
 	if cnt := len(utxos); cnt != 5 {

@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 )
 
@@ -29,7 +30,7 @@ func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error
 
 // WalletPending returns the txpool transactions that are relevant to the
 // wallet.
-func (c *Client) WalletPending(ctx context.Context) (resp []types.Transaction, err error) {
+func (c *Client) WalletPending(ctx context.Context) (resp []wallet.Event, err error) {
 	err = c.c.WithContext(ctx).GET("/wallet/pending", &resp)
 	return
 }
@@ -48,7 +49,7 @@ func (c *Client) WalletRedistribute(ctx context.Context, outputs int, amount typ
 }
 
 // WalletEvents returns all events relevant to the wallet.
-func (c *Client) WalletEvents(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []api.Transaction, err error) {
+func (c *Client) WalletEvents(ctx context.Context, opts ...api.WalletTransactionsOption) (resp []wallet.Event, err error) {
 	c.c.Custom("GET", "/wallet/events", nil, &resp)
 
 	values := url.Values{}

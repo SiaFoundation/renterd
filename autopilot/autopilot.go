@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -41,6 +42,7 @@ type Bus interface {
 	// contracts
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	BroadcastRevision(ctx context.Context, contractID types.FileContractID) error
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
@@ -84,7 +86,7 @@ type Bus interface {
 
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
+	WalletPending(ctx context.Context) (resp []wallet.Event, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
 
@@ -609,7 +611,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	}
 	for _, txn := range pending {
 		for _, mTxnID := range ap.maintenanceTxnIDs {
-			if mTxnID == txn.ID() {
+			if mTxnID == types.TransactionID(txn.ID) {
 				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
 			}
