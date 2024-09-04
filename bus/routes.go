@@ -1784,7 +1784,10 @@ func (b *Bus) contractIDBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to broadcast contract revision", b.broadcastContract(jc.Request.Context(), fcid))
+	txnID, err := b.broadcastContract(jc.Request.Context(), fcid)
+	if jc.Check("failed to broadcast contract revision", err) == nil {
+		jc.Encode(txnID)
+	}
 }
 
 func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {

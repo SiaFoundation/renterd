@@ -567,11 +567,11 @@ func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileCont
 	return r, nil
 }
 
-func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) error {
+func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
 	if err != nil {
-		return fmt.Errorf("couldn't acquire contract lock; %w", err)
+		return types.TransactionID{}, fmt.Errorf("couldn't acquire contract lock; %w", err)
 	}
 	defer func() {
 		if err := b.contractLocker.Release(fcid, lockID); err != nil {
@@ -582,14 +582,14 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	// fetch contract
 	c, err := b.ms.Contract(ctx, fcid)
 	if err != nil {
-		return fmt.Errorf("couldn't fetch contract; %w", err)
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
 
 	// fetch revision
 	rk := b.deriveRenterKey(c.HostKey)
 	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
 	if err != nil {
-		return fmt.Errorf("couldn't fetch revision; %w", err)
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
@@ -605,7 +605,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		// fund the transaction (only the fee)
 		toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
 		if err != nil {
-			return fmt.Errorf("couldn't fund transaction; %w", err)
+			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
 		}
 		// sign the transaction
 		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
@@ -615,14 +615,15 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		_, err = b.cm.AddPoolTransactions(txnset)
 		if err != nil {
 			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-			return fmt.Errorf("couldn't add transaction set to the pool; %w", err)
+			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
 		}
 
 		// broadcast the transaction
 		b.s.BroadcastTransactionSet(txnset)
+		txnID = txn.ID()
 	}
 
-	return nil
+	return
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
