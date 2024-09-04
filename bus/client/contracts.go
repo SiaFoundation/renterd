@@ -11,12 +11,6 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-// BroadcastRevision broadcasts the latest revision for a contract.
-func (c *Client) BroadcastRevision(ctx context.Context, contractID types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, nil)
-	return
-}
-
 // AddContract adds the provided contract to the metadata store.
 func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
@@ -65,6 +59,12 @@ func (c *Client) AcquireContract(ctx context.Context, contractID types.FileContr
 // ArchiveContracts archives the contracts with the given IDs and archival reason.
 func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) (err error) {
 	err = c.c.WithContext(ctx).POST("/contracts/archive", toArchive, nil)
+	return
+}
+
+// BroadcastContract broadcasts the latest revision for a contract.
+func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, &txnID)
 	return
 }
 

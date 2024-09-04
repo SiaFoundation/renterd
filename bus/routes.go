@@ -34,59 +34,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func (b *Bus) contractBroadcastHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the fcid
-	var fcid types.FileContractID
-	if jc.DecodeParam("id", &fcid) != nil {
-		return
-	}
-
-	// Acquire lock before fetching revision.
-	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), lockingPriorityActiveContractRevision, fcid, math.MaxInt64)
-	if jc.Check("failed to acquire contract", err) != nil {
-		return
-	}
-	defer b.contractLocker.Release(fcid, lockID)
-
-	// Fetch contract from bus.
-	c, err := b.ms.Contract(ctx, fcid)
-	if jc.Check("could not get contract", err) != nil {
-		return
-	}
-	rk := b.deriveRenterKey(c.HostKey)
-
-	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
-	if jc.Check("could not fetch revision", err) != nil {
-		return
-	}
-
-	// Create txn with revision.
-	txn := types.Transaction{
-		FileContractRevisions: []types.FileContractRevision{rev.Revision},
-		Signatures:            rev.Signatures[:],
-	}
-	// Fund the txn. We pass 0 here since we only need the wallet to fund
-	// the fee.
-	toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
-	if jc.Check("failed to fund transaction", err) != nil {
-		return
-	}
-	// Sign the txn.
-	b.w.SignTransaction(&txn, toSign, types.CoveredFields{
-		WholeTransaction: true,
-	})
-	if jc.Check("failed to sign transaction", err) != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return
-	}
-	// Broadcast the txn.
-	txnSet := b.cm.UnconfirmedParents(txn)
-	txnSet = append(txnSet, txn)
-	b.s.BroadcastTransactionSet(txnSet)
-}
-
 func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
 	if val, err := b.ss.Setting(ctx, key); err != nil {
 		return fmt.Errorf("could not get contract set settings: %w", err)
@@ -1683,6 +1630,18 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(ancestors)
+}
+
+func (b *Bus) contractIDBroadcastHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	txnID, err := b.broadcastContract(jc.Request.Context(), fcid)
+	if jc.Check("failed to broadcast contract revision", err) == nil {
+		jc.Encode(txnID)
+	}
 }
 
 func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {

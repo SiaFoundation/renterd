@@ -41,11 +41,8 @@ import (
 const (
 	defaultRevisionFetchTimeout = 30 * time.Second
 
-	lockingPriorityActiveContractRevision = 100
-	lockingPriorityRenew                  = 80
-	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 30
-	lockingPriorityPruning                = 20
+	lockingPriorityActiveContractRevision = 100
 
 	lockingPriorityBlockedUpload    = 15
 	lockingPriorityUpload           = 10

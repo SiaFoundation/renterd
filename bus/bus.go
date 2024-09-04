@@ -44,10 +44,10 @@ const (
 	defaultPinUpdateInterval          = 5 * time.Minute
 	defaultPinRateWindow              = 6 * time.Hour
 
-	lockingPriorityPruning                = 20
-	lockingPriorityFunding                = 40
-	lockingPriorityRenew                  = 80
-	lockingPriorityActiveContractRevision = 100
+	lockingPriorityPruning   = 20
+	lockingPriorityFunding   = 40
+	lockingPriorityRenew     = 80
+	lockingPriorityBroadcast = 100
 
 	stdTxnSize = 1200 // bytes
 )
@@ -410,7 +410,6 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
-		"POST   /contract/:id/broadcast": b.contractBroadcastHandler,
 		"POST   /contracts":              b.contractsFormHandler,
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
@@ -426,6 +425,7 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
+		"POST   /contract/:id/broadcast": b.contractIDBroadcastHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
@@ -561,6 +561,65 @@ func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileCont
 		},
 	})
 	return r, nil
+}
+
+func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't acquire contract lock; %w", err)
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch contract
+	c, err := b.ms.Contract(ctx, fcid)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
+	}
+
+	// fetch revision
+	rk := b.deriveRenterKey(c.HostKey)
+	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+	}
+
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		// create the transaction
+		txn := types.Transaction{
+			FileContractRevisions: []types.FileContractRevision{rev.Revision},
+			Signatures:            rev.Signatures[:],
+		}
+
+		// fund the transaction (only the fee)
+		toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+		}
+		// sign the transaction
+		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
+
+		// verify the transaction and add it to the transaction pool
+		txnset := append(b.cm.UnconfirmedParents(txn), txn)
+		_, err = b.cm.AddPoolTransactions(txnset)
+		if err != nil {
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
+		}
+
+		// broadcast the transaction
+		b.s.BroadcastTransactionSet(txnset)
+		txnID = txn.ID()
+	}
+
+	return
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
