@@ -1110,7 +1110,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	}
 
 	// broadcast the revision for each contract
-	tt.OK(b.BroadcastContract(context.Background(), contract.ID))
+	tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.

@@ -63,8 +63,8 @@ func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileC
 }
 
 // BroadcastContract broadcasts the latest revision for a contract.
-func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, nil)
+func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, &txnID)
 	return
 }
 
