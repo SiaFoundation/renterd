@@ -1089,7 +1089,6 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// convenience variables
-	w := cluster.Worker
 	b := cluster.Bus
 	tt := cluster.tt
 
@@ -1111,7 +1110,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	}
 
 	// broadcast the revision for each contract
-	tt.OK(w.RHPBroadcast(context.Background(), contract.ID))
+	tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.
@@ -1384,7 +1383,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 	if len(accounts) != 1 || accounts[0].ID != acc.ID {
 		t.Fatal("account should exist")
 	} else if accounts[0].CleanShutdown || !accounts[0].RequiresSync {
-		t.Fatalf("account shouldn't be marked as clean shutdown or not require a sync, got %v", accounts[0])
+		t.Fatal("account shouldn't be marked as clean shutdown or not require a sync, got", accounts[0].CleanShutdown, accounts[0].RequiresSync)
 	}
 
 	// assert account was funded

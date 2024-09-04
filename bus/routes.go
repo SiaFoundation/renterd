@@ -14,10 +14,12 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
+
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -40,6 +42,87 @@ func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) e
 		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
 	}
 	return nil
+}
+
+func (b *Bus) accountsFundHandler(jc jape.Context) {
+	var req api.AccountsFundRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// contract metadata
+	cm, err := b.ms.Contract(jc.Request.Context(), req.ContractID)
+	if jc.Check("failed to fetch contract metadata", err) != nil {
+		return
+	}
+
+	rk := b.masterKey.DeriveContractKey(cm.HostKey)
+
+	// acquire contract
+	lockID, err := b.contractLocker.Acquire(jc.Request.Context(), lockingPriorityFunding, req.ContractID, math.MaxInt64)
+	if jc.Check("failed to acquire lock", err) != nil {
+		return
+	}
+	defer b.contractLocker.Release(req.ContractID, lockID)
+
+	// latest revision
+	rev, err := b.rhp3.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+	if jc.Check("failed to fetch contract revision", err) != nil {
+		return
+	}
+
+	// ensure we have at least 2H in the contract to cover the costs
+	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
+		jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
+		return
+	}
+
+	// price table
+	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+	if jc.Check("failed to fetch price table", err) != nil {
+		return
+	}
+
+	// check only the FundAccountCost
+	if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
+		jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
+		return
+	}
+
+	// cap the deposit by what's left in the contract
+	deposit := req.Amount
+	cost := pt.FundAccountCost
+	availableFunds := rev.ValidRenterPayout().Sub(cost)
+	if deposit.Cmp(availableFunds) > 0 {
+		deposit = availableFunds
+	}
+
+	// fund the account
+	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
+	if jc.Check("failed to fund account", err) != nil {
+		return
+	}
+
+	// record spending
+	err = b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+		{
+			ContractSpending: api.ContractSpending{
+				FundAccount: deposit.Add(cost),
+			},
+			ContractID:     rev.ParentID,
+			RevisionNumber: rev.RevisionNumber,
+			Size:           rev.Filesize,
+
+			MissedHostPayout:  rev.MissedHostPayout(),
+			ValidRenterPayout: rev.ValidRenterPayout(),
+		},
+	})
+	if err != nil {
+		b.logger.Error("failed to record contract spending", zap.Error(err))
+	}
+	jc.Encode(api.AccountsFundResponse{
+		Deposit: deposit,
+	})
 }
 
 func (b *Bus) consensusAcceptBlock(jc jape.Context) {
@@ -189,11 +272,7 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	tip, err := b.w.Tip()
-	if jc.Check("couldn't fetch wallet scan height", err) != nil {
-		return
-	}
-
+	tip := b.w.Tip()
 	jc.Encode(api.WalletResponse{
 		ScanHeight:  tip.Height,
 		Address:     address,
@@ -364,19 +443,23 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 			},
 		}
 		// fund and sign transaction
-		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
+		basis, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
 		if jc.Check("failed to fund transaction", err) != nil {
 			return
 		}
-		b.w.SignV2Inputs(state, &txn, toSign)
-		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
+		b.w.SignV2Inputs(&txn, toSign)
+		basis, txnset, err := b.cm.V2TransactionSet(basis, txn)
+		if jc.Check("failed to get parents for funded transaction", err) != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return
+		}
 		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+		if _, err := b.cm.AddV2PoolTransactions(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
 			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
 			return
 		}
 		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(state.Index, txnset)
+		b.s.BroadcastV2TransactionSet(basis, txnset)
 		jc.Encode(txn.ID())
 	} else {
 		// build transaction
@@ -460,7 +543,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 
 		for i := 0; i < len(txns); i++ {
-			b.w.SignV2Inputs(state, &txns[i], toSign[i])
+			b.w.SignV2Inputs(&txns[i], toSign[i])
 			ids = append(ids, txns[i].ID())
 		}
 
@@ -479,63 +562,6 @@ func (b *Bus) walletDiscardHandler(jc jape.Context) {
 	if jc.Decode(&txn) == nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 	}
-}
-
-func (b *Bus) walletPrepareRenewHandler(jc jape.Context) {
-	var wprr api.WalletPrepareRenewRequest
-	if jc.Decode(&wprr) != nil {
-		return
-	}
-	if wprr.RenterKey == nil {
-		jc.Error(errors.New("no renter key provided"), http.StatusBadRequest)
-		return
-	}
-	cs := b.cm.TipState()
-
-	// Create the final revision from the provided revision.
-	finalRevision := wprr.Revision
-	finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
-	finalRevision.Filesize = 0
-	finalRevision.FileMerkleRoot = types.Hash256{}
-	finalRevision.RevisionNumber = math.MaxUint64
-
-	// Prepare the new contract.
-	fc, basePrice, err := rhpv3.PrepareContractRenewal(wprr.Revision, wprr.HostAddress, wprr.RenterAddress, wprr.RenterFunds, wprr.MinNewCollateral, wprr.PriceTable, wprr.ExpectedNewStorage, wprr.EndHeight)
-	if jc.Check("couldn't prepare contract renewal", err) != nil {
-		return
-	}
-
-	// Create the transaction containing both the final revision and new
-	// contract.
-	txn := types.Transaction{
-		FileContracts:         []types.FileContract{fc},
-		FileContractRevisions: []types.FileContractRevision{finalRevision},
-		MinerFees:             []types.Currency{wprr.PriceTable.TxnFeeMaxRecommended.Mul64(4096)},
-	}
-
-	// Compute how much renter funds to put into the new contract.
-	cost := rhpv3.ContractRenewalCost(cs, wprr.PriceTable, fc, txn.MinerFees[0], basePrice)
-
-	// Make sure we don't exceed the max fund amount.
-	// TODO: remove the IsZero check for the v2 change
-	if /*!wprr.MaxFundAmount.IsZero() &&*/ wprr.MaxFundAmount.Cmp(cost) < 0 {
-		jc.Error(fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, cost, wprr.MaxFundAmount), http.StatusBadRequest)
-		return
-	}
-
-	// Fund the txn. We are not signing it yet since it's not complete. The host
-	// still needs to complete it and the revision + contract are signed with
-	// the renter key by the worker.
-	toSign, err := b.w.FundTransaction(&txn, cost, true)
-	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	jc.Encode(api.WalletPrepareRenewResponse{
-		FundAmount:     cost,
-		ToSign:         toSign,
-		TransactionSet: append(b.cm.UnconfirmedParents(txn), txn),
-	})
 }
 
 func (b *Bus) walletPendingHandler(jc jape.Context) {
@@ -605,11 +631,11 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("maxDowntime must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	if hrr.MinRecentScanFailures == 0 {
-		jc.Error(errors.New("minRecentScanFailures must be non-zero"), http.StatusBadRequest)
+	if hrr.MaxConsecutiveScanFailures == 0 {
+		jc.Error(errors.New("maxConsecutiveScanFailures must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MinRecentScanFailures, time.Duration(hrr.MaxDowntimeHours))
+	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MaxConsecutiveScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}
@@ -838,6 +864,117 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode fcid
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode timeout
+	var req api.ContractPruneRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// create gouging checker
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("couldn't fetch gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// apply timeout
+	pruneCtx := ctx
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		pruneCtx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout))
+		defer cancel()
+	}
+
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(pruneCtx, lockingPriorityPruning, fcid, time.Duration(math.MaxInt64))
+	if jc.Check("couldn't acquire contract lock", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch the contract from the bus
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// build map of uploading sectors
+	pending := make(map[types.Hash256]struct{})
+	for _, root := range b.sectors.Sectors(fcid) {
+		pending[root] = struct{}{}
+	}
+
+	// prune the contract
+	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
+		if err != nil {
+			return nil, err
+		} else if len(indices) > len(roots) {
+			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
+		}
+
+		filtered := indices[:0]
+		for _, index := range indices {
+			_, ok := pending[roots[index]]
+			if !ok {
+				filtered = append(filtered, index)
+			}
+		}
+		indices = filtered
+		return indices, nil
+	})
+
+	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
+		err = nil // ignore error
+	} else if !errors.Is(err, context.Canceled) {
+		if jc.Check("couldn't prune contract", err) != nil {
+			return
+		}
+	}
+
+	// record spending
+	if !spending.Total().IsZero() {
+		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+			{
+				ContractSpending: spending,
+				ContractID:       fcid,
+				RevisionNumber:   rev.RevisionNumber,
+				Size:             rev.Filesize,
+
+				MissedHostPayout:  rev.MissedHostPayout(),
+				ValidRenterPayout: rev.ValidRenterPayout(),
+			},
+		})
+	}
+
+	// return response
+	res := api.ContractPruneResponse{
+		ContractSize: rev.Filesize,
+		Pruned:       pruned,
+		Remaining:    remaining,
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	jc.Encode(res)
+}
+
 func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 	sizes, err := b.ms.ContractSizes(jc.Request.Context())
 	if jc.Check("failed to fetch contract sizes", err) != nil {
@@ -955,6 +1092,86 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	jc.Encode(a)
 }
 
+func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
+	// apply pessimistic timeout
+	ctx, cancel := context.WithTimeout(jc.Request.Context(), 15*time.Minute)
+	defer cancel()
+
+	// decode contract id
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode request
+	var rrr api.ContractRenewRequest
+	if jc.Decode(&rrr) != nil {
+		return
+	}
+
+	// validate the request
+	if rrr.EndHeight == 0 {
+		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+	} else if rrr.ExpectedNewStorage == 0 {
+		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
+	} else if rrr.MaxFundAmount.IsZero() {
+		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
+	} else if rrr.MinNewCollateral.IsZero() {
+		http.Error(jc.ResponseWriter, "MinNewCollateral can not be zero", http.StatusBadRequest)
+	} else if rrr.RenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
+		return
+	}
+
+	// fetch the contract
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// fetch the host
+	h, err := b.hs.Host(ctx, c.HostKey)
+	if jc.Check("couldn't fetch host", err) != nil {
+		return
+	}
+
+	// fetch consensus state
+	cs := b.cm.TipState()
+
+	// fetch gouging parameters
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("could not get gouging parameters", err) != nil {
+		return
+	}
+
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	var newRevision rhpv2.ContractRevision
+	var contractPrice, fundAmount types.Currency
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		newRevision, contractPrice, fundAmount, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
+			jc.Error(err, http.StatusBadRequest)
+			return
+		} else if jc.Check("couldn't renew contract", err) != nil {
+			return
+		}
+	}
+
+	// add renewal contract to store
+	metadata, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
+	if jc.Check("couldn't store contract", err) != nil {
+		return
+	}
+
+	// send the response
+	jc.Encode(metadata)
+}
+
 func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	var req api.ContractRenewedRequest
@@ -972,20 +1189,10 @@ func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 	if req.State == "" {
 		req.State = api.ContractStatePending
 	}
-	r, err := b.ms.AddRenewedContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.RenewedFrom, req.State)
+	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
-
-	b.sectors.HandleRenewal(req.Contract.ID(), req.RenewedFrom)
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventRenew,
-		Payload: api.EventContractRenew{
-			Renewal:   r,
-			Timestamp: time.Now().UTC(),
-		},
-	})
 
 	jc.Encode(r)
 }
@@ -1569,6 +1776,18 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(ancestors)
+}
+
+func (b *Bus) contractIDBroadcastHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	txnID, err := b.broadcastContract(jc.Request.Context(), fcid)
+	if jc.Check("failed to broadcast contract revision", err) == nil {
+		jc.Encode(txnID)
+	}
 }
 
 func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {

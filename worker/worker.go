@@ -36,17 +36,13 @@ import (
 	"go.sia.tech/renterd/worker/client"
 	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
 	defaultRevisionFetchTimeout = 30 * time.Second
 
-	lockingPriorityActiveContractRevision = 100
-	lockingPriorityRenew                  = 80
-	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 30
-	lockingPriorityPruning                = 20
+	lockingPriorityActiveContractRevision = 100
 
 	lockingPriorityBlockedUpload    = 15
 	lockingPriorityUpload           = 10
@@ -76,7 +72,9 @@ type (
 		gouging.ConsensusState
 		webhooks.Broadcaster
 
+		AccountFunder
 		iworker.AccountStore
+
 		ContractLocker
 		ContractStore
 		HostStore
@@ -86,6 +84,10 @@ type (
 
 		Syncer
 		Wallet
+	}
+
+	AccountFunder interface {
+		FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
 	}
 
 	ContractStore interface {
@@ -141,7 +143,6 @@ type (
 	Wallet interface {
 		WalletDiscard(ctx context.Context, txn types.Transaction) error
 		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletPrepareRenew(ctx context.Context, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterKey types.PrivateKey, renterFunds, minNewCollateral, maxFundAmount types.Currency, pt rhpv3.HostPriceTable, endHeight, windowSize, expectedStorage uint64) (api.WalletPrepareRenewResponse, error)
 		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
 
@@ -150,18 +151,6 @@ type (
 		UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
 )
-
-// deriveSubKey can be used to derive a sub-masterkey from the worker's
-// masterkey to use for a specific purpose. Such as deriving more keys for
-// ephemeral accounts.
-func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(w.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
 
 // TODO: deriving the renter key from the host key using the master key only
 // works if we persist a hash of the renter's master key in the database and
@@ -176,12 +165,7 @@ func (w *Worker) deriveSubKey(purpose string) types.PrivateKey {
 // TODO: instead of deriving a renter key use a randomly generated salt so we're
 // not limited to one key per host
 func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(w.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
+	return w.masterKey.DeriveContractKey(hostKey)
 }
 
 // A worker talks to Sia hosts to perform contract and storage operations within
@@ -195,7 +179,7 @@ type Worker struct {
 	allowPrivateIPs bool
 	id              string
 	bus             Bus
-	masterKey       [32]byte
+	masterKey       utils.MasterKey
 	startTime       time.Time
 
 	eventSubscriber iworker.EventSubscriber
@@ -370,226 +354,6 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(hpt)
-}
-
-func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the fcid
-	var fcid types.FileContractID
-	if jc.DecodeParam("id", &fcid) != nil {
-		return
-	}
-
-	// Acquire lock before fetching revision.
-	unlocker, err := w.acquireContractLock(ctx, fcid, lockingPriorityActiveContractRevision)
-	if jc.Check("could not acquire revision lock", err) != nil {
-		return
-	}
-	defer unlocker.Release(ctx)
-
-	// Fetch contract from bus.
-	c, err := w.bus.Contract(ctx, fcid)
-	if jc.Check("could not get contract", err) != nil {
-		return
-	}
-	rk := w.deriveRenterKey(c.HostKey)
-
-	rev, err := w.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
-	if jc.Check("could not fetch revision", err) != nil {
-		return
-	}
-
-	// Create txn with revision.
-	txn := types.Transaction{
-		FileContractRevisions: []types.FileContractRevision{rev.Revision},
-		Signatures:            rev.Signatures[:],
-	}
-	// Fund the txn. We pass 0 here since we only need the wallet to fund
-	// the fee.
-	toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency, true)
-	if jc.Check("failed to fund transaction", err) != nil {
-		return
-	}
-	// Sign the txn.
-	err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
-		WholeTransaction: true,
-	})
-	if jc.Check("failed to sign transaction", err) != nil {
-		_ = w.bus.WalletDiscard(ctx, txn)
-		return
-	}
-	// Broadcast the txn.
-	txnSet := parents
-	txnSet = append(txnSet, txn)
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if jc.Check("failed to broadcast transaction", err) != nil {
-		_ = w.bus.WalletDiscard(ctx, txn)
-		return
-	}
-}
-
-func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode fcid
-	var fcid types.FileContractID
-	if jc.DecodeParam("id", &fcid) != nil {
-		return
-	}
-
-	// decode timeout
-	var pcr api.RHPPruneContractRequest
-	if jc.Decode(&pcr) != nil {
-		return
-	}
-
-	// apply timeout
-	if pcr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(pcr.Timeout))
-		defer cancel()
-	}
-
-	// fetch the contract from the bus
-	contract, err := w.bus.Contract(ctx, fcid)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch contract", err) != nil {
-		return
-	}
-
-	// return early if there's no data to prune
-	size, err := w.bus.ContractSize(ctx, fcid)
-	if jc.Check("couldn't fetch contract size", err) != nil {
-		return
-	} else if size.Prunable == 0 {
-		jc.Encode(api.RHPPruneContractResponse{})
-		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not fetch gouging parameters", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	// prune the contract
-	var pruned, remaining uint64
-	var rev *types.FileContractRevision
-	var cost types.Currency
-	err = w.withContractLock(ctx, contract.ID, lockingPriorityPruning, func() error {
-		stored, pending, err := w.bus.ContractRoots(ctx, contract.ID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch contract roots; %w", err)
-		}
-		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
-		return err
-	})
-	if rev != nil {
-		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{Deletions: cost})
-	}
-	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) && pruned == 0 {
-		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-
-	res := api.RHPPruneContractResponse{
-		Pruned:    pruned,
-		Remaining: remaining,
-	}
-	if err != nil {
-		res.Error = err.Error()
-	}
-	jc.Encode(res)
-}
-
-func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode fcid
-	var id types.FileContractID
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	// fetch the contract from the bus
-	c, err := w.bus.Contract(ctx, id)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch contract", err) != nil {
-		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	// fetch the roots from the host
-	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, id, c.RevisionNumber)
-	if jc.Check("couldn't fetch contract roots from host", err) != nil {
-		return
-	} else if rev != nil {
-		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{SectorRoots: cost})
-	}
-	jc.Encode(roots)
-}
-
-func (w *Worker) rhpRenewHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode request
-	var rrr api.RHPRenewRequest
-	if jc.Decode(&rrr) != nil {
-		return
-	}
-
-	// check renter funds is not zero
-	if rrr.RenterFunds.IsZero() {
-		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
-		return
-	}
-
-	// attach gouging checker
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// renew the contract
-	var renewed rhpv2.ContractRevision
-	var txnSet []types.Transaction
-	var contractPrice, fundAmount types.Currency
-	if jc.Check("couldn't renew contract", w.withContractLock(ctx, rrr.ContractID, lockingPriorityRenew, func() (err error) {
-		h := w.Host(rrr.HostKey, rrr.ContractID, rrr.SiamuxAddr)
-		renewed, txnSet, contractPrice, fundAmount, err = h.RenewContract(ctx, rrr)
-		return err
-	})) != nil {
-		return
-	}
-
-	// broadcast the transaction set
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if err != nil {
-		w.logger.Errorf("failed to broadcast renewal txn set: %v", err)
-	}
-
-	// send the response
-	jc.Encode(api.RHPRenewResponse{
-		ContractID:     renewed.ID(),
-		Contract:       renewed,
-		ContractPrice:  contractPrice,
-		FundAmount:     fundAmount,
-		TransactionSet: txnSet,
-	})
 }
 
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
@@ -1224,13 +988,9 @@ func (w *Worker) Handler() http.Handler {
 
 		"GET /memory": w.memoryGET,
 
-		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
-		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
-		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
-		"GET    /rhp/contract/:id/roots":     w.rhpContractRootsHandlerGET,
-		"POST   /rhp/scan":                   w.rhpScanHandler,
-		"POST   /rhp/renew":                  w.rhpRenewHandler,
-		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
+		"GET    /rhp/contracts":  w.rhpContractsHandlerGET,
+		"POST   /rhp/scan":       w.rhpScanHandler,
+		"POST   /rhp/pricetable": w.rhpPriceTableHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
@@ -1422,38 +1182,33 @@ func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 	}, res, nil
 }
 
-func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, balance types.Currency) error {
-	// attach gouging checker
-	gp, err := w.cache.GougingParams(ctx)
-	if err != nil {
-		return fmt.Errorf("couldn't get gouging parameters; %w", err)
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	// fund the account
-	err = w.withRevision(ctx, defaultRevisionFetchTimeout, fcid, hk, siamuxAddr, lockingPriorityFunding, func(rev types.FileContractRevision) (err error) {
-		h := w.Host(hk, rev.ParentID, siamuxAddr)
-		err = h.FundAccount(ctx, balance, &rev)
-		if rhp3.IsBalanceMaxExceeded(err) {
-			// sync the account
-			err = h.SyncAccount(ctx, &rev)
-			if err != nil {
-				w.logger.Infof(fmt.Sprintf("failed to sync account: %v", err), "host", hk)
-				return
-			}
-
-			// try funding the account again
-			err = h.FundAccount(ctx, balance, &rev)
-			if err != nil {
-				w.logger.Errorw(fmt.Sprintf("failed to fund account after syncing: %v", err), "host", hk, "balance", balance)
-			}
+func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
+	// calculate the deposit amount
+	acc := w.accounts.ForHost(hk)
+	return acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
+		// return early if we have the desired balance
+		if balance.Cmp(desired) >= 0 {
+			return types.ZeroCurrency, nil
 		}
-		return
+		deposit := desired.Sub(balance)
+
+		// fund the account
+		var err error
+		deposit, err = w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
+		if err != nil {
+			if rhp3.IsBalanceMaxExceeded(err) {
+				acc.ScheduleSync()
+			}
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
+		}
+
+		// log the account balance after funding
+		w.logger.Debugw("fund account succeeded",
+			"balance", balance.ExactString(),
+			"deposit", deposit.ExactString(),
+		)
+		return deposit, nil
 	})
-	if err != nil {
-		return fmt.Errorf("couldn't fund account; %w", err)
-	}
-	return nil
 }
 
 func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
@@ -1502,7 +1257,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, opts.Prefix, opts.Marker, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, path, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -1641,8 +1396,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	keyPath := fmt.Sprintf("accounts/%s", w.id)
-	w.accounts, err = iworker.NewAccountManager(w.deriveSubKey(keyPath), w.id, w.bus, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

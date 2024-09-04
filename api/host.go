@@ -53,8 +53,8 @@ type (
 
 	// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
 	HostsRemoveRequest struct {
-		MaxDowntimeHours      DurationH `json:"maxDowntimeHours"`
-		MinRecentScanFailures uint64    `json:"minRecentScanFailures"`
+		MaxDowntimeHours           DurationH `json:"maxDowntimeHours"`
+		MaxConsecutiveScanFailures uint64    `json:"maxConsecutiveScanFailures"`
 	}
 
 	// SearchHostsRequest is the request type for the /api/bus/search/hosts
