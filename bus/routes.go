@@ -1778,6 +1778,15 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 	jc.Encode(ancestors)
 }
 
+func (b *Bus) contractIDBroadcastHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	jc.Check("failed to broadcast contract revision", b.broadcastContract(jc.Request.Context(), fcid))
+}
+
 func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
