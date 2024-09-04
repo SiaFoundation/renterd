@@ -1089,7 +1089,6 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// convenience variables
-	w := cluster.Worker
 	b := cluster.Bus
 	tt := cluster.tt
 
@@ -1111,7 +1110,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	}
 
 	// broadcast the revision for each contract
-	tt.OK(w.RHPBroadcast(context.Background(), contract.ID))
+	tt.OK(b.BroadcastContract(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
 
 	// check the revision height was updated.

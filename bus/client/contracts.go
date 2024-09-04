@@ -62,6 +62,12 @@ func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileC
 	return
 }
 
+// BroadcastContract broadcasts the latest revision for a contract.
+func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, nil)
+	return
+}
+
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s", id), &contract)
