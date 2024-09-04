@@ -232,7 +232,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		}
 		setupFns = append(setupFns, fn{
 			name: "Autopilot",
-			fn:   func(_ context.Context) error { ap.Run(); return nil },
+			fn:   func(_ context.Context) error { go ap.Run(); return nil },
 		})
 		shutdownFns = append(shutdownFns, fn{
 			name: "Autopilot",
@@ -252,6 +252,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		setupFns:    setupFns,
 		shutdownFns: shutdownFns,
 
+		bus: bc,
 		cfg: cfg,
 
 		logger: logger.Sugar(),
@@ -429,10 +430,6 @@ func (n *node) Run() error {
 			}
 		}
 
-		// merge keys
-		for k, v := range n.cfg.S3.KeypairsV4 {
-			as.V4Keypairs[k] = v
-		}
 		// update settings
 		if err := n.bus.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
 			return fmt.Errorf("failed to update S3 authentication settings: %w", err)
@@ -497,6 +494,11 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
 	if cfg.Database.MySQL.URI != "" {
+		// check that both main and metrics databases are not the same
+		if cfg.Database.MySQL.Database == cfg.Database.MySQL.MetricsDatabase {
+			return stores.Config{}, errors.New("main and metrics databases cannot be the same")
+		}
+
 		// create MySQL connections
 		connMain, err := mysql.Open(
 			cfg.Database.MySQL.User,

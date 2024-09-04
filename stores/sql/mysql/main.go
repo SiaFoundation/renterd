@@ -26,6 +26,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	batchSizeInsertSectors = 500
+)
+
 type (
 	MainDatabase struct {
 		db  *sql.DB
@@ -95,8 +99,8 @@ func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path
 	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
 }
 
-func (tx *MainDatabaseTx) Accounts(ctx context.Context) ([]api.Account, error) {
-	return ssql.Accounts(ctx, tx)
+func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Account, error) {
+	return ssql.Accounts(ctx, tx, owner)
 }
 
 func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
@@ -566,6 +570,62 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 	})
 }
 
+func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+	// build tmp table name
+	tmpTable := strings.ReplaceAll(fmt.Sprintf("tmp_host_roots_%s", fcid.String()[:8]), ":", "_")
+
+	// create temporary table
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+DROP TABLE IF EXISTS %s;
+CREATE TEMPORARY TABLE %s (idx INT, root varbinary(32)) ENGINE=MEMORY;
+CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary table: %w", err)
+	}
+
+	// defer removal
+	defer func() {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable)); err != nil {
+			tx.log.Warnw("failed to drop temporary table", zap.Error(err))
+		}
+	}()
+
+	// insert roots in batches
+	for i := 0; i < len(roots); i += batchSizeInsertSectors {
+		end := i + batchSizeInsertSectors
+		if end > len(roots) {
+			end = len(roots)
+		}
+
+		var params []interface{}
+		for i, r := range roots[i:end] {
+			params = append(params, uint64(i), ssql.Hash256(r))
+		}
+
+		_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+		}
+	}
+
+	// execute query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	defer rows.Close()
+
+	// fetch indices
+	for rows.Next() {
+		var idx uint64
+		if err := rows.Scan(&idx); err != nil {
+			return nil, fmt.Errorf("failed to scan root index: %w", err)
+		}
+		indices = append(indices, idx)
+	}
+	return
+}
+
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
@@ -719,11 +779,11 @@ func (tx *MainDatabaseTx) ResetLostSectors(ctx context.Context, hk types.PublicK
 func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Account) error {
 	// clean_shutdown = 1 after save
 	stmt, err := tx.Prepare(ctx, `
-		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync)
-		VAlUES (?, ?, 1, ?, ?, ?, ?)
+		INSERT INTO ephemeral_accounts (created_at, account_id, clean_shutdown, host, balance, drift, requires_sync, owner)
+		VAlUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 		account_id = VALUES(account_id),
-		clean_shutdown = 1,
+		clean_shutdown = VALUES(clean_shutdown),
 		host = VALUES(host),
 		balance = VALUES(balance),
 		drift = VALUES(drift),
@@ -735,7 +795,7 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 	defer stmt.Close()
 
 	for _, acc := range accounts {
-		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync)
+		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), acc.CleanShutdown, (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync, acc.Owner)
 		if err != nil {
 			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
 		} else if n, err := res.RowsAffected(); err != nil {
@@ -825,10 +885,6 @@ func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, erro
 
 func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
 	return ssql.Settings(ctx, tx)
-}
-
-func (tx *MainDatabaseTx) SetUncleanShutdown(ctx context.Context) error {
-	return ssql.SetUncleanShutdown(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {

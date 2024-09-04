@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 )
@@ -43,30 +42,6 @@ type (
 		Transaction types.Transaction   `json:"transaction"`
 		ToSign      []types.Hash256     `json:"toSign"`
 		DependsOn   []types.Transaction `json:"dependsOn"`
-	}
-
-	// WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
-	// endpoint.
-	WalletPrepareRenewRequest struct {
-		Revision           types.FileContractRevision `json:"revision"`
-		EndHeight          uint64                     `json:"endHeight"`
-		ExpectedNewStorage uint64                     `json:"expectedNewStorage"`
-		HostAddress        types.Address              `json:"hostAddress"`
-		PriceTable         rhpv3.HostPriceTable       `json:"priceTable"`
-		MaxFundAmount      types.Currency             `json:"maxFundAmount"`
-		MinNewCollateral   types.Currency             `json:"minNewCollateral"`
-		RenterAddress      types.Address              `json:"renterAddress"`
-		RenterFunds        types.Currency             `json:"renterFunds"`
-		RenterKey          types.PrivateKey           `json:"renterKey"`
-		WindowSize         uint64                     `json:"windowSize"`
-	}
-
-	// WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew
-	// endpoint.
-	WalletPrepareRenewResponse struct {
-		FundAmount     types.Currency      `json:"fundAmount"`
-		ToSign         []types.Hash256     `json:"toSign"`
-		TransactionSet []types.Transaction `json:"transactionSet"`
 	}
 
 	// WalletRedistributeRequest is the request type for the /wallet/redistribute

@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	s3aws "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
@@ -61,6 +65,7 @@ type TestCluster struct {
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
 	Worker    *worker.Client
+	S3Aws     *s3aws.S3
 	S3        *minio.Client
 	S3Core    *minio.Core
 
@@ -86,6 +91,39 @@ type dbConfig struct {
 	Database         config.Database
 	DatabaseLog      config.DatabaseLog
 	RetryTxIntervals []time.Duration
+}
+
+func (tc *TestCluster) Accounts() []api.Account {
+	tc.tt.Helper()
+	accounts, err := tc.Worker.Accounts(context.Background())
+	tc.tt.OK(err)
+	return accounts
+}
+
+func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error) {
+	tc.tt.Helper()
+
+	c, err := tc.Bus.Contract(ctx, fcid)
+	if err != nil {
+		return nil, err
+	}
+
+	var h *Host
+	for _, host := range tc.hosts {
+		if host.PublicKey() == c.HostKey {
+			h = host
+			break
+		}
+	}
+	if h == nil {
+		return nil, fmt.Errorf("no host found for contract %v", c)
+	}
+
+	roots, err := h.store.SectorRoots()
+	if err != nil {
+		return nil, err
+	}
+	return roots[c.ID], nil
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -312,6 +350,18 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	})
 	tt.OK(err)
 
+	mySession := session.Must(session.NewSession())
+	s3AWSClient := s3aws.New(mySession, aws.NewConfig().
+		WithEndpoint(s3Client.EndpointURL().String()).
+		WithRegion("dummy").
+		WithS3ForcePathStyle(true).
+		WithCredentials(credentials.NewCredentials(&credentials.StaticProvider{
+			Value: credentials.Value{
+				AccessKeyID:     test.S3AccessKeyID,
+				SecretAccessKey: test.S3SecretAccessKey,
+			},
+		})))
+
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
 	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
@@ -381,6 +431,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Bus:       busClient,
 		Worker:    workerClient,
 		S3:        s3Client,
+		S3Aws:     s3AWSClient,
 		S3Core:    s3Core,
 
 		workerShutdownFns:    workerShutdownFns,
@@ -707,7 +758,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 	c.waitForHostAccounts(hostsMap)
 
 	// fetch all accounts
-	accounts, err := c.Bus.Accounts(context.Background())
+	accounts, err := c.Worker.Accounts(context.Background())
 	c.tt.OK(err)
 	return accounts
 }
@@ -904,7 +955,7 @@ func (c *TestCluster) Shutdown() {
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		accounts, err := c.Bus.Accounts(context.Background())
+		accounts, err := c.Worker.Accounts(context.Background())
 		if err != nil {
 			return err
 		}
@@ -1035,6 +1086,7 @@ func testDBCfg() dbConfig {
 
 func testWorkerCfg() config.Worker {
 	return config.Worker{
+		AccountsRefillInterval:   time.Second,
 		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
@@ -1049,7 +1101,6 @@ func testWorkerCfg() config.Worker {
 
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
-		AccountsRefillInterval:         time.Second,
 		Heartbeat:                      time.Second,
 		ID:                             api.DefaultAutopilotID,
 		MigrationHealthCutoff:          0.99,

@@ -162,7 +162,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		item := &gofakes3.Content{
 			Key:          key,
 			LastModified: gofakes3.NewContentTime(object.ModTime.Std()),
-			ETag:         object.ETag,
+			ETag:         api.FormatETag(object.ETag),
 			Size:         object.Size,
 			StorageClass: gofakes3.StorageStandard,
 		}
@@ -388,7 +388,7 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 	}
 
 	return gofakes3.PutObjectResult{
-		ETag:      ur.ETag,
+		ETag:      api.FormatETag(ur.ETag),
 		VersionID: "", // not supported
 	}, nil
 }
@@ -451,7 +451,9 @@ func (s *s3) UploadPart(ctx context.Context, bucket, object string, id gofakes3.
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
 
-	return &gofakes3.UploadPartResult{ETag: res.ETag}, nil
+	return &gofakes3.UploadPartResult{
+		ETag: api.FormatETag(res.ETag),
+	}, nil
 }
 
 func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *gofakes3.UploadListMarker, prefix gofakes3.Prefix, limit int64) (*gofakes3.ListMultipartUploadsResult, error) {
@@ -501,7 +503,7 @@ func (s *s3) ListParts(ctx context.Context, bucket, object string, uploadID gofa
 		parts = append(parts, gofakes3.ListMultipartUploadPartItem{
 			PartNumber:   part.PartNumber,
 			LastModified: gofakes3.NewContentTime(part.LastModified.Std()),
-			ETag:         part.ETag,
+			ETag:         api.FormatETag(part.ETag),
 			Size:         part.Size,
 		})
 	}
@@ -531,7 +533,7 @@ func (s *s3) CompleteMultipartUpload(ctx context.Context, bucket, object string,
 	var parts []api.MultipartCompletedPart
 	for _, part := range input.Parts {
 		parts = append(parts, api.MultipartCompletedPart{
-			ETag:       part.ETag,
+			ETag:       api.FormatETag(part.ETag),
 			PartNumber: part.PartNumber,
 		})
 	}

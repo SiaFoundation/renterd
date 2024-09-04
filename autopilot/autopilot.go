@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -31,8 +29,7 @@ type Bus interface {
 	webhooks.Broadcaster
 
 	// Accounts
-	Account(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey) (account api.Account, err error)
-	Accounts(ctx context.Context) (accounts []api.Account, err error)
+	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
 
 	// Autopilots
 	Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error)
@@ -42,20 +39,21 @@ type Bus interface {
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// contracts
-	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
+	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
+	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
-	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
+	RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 
@@ -86,8 +84,6 @@ type Bus interface {
 
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error)
 	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
@@ -100,7 +96,6 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	a *accounts
 	c *contractor.Contractor
 	m *migrator
 	s scanner.Scanner
@@ -149,7 +144,6 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 
 	ap.c = contractor.New(bus, bus, ap.logger, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval)
 	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer)
 
 	return ap, nil
 }
@@ -240,7 +234,6 @@ func (ap *Autopilot) Run() {
 	}
 
 	var forceScan bool
-	var launchAccountRefillsOnce sync.Once
 	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
@@ -323,20 +316,12 @@ func (ap *Autopilot) Run() {
 				ap.m.SignalMaintenanceFinished()
 			}
 
-			// launch account refills after successful contract maintenance.
-			if maintenanceSuccess {
-				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Info("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
-				})
-			}
-
 			// migration
 			ap.m.tryPerformMigrations(ap.workers)
 
 			// pruning
 			if autopilot.Config.Contracts.Prune {
-				ap.tryPerformPruning(ap.workers)
+				ap.tryPerformPruning()
 			} else {
 				ap.logger.Info("pruning disabled")
 			}
@@ -352,7 +337,6 @@ func (ap *Autopilot) Run() {
 		case <-tickerFired:
 		}
 	}
-	return
 }
 
 // Shutdown shuts down the autopilot.
@@ -632,20 +616,8 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 		}
 	}
 
-	wantedNumOutputs := 10
-
-	// enough outputs - nothing to do
-	available, err := b.WalletOutputs(ctx)
-	if err != nil {
-		return err
-	}
-	if uint64(len(available)) >= uint64(wantedNumOutputs) {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
-		return nil
-	}
-	wantedNumOutputs -= len(available)
-
 	// figure out the amount per output
+	wantedNumOutputs := 10
 	amount := cfg.Contracts.Allowance.Div64(uint64(wantedNumOutputs))
 
 	// redistribute outputs
@@ -685,6 +657,9 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
 			contractSetChanged = true

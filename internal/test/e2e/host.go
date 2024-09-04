@@ -107,9 +107,10 @@ type Host struct {
 	dir     string
 	privKey types.PrivateKey
 
-	s       *syncer.Syncer
-	cm      *chain.Manager
-	chainDB *coreutils.BoltChainDB
+	s            *syncer.Syncer
+	syncerCancel context.CancelFunc
+	cm           *chain.Manager
+	chainDB      *coreutils.BoltChainDB
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
@@ -157,6 +158,7 @@ func (h *Host) Close() error {
 	h.contracts.Close()
 	h.storage.Close()
 	h.store.Close()
+	h.syncerCancel()
 	h.s.Close()
 	h.chainDB.Close()
 	return nil
@@ -242,7 +244,13 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		NetAddress: l.Addr().String(),
 	}, syncer.WithPeerDiscoveryInterval(100*time.Millisecond), syncer.WithSyncInterval(100*time.Millisecond))
 	syncErrChan := make(chan error, 1)
-	go func() { syncErrChan <- s.Run(context.Background()) }()
+	syncerCtx, syncerCancel := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			syncerCancel()
+		}
+	}()
+	go func() { syncErrChan <- s.Run(syncerCtx) }()
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
@@ -275,7 +283,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet)
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, settings.WithValidateNetAddress(false))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
@@ -304,9 +312,10 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		dir:     dir,
 		privKey: privKey,
 
-		s:       s,
-		cm:      cm,
-		chainDB: chainDB,
+		s:            s,
+		syncerCancel: syncerCancel,
+		cm:           cm,
+		chainDB:      chainDB,
 
 		store:     db,
 		wallet:    wallet,

@@ -62,10 +62,10 @@ func (c *Client) RecordPriceTables(ctx context.Context, priceTableUpdates []api.
 }
 
 // RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
-func (c *Client) RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
+func (c *Client) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{
-		MaxDowntimeHours:      api.DurationH(maxDowntime),
-		MinRecentScanFailures: minRecentScanFailures,
+		MaxDowntimeHours:           api.DurationH(maxDowntime),
+		MaxConsecutiveScanFailures: maxConsecutiveScanFailures,
 	}, &removed)
 	return
 }

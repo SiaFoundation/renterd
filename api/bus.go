@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
@@ -45,6 +46,20 @@ type (
 )
 
 type (
+	AccountsFundRequest struct {
+		AccountID  rhpv3.Account        `json:"accountID"`
+		Amount     types.Currency       `json:"amount"`
+		ContractID types.FileContractID `json:"contractID"`
+	}
+
+	AccountsFundResponse struct {
+		Deposit types.Currency `json:"deposit"`
+	}
+
+	AccountsSaveRequest struct {
+		Accounts []Account `json:"accounts"`
+	}
+
 	// BusStateResponse is the response type for the /bus/state endpoint.
 	BusStateResponse struct {
 		StartTime TimeRFC3339 `json:"startTime"`

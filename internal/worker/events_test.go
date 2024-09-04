@@ -117,7 +117,7 @@ func TestEventSubscriber(t *testing.T) {
 	}
 
 	// setup a server
-	mux := jape.Mux(map[string]jape.Handler{"POST /events": func(jc jape.Context) {
+	mux := jape.Mux(map[string]jape.Handler{"POST /event": func(jc jape.Context) {
 		var event webhooks.Event
 		if jc.Decode(&event) != nil {
 			return
@@ -132,7 +132,7 @@ func TestEventSubscriber(t *testing.T) {
 	defer srv.Close()
 
 	// register the subscriber
-	eventsURL := fmt.Sprintf("http://%v/events", srv.Listener.Addr().String())
+	eventsURL := fmt.Sprintf("http://%v/event", srv.Listener.Addr().String())
 	go func() {
 		if err := s.Register(context.Background(), eventsURL); err != nil {
 			t.Error(err)
