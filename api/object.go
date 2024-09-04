@@ -66,7 +66,7 @@ type (
 		ETag     string      `json:"eTag,omitempty"`
 		Health   float64     `json:"health"`
 		ModTime  TimeRFC3339 `json:"modTime"`
-		Name     string      `json:"name"`
+		Key      string      `json:"key"`
 		Size     int64       `json:"size"`
 		MimeType string      `json:"mimeType,omitempty"`
 	}
@@ -146,7 +146,7 @@ func (o ObjectMetadata) ContentType() string {
 		return o.MimeType
 	}
 
-	if ext := filepath.Ext(o.Name); ext != "" {
+	if ext := filepath.Ext(o.Key); ext != "" {
 		return mime.TypeByExtension(ext)
 	}
 

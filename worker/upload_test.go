@@ -221,8 +221,8 @@ func TestUploadPackedSlab(t *testing.T) {
 	var c int
 	uploadBytes := func(n int) {
 		t.Helper()
-		params.path = fmt.Sprintf("%s_%d", t.Name(), c)
-		_, err := w.upload(context.Background(), params.bucket, params.path, testRedundancySettings, bytes.NewReader(frand.Bytes(n)), w.Contracts(), opts...)
+		params.key = fmt.Sprintf("%s_%d", t.Name(), c)
+		_, err := w.upload(context.Background(), params.bucket, params.key, testRedundancySettings, bytes.NewReader(frand.Bytes(n)), w.Contracts(), opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -599,7 +599,7 @@ func TestUploadRegression(t *testing.T) {
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := w.upload(ctx, params.bucket, params.path, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
+	_, err := w.upload(ctx, params.bucket, params.key, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -608,7 +608,7 @@ func TestUploadRegression(t *testing.T) {
 	unblock()
 
 	// upload data
-	_, err = w.upload(context.Background(), params.bucket, params.path, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
+	_, err = w.upload(context.Background(), params.bucket, params.key, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,10 +660,10 @@ func TestUploadSingleSectorSlowHosts(t *testing.T) {
 	}
 }
 
-func testParameters(path string) uploadParameters {
+func testParameters(key string) uploadParameters {
 	return uploadParameters{
 		bucket: testBucket,
-		path:   path,
+		key:    key,
 
 		ec:               object.GenerateEncryptionKey(), // random key
 		encryptionOffset: 0,                              // from the beginning

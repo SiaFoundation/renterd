@@ -115,7 +115,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 
 	// Loop over the entries and add them to the response.
 	for _, object := range objects {
-		key := strings.TrimPrefix(object.Name, "/")
+		key := strings.TrimPrefix(object.Key, "/")
 		if prefix.HasDelimiter && strings.HasSuffix(key, prefix.Delimiter) {
 			response.AddPrefix(key)
 			continue
@@ -199,7 +199,7 @@ func (s *s3) DeleteBucket(ctx context.Context, name string) error {
 // If the backend is a VersionedBackend, GetObject retrieves the latest version.
 // TODO: Range requests starting from the end are not supported yet. Backend
 // needs to be updated for that.
-func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
+func (s *s3) GetObject(ctx context.Context, bucketName, key string, rangeRequest *gofakes3.ObjectRangeRequest) (*gofakes3.Object, error) {
 	if rangeRequest != nil && rangeRequest.FromEnd {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrNotImplemented, "range request from end not supported")
 	}
@@ -213,11 +213,11 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 		opts.Range = &api.DownloadRange{Offset: rangeRequest.Start, Length: length}
 	}
 
-	res, err := s.w.GetObject(ctx, bucketName, objectName, opts)
+	res, err := s.w.GetObject(ctx, bucketName, key, opts)
 	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return nil, gofakes3.BucketNotFound(bucketName)
 	} else if utils.IsErr(err, api.ErrObjectNotFound) {
-		return nil, gofakes3.KeyNotFound(objectName)
+		return nil, gofakes3.KeyNotFound(key)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -248,7 +248,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 
 	return &gofakes3.Object{
 		Hash:     etag,
-		Name:     gofakes3.URLEncode(objectName),
+		Name:     gofakes3.URLEncode(key),
 		Metadata: res.Metadata,
 		Size:     res.Size,
 		Contents: res.Content,
@@ -265,10 +265,10 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 //
 // HeadObject should return a NotFound() error if the object does not
 // exist.
-func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*gofakes3.Object, error) {
-	res, err := s.w.HeadObject(ctx, bucketName, objectName, api.HeadObjectOptions{})
+func (s *s3) HeadObject(ctx context.Context, bucketName, key string) (*gofakes3.Object, error) {
+	res, err := s.w.HeadObject(ctx, bucketName, key, api.HeadObjectOptions{})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
-		return nil, gofakes3.KeyNotFound(objectName)
+		return nil, gofakes3.KeyNotFound(key)
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}
@@ -291,7 +291,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 
 	return &gofakes3.Object{
 		Hash:     hash,
-		Name:     gofakes3.URLEncode(objectName),
+		Name:     gofakes3.URLEncode(key),
 		Metadata: metadata,
 		Size:     res.Size,
 		Contents: io.NopCloser(bytes.NewReader(nil)),
@@ -313,8 +313,8 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, objectName string) (*go
 //	Removes the null version (if there is one) of an object and inserts a
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
-func (s *s3) DeleteObject(ctx context.Context, bucketName, objectName string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
+func (s *s3) DeleteObject(ctx context.Context, bucketName, key string) (gofakes3.ObjectDeleteResult, error) {
+	err := s.b.DeleteObject(ctx, bucketName, key, api.DeleteObjectOptions{})
 	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if utils.IsErr(err, api.ErrObjectNotFound) {
@@ -354,17 +354,17 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 
 func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	var res gofakes3.MultiDeleteResult
-	for _, objectName := range objects {
-		err := s.b.DeleteObject(ctx, bucketName, objectName, api.DeleteObjectOptions{})
+	for _, key := range objects {
+		err := s.b.DeleteObject(ctx, bucketName, key, api.DeleteObjectOptions{})
 		if err != nil && !utils.IsErr(err, api.ErrObjectNotFound) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
-				Key:     objectName,
+				Key:     key,
 				Code:    gofakes3.ErrInternal,
 				Message: err.Error(),
 			})
 		} else {
 			res.Deleted = append(res.Deleted, gofakes3.ObjectID{
-				Key:       objectName,
+				Key:       key,
 				VersionID: "", // not supported
 			})
 		}
@@ -432,7 +432,7 @@ func (s *s3) ListMultipartUploads(ctx context.Context, bucket string, marker *go
 	var uploads []gofakes3.ListMultipartUploadItem
 	for _, upload := range resp.Uploads {
 		uploads = append(uploads, gofakes3.ListMultipartUploadItem{
-			Key:       upload.Path[1:],
+			Key:       upload.Key[1:],
 			UploadID:  gofakes3.UploadID(upload.UploadID),
 			Initiated: gofakes3.NewContentTime(upload.CreatedAt.Std()),
 		})

@@ -31,11 +31,11 @@ var (
 
 type (
 	MultipartUpload struct {
-		Bucket    string               `json:"bucket"`
-		Key       object.EncryptionKey `json:"key"`
-		Path      string               `json:"path"`
-		UploadID  string               `json:"uploadID"`
-		CreatedAt TimeRFC3339          `json:"createdAt"`
+		Bucket        string               `json:"bucket"`
+		EncryptionKey object.EncryptionKey `json:"encryptionKey"`
+		Key           string               `json:"key"`
+		UploadID      string               `json:"uploadID"`
+		CreatedAt     TimeRFC3339          `json:"createdAt"`
 	}
 
 	MultipartListPartItem struct {
@@ -65,14 +65,14 @@ type (
 type (
 	MultipartAbortRequest struct {
 		Bucket   string `json:"bucket"`
-		Path     string `json:"path"`
+		Key      string `json:"key"`
 		UploadID string `json:"uploadID"`
 	}
 
 	MultipartAddPartRequest struct {
 		Bucket      string             `json:"bucket"`
 		ETag        string             `json:"eTag"`
-		Path        string             `json:"path"`
+		Key         string             `json:"key"`
 		ContractSet string             `json:"contractSet"`
 		UploadID    string             `json:"uploadID"`
 		PartNumber  int                `json:"partNumber"`
@@ -86,17 +86,17 @@ type (
 	MultipartCompleteRequest struct {
 		Bucket   string                   `json:"bucket"`
 		Metadata ObjectUserMetadata       `json:"metadata"`
-		Path     string                   `json:"path"`
+		Key      string                   `json:"key"`
 		UploadID string                   `json:"uploadID"`
 		Parts    []MultipartCompletedPart `json:"parts"`
 	}
 
 	MultipartCreateRequest struct {
-		Bucket   string                `json:"bucket"`
-		Path     string                `json:"path"`
-		Key      *object.EncryptionKey `json:"key"`
-		MimeType string                `json:"mimeType"`
-		Metadata ObjectUserMetadata    `json:"metadata"`
+		Bucket        string                `json:"bucket"`
+		EncryptionKey *object.EncryptionKey `json:"encryptionKey"`
+		Key           string                `json:"key"`
+		MimeType      string                `json:"mimeType"`
+		Metadata      ObjectUserMetadata    `json:"metadata"`
 
 		// TODO: The next major version change should invert this to create a
 		// key by default
@@ -109,7 +109,7 @@ type (
 
 	MultipartListPartsRequest struct {
 		Bucket           string `json:"bucket"`
-		Path             string `json:"path"`
+		Key              string `json:"key"`
 		UploadID         string `json:"uploadID"`
 		PartNumberMarker int    `json:"partNumberMarker"`
 		Limit            int64  `json:"limit"`
@@ -124,7 +124,7 @@ type (
 	MultipartListUploadsRequest struct {
 		Bucket         string `json:"bucket"`
 		Prefix         string `json:"prefix"`
-		PathMarker     string `json:"pathMarker"`
+		KeyMarker      string `json:"keyMarker"`
 		UploadIDMarker string `json:"uploadIDMarker"`
 		Limit          int    `json:"limit"`
 	}

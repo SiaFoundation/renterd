@@ -9,21 +9,21 @@ import (
 )
 
 // AbortMultipartUpload aborts a multipart upload.
-func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error) {
+func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) (err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/abort", api.MultipartAbortRequest{
 		Bucket:   bucket,
-		Path:     path,
+		Key:      key,
 		UploadID: uploadID,
 	}, nil)
 	return
 }
 
 // AddMultipartPart adds a part to a multipart upload.
-func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (c *Client) AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	err = c.c.WithContext(ctx).PUT("/multipart/part", api.MultipartAddPartRequest{
 		Bucket:      bucket,
 		ETag:        eTag,
-		Path:        path,
+		Key:         key,
 		ContractSet: contractSet,
 		UploadID:    uploadID,
 		PartNumber:  partNumber,
@@ -33,10 +33,10 @@ func (c *Client) AddMultipartPart(ctx context.Context, bucket, path, contractSet
 }
 
 // CompleteMultipartUpload completes a multipart upload.
-func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (resp api.MultipartCompleteResponse, err error) {
+func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (resp api.MultipartCompleteResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/complete", api.MultipartCompleteRequest{
 		Bucket:   bucket,
-		Path:     path,
+		Key:      key,
 		Metadata: opts.Metadata,
 		UploadID: uploadID,
 		Parts:    parts,
@@ -45,14 +45,12 @@ func (c *Client) CompleteMultipartUpload(ctx context.Context, bucket, path, uplo
 }
 
 // CreateMultipartUpload creates a new multipart upload.
-func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, path string, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
+func (c *Client) CreateMultipartUpload(ctx context.Context, bucket, key string, opts api.CreateMultipartOptions) (resp api.MultipartCreateResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/create", api.MultipartCreateRequest{
-		Bucket:      bucket,
-		GenerateKey: opts.GenerateKey,
-		Path:        path,
-		Key:         opts.Key,
-		MimeType:    opts.MimeType,
-		Metadata:    opts.Metadata,
+		Bucket:   bucket,
+		Key:      key,
+		MimeType: opts.MimeType,
+		Metadata: opts.Metadata,
 	}, &resp)
 	return
 }
@@ -68,7 +66,7 @@ func (c *Client) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker
 	err = c.c.WithContext(ctx).POST("/multipart/listuploads", api.MultipartListUploadsRequest{
 		Bucket:         bucket,
 		Prefix:         prefix,
-		PathMarker:     keyMarker,
+		KeyMarker:      keyMarker,
 		UploadIDMarker: uploadIDMarker,
 		Limit:          maxUploads,
 	}, &resp)
@@ -76,10 +74,10 @@ func (c *Client) MultipartUploads(ctx context.Context, bucket, prefix, keyMarker
 }
 
 // MultipartUploadParts returns information about all parts of a multipart upload.
-func (c *Client) MultipartUploadParts(ctx context.Context, bucket, path string, uploadID string, partNumberMarker int, limit int64) (resp api.MultipartListPartsResponse, err error) {
+func (c *Client) MultipartUploadParts(ctx context.Context, bucket, key string, uploadID string, partNumberMarker int, limit int64) (resp api.MultipartListPartsResponse, err error) {
 	err = c.c.WithContext(ctx).POST("/multipart/listparts", api.MultipartListPartsRequest{
 		Bucket:           bucket,
-		Path:             path,
+		Key:              key,
 		UploadID:         uploadID,
 		PartNumberMarker: partNumberMarker,
 		Limit:            limit,

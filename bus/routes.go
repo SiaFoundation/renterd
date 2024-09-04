@@ -2116,13 +2116,13 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 	var key object.EncryptionKey
 	if req.GenerateKey {
 		key = object.GenerateEncryptionKey()
-	} else if req.Key == nil {
+	} else if req.EncryptionKey == nil {
 		key = object.NoOpKey
 	} else {
-		key = *req.Key
+		key = *req.EncryptionKey
 	}
 
-	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType, req.Metadata)
+	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, key, req.MimeType, req.Metadata)
 	if jc.Check("failed to create multipart upload", err) != nil {
 		return
 	}
@@ -2134,7 +2134,7 @@ func (b *Bus) multipartHandlerAbortPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
+	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, req.UploadID)
 	if jc.Check("failed to abort multipart upload", err) != nil {
 		return
 	}
@@ -2145,7 +2145,7 @@ func (b *Bus) multipartHandlerCompletePOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts, api.CompleteMultipartOptions{
+	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, req.UploadID, req.Parts, api.CompleteMultipartOptions{
 		Metadata: req.Metadata,
 	})
 	if jc.Check("failed to complete multipart upload", err) != nil {
@@ -2174,7 +2174,7 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices)
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Key, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}
@@ -2193,7 +2193,7 @@ func (b *Bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.PathMarker, req.UploadIDMarker, req.Limit)
+	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.KeyMarker, req.UploadIDMarker, req.Limit)
 	if jc.Check("failed to list multipart uploads", err) != nil {
 		return
 	}
@@ -2205,7 +2205,7 @@ func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
+	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Key, req.UploadID, req.PartNumberMarker, int64(req.Limit))
 	if jc.Check("failed to list multipart upload parts", err) != nil {
 		return
 	}

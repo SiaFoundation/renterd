@@ -386,7 +386,7 @@ func (os *objectStoreMock) DeleteHostSector(ctx context.Context, hk types.Public
 	return nil
 }
 
-func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error {
+func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) error {
 	return nil
 }
 
@@ -433,7 +433,7 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 	return []object.SlabSlice{ss}, os.totalSlabBufferSize() > os.slabBufferMaxSizeSoft, nil
 }
 
-func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.Object, error) {
+func (os *objectStoreMock) Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (api.Object, error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -443,20 +443,20 @@ func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts
 	}
 
 	// check if the object exists
-	if _, exists := os.objects[bucket][path]; !exists {
+	if _, exists := os.objects[bucket][key]; !exists {
 		return api.Object{}, api.ErrObjectNotFound
 	}
 
 	// clone to ensure the store isn't unwillingly modified
 	var o object.Object
-	if b, err := json.Marshal(os.objects[bucket][path]); err != nil {
+	if b, err := json.Marshal(os.objects[bucket][key]); err != nil {
 		panic(err)
 	} else if err := json.Unmarshal(b, &o); err != nil {
 		panic(err)
 	}
 
 	return api.Object{
-		ObjectMetadata: api.ObjectMetadata{Name: path, Size: o.TotalSize()},
+		ObjectMetadata: api.ObjectMetadata{Key: key, Size: o.TotalSize()},
 		Object:         &o,
 	}, nil
 }
@@ -480,7 +480,7 @@ func (os *objectStoreMock) Slab(ctx context.Context, key object.EncryptionKey) (
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
-	os.forEachObject(func(bucket, path string, o object.Object) {
+	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for _, s := range o.Slabs {
 			if s.Slab.Key.String() == key.String() {
 				slab = s.Slab
@@ -496,13 +496,13 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
-	os.forEachObject(func(bucket, path string, o object.Object) {
+	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
 			if slab.Key.String() != s.Key.String() {
 				continue
 			}
 			// update slab
-			shards := os.objects[bucket][path].Slabs[i].Slab.Shards
+			shards := os.objects[bucket][objKey].Slabs[i].Slab.Shards
 			for sI := range shards {
 				// overwrite latest host
 				shards[sI].LatestHost = s.Shards[sI].LatestHost
@@ -523,7 +523,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 					}
 				}
 			}
-			os.objects[bucket][path].Slabs[i].Slab.Shards = shards
+			os.objects[bucket][objKey].Slabs[i].Slab.Shards = shards
 			return
 		}
 	})
@@ -544,9 +544,9 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 		if ps.parameterKey == parameterKey && time.Now().After(ps.lockedUntil) {
 			ps.lockedUntil = time.Now().Add(lockingDuration)
 			pss = append(pss, api.PackedSlab{
-				BufferID: ps.bufferID,
-				Data:     ps.data,
-				Key:      ps.slabKey,
+				BufferID:      ps.bufferID,
+				Data:          ps.data,
+				EncryptionKey: ps.slabKey,
 			})
 			if len(pss) == limit {
 				break
@@ -566,9 +566,9 @@ func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	}
 
 	slabKeyToSlab := make(map[string]*object.Slab)
-	os.forEachObject(func(bucket, path string, o object.Object) {
+	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][path].Slabs[i].Slab
+			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][objKey].Slabs[i].Slab
 		}
 	})
 
@@ -604,7 +604,7 @@ func (os *objectStoreMock) setSlabBufferMaxSizeSoft(n int) {
 	os.slabBufferMaxSizeSoft = n
 }
 
-func (os *objectStoreMock) forEachObject(fn func(bucket, path string, o object.Object)) {
+func (os *objectStoreMock) forEachObject(fn func(bucket, key string, o object.Object)) {
 	for bucket, objects := range os.objects {
 		for path, object := range objects {
 			fn(bucket, path, object)

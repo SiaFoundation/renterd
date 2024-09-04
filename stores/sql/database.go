@@ -169,7 +169,7 @@ type (
 
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
-		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
 
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.

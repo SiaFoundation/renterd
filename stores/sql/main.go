@@ -392,7 +392,7 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	// helper to fetch metadata
 	fetchMetadata := func(objID int64) (om api.ObjectMetadata, err error) {
 		err = tx.QueryRow(ctx, "SELECT etag, health, created_at, object_id, size, mime_type FROM objects WHERE id = ?", objID).
-			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Name, &om.Size, &om.MimeType)
+			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Key, &om.Size, &om.MimeType)
 		if err != nil {
 			return api.ObjectMetadata{}, fmt.Errorf("failed to fetch new object: %w", err)
 		}
@@ -1134,7 +1134,7 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 	if limitUsed && len(uploads) > int(limit) {
 		hasMore = true
 		uploads = uploads[:len(uploads)-1]
-		nextPathMarker = uploads[len(uploads)-1].Path
+		nextPathMarker = uploads[len(uploads)-1].Key
 		nextUploadIDMarker = uploads[len(uploads)-1].UploadID
 	}
 
@@ -2124,7 +2124,7 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 	var slabs []api.UnhealthySlab
 	for rows.Next() {
 		var slab api.UnhealthySlab
-		if err := rows.Scan((*EncryptionKey)(&slab.Key), &slab.Health); err != nil {
+		if err := rows.Scan((*EncryptionKey)(&slab.EncryptionKey), &slab.Health); err != nil {
 			return nil, fmt.Errorf("failed to scan unhealthy slab: %w", err)
 		}
 		slabs = append(slabs, slab)
@@ -2285,7 +2285,7 @@ func scanBucket(s Scanner) (api.Bucket, error) {
 }
 
 func scanMultipartUpload(s Scanner) (resp api.MultipartUpload, _ error) {
-	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.Key), &resp.Path, &resp.UploadID, &resp.CreatedAt)
+	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.EncryptionKey), &resp.Key, &resp.UploadID, &resp.CreatedAt)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.MultipartUpload{}, api.ErrMultipartUploadNotFound
 	} else if err != nil {
@@ -2732,7 +2732,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		objects = objects[:len(objects)-1]
 		if len(objects) > 0 {
 			hasMore = true
-			nextMarker = objects[len(objects)-1].Name
+			nextMarker = objects[len(objects)-1].Key
 		}
 	}
 
@@ -2899,7 +2899,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		objects = objects[:len(objects)-1]
 		if len(objects) > 0 {
 			hasMore = true
-			nextMarker = objects[len(objects)-1].Name
+			nextMarker = objects[len(objects)-1].Key
 		}
 	}
 

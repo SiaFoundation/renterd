@@ -37,7 +37,7 @@ func BenchmarkDownloaderSingleObject(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	o, err := w.os.Object(context.Background(), testBucket, up.path, api.GetObjectOptions{})
+	o, err := w.os.Object(context.Background(), testBucket, up.key, api.GetObjectOptions{})
 	if err != nil {
 		b.Fatal(err)
 	}

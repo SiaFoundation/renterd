@@ -113,8 +113,8 @@ type (
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
 		// NOTE: used for upload
-		AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
-		AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) error
+		AddMultipartPart(ctx context.Context, bucket, key, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
@@ -124,8 +124,8 @@ type (
 
 		// NOTE: used by worker
 		Bucket(_ context.Context, bucket string) (api.Bucket, error)
-		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.Object, error)
-		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
+		Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (api.Object, error)
+		DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) error
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 	}
@@ -664,7 +664,7 @@ func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 		return
 	}
 
-	// parse path
+	// parse key
 	path := jc.PathParam("key")
 
 	var off int
@@ -745,8 +745,8 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	path := jc.PathParam("key")
-	if path == "" {
+	key := jc.PathParam("key")
+	if key == "" {
 		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
 		return
 	}
@@ -763,7 +763,7 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	gor, err := w.GetObject(ctx, bucket, path, api.DownloadObjectOptions{
+	gor, err := w.GetObject(ctx, bucket, key, api.DownloadObjectOptions{
 		Range: &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
@@ -778,7 +778,7 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 	defer gor.Content.Close()
 
 	// serve the content
-	serveContent(jc.ResponseWriter, jc.Request, path, gor.Content, gor.HeadObjectResponse)
+	serveContent(jc.ResponseWriter, jc.Request, key, gor.Content, gor.HeadObjectResponse)
 }
 
 func (w *Worker) objectsHandlerPUT(jc jape.Context) {
@@ -857,7 +857,7 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// grab the path
-	path := jc.PathParam("path")
+	path := jc.PathParam("key")
 
 	// decode the contract set from the query string
 	var contractset string
@@ -1146,7 +1146,7 @@ func (w *Worker) Handler() http.Handler {
 		"PUT    /objects/*key": w.objectsHandlerPUT,
 		"DELETE /objects/*key": w.objectsHandlerDELETE,
 
-		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
+		"PUT    /multipart/*key": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
 	})
@@ -1292,9 +1292,9 @@ func isErrHostUnreachable(err error) bool {
 		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
-func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.Object, error) {
+func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.Object, error) {
 	// fetch object
-	res, err := w.bus.Object(ctx, bucket, path, api.GetObjectOptions{
+	res, err := w.bus.Object(ctx, bucket, key, api.GetObjectOptions{
 		OnlyMetadata: onlyMetadata,
 	})
 	if err != nil {
@@ -1355,9 +1355,9 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 	})
 }
 
-func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
+func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	// head object
-	hor, res, err := w.headObject(ctx, bucket, path, false, api.HeadObjectOptions{
+	hor, res, err := w.headObject(ctx, bucket, key, false, api.HeadObjectOptions{
 		Range: opts.Range,
 	})
 	if err != nil {
@@ -1400,7 +1400,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -1420,8 +1420,8 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	}, nil
 }
 
-func (w *Worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
-	res, _, err := w.headObject(ctx, bucket, path, true, opts)
+func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
+	res, _, err := w.headObject(ctx, bucket, key, true, opts)
 	return res, err
 }
 
@@ -1444,7 +1444,7 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 	return nil
 }
 
-func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
+func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
 	// prepare upload params
 	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
 	if err != nil {
@@ -1461,7 +1461,7 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	}
 
 	// upload
-	eTag, err := w.upload(ctx, bucket, path, up.RedundancySettings, r, contracts,
+	eTag, err := w.upload(ctx, bucket, key, up.RedundancySettings, r, contracts,
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithMimeType(opts.MimeType),
@@ -1469,9 +1469,9 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 		WithObjectUserMetadata(opts.Metadata),
 	)
 	if err != nil {
-		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
+		w.logger.With(zap.Error(err)).With("key", key).With("bucket", bucket).Error("failed to upload object")
 		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
-			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+			w.registerAlert(newUploadFailedAlert(bucket, key, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return nil, fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -1501,13 +1501,13 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
-		WithCustomKey(upload.Key),
+		WithCustomKey(upload.EncryptionKey),
 		WithPartNumber(partNumber),
 		WithUploadID(uploadID),
 	}
 
 	// make sure only one of the following is set
-	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
+	if encryptionEnabled := !upload.EncryptionKey.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
 		return nil, fmt.Errorf("%w: if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set", api.ErrInvalidMultipartEncryptionSettings)
 	} else if opts.EncryptionOffset != nil && *opts.EncryptionOffset < 0 {
 		return nil, fmt.Errorf("%w: encryption offset must be positive", api.ErrInvalidMultipartEncryptionSettings)
