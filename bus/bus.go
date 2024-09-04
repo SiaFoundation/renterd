@@ -43,9 +43,12 @@ const (
 	defaultWalletRecordMetricInterval = 5 * time.Minute
 	defaultPinUpdateInterval          = 5 * time.Minute
 	defaultPinRateWindow              = 6 * time.Hour
-	lockingPriorityFunding            = 40
-	lockingPriorityRenew              = 80
-	stdTxnSize                        = 1200 // bytes
+
+	lockingPriorityPruning = 20
+	lockingPriorityFunding = 40
+	lockingPriorityRenew   = 80
+
+	stdTxnSize = 1200 // bytes
 )
 
 // Client re-exports the client from the client package.
@@ -223,6 +226,7 @@ type (
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
+		PrunableContractRoots(ctx context.Context, id types.FileContractID, roots []types.Hash256) ([]uint64, error)
 
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
@@ -421,6 +425,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,

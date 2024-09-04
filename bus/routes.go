@@ -19,6 +19,7 @@ import (
 
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -832,6 +833,117 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
 	}
+}
+
+func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode fcid
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode timeout
+	var req api.ContractPruneRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// create gouging checker
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("couldn't fetch gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// apply timeout
+	pruneCtx := ctx
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		pruneCtx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout))
+		defer cancel()
+	}
+
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(pruneCtx, lockingPriorityPruning, fcid, time.Duration(math.MaxInt64))
+	if jc.Check("couldn't acquire contract lock", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch the contract from the bus
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// build map of uploading sectors
+	pending := make(map[types.Hash256]struct{})
+	for _, root := range b.sectors.Sectors(fcid) {
+		pending[root] = struct{}{}
+	}
+
+	// prune the contract
+	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
+		if err != nil {
+			return nil, err
+		} else if len(indices) > len(roots) {
+			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
+		}
+
+		filtered := indices[:0]
+		for _, index := range indices {
+			_, ok := pending[roots[index]]
+			if !ok {
+				filtered = append(filtered, index)
+			}
+		}
+		indices = filtered
+		return indices, nil
+	})
+
+	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
+		err = nil // ignore error
+	} else if !errors.Is(err, context.Canceled) {
+		if jc.Check("couldn't prune contract", err) != nil {
+			return
+		}
+	}
+
+	// record spending
+	if !spending.Total().IsZero() {
+		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+			{
+				ContractSpending: spending,
+				ContractID:       fcid,
+				RevisionNumber:   rev.RevisionNumber,
+				Size:             rev.Filesize,
+
+				MissedHostPayout:  rev.MissedHostPayout(),
+				ValidRenterPayout: rev.ValidRenterPayout(),
+			},
+		})
+	}
+
+	// return response
+	res := api.ContractPruneResponse{
+		ContractSize: rev.Filesize,
+		Pruned:       pruned,
+		Remaining:    remaining,
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	jc.Encode(res)
 }
 
 func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
