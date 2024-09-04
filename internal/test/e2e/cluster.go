@@ -100,6 +100,32 @@ func (tc *TestCluster) Accounts() []api.Account {
 	return accounts
 }
 
+func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContractID) ([]types.Hash256, error) {
+	tc.tt.Helper()
+
+	c, err := tc.Bus.Contract(ctx, fcid)
+	if err != nil {
+		return nil, err
+	}
+
+	var h *Host
+	for _, host := range tc.hosts {
+		if host.PublicKey() == c.HostKey {
+			h = host
+			break
+		}
+	}
+	if h == nil {
+		return nil, fmt.Errorf("no host found for contract %v", c)
+	}
+
+	roots, err := h.store.SectorRoots()
+	if err != nil {
+		return nil, err
+	}
+	return roots[c.ID], nil
+}
+
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
 	tc.tt.Helper()
 	for _, fn := range tc.autopilotShutdownFns {

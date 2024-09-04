@@ -160,6 +160,12 @@ func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPr
 	return
 }
 
+// PruneContract prunes the given contract.
+func (c *Client) PruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (res api.ContractPruneResponse, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/prune", contractID), api.ContractPruneRequest{Timeout: api.DurationMS(timeout)}, &res)
+	return
+}
+
 // RenewContract renews an existing contract with a host and adds it to the bus.
 func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
 	req := api.ContractRenewRequest{

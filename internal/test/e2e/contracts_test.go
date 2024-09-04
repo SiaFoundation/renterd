@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -45,8 +46,20 @@ func TestFormContract(t *testing.T) {
 	_, err = b.Contract(context.Background(), contract.ID)
 	tt.OK(err)
 
+	// fetch autopilot config
+	old, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
+	tt.OK(err)
+
 	// mine to the renew window
 	cluster.MineToRenewWindow()
+
+	// wait until autopilot updated the current period
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		if curr, _ := b.Autopilot(context.Background(), api.DefaultAutopilotID); curr.CurrentPeriod == old.CurrentPeriod {
+			return errors.New("autopilot didn't update the current period")
+		}
+		return nil
+	})
 
 	// update autopilot config to allow for 1 contract, this won't form a
 	// contract but will ensure we don't skip contract maintenance, which should

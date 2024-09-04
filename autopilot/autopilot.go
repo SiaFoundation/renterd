@@ -48,6 +48,7 @@ type Bus interface {
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
+	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -322,7 +323,7 @@ func (ap *Autopilot) Run() {
 
 			// pruning
 			if autopilot.Config.Contracts.Prune {
-				ap.tryPerformPruning(ap.workers)
+				ap.tryPerformPruning()
 			} else {
 				ap.logger.Info("pruning disabled")
 			}
@@ -670,6 +671,9 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
 			contractSetChanged = true
