@@ -86,7 +86,7 @@ type (
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
-		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
+		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
 	ContractLocker interface {
@@ -138,14 +138,14 @@ type (
 		Balance() (wallet.Balance, error)
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
-		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (consensus.State, []int, error)
+		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
 		RedistributeV2(outputs int, amount, feePerByte types.Currency) (txns []types.V2Transaction, toSign [][]int, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
-		SignV2Inputs(state consensus.State, txn *types.V2Transaction, toSign []int)
+		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)
-		Tip() (types.ChainIndex, error)
+		Tip() types.ChainIndex
 		UnconfirmedEvents() ([]wallet.Event, error)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)
