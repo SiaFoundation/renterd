@@ -2529,46 +2529,51 @@ func TestWalletRedistribute(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	// redistribute into 5 outputs
-	_, err := cluster.Bus.WalletRedistribute(context.Background(), 5, types.Siacoins(10))
+	// redistribute into 2 outputs of 500KS each
+	numOutputs := 2
+	outputAmt := types.Siacoins(500e3)
+	txnSet, err := cluster.Bus.WalletRedistribute(context.Background(), numOutputs, outputAmt)
 	if err != nil {
 		t.Fatal(err)
+	} else if len(txnSet) == 0 {
+		t.Fatal("nothing happened")
 	}
 	cluster.MineBlocks(1)
 
 	// assert we have 5 outputs with 10 SC
 	txns, err := cluster.Bus.WalletEvents(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	cluster.tt.OK(err)
 
-	utxos := make(map[types.SiacoinOutputID]struct{})
+	nOutputs := 0
 	for _, txn := range txns {
-		if v1Txn, ok := txn.Data.(*wallet.EventV1Transaction); ok {
-			for i := range v1Txn.SpentSiacoinElements {
-				utxos[v1Txn.Transaction.SiacoinOutputID(i)] = struct{}{}
+		switch txn := txn.Data.(type) {
+		case wallet.EventV1Transaction:
+			for _, sco := range txn.Transaction.SiacoinOutputs {
+				if sco.Value.Equals(types.Siacoins(500e3)) {
+					nOutputs++
+				}
 			}
-			for _, sci := range v1Txn.Transaction.SiacoinInputs {
-				delete(utxos, sci.ParentID)
+		case wallet.EventV2Transaction:
+			for _, sco := range txn.SiacoinOutputs {
+				if sco.Value.Equals(types.Siacoins(500e3)) {
+					nOutputs++
+				}
 			}
-		} else if v2Txn, ok := txn.Data.(*wallet.EventV1Transaction); ok {
-			for i := range v2Txn.SpentSiacoinElements {
-				utxos[v2Txn.Transaction.SiacoinOutputID(i)] = struct{}{}
-			}
-			for _, sci := range v2Txn.Transaction.SiacoinInputs {
-				delete(utxos, sci.ParentID)
-			}
+		case wallet.EventPayout:
+		default:
+			t.Fatalf("unexpected transaction type %T", txn)
 		}
 	}
-	if cnt := len(utxos); cnt != 5 {
+	if cnt := nOutputs; cnt != numOutputs {
 		t.Fatalf("expected 5 outputs with 10 SC, got %v", cnt)
 	}
 
 	// assert redistributing into 3 outputs succeeds, used to fail because we
 	// were broadcasting an empty transaction set
-	_, err = cluster.Bus.WalletRedistribute(context.Background(), 3, types.Siacoins(10))
-	if err != nil {
-		t.Fatal(err)
+	txnSet, err = cluster.Bus.WalletRedistribute(context.Background(), nOutputs, outputAmt)
+	cluster.tt.OK(err)
+	if len(txnSet) != 0 {
+		t.Fatal("txnSet should be empty")
 	}
 }
 

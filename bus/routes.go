@@ -377,14 +377,22 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
-	available, err := b.w.SpendableOutputs()
+	spendableOutputs, err := b.w.SpendableOutputs()
 	if jc.Check("couldn't fetch spendable outputs", err) != nil {
 		return
-	} else if len(available) >= wfr.Outputs {
-		b.logger.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), wfr.Outputs)
+	}
+	var available int
+	for _, so := range spendableOutputs {
+		if so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0 {
+			available++
+		}
+	}
+	if available >= wfr.Outputs {
+		b.logger.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", available, wfr.Outputs)
+		jc.Encode([]types.TransactionID{})
 		return
 	}
-	wantedOutputs := wfr.Outputs - len(available)
+	wantedOutputs := wfr.Outputs - available
 
 	var ids []types.TransactionID
 	if state := b.cm.TipState(); state.Index.Height < state.Network.HardforkV2.AllowHeight {
