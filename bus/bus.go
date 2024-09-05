@@ -41,9 +41,13 @@ const (
 	defaultWalletRecordMetricInterval = 5 * time.Minute
 	defaultPinUpdateInterval          = 5 * time.Minute
 	defaultPinRateWindow              = 6 * time.Hour
-	lockingPriorityFunding            = 40
-	lockingPriorityRenew              = 80
-	stdTxnSize                        = 1200 // bytes
+
+	lockingPriorityPruning   = 20
+	lockingPriorityFunding   = 40
+	lockingPriorityRenew     = 80
+	lockingPriorityBroadcast = 100
+
+	stdTxnSize = 1200 // bytes
 )
 
 // Client re-exports the client from the client package.
@@ -81,7 +85,7 @@ type (
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
-		V2UnconfirmedParents(txn types.V2Transaction) []types.V2Transaction
+		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
 	ContractLocker interface {
@@ -133,14 +137,14 @@ type (
 		Balance() (wallet.Balance, error)
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
-		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (consensus.State, []int, error)
+		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
 		RedistributeV2(outputs int, amount, feePerByte types.Currency) (txns []types.V2Transaction, toSign [][]int, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
-		SignV2Inputs(state consensus.State, txn *types.V2Transaction, toSign []int)
+		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)
-		Tip() (types.ChainIndex, error)
+		Tip() types.ChainIndex
 		UnconfirmedEvents() ([]wallet.Event, error)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)
@@ -221,6 +225,7 @@ type (
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
+		PrunableContractRoots(ctx context.Context, id types.FileContractID, roots []types.Hash256) ([]uint64, error)
 
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
@@ -427,7 +432,9 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
+		"POST   /contract/:id/broadcast": b.contractIDBroadcastHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
 		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
@@ -587,6 +594,67 @@ func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
 		seed[i] = 0
 	}
 	return pk
+}
+
+func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't acquire contract lock; %w", err)
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch contract
+	c, err := b.ms.Contract(ctx, fcid)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
+	}
+
+	// derive the renter key
+	renterKey := b.deriveRenterKey(c.HostKey)
+
+	// fetch revision
+	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+	}
+
+	// send V2 transaction if we're passed the V2 hardfork allow height
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		// create the transaction
+		txn := types.Transaction{
+			FileContractRevisions: []types.FileContractRevision{rev.Revision},
+			Signatures:            rev.Signatures[:],
+		}
+
+		// fund the transaction (only the fee)
+		toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+		}
+		// sign the transaction
+		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
+
+		// verify the transaction and add it to the transaction pool
+		txnset := append(b.cm.UnconfirmedParents(txn), txn)
+		_, err = b.cm.AddPoolTransactions(txnset)
+		if err != nil {
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
+		}
+
+		// broadcast the transaction
+		b.s.BroadcastTransactionSet(txnset)
+		txnID = txn.ID()
+	}
+
+	return
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {

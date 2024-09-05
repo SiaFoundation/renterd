@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
+	"go.uber.org/zap"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -98,7 +100,9 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// create a cluster
-	cluster := newTestCluster(t, clusterOptsDefault)
+	opts := clusterOptsDefault
+	opts.logger = zap.NewNop()
+	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 
 	// add a helper to check whether a root is in a given slice
@@ -121,13 +125,13 @@ func TestSectorPruning(t *testing.T) {
 	numObjects := 10
 
 	// add hosts
-	hosts := cluster.AddHostsBlocking(int(cfg.Contracts.Amount))
+	hosts := cluster.AddHostsBlocking(rs.TotalShards)
 
 	// wait until we have accounts
 	cluster.WaitForAccounts()
 
 	// wait until we have a contract set
-	cluster.WaitForContractSetContracts(cfg.Contracts.Set, int(cfg.Contracts.Amount))
+	cluster.WaitForContractSetContracts(cfg.Contracts.Set, rs.TotalShards)
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {
@@ -147,7 +151,8 @@ func TestSectorPruning(t *testing.T) {
 	for _, c := range contracts {
 		dbRoots, _, err := b.ContractRoots(context.Background(), c.ID)
 		tt.OK(err)
-		cRoots, err := w.RHPContractRoots(context.Background(), c.ID)
+
+		cRoots, err := cluster.ContractRoots(context.Background(), c.ID)
 		tt.OK(err)
 		if len(dbRoots) != len(cRoots) {
 			t.Fatal("unexpected number of roots", dbRoots, cRoots)
@@ -163,7 +168,7 @@ func TestSectorPruning(t *testing.T) {
 		t.Fatal("unexpected number of roots", n)
 	}
 
-	// sleep for a bit to ensure spending records get flushed
+	// sleep to ensure spending records get flushed
 	time.Sleep(3 * testBusFlushInterval)
 
 	// assert prunable data is 0
@@ -180,7 +185,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// assert amount of prunable data
-	tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		res, err = b.PrunableData(context.Background())
 		tt.OK(err)
 		if res.TotalPrunable != uint64(math.Ceil(float64(numObjects)/2))*rs.SlabSize() {
@@ -191,18 +196,21 @@ func TestSectorPruning(t *testing.T) {
 
 	// prune all contracts
 	for _, c := range contracts {
-		tt.OKAll(w.RHPPruneContract(context.Background(), c.ID, 0))
+		res, err := b.PruneContract(context.Background(), c.ID, 0)
+		tt.OK(err)
+		if res.Pruned == 0 {
+			t.Fatal("expected pruned to be non-zero")
+		} else if res.Remaining != 0 {
+			t.Fatal("expected remaining to be zero")
+		}
 	}
 
-	// assert spending records were updated and prunable data is 0
-	tt.Retry(10, testBusFlushInterval, func() error {
-		res, err := b.PrunableData(context.Background())
-		tt.OK(err)
-		if res.TotalPrunable != 0 {
-			return fmt.Errorf("unexpected prunable data: %d", n)
-		}
-		return nil
-	})
+	// assert prunable data is 0
+	res, err = b.PrunableData(context.Background())
+	tt.OK(err)
+	if res.TotalPrunable != 0 {
+		t.Fatalf("unexpected prunable data: %d", n)
+	}
 
 	// assert spending was updated
 	for _, c := range contracts {
@@ -222,15 +230,23 @@ func TestSectorPruning(t *testing.T) {
 		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
 	}
 
-	// sleep for a bit to ensure spending records get flushed
-	time.Sleep(3 * testBusFlushInterval)
-
 	// assert amount of prunable data
-	res, err = b.PrunableData(context.Background())
-	tt.OK(err)
-	if res.TotalPrunable == 0 {
-		t.Fatal("expected prunable data")
-	}
+	tt.Retry(300, 100*time.Millisecond, func() error {
+		res, err = b.PrunableData(context.Background())
+		tt.OK(err)
+
+		if len(res.Contracts) != len(contracts) {
+			return fmt.Errorf("expected %d contracts, got %d", len(contracts), len(res.Contracts))
+		} else if res.TotalPrunable == 0 {
+			var sizes []string
+			for _, c := range res.Contracts {
+				res, _ := b.ContractSize(context.Background(), c.ID)
+				sizes = append(sizes, fmt.Sprintf("c: %v size: %v prunable: %v", c.ID, res.Size, res.Prunable))
+			}
+			return errors.New("expected prunable data, contract sizes:\n" + strings.Join(sizes, "\n"))
+		}
+		return nil
+	})
 
 	// update the host settings so it's gouging
 	host := hosts[0]
@@ -249,7 +265,7 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// prune the contract and assert it threw a gouging error
-	_, _, err = w.RHPPruneContract(context.Background(), c.ID, 0)
+	_, err = b.PruneContract(context.Background(), c.ID, 0)
 	if err == nil || !strings.Contains(err.Error(), "gouging") {
 		t.Fatal("expected gouging error", err)
 	}

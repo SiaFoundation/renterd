@@ -243,6 +243,10 @@ type (
 		// ProcessChainUpdate applies the given chain update to the database.
 		ProcessChainUpdate(ctx context.Context, applyFn func(ChainUpdateTx) error) error
 
+		// PrunableContractRoots returns the indices of roots that are not in
+		// the contract.
+		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 

@@ -41,11 +41,8 @@ import (
 const (
 	defaultRevisionFetchTimeout = 30 * time.Second
 
-	lockingPriorityActiveContractRevision = 100
-	lockingPriorityRenew                  = 80
-	lockingPriorityFunding                = 40
 	lockingPrioritySyncing                = 30
-	lockingPriorityPruning                = 20
+	lockingPriorityActiveContractRevision = 100
 
 	lockingPriorityBlockedUpload    = 15
 	lockingPriorityUpload           = 10
@@ -357,176 +354,6 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(hpt)
-}
-
-func (w *Worker) rhpBroadcastHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the fcid
-	var fcid types.FileContractID
-	if jc.DecodeParam("id", &fcid) != nil {
-		return
-	}
-
-	// Acquire lock before fetching revision.
-	unlocker, err := w.acquireContractLock(ctx, fcid, lockingPriorityActiveContractRevision)
-	if jc.Check("could not acquire revision lock", err) != nil {
-		return
-	}
-	defer unlocker.Release(ctx)
-
-	// Fetch contract from bus.
-	c, err := w.bus.Contract(ctx, fcid)
-	if jc.Check("could not get contract", err) != nil {
-		return
-	}
-	rk := w.deriveRenterKey(c.HostKey)
-
-	rev, err := w.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
-	if jc.Check("could not fetch revision", err) != nil {
-		return
-	}
-
-	// Create txn with revision.
-	txn := types.Transaction{
-		FileContractRevisions: []types.FileContractRevision{rev.Revision},
-		Signatures:            rev.Signatures[:],
-	}
-	// Fund the txn. We pass 0 here since we only need the wallet to fund
-	// the fee.
-	toSign, parents, err := w.bus.WalletFund(ctx, &txn, types.ZeroCurrency, true)
-	if jc.Check("failed to fund transaction", err) != nil {
-		return
-	}
-	// Sign the txn.
-	err = w.bus.WalletSign(ctx, &txn, toSign, types.CoveredFields{
-		WholeTransaction: true,
-	})
-	if jc.Check("failed to sign transaction", err) != nil {
-		_ = w.bus.WalletDiscard(ctx, txn)
-		return
-	}
-	// Broadcast the txn.
-	txnSet := parents
-	txnSet = append(txnSet, txn)
-	err = w.bus.BroadcastTransaction(ctx, txnSet)
-	if jc.Check("failed to broadcast transaction", err) != nil {
-		_ = w.bus.WalletDiscard(ctx, txn)
-		return
-	}
-}
-
-func (w *Worker) rhpPruneContractHandlerPOST(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode fcid
-	var fcid types.FileContractID
-	if jc.DecodeParam("id", &fcid) != nil {
-		return
-	}
-
-	// decode timeout
-	var pcr api.RHPPruneContractRequest
-	if jc.Decode(&pcr) != nil {
-		return
-	}
-
-	// apply timeout
-	if pcr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(pcr.Timeout))
-		defer cancel()
-	}
-
-	// fetch the contract from the bus
-	contract, err := w.bus.Contract(ctx, fcid)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch contract", err) != nil {
-		return
-	}
-
-	// return early if there's no data to prune
-	size, err := w.bus.ContractSize(ctx, fcid)
-	if jc.Check("couldn't fetch contract size", err) != nil {
-		return
-	} else if size.Prunable == 0 {
-		jc.Encode(api.RHPPruneContractResponse{})
-		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not fetch gouging parameters", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	// prune the contract
-	var pruned, remaining uint64
-	var rev *types.FileContractRevision
-	var cost types.Currency
-	err = w.withContractLock(ctx, contract.ID, lockingPriorityPruning, func() error {
-		stored, pending, err := w.bus.ContractRoots(ctx, contract.ID)
-		if err != nil {
-			return fmt.Errorf("failed to fetch contract roots; %w", err)
-		}
-		rev, pruned, remaining, cost, err = w.rhp2Client.PruneContract(ctx, w.deriveRenterKey(contract.HostKey), gc, contract.HostIP, contract.HostKey, fcid, contract.RevisionNumber, append(stored, pending...))
-		return err
-	})
-	if rev != nil {
-		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{Deletions: cost})
-	}
-	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) && pruned == 0 {
-		err = fmt.Errorf("failed to prune contract %v; %w", fcid, err)
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-
-	res := api.RHPPruneContractResponse{
-		Pruned:    pruned,
-		Remaining: remaining,
-	}
-	if err != nil {
-		res.Error = err.Error()
-	}
-	jc.Encode(res)
-}
-
-func (w *Worker) rhpContractRootsHandlerGET(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode fcid
-	var id types.FileContractID
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	// fetch the contract from the bus
-	c, err := w.bus.Contract(ctx, id)
-	if errors.Is(err, api.ErrContractNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("couldn't fetch contract", err) != nil {
-		return
-	}
-
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("couldn't fetch gouging parameters from bus", err) != nil {
-		return
-	}
-	gc := newGougingChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, false)
-
-	// fetch the roots from the host
-	roots, rev, cost, err := w.rhp2Client.ContractRoots(ctx, w.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, id, c.RevisionNumber)
-	if jc.Check("couldn't fetch contract roots from host", err) != nil {
-		return
-	} else if rev != nil {
-		w.contractSpendingRecorder.Record(*rev, api.ContractSpending{SectorRoots: cost})
-	}
-	jc.Encode(roots)
 }
 
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
@@ -1161,12 +988,9 @@ func (w *Worker) Handler() http.Handler {
 
 		"GET /memory": w.memoryGET,
 
-		"GET    /rhp/contracts":              w.rhpContractsHandlerGET,
-		"POST   /rhp/contract/:id/broadcast": w.rhpBroadcastHandler,
-		"POST   /rhp/contract/:id/prune":     w.rhpPruneContractHandlerPOST,
-		"GET /rhp/contract/:id/roots":        w.rhpContractRootsHandlerGET,
-		"POST   /rhp/scan":                   w.rhpScanHandler,
-		"POST   /rhp/pricetable":             w.rhpPriceTableHandler,
+		"GET    /rhp/contracts":  w.rhpContractsHandlerGET,
+		"POST   /rhp/scan":       w.rhpScanHandler,
+		"POST   /rhp/pricetable": w.rhpPriceTableHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,

@@ -62,6 +62,12 @@ func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileC
 	return
 }
 
+// BroadcastContract broadcasts the latest revision for a contract.
+func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, &txnID)
+	return
+}
+
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s", id), &contract)
@@ -157,6 +163,12 @@ func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileCon
 // the amount of data that can be pruned.
 func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/prunable", &prunableData)
+	return
+}
+
+// PruneContract prunes the given contract.
+func (c *Client) PruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (res api.ContractPruneResponse, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/prune", contractID), api.ContractPruneRequest{Timeout: api.DurationMS(timeout)}, &res)
 	return
 }
 
