@@ -608,6 +608,11 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	if req.AutopilotID == "" && req.UsabilityMode != api.UsabilityFilterModeAll {
+		jc.Error(errors.New("need to specify autopilot id when usability mode isn't 'all'"), http.StatusBadRequest)
+		return
+	}
+
 	// validate the filter mode
 	switch req.FilterMode {
 	case api.HostFilterModeAllowed:

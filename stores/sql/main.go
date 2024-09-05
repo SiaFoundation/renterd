@@ -28,7 +28,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var ErrNegativeOffset = errors.New("offset can not be negative")
+var (
+	ErrNegativeOffset     = errors.New("offset can not be negative")
+	ErrMissingAutopilotID = errors.New("missing autopilot id")
+)
 
 // helper types
 type (
@@ -665,6 +668,8 @@ func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
 func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, error) {
 	if opts.Offset < 0 {
 		return nil, ErrNegativeOffset
+	} else if opts.AutopilotID == "" && opts.UsabilityMode != "" && opts.UsabilityMode != api.UsabilityFilterModeAll {
+		return nil, fmt.Errorf("%w: have to specify autopilot id when filter mode isn't 'all'", ErrMissingAutopilotID)
 	}
 
 	var hasAllowlist, hasBlocklist bool
@@ -723,7 +728,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	// filter address
 	if opts.AddressContains != "" {
 		whereExprs = append(whereExprs, "h.net_address LIKE ?")
-		fmt.Println("append1", opts.AddressContains)
 		args = append(args, "%"+opts.AddressContains+"%")
 	}
 
@@ -735,7 +739,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		}
 		placeholders := strings.Repeat("?, ", len(opts.KeyIn)-1) + "?"
 		whereExprs = append(whereExprs, fmt.Sprintf("h.public_key IN (%s)", placeholders))
-		fmt.Println("append2", pubKeys)
 		args = append(args, pubKeys...)
 	}
 
@@ -743,16 +746,15 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	whereApExpr := ""
 	if opts.AutopilotID != "" {
 		whereApExpr = "AND hc.db_autopilot_id = ?"
-	}
-	switch opts.UsabilityMode {
-	case api.UsabilityFilterModeUsable:
-		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
-		fmt.Println("append3", autopilotID)
-		args = append(args, autopilotID)
-	case api.UsabilityFilterModeUnusable:
-		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
-		args = append(args, autopilotID)
-		fmt.Println("append4", autopilotID)
+
+		switch opts.UsabilityMode {
+		case api.UsabilityFilterModeUsable:
+			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
+			args = append(args, autopilotID)
+		case api.UsabilityFilterModeUnusable:
+			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
+			args = append(args, autopilotID)
+		}
 	}
 
 	// offset + limit
@@ -806,9 +808,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		%s
 	`, blockedExpr, whereExpr, offsetLimitStr), args...)
 	if err != nil {
-		inOpts, _ := json.MarshalIndent(opts, "  ", "  ")
-		fmt.Println(string(inOpts))
-		return nil, fmt.Errorf("failed to fetch hosts: %w %v %v", err, string(inOpts), args)
+		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
 	defer rows.Close()
 

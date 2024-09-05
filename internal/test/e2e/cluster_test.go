@@ -337,6 +337,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUnusable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:   testApCfg().ID,
 		FilterMode:    api.UsabilityFilterModeAll,
 		UsabilityMode: api.UsabilityFilterModeUnusable,
 	})
@@ -346,6 +347,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUsable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:   testApCfg().ID,
 		FilterMode:    api.UsabilityFilterModeAll,
 		UsabilityMode: api.UsabilityFilterModeUsable,
 	})
