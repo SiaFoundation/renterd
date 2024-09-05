@@ -62,6 +62,12 @@ func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileC
 	return
 }
 
+// BroadcastContract broadcasts the latest revision for a contract.
+func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, &txnID)
+	return
+}
+
 // Contract returns the contract with the given ID.
 func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s", id), &contract)
@@ -160,6 +166,12 @@ func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPr
 	return
 }
 
+// PruneContract prunes the given contract.
+func (c *Client) PruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (res api.ContractPruneResponse, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/prune", contractID), api.ContractPruneRequest{Timeout: api.DurationMS(timeout)}, &res)
+	return
+}
+
 // RenewContract renews an existing contract with a host and adds it to the bus.
 func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
 	req := api.ContractRenewRequest{
@@ -193,8 +205,11 @@ func (c *Client) ReleaseContract(ctx context.Context, contractID types.FileContr
 	return
 }
 
-// SetContractSet adds the given contracts to the given set.
-func (c *Client) SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
+// UpdateContractSet adds/removes the given contracts to/from the given set.
+func (c *Client) UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contracts/set/%s", set), api.ContractSetUpdateRequest{
+		ToAdd:    toAdd,
+		ToRemove: toRemove,
+	}, nil)
 	return
 }

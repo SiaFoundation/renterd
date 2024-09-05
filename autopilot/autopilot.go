@@ -41,13 +41,15 @@ type Bus interface {
 	// contracts
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
-	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
+	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -322,7 +324,7 @@ func (ap *Autopilot) Run() {
 
 			// pruning
 			if autopilot.Config.Contracts.Prune {
-				ap.tryPerformPruning(ap.workers)
+				ap.tryPerformPruning()
 			} else {
 				ap.logger.Info("pruning disabled")
 			}
@@ -670,6 +672,9 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
 			contractSetChanged = true
