@@ -158,12 +158,11 @@ func (ap *Autopilot) Config(ctx context.Context) (api.Autopilot, error) {
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /config":        ap.configHandlerGET,
-		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /config":        ap.configHandlerPOST,
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /state":         ap.stateHandlerGET,
-		"POST   /trigger":       ap.triggerHandlerPOST,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+		"POST   /config":  ap.configHandlerPOST,
+		"GET    /state":   ap.stateHandlerGET,
+		"POST   /trigger": ap.triggerHandlerPOST,
 	})
 }
 
@@ -703,36 +702,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	jc.Encode(api.AutopilotTriggerResponse{
 		Triggered: ap.Trigger(req.ForceScan),
 	})
-}
-
-func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostKey", &hk) != nil {
-		return
-	}
-
-	hi, err := ap.bus.Host(jc.Request.Context(), hk)
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-
-	check, ok := hi.Checks[ap.id]
-	if ok {
-		jc.Encode(api.HostResponse{
-			Host: hi,
-			Checks: &api.HostChecks{
-				Gouging:          check.Gouging.Gouging(),
-				GougingBreakdown: check.Gouging,
-				Score:            check.Score.Score(),
-				ScoreBreakdown:   check.Score,
-				Usable:           check.Usability.IsUsable(),
-				UnusableReasons:  check.Usability.UnusableReasons(),
-			},
-		})
-		return
-	}
-
-	jc.Encode(api.HostResponse{Host: hi})
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {

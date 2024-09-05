@@ -295,64 +295,63 @@ func TestNewTestCluster(t *testing.T) {
 	hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	for _, host := range hosts {
-		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)
+		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		}
-		if hi.Checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
+		} else if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+			t.Fatal("host check not found")
+		} else if checks.Score.Score() == 0 {
+			js, _ := json.MarshalIndent(checks.Score, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		}
-		if hi.Checks.Score == 0 {
-			t.Fatal("score shouldn't be 0")
-		}
-		if !hi.Checks.Usable {
+		} else if !checks.Usability.IsUsable() {
 			t.Fatal("host should be usable")
-		}
-		if len(hi.Checks.UnusableReasons) != 0 {
+		} else if len(checks.Usability.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
-		}
-		if reflect.DeepEqual(hi.Host, api.Host{}) {
+		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		}
-		if hi.Host.Settings.Release == "" {
+		} else if hi.Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
 	}
-	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	hostInfos, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		FilterMode:    api.HostFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeAll,
+	})
 	tt.OK(err)
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if hi.Checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
+		if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+			t.Fatal("host check not found")
+		} else if checks.Score.Score() == 0 {
+			js, _ := json.MarshalIndent(checks.Score, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		}
-		if hi.Checks.Score == 0 {
-			t.Fatal("score shouldn't be 0")
-		}
-		if !hi.Checks.Usable {
+		} else if !checks.Usability.IsUsable() {
 			t.Fatal("host should be usable")
-		}
-		if len(hi.Checks.UnusableReasons) != 0 {
+		} else if len(checks.Usability.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
-		}
-		if reflect.DeepEqual(hi.Host, api.Host{}) {
+		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
 		}
-		allHosts[hi.Host.PublicKey] = struct{}{}
+		allHosts[hi.PublicKey] = struct{}{}
 	}
 
-	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
+	hostInfosUnusable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		FilterMode:    api.UsabilityFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeUnusable,
+	})
 	tt.OK(err)
 	if len(hostInfosUnusable) != 0 {
 		t.Fatal("there should be no unusable hosts", len(hostInfosUnusable))
 	}
 
-	hostInfosUsable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	hostInfosUsable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		FilterMode:    api.UsabilityFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeUsable,
+	})
 	tt.OK(err)
 	for _, hI := range hostInfosUsable {
-		delete(allHosts, hI.Host.PublicKey)
+		delete(allHosts, hI.PublicKey)
 	}
 	if len(hostInfosUsable) != len(hostInfos) || len(allHosts) != 0 {
 		t.Fatalf("result for 'usable' should match the result for 'all', \n\nall: %+v \n\nusable: %+v", hostInfos, hostInfosUsable)
