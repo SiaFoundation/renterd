@@ -127,18 +127,18 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 		WITH RECURSIVE ancestors AS
 		(
 			SELECT *
-			FROM archived_contracts
+			FROM contracts
 			WHERE renewed_to = ?
 			UNION ALL
-			SELECT archived_contracts.*
-			FROM ancestors, archived_contracts
-			WHERE archived_contracts.renewed_to = ancestors.fcid
+			SELECT contracts.*
+			FROM ancestors, contracts
+			WHERE contracts.renewed_to = ancestors.fcid
 		)
-		SELECT fcid, host, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
+		SELECT fcid, h.public_key, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
 		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
-		COALESCE(h.net_address, ''), contract_price, renewed_from, total_cost, reason
+		COALESCE(h.net_address, ''), contract_price, renewed_from, total_cost, archival_reason
 		FROM ancestors
-		LEFT JOIN hosts h ON h.public_key = ancestors.host
+		LEFT JOIN hosts h ON h.id = ancestors.host_id
 		WHERE start_height >= ?
 	`, FileContractID(fcid), startHeight)
 	if err != nil {
@@ -166,16 +166,24 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 }
 
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
-	if err := copyContractToArchive(ctx, tx, fcid, nil, reason); err != nil {
-		return fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
-	}
-	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", FileContractID(fcid))
+	var id int64
+	err := tx.QueryRow(ctx, "SELECT id FROM contracts WHERE fcid = ?", FileContractID(fcid)).Scan(&id)
 	if err != nil {
-		return fmt.Errorf("failed to delete contract from contracts: %w", err)
+		return fmt.Errorf("failed to fetch contract id: %w", err)
+	}
+
+	res, err := tx.Exec(ctx, "UPDATE contracts SET archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
+	if err != nil {
+		return fmt.Errorf("failed to archive contract: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
 		return fmt.Errorf("failed to fetch rows affected: %w", err)
 	} else if n == 0 {
-		return fmt.Errorf("expected to delete 1 row, deleted %d", n)
+		return fmt.Errorf("expected to update 1 row, updated %d", n)
+	}
+
+	_, err = tx.Exec(ctx, "DELETE FROM contract_sectors WHERE db_contract_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
 	return nil
 }
@@ -331,7 +339,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	rows, err := tx.Query(ctx, `
 		SELECT c.fcid, c.size, c.size
 		FROM contracts c
-		WHERE NOT EXISTS (
+		WHERE archival_reason == '' AND NOT EXISTS (
 			SELECT 1
 			FROM contract_sectors cs
 			WHERE cs.db_contract_id = c.id
@@ -342,6 +350,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 			SELECT c.fcid, c.size, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size
 			FROM contracts c
 			INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+			WHERE archival_reason == ''
 			GROUP BY c.fcid
 		) i
 	`, rhpv2.SectorSize)
@@ -709,7 +718,7 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 	return bufferedSlabID, nil
 }
 
-func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
+func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
 	var contractState ContractState
 	if err := contractState.LoadString(state); err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
@@ -721,11 +730,11 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 	}
 
 	res, err := tx.Exec(ctx, `
-		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
+		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, renewed_to, contract_price, state, total_cost, proof_height,
 		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending,
 		fund_account_spending, delete_spending, list_spending)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(types.FileContractID{}), FileContractID(types.FileContractID{}), Currency(contractPrice),
 		contractState, Currency(totalCost), 0, 0, "0", rev.Revision.Filesize, startHeight, rev.Revision.WindowStart, rev.Revision.WindowEnd,
 		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
 	if err != nil {
@@ -1850,8 +1859,10 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	}
 
 	// delete hosts
-	res, err := tx.Exec(ctx, "DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?",
-		maxDownTime, minRecentFailures)
+	res, err := tx.Exec(ctx, `
+DELETE FROM hosts h
+LEFT JOIN contracts c ON c.host_id = h.id
+WHERE h.recent_downtime >= ? AND h.recent_scan_failures >= ? AND c.id IS NULL`, maxDownTime, minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
@@ -1863,53 +1874,75 @@ func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, c
 	if err := contractState.LoadString(state); err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
 	}
-	// create copy of contract in archived_contracts
-	if err := copyContractToArchive(ctx, tx, renewedFrom, &rev.Revision.ParentID, api.ContractArchivalReasonRenewed); err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
+
+	// fetch existing contract
+	var r ContractRow
+	err := tx.QueryRow(ctx, `
+SELECT
+	c.created_at, c.fcid, c.renewed_from,
+	c.contract_price, c.state, c.total_cost, c.proof_height, c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
+	c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
+	c.host_id, c.archival_reason
+FROM contracts AS c
+WHERE fcid = ?`, FileContractID(renewedFrom)).Scan(&r.CreatedAt, &r.FCID, &r.RenewedFrom,
+		&r.ContractPrice, &r.State, &r.TotalCost, &r.ProofHeight, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.WindowStart, &r.WindowEnd,
+		&r.UploadSpending, &r.DownloadSpending, &r.FundAccountSpending, &r.DeleteSpending, &r.ListSpending,
+		&r.HostID, &r.ArchivalReason)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ContractMetadata{}, contractNotFoundErr(renewedFrom)
+	} else if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract: %w", err)
 	}
-	// update existing contract
-	_, err := tx.Exec(ctx, `
-		UPDATE contracts SET
-			created_at = ?,
-			fcid = ?,
-			renewed_from = ?,
-			contract_price = ?,
-			state = ?,
-			total_cost = ?,
-			proof_height = ?,
-			revision_height = ?,
-			revision_number = ?,
-			size = ?,
-			start_height = ?,
-			window_start = ?,
-			window_end = ?,
-			upload_spending = ?,
-			download_spending = ?,
-			fund_account_spending = ?,
-			delete_spending = ?,
-			list_spending = ?
-		WHERE fcid = ?
-	`,
-		time.Now(), FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice), contractState,
+
+	// overwrite existing contract
+	_, err = tx.Exec(ctx, `
+UPDATE contracts SET
+	created_at = ?, fcid = ?, renewed_from = ?, renewed_to = ?,
+	contract_price = ?, state = ?, total_cost = ?, proof_height = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, window_start = ?, window_end = ?,
+	upload_spending = ?, download_spending = ?, fund_account_spending = ?, delete_spending = ?, list_spending = ?
+WHERE fcid = ?`,
+		time.Now(), FileContractID(rev.ID()), FileContractID(renewedFrom), FileContractID(types.FileContractID{}), Currency(contractPrice), contractState,
 		Currency(totalCost), 0, 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight,
 		rev.Revision.WindowStart, rev.Revision.WindowEnd, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
 		ZeroCurrency, FileContractID(renewedFrom))
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to update contract: %w", err)
 	}
+
+	// insert archived contract
+	r.ArchivalReason = api.ContractArchivalReasonRenewed
+	res, err := tx.Exec(ctx, `
+INSERT INTO contracts (
+	created_at, fcid, renewed_from, renewed_to, contract_price, state, total_cost, proof_height,
+	revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending, delete_spending, list_spending,
+	host_id, archival_reason
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.CreatedAt, r.FCID, r.RenewedFrom, FileContractID(rev.ID()), r.ContractPrice, r.State, r.TotalCost, r.ProofHeight,
+		r.RevisionHeight, r.RevisionNumber, r.Size, r.StartHeight, r.WindowStart, r.WindowEnd, r.UploadSpending, r.DownloadSpending, r.FundAccountSpending, r.DeleteSpending, r.ListSpending,
+		r.HostID, r.ArchivalReason,
+	)
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to insert archived contract: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to insert archived contract: %w", err)
+	} else if n != 1 {
+		return api.ContractMetadata{}, fmt.Errorf("failed to insert archived contract: no rows affected")
+	}
+
 	return Contract(ctx, tx, rev.ID())
 }
 
 func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
-	var whereExpr string
+	whereExpr := "WHERE c.archival_reason == ''"
 	if len(whereExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
+		whereExpr += " AND " + strings.Join(whereExprs, " AND ")
 	}
+
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
+			SELECT c.created_at, c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
+			c.host_id, c.archival_reason, COALESCE(cs.name, ""), COALESCE(h.net_address, ""), h.public_key, h.settings->>'$.siamuxport' AS siamux_port
 			FROM contracts AS c
 			INNER JOIN hosts h ON h.id = c.host_id
 			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
@@ -2485,22 +2518,6 @@ func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) 
 		return 0, fmt.Errorf("failed to count wallet events: %w", err)
 	}
 	return uint64(n), nil
-}
-
-func copyContractToArchive(ctx context.Context, tx sql.Tx, fcid types.FileContractID, renewedTo *types.FileContractID, reason string) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
-			proof_height, revision_height, revision_number, size, start_height, window_start, window_end,
-			upload_spending, download_spending, fund_account_spending, delete_spending, list_spending, renewed_to,
-			host, reason)
-		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
-			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
-			delete_spending, list_spending, ?, h.public_key, ?
-		FROM contracts c
-		INNER JOIN hosts h ON h.id = c.host_id
-		WHERE fcid = ?
-	`, time.Now(), (*FileContractID)(renewedTo), reason, FileContractID(fcid))
-	return err
 }
 
 func scanAutopilot(s Scanner) (api.Autopilot, error) {

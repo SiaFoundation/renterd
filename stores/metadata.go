@@ -112,7 +112,7 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (_ api.ContractMetadata, err error) {
 	var contract api.ContractMetadata
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		contract, err = tx.InsertContract(ctx, c, contractPrice, totalCost, startHeight, types.FileContractID{}, state)
+		contract, err = tx.InsertContract(ctx, c, contractPrice, totalCost, startHeight, state)
 		return err
 	})
 	if err != nil {

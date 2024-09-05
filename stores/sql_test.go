@@ -314,12 +314,12 @@ func (s *testSQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.F
 }
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
-	rev := testContractRevision(fcid, hk)
+	rev := newTestContract(fcid, hk)
 	return s.AddContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, 0, api.ContractStatePending)
 }
 
 func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
-	rev := testContractRevision(fcid, hk)
+	rev := newTestContract(fcid, hk)
 	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, startHeight, renewedFrom, api.ContractStatePending)
 }
 

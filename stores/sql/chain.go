@@ -12,20 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
-var contractTables = []string{
-	"contracts",
-	"archived_contracts",
-}
-
 func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractState, error) {
 	var cse ContractState
 	err := tx.
-		QueryRow(ctx,
-			fmt.Sprintf("SELECT state FROM (SELECT state, fcid FROM %s UNION SELECT state, fcid FROM %s) as combined WHERE fcid = ?",
-				contractTables[0],
-				contractTables[1]),
-			FileContractID(fcid),
-		).
+		QueryRow(ctx, `SELECT state FROM contracts WHERE fcid = ?`, FileContractID(fcid)).
 		Scan(&cse)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return "", contractNotFoundErr(fcid)
@@ -55,45 +45,41 @@ func UpdateChainIndex(ctx context.Context, tx sql.Tx, index types.ChainIndex, l 
 }
 
 func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, revisionHeight, revisionNumber, size uint64, l *zap.SugaredLogger) error {
-	for _, table := range contractTables {
-		// fetch current contract, in SQLite we could use a single query to
-		// perform the conditional update, however we have to compare the
-		// revision number which are stored as strings so we need to fetch the
-		// current contract info separately
-		var currRevisionHeight, currSize uint64
-		var currRevisionNumber Uint64Str
-		err := tx.
-			QueryRow(ctx, fmt.Sprintf("SELECT revision_height, revision_number, COALESCE(size, 0) FROM %s WHERE fcid = ?", table), FileContractID(fcid)).
-			Scan(&currRevisionHeight, &currRevisionNumber, &currSize)
-		if errors.Is(err, dsql.ErrNoRows) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch '%s' info for %v: %w", table[:len(table)-1], fcid, err)
-		}
-
-		// update contract
-		err = updateContract(ctx, tx, table, fcid, currRevisionHeight, uint64(currRevisionNumber), revisionHeight, revisionNumber, size)
-		if err != nil {
-			return fmt.Errorf("failed to update '%s' %v: %w", table[:len(table)-1], fcid, err)
-		}
-
-		l.Debugw(fmt.Sprintf("update %s, revision number %d -> %d, revision height %d -> %d, size %d -> %d", table[:len(table)-1], currRevisionNumber, revisionNumber, currRevisionHeight, revisionHeight, currSize, size), "fcid", fcid)
-		return nil
+	// fetch current contract, in SQLite we could use a single query to
+	// perform the conditional update, however we have to compare the
+	// revision number which are stored as strings so we need to fetch the
+	// current contract info separately
+	var currRevisionHeight, currSize uint64
+	var currRevisionNumber Uint64Str
+	err := tx.
+		QueryRow(ctx, `SELECT revision_height, revision_number, COALESCE(size, 0) FROM contracts WHERE fcid = ?`, FileContractID(fcid)).
+		Scan(&currRevisionHeight, &currRevisionNumber, &currSize)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return contractNotFoundErr(fcid)
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch contract %v: %w", fcid, err)
 	}
 
-	return contractNotFoundErr(fcid)
+	// update contract
+	err = updateContract(ctx, tx, fcid, currRevisionHeight, uint64(currRevisionNumber), revisionHeight, revisionNumber, size)
+	if err != nil {
+		return fmt.Errorf("failed to update contract %v: %w", fcid, err)
+	}
+
+	l.Debugw(fmt.Sprintf("updated contract %v: revision number %d -> %d, revision height %d -> %d, size %d -> %d", fcid, currRevisionNumber, revisionNumber, currRevisionHeight, revisionHeight, currSize, size))
+	return nil
 }
 
 func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileContractID, proofHeight uint64, l *zap.SugaredLogger) error {
 	l.Debugw("update contract proof height", "fcid", fcid, "proof_height", proofHeight)
 
-	for _, table := range contractTables {
-		ok, err := updateContractProofHeight(ctx, tx, table, fcid, proofHeight)
-		if err != nil {
-			return fmt.Errorf("failed to update '%s' %v proof height: %w", table[:len(table)-1], fcid, err)
-		} else if ok {
-			break
-		}
+	res, err := tx.Exec(ctx, `UPDATE contracts SET proof_height = ? WHERE fcid = ?`, proofHeight, FileContractID(fcid))
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("expected to update 1 row, but updated %d", n)
 	}
 
 	return nil
@@ -107,13 +93,13 @@ func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContract
 		return err
 	}
 
-	for _, table := range contractTables {
-		ok, err := updateContractState(ctx, tx, table, fcid, cs)
-		if err != nil {
-			return fmt.Errorf("failed to update %s state: %w", table[:len(table)-1], err)
-		} else if ok {
-			break
-		}
+	res, err := tx.Exec(ctx, `UPDATE contracts SET state = ? WHERE fcid = ?`, cs, FileContractID(fcid))
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("expected to update 1 row, but updated %d", n)
 	}
 
 	return nil
@@ -180,11 +166,11 @@ func contractNotFoundErr(fcid types.FileContractID) error {
 	return fmt.Errorf("%w: %v", api.ErrContractNotFound, fcid)
 }
 
-func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, currRevisionHeight, currRevisionNumber, revisionHeight, revisionNumber, size uint64) (err error) {
+func updateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, currRevisionHeight, currRevisionNumber, revisionHeight, revisionNumber, size uint64) (err error) {
 	if revisionNumber > currRevisionNumber {
 		_, err = tx.Exec(
 			ctx,
-			fmt.Sprintf("UPDATE %s SET revision_height = ?, revision_number = ?, size = ? WHERE fcid = ?", table),
+			"UPDATE contracts SET revision_height = ?, revision_number = ?, size = ? WHERE fcid = ?",
 			revisionHeight,
 			fmt.Sprint(revisionNumber),
 			size,
@@ -193,34 +179,10 @@ func updateContract(ctx context.Context, tx sql.Tx, table string, fcid types.Fil
 	} else if revisionHeight > currRevisionHeight {
 		_, err = tx.Exec(
 			ctx,
-			fmt.Sprintf("UPDATE %s SET revision_height = ? WHERE fcid = ?", table),
+			"UPDATE contracts SET revision_height = ? WHERE fcid = ?",
 			revisionHeight,
 			FileContractID(fcid),
 		)
 	}
 	return
-}
-
-func updateContractProofHeight(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, proofHeight uint64) (bool, error) {
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET proof_height = ? WHERE fcid = ?", table), proofHeight, FileContractID(fcid))
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-	return n == 1, nil
-}
-
-func updateContractState(ctx context.Context, tx sql.Tx, table string, fcid types.FileContractID, cs ContractState) (bool, error) {
-	res, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET state = ? WHERE fcid = ?", table), cs, FileContractID(fcid))
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-	return n == 1, nil
 }
