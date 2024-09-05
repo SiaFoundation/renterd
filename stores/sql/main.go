@@ -1909,7 +1909,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
+			COALESCE(cs.name, ""), h.net_address, h.public_key, COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 			FROM contracts AS c
 			INNER JOIN hosts h ON h.id = c.host_id
 			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
