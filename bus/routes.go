@@ -19,6 +19,7 @@ import (
 
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
+	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -271,11 +272,7 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	tip, err := b.w.Tip()
-	if jc.Check("couldn't fetch wallet scan height", err) != nil {
-		return
-	}
-
+	tip := b.w.Tip()
 	jc.Encode(api.WalletResponse{
 		ScanHeight:  tip.Height,
 		Address:     address,
@@ -446,19 +443,23 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 			},
 		}
 		// fund and sign transaction
-		state, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
+		basis, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
 		if jc.Check("failed to fund transaction", err) != nil {
 			return
 		}
-		b.w.SignV2Inputs(state, &txn, toSign)
-		txnset := append(b.cm.V2UnconfirmedParents(txn), txn)
+		b.w.SignV2Inputs(&txn, toSign)
+		basis, txnset, err := b.cm.V2TransactionSet(basis, txn)
+		if jc.Check("failed to get parents for funded transaction", err) != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return
+		}
 		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddV2PoolTransactions(state.Index, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+		if _, err := b.cm.AddV2PoolTransactions(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
 			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
 			return
 		}
 		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(state.Index, txnset)
+		b.s.BroadcastV2TransactionSet(basis, txnset)
 		jc.Encode(txn.ID())
 	} else {
 		// build transaction
@@ -542,7 +543,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 
 		for i := 0; i < len(txns); i++ {
-			b.w.SignV2Inputs(state, &txns[i], toSign[i])
+			b.w.SignV2Inputs(&txns[i], toSign[i])
 			ids = append(ids, txns[i].ID())
 		}
 
@@ -801,22 +802,23 @@ func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
-	var contractIds []types.FileContractID
+	var req api.ContractSetUpdateRequest
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
 		return
-	} else if jc.Decode(&contractIds) != nil {
+	} else if jc.Decode(&req) != nil {
 		return
-	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
+	} else if jc.Check("could not add contracts to set", b.ms.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
 	} else {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleContractSet,
 			Event:  api.EventUpdate,
 			Payload: api.EventContractSetUpdate{
-				Name:        set,
-				ContractIDs: contractIds,
-				Timestamp:   time.Now().UTC(),
+				Name:      set,
+				ToAdd:     req.ToAdd,
+				ToRemove:  req.ToRemove,
+				Timestamp: time.Now().UTC(),
 			},
 		})
 	}
@@ -861,6 +863,117 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
 	}
+}
+
+func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
+	ctx := jc.Request.Context()
+
+	// decode fcid
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	// decode timeout
+	var req api.ContractPruneRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	// create gouging checker
+	gp, err := b.gougingParams(ctx)
+	if jc.Check("couldn't fetch gouging parameters", err) != nil {
+		return
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+
+	// apply timeout
+	pruneCtx := ctx
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		pruneCtx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout))
+		defer cancel()
+	}
+
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(pruneCtx, lockingPriorityPruning, fcid, time.Duration(math.MaxInt64))
+	if jc.Check("couldn't acquire contract lock", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(fcid, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// fetch the contract from the bus
+	c, err := b.ms.Contract(ctx, fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't fetch contract", err) != nil {
+		return
+	}
+
+	// build map of uploading sectors
+	pending := make(map[types.Hash256]struct{})
+	for _, root := range b.sectors.Sectors(fcid) {
+		pending[root] = struct{}{}
+	}
+
+	// prune the contract
+	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
+		if err != nil {
+			return nil, err
+		} else if len(indices) > len(roots) {
+			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
+		}
+
+		filtered := indices[:0]
+		for _, index := range indices {
+			_, ok := pending[roots[index]]
+			if !ok {
+				filtered = append(filtered, index)
+			}
+		}
+		indices = filtered
+		return indices, nil
+	})
+
+	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
+		err = nil // ignore error
+	} else if !errors.Is(err, context.Canceled) {
+		if jc.Check("couldn't prune contract", err) != nil {
+			return
+		}
+	}
+
+	// record spending
+	if !spending.Total().IsZero() {
+		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+			{
+				ContractSpending: spending,
+				ContractID:       fcid,
+				RevisionNumber:   rev.RevisionNumber,
+				Size:             rev.Filesize,
+
+				MissedHostPayout:  rev.MissedHostPayout(),
+				ValidRenterPayout: rev.ValidRenterPayout(),
+			},
+		})
+	}
+
+	// return response
+	res := api.ContractPruneResponse{
+		ContractSize: rev.Filesize,
+		Pruned:       pruned,
+		Remaining:    remaining,
+	}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	jc.Encode(res)
 }
 
 func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
@@ -1613,6 +1726,18 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	jc.Encode(ancestors)
+}
+
+func (b *Bus) contractIDBroadcastHandler(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+
+	txnID, err := b.broadcastContract(jc.Request.Context(), fcid)
+	if jc.Check("failed to broadcast contract revision", err) == nil {
+		jc.Encode(txnID)
+	}
 }
 
 func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {

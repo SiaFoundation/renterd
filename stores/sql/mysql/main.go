@@ -26,6 +26,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	batchSizeInsertSectors = 500
+)
+
 type (
 	MainDatabase struct {
 		db  *sql.DB
@@ -562,6 +566,62 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 	})
 }
 
+func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+	// build tmp table name
+	tmpTable := strings.ReplaceAll(fmt.Sprintf("tmp_host_roots_%s", fcid.String()[:8]), ":", "_")
+
+	// create temporary table
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+DROP TABLE IF EXISTS %s;
+CREATE TEMPORARY TABLE %s (idx INT, root varbinary(32)) ENGINE=MEMORY;
+CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary table: %w", err)
+	}
+
+	// defer removal
+	defer func() {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable)); err != nil {
+			tx.log.Warnw("failed to drop temporary table", zap.Error(err))
+		}
+	}()
+
+	// insert roots in batches
+	for i := 0; i < len(roots); i += batchSizeInsertSectors {
+		end := i + batchSizeInsertSectors
+		if end > len(roots) {
+			end = len(roots)
+		}
+
+		var params []interface{}
+		for i, r := range roots[i:end] {
+			params = append(params, uint64(i), ssql.Hash256(r))
+		}
+
+		_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+		}
+	}
+
+	// execute query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	defer rows.Close()
+
+	// fetch indices
+	for rows.Next() {
+		var idx uint64
+		if err := rows.Scan(&idx); err != nil {
+			return nil, fmt.Errorf("failed to scan root index: %w", err)
+		}
+		indices = append(indices, idx)
+	}
+	return
+}
+
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
 	stmt, err := tx.Prepare(ctx, `
 	DELETE
@@ -760,57 +820,6 @@ func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag"
 }
 
-func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
-	if err != nil {
-		return fmt.Errorf("failed to insert contract set: %w", err)
-	}
-
-	csID, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-
-	// handle empty set
-	if len(contractIds) == 0 {
-		_, err := tx.Exec(ctx, "DELETE FROM contract_set_contracts WHERE db_contract_set_id = ?", csID)
-		return err
-	}
-
-	// prepare fcid args and query
-	fcidQuery := strings.Repeat("?, ", len(contractIds)-1) + "?"
-	fcidArgs := make([]interface{}, len(contractIds))
-	for i, fcid := range contractIds {
-		fcidArgs[i] = ssql.FileContractID(fcid)
-	}
-
-	// remove unwanted contracts
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		DELETE csc
-		FROM contract_set_contracts csc
-		INNER JOIN contracts c ON c.id = csc.db_contract_id
-		WHERE c.fcid NOT IN (%s)
-	`, fcidQuery), fcidArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to delete contract set contracts: %w", err)
-	}
-
-	// add missing contracts
-	args := []interface{}{csID}
-	args = append(args, fcidArgs...)
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
-		SELECT ?, c.id
-		FROM contracts c
-		WHERE c.fcid IN (%s)
-		ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
-	`, fcidQuery), args...)
-	if err != nil {
-		return fmt.Errorf("failed to add contract set contracts: %w", err)
-	}
-	return nil
-}
-
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
 }
@@ -852,6 +861,62 @@ func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot)
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
+}
+
+func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
+	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
+	if err != nil {
+		return fmt.Errorf("failed to insert contract set: %w", err)
+	}
+
+	// if no changes are needed, return after creating the set
+	if len(toAdd)+len(toRemove) == 0 {
+		return nil
+	}
+
+	csID, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+
+	prepareQuery := func(fcids []types.FileContractID) (string, []any) {
+		args := []any{csID}
+		query := strings.Repeat("?, ", len(fcids)-1) + "?"
+		for _, fcid := range fcids {
+			args = append(args, ssql.FileContractID(fcid))
+		}
+		return query, args
+	}
+
+	// remove unwanted contracts first
+	if len(toRemove) > 0 {
+		query, args := prepareQuery(toRemove)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			DELETE csc
+			FROM contract_set_contracts csc
+			INNER JOIN contracts c ON c.id = csc.db_contract_id
+			WHERE csc.db_contract_set_id = ? AND c.fcid IN (%s)
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to remove contracts: %w", err)
+		}
+	}
+
+	// add new contracts
+	if len(toAdd) > 0 {
+		query, args := prepareQuery(toAdd)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
+			SELECT ?, c.id
+			FROM contracts c
+			WHERE c.fcid IN (%s)
+			ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to add contract set contracts: %w", err)
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {

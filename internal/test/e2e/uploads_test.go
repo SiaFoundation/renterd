@@ -135,7 +135,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 			}
 		}
 
-		cr, err := w.RHPContractRoots(context.Background(), id)
+		cr, err := cluster.ContractRoots(context.Background(), id)
 		tt.OK(err)
 		expected := make(map[types.Hash256]struct{})
 		for _, root := range cr {

@@ -25,6 +25,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	batchSizeInsertSectors = 500
+)
+
 type (
 	MainDatabase struct {
 		db  *sql.DB
@@ -447,7 +451,6 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 		)
 	`, strings.Repeat("?, ", len(fcids)-1)+"?"), args...)
 	if err != nil {
-		fmt.Println(strings.Repeat("?, ", len(fcids)-1) + "?")
 		return 0, err
 	}
 	return res.RowsAffected()
@@ -557,6 +560,76 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 		tx:  tx,
 		l:   tx.log.Named("ProcessChainUpdate"),
 	})
+}
+
+func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+	// build tmp table name
+	tmpTable := strings.ReplaceAll(fmt.Sprintf("tmp_host_roots_%s", fcid.String()[:8]), ":", "_")
+
+	// create temporary table
+	_, err = tx.Exec(ctx, fmt.Sprintf(`
+DROP TABLE IF EXISTS %s;
+CREATE TEMPORARY TABLE %s (idx INT, root blob);
+CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary table: %w", err)
+	}
+
+	// defer removal
+	defer func() {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable)); err != nil {
+			tx.log.Warnw("failed to drop temporary table", zap.Error(err))
+		}
+	}()
+
+	// prepare insert statement
+	insertStmt, err := tx.Prepare(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", batchSizeInsertSectors), ", ")))
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement to insert contract roots: %w", err)
+	}
+	defer insertStmt.Close()
+
+	// insert roots in batches
+	for i := 0; i < len(roots); i += batchSizeInsertSectors {
+		end := i + batchSizeInsertSectors
+		if end > len(roots) {
+			end = len(roots)
+		}
+
+		var params []interface{}
+		for i, r := range roots[i:end] {
+			params = append(params, uint64(i), ssql.Hash256(r))
+		}
+
+		if len(params) == batchSizeInsertSectors {
+			_, err := insertStmt.Exec(ctx, params...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+			}
+		} else {
+			_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
+			}
+		}
+	}
+
+	// execute query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	defer rows.Close()
+
+	// fetch indices
+	for rows.Next() {
+		var idx uint64
+		if err := rows.Scan(&idx); err != nil {
+			return nil, fmt.Errorf("failed to scan root index: %w", err)
+		}
+		indices = append(indices, idx)
+	}
+	return
 }
 
 func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
@@ -761,51 +834,56 @@ func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 	return "o.object_id, o.size, o.health, o.mime_type, DATETIME(o.created_at), o.etag"
 }
 
-func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
+func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
 	var csID int64
 	err := tx.QueryRow(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON CONFLICT(name) DO UPDATE SET id = id RETURNING id", name).Scan(&csID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract set id: %w", err)
 	}
 
-	// handle empty set
-	if len(contractIds) == 0 {
-		_, err := tx.Exec(ctx, "DELETE FROM contract_set_contracts WHERE db_contract_set_id = ?", csID)
-		return err
+	// if no changes are needed, return after creating the set
+	if len(toAdd)+len(toRemove) == 0 {
+		return nil
 	}
 
-	// prepare fcid args and query
-	fcidQuery := strings.Repeat("?, ", len(contractIds)-1) + "?"
-	fcidArgs := make([]interface{}, len(contractIds))
-	for i, fcid := range contractIds {
-		fcidArgs[i] = ssql.FileContractID(fcid)
+	prepareQuery := func(fcids []types.FileContractID) (string, []any) {
+		args := []any{csID}
+		query := strings.Repeat("?, ", len(fcids)-1) + "?"
+		for _, fcid := range fcids {
+			args = append(args, ssql.FileContractID(fcid))
+		}
+		return query, args
 	}
 
-	// remove unwanted contracts
-	args := []interface{}{csID}
-	args = append(args, fcidArgs...)
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		DELETE FROM contract_set_contracts
-		WHERE db_contract_set_id = ? AND db_contract_id NOT IN (
-			SELECT id
-			FROM contracts
-			WHERE contracts.fcid IN (%s)
-		)
-	`, fcidQuery), args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete contract set contracts: %w", err)
+	// remove unwanted contracts first
+	if len(toRemove) > 0 {
+		query, args := prepareQuery(toRemove)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			DELETE FROM contract_set_contracts
+			WHERE db_contract_set_id = ? AND db_contract_id IN (
+				SELECT id
+				FROM contracts
+				WHERE contracts.fcid IN (%s)
+			)
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to delete contract set contracts: %w", err)
+		}
 	}
 
-	// add missing contracts
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
-		SELECT ?, c.id
-		FROM contracts c
-		WHERE c.fcid IN (%s)
-		ON CONFLICT(db_contract_set_id, db_contract_id) DO NOTHING
-	`, fcidQuery), args...)
-	if err != nil {
-		return fmt.Errorf("failed to add contract set contracts: %w", err)
+	// add new contracts
+	if len(toAdd) > 0 {
+		query, args := prepareQuery(toAdd)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
+			SELECT ?, c.id
+			FROM contracts c
+			WHERE c.fcid IN (%s)
+			ON CONFLICT(db_contract_set_id, db_contract_id) DO NOTHING
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to add contract set contracts: %w", err)
+		}
 	}
 	return nil
 }

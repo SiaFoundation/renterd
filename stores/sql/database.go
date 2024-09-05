@@ -240,6 +240,10 @@ type (
 		// ProcessChainUpdate applies the given chain update to the database.
 		ProcessChainUpdate(ctx context.Context, applyFn func(ChainUpdateTx) error) error
 
+		// PrunableContractRoots returns the indices of roots that are not in
+		// the contract.
+		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 
@@ -310,9 +314,10 @@ type (
 		// SearchHosts returns a list of hosts that match the provided filters
 		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 
-		// SetContractSet creates the contract set with the given name and
-		// associates it with the provided contract IDs.
-		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't exist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)

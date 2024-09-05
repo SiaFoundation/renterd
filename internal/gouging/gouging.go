@@ -32,7 +32,7 @@ const (
 )
 
 var (
-	errHostSettingsGouging = errors.New("host settings gouging detected")
+	ErrHostSettingsGouging = errors.New("host settings gouging detected")
 	ErrPriceTableGouging   = errors.New("price table gouging detected")
 )
 
@@ -243,7 +243,7 @@ func checkContractGougingRHPv2(period, renewWindow *uint64, hs *rhpv2.HostSettin
 
 	err = checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
 	if err != nil {
-		err = fmt.Errorf("%w: %v", errHostSettingsGouging, err)
+		err = fmt.Errorf("%w: %v", ErrHostSettingsGouging, err)
 	}
 	return
 }
@@ -290,14 +290,14 @@ func checkPruneGougingRHPv2(gs api.GougingSettings, hs *rhpv2.HostSettings) erro
 		hs.UploadBandwidthPrice,
 	)
 	if overflow {
-		return fmt.Errorf("%w: overflow detected when computing sector download price", errHostSettingsGouging)
+		return fmt.Errorf("%w: overflow detected when computing sector download price", ErrHostSettingsGouging)
 	}
 	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(uint64(bytesPerTB) / rhpv2.SectorSize) // sectors per TB
 	if overflow {
-		return fmt.Errorf("%w: overflow detected when computing download price per TiB", errHostSettingsGouging)
+		return fmt.Errorf("%w: overflow detected when computing download price per TiB", ErrHostSettingsGouging)
 	}
 	if !gs.MaxDownloadPrice.IsZero() && dpptb.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("%w: cost per TiB exceeds max dl price: %v > %v", errHostSettingsGouging, dpptb, gs.MaxDownloadPrice)
+		return fmt.Errorf("%w: cost per TiB exceeds max dl price: %v > %v", ErrHostSettingsGouging, dpptb, gs.MaxDownloadPrice)
 	}
 	return nil
 }
