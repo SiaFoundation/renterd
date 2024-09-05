@@ -34,7 +34,6 @@ import (
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -292,8 +291,8 @@ type (
 		GougingSettings(ctx context.Context) (api.GougingSettings, error)
 		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
 
-		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
-		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
+		PinningSettings(ctx context.Context) (api.PinningSettings, error)
+		UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error
 
 		UploadSettings(ctx context.Context) (api.UploadSettings, error)
 		UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error
@@ -578,24 +577,6 @@ func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileCont
 	return r, nil
 }
 
-func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
-func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
 func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
@@ -615,7 +596,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}
 
 	// derive the renter key
-	renterKey := b.deriveRenterKey(c.HostKey)
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
 	// fetch revision
 	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
@@ -659,7 +640,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
 	// derive the renter key
-	renterKey := b.deriveRenterKey(hostKey)
+	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
 	// prepare the transaction
 	cs := b.cm.TipState()
@@ -753,6 +734,9 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 }
 
 func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
 	if err != nil {
@@ -772,7 +756,6 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
-	renterKey := b.deriveRenterKey(c.HostKey)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, maxFundAmount, endHeight, expectedNewStorage)
 	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {

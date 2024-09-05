@@ -18,13 +18,13 @@ func (c *Client) UpdateGougingSettings(ctx context.Context, gs api.GougingSettin
 }
 
 // PricePinningSettings returns the contract set settings.
-func (c *Client) PricePinningSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
+func (c *Client) PricePinningSettings(ctx context.Context) (ps api.PinningSettings, err error) {
 	err = c.c.WithContext(ctx).GET("/settings/pinned", &ps)
 	return
 }
 
-// UpdatePinnedSettings updates the given setting.
-func (c *Client) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+// UpdatePinningSettings updates the given setting.
+func (c *Client) UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error {
 	return c.c.WithContext(ctx).PUT("/settings/pinned", ps)
 }
 

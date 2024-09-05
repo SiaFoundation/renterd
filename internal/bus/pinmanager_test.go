@@ -112,7 +112,7 @@ func (api *mockForexAPI) setUnreachable(unreachable bool) {
 type mockPinStore struct {
 	mu         sync.Mutex
 	gs         api.GougingSettings
-	ps         api.PinnedSettings
+	ps         api.PinningSettings
 	autopilots map[string]api.Autopilot
 }
 
@@ -149,18 +149,18 @@ func (ms *mockPinStore) UpdateGougingSettings(ctx context.Context, gs api.Gougin
 	return nil
 }
 
-func (ms *mockPinStore) PinnedSettings(ctx context.Context) (api.PinnedSettings, error) {
+func (ms *mockPinStore) PinningSettings(ctx context.Context) (api.PinningSettings, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	return ms.ps, nil
 }
 
-func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+func (ms *mockPinStore) UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error {
 	b, err := json.Marshal(ps)
 	if err != nil {
 		return err
 	}
-	var cloned api.PinnedSettings
+	var cloned api.PinningSettings
 	if err := json.Unmarshal(b, &cloned); err != nil {
 		return err
 	}
@@ -221,7 +221,7 @@ func TestPinManager(t *testing.T) {
 	pps.Currency = "usd"
 	pps.Threshold = 0.5
 	pps.ForexEndpointURL = forex.s.URL
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 
 	// assert price manager is running now
 	if cnt := len(rates()); cnt < 1 {
@@ -236,7 +236,7 @@ func TestPinManager(t *testing.T) {
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 
 	// assert gouging settings are unchanged
 	if gss, _ := ms.GougingSettings(context.Background()); !reflect.DeepEqual(gs, gss) {
@@ -245,14 +245,14 @@ func TestPinManager(t *testing.T) {
 
 	// enable the max download pin, with the threshold at 0.5 it should remain unchanged
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 	if gss, _ := ms.GougingSettings(context.Background()); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
 	// lower the threshold, gouging settings should be updated
 	pps.Threshold = 0.05
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 	if gss, _ := ms.GougingSettings(context.Background()); gss.MaxContractPrice.Equals(gs.MaxDownloadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
@@ -261,7 +261,7 @@ func TestPinManager(t *testing.T) {
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 
 	// assert they're all updated
 	if gss, _ := ms.GougingSettings(context.Background()); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
@@ -284,7 +284,7 @@ func TestPinManager(t *testing.T) {
 		},
 	}
 	pps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 
 	// assert autopilot was not updated
 	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -294,7 +294,7 @@ func TestPinManager(t *testing.T) {
 	// enable the pin
 	pins.Allowance.Pinned = true
 	pps.Autopilots[testAutopilotID] = pins
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 
 	// assert autopilot was updated
 	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -305,7 +305,7 @@ func TestPinManager(t *testing.T) {
 	forex.setUnreachable(true)
 
 	// assert alert was registered
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 	res, _ := a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) == 0 {
 		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
@@ -315,7 +315,7 @@ func TestPinManager(t *testing.T) {
 	forex.setUnreachable(false)
 
 	// assert alert was dismissed
-	ms.UpdatePinnedSettings(context.Background(), pps)
+	ms.UpdatePinningSettings(context.Background(), pps)
 	res, _ = a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(a.alerts))

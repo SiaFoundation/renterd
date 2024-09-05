@@ -24,8 +24,8 @@ type (
 		GougingSettings(ctx context.Context) (api.GougingSettings, error)
 		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
 
-		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
-		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
+		PinningSettings(ctx context.Context) (api.PinningSettings, error)
+		UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error
 	}
 )
 
@@ -309,10 +309,10 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	pm.logger.Debugw("updating prices", zap.Bool("forced", forced))
 
-	// fetch pinned settings
-	settings, err := pm.s.PinnedSettings(ctx)
+	// fetch pinning settings
+	settings, err := pm.s.PinningSettings(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch pinned settings: %w", err)
+		return fmt.Errorf("failed to fetch pinning settings: %w", err)
 	} else if !settings.Enabled {
 		pm.logger.Debug("price pinning is disabled, skipping price update")
 		return nil

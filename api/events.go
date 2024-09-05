@@ -64,7 +64,7 @@ type (
 
 	EventSettingUpdate struct {
 		GougingSettings *GougingSettings `json:"gougingSettings,omitempty"`
-		PinnedSettings  *PinnedSettings  `json:"pinnedSettings,omitempty"`
+		PinnedSettings  *PinningSettings `json:"pinnedSettings,omitempty"`
 		S3Settings      *S3Settings      `json:"s3Settings,omitempty"`
 		UploadSettings  *UploadSettings  `json:"uploadSettings,omitempty"`
 		Timestamp       time.Time        `json:"timestamp"`

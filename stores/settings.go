@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	SettingGouging = "gouging"
-	SettingPinned  = "pinned"
-	SettingS3      = "s3"
-	SettingUpload  = "upload"
+	SettingGouging      = "gouging"
+	SettingPricePinning = "pricepinning"
+	SettingS3           = "s3"
+	SettingUpload       = "upload"
 )
 
 func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
@@ -27,13 +27,13 @@ func (s *SQLStore) UpdateGougingSettings(ctx context.Context, gs api.GougingSett
 	return s.updateSetting(ctx, SettingGouging, gs)
 }
 
-func (s *SQLStore) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
-	err = s.fetchSetting(ctx, SettingPinned, &ps)
+func (s *SQLStore) PinningSettings(ctx context.Context) (ps api.PinningSettings, err error) {
+	err = s.fetchSetting(ctx, SettingPricePinning, &ps)
 	return
 }
 
-func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
-	return s.updateSetting(ctx, SettingPinned, ps)
+func (s *SQLStore) UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error {
+	return s.updateSetting(ctx, SettingPricePinning, ps)
 }
 
 func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, err error) {
@@ -93,22 +93,22 @@ func (s *SQLStore) MigrateV2Settings(ctx context.Context) error {
 			}
 		}
 
-		// migrate pinned settings
+		// migrate pinning settings
 		value, err = tx.Setting(ctx, "pricepinning")
 		if err != nil && !errors.Is(err, sql.ErrSettingNotFound) {
 			return err
 		} else if err == nil {
-			var ps api.PinnedSettings
+			var ps api.PinningSettings
 			if err := json.Unmarshal([]byte(value), &ps); err != nil {
-				s.logger.Warnw("failed to unmarshal pinned settings, using default", zap.Error(err))
-				value = s.defaultSetting(SettingPinned)
+				s.logger.Warnw("failed to unmarshal pinning settings, using default", zap.Error(err))
+				value = s.defaultSetting(SettingPricePinning)
 			} else if err := ps.Validate(); err != nil {
-				s.logger.Warnw("failed to migrate pinned settings, using default", zap.Error(err))
-				value = s.defaultSetting(SettingPinned)
+				s.logger.Warnw("failed to migrate pinning settings, using default", zap.Error(err))
+				value = s.defaultSetting(SettingPricePinning)
 			}
 
 			// update setting and delete old value
-			if err := tx.UpdateSetting(ctx, SettingPinned, value); err != nil {
+			if err := tx.UpdateSetting(ctx, SettingPricePinning, value); err != nil {
 				return err
 			} else if err := tx.DeleteSetting(ctx, "pricepinning"); err != nil {
 				return err
@@ -266,7 +266,7 @@ func (s *SQLStore) defaultSetting(key string) string {
 	case SettingGouging:
 		b, _ := json.Marshal(api.DefaultGougingSettings)
 		return string(b)
-	case SettingPinned:
+	case SettingPricePinning:
 		b, _ := json.Marshal(api.DefaultPinnedSettings)
 		return string(b)
 	case SettingS3:

@@ -912,7 +912,8 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}
 
 	// prune the contract
-	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+	rk := b.masterKey.DeriveContractKey(c.HostKey)
+	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, rk, gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
 		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
 		if err != nil {
 			return nil, err
@@ -1487,8 +1488,8 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	pps, err := b.ss.PinnedSettings(jc.Request.Context())
-	if jc.Check("failed to get pinned settings", err) == nil {
+	pps, err := b.ss.PinningSettings(jc.Request.Context())
+	if jc.Check("failed to get pinning settings", err) == nil {
 		// populate the Autopilots map with the current autopilots
 		aps, err := b.as.Autopilots(jc.Request.Context())
 		if jc.Check("failed to fetch autopilots", err) != nil {
@@ -1507,19 +1508,19 @@ func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
-	var ps api.PinnedSettings
+	var ps api.PinningSettings
 	if jc.Decode(&ps) != nil {
 		return
 	} else if err := ps.Validate(); err != nil {
-		jc.Error(fmt.Errorf("couldn't update pinned settings, error: %v", err), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("couldn't update pinning settings, error: %v", err), http.StatusBadRequest)
 		return
 	} else if ps.Enabled {
 		if _, err := ibus.NewForexClient(ps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), ps.Currency); err != nil {
-			jc.Error(fmt.Errorf("couldn't update pinned settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
+			jc.Error(fmt.Errorf("couldn't update pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
 			return
 		}
 	}
-	if jc.Check("could not update pinned settings", b.ss.UpdatePinnedSettings(jc.Request.Context(), ps)) == nil {
+	if jc.Check("could not update pinning settings", b.ss.UpdatePinningSettings(jc.Request.Context(), ps)) == nil {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
