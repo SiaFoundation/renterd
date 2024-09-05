@@ -67,8 +67,8 @@ type (
 		WindowStart    uint64               `json:"windowStart"`
 		WindowEnd      uint64               `json:"windowEnd"`
 
-		ContractPrice types.Currency `json:"contractPrice"`
-		TotalCost     types.Currency `json:"totalCost"`
+		ContractPrice      types.Currency `json:"contractPrice"`
+		InitialRenterFunds types.Currency `json:"initialRenterFunds"`
 
 		Spending ContractSpending `json:"spending"`
 
@@ -116,11 +116,11 @@ type (
 
 	// ContractAddRequest is the request type for the /contract/:id endpoint.
 	ContractAddRequest struct {
-		Contract      rhpv2.ContractRevision `json:"contract"`
-		ContractPrice types.Currency         `json:"contractPrice"`
-		StartHeight   uint64                 `json:"startHeight"`
-		State         string                 `json:"state,omitempty"`
-		TotalCost     types.Currency         `json:"totalCost"`
+		Contract           rhpv2.ContractRevision `json:"contract"`
+		ContractPrice      types.Currency         `json:"contractPrice"`
+		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
+		StartHeight        uint64                 `json:"startHeight"`
+		State              string                 `json:"state,omitempty"`
 	}
 
 	// ContractFormRequest is the request type for the POST /contracts endpoint.
@@ -174,12 +174,12 @@ type (
 	// ContractRenewedRequest is the request type for the /contract/:id/renewed
 	// endpoint.
 	ContractRenewedRequest struct {
-		Contract      rhpv2.ContractRevision `json:"contract"`
-		ContractPrice types.Currency         `json:"contractPrice"`
-		RenewedFrom   types.FileContractID   `json:"renewedFrom"`
-		StartHeight   uint64                 `json:"startHeight"`
-		State         string                 `json:"state,omitempty"`
-		TotalCost     types.Currency         `json:"totalCost"`
+		Contract           rhpv2.ContractRevision `json:"contract"`
+		ContractPrice      types.Currency         `json:"contractPrice"`
+		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
+		RenewedFrom        types.FileContractID   `json:"renewedFrom"`
+		StartHeight        uint64                 `json:"startHeight"`
+		State              string                 `json:"state,omitempty"`
 	}
 
 	// ContractRootsResponse is the response type for the /contract/:id/roots

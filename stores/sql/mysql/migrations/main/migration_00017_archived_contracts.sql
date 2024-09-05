@@ -1,8 +1,3 @@
-/*
-TODOs:
-- rename total_cost
-*/
-
 DROP TABLE IF EXISTS contracts_temp;
 
 CREATE TABLE contracts_temp (
@@ -24,7 +19,7 @@ CREATE TABLE contracts_temp (
   `window_end` bigint unsigned NOT NULL DEFAULT '0',
 
   `contract_price` longtext,
-  `total_cost` longtext,
+  `initial_renter_funds` longtext,
 
   `delete_spending` longtext,
   `fund_account_spending` longtext,
@@ -60,7 +55,7 @@ INSERT INTO contracts_temp (
     window_start,
     window_end,
     contract_price,
-    total_cost,
+    initial_renter_funds,
     delete_spending,
     fund_account_spending,
     list_spending,
@@ -104,7 +99,7 @@ INSERT INTO contracts_temp (
     window_start,
     window_end,
     contract_price,
-    total_cost,
+    initial_renter_funds,
     delete_spending,
     fund_account_spending,
     list_spending,

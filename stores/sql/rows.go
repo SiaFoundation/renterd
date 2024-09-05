@@ -31,8 +31,8 @@ type ContractRow struct {
 	WindowEnd      uint64
 
 	// cost fields
-	ContractPrice Currency
-	TotalCost     Currency
+	ContractPrice      Currency
+	InitialRenterFunds Currency
 
 	// spending fields
 	DeleteSpending      Currency
@@ -50,7 +50,7 @@ func (r *ContractRow) Scan(s Scanner) error {
 	return s.Scan(
 		&r.CreatedAt, &r.FCID, &r.HostKey,
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
-		&r.ContractPrice, &r.TotalCost,
+		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.ListSpending, &r.UploadSpending,
 		&r.ContractSet, &r.NetAddress, &r.SiamuxPort,
 	)
@@ -88,8 +88,8 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 		WindowStart:    r.WindowStart,
 		WindowEnd:      r.WindowEnd,
 
-		ContractPrice: types.Currency(r.ContractPrice),
-		TotalCost:     types.Currency(r.TotalCost),
+		ContractPrice:      types.Currency(r.ContractPrice),
+		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
 
 		Spending: api.ContractSpending{
 			Uploads:     types.Currency(r.UploadSpending),

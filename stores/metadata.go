@@ -109,10 +109,10 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 	return buffers, nil
 }
 
-func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (_ api.ContractMetadata, err error) {
+func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (_ api.ContractMetadata, err error) {
 	var contract api.ContractMetadata
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		contract, err = tx.InsertContract(ctx, c, contractPrice, totalCost, startHeight, state)
+		contract, err = tx.InsertContract(ctx, c, contractPrice, initialRenterFunds, startHeight, state)
 		return err
 	})
 	if err != nil {
@@ -135,9 +135,9 @@ func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api
 // The old contract specified as 'renewedFrom' will be deleted from the active
 // contracts and moved to the archive. Both new and old contract will be linked
 // to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
+func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		renewed, err = tx.RenewContract(ctx, c, contractPrice, totalCost, startHeight, renewedFrom, state)
+		renewed, err = tx.RenewContract(ctx, c, contractPrice, initialRenterFunds, startHeight, renewedFrom, state)
 		return err
 	})
 	if err != nil {

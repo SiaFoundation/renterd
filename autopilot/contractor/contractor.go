@@ -325,7 +325,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	}
 
 	// update the budget
-	*budget = budget.Sub(renewal.TotalCost)
+	*budget = budget.Sub(renewal.InitialRenterFunds)
 
 	// add to renewed set
 	logger.Infow("refresh succeeded",
@@ -357,7 +357,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
 	minRenterFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
-	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds(), logger)
+	renterFunds := renewFundingEstimate(minRenterFunds, contract.InitialRenterFunds, contract.RenterFunds(), logger)
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
@@ -392,7 +392,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	}
 
 	// update the budget
-	*budget = budget.Sub(renewal.TotalCost)
+	*budget = budget.Sub(renewal.InitialRenterFunds)
 
 	logger.Infow(
 		"renewal succeeded",
@@ -465,7 +465,7 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, w Worker, contracts
 
 func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, host api.Host, fee types.Currency, logger *zap.SugaredLogger) types.Currency {
 	// refresh with 1.2x the funds
-	refreshAmount := contract.TotalCost.Mul64(6).Div64(5)
+	refreshAmount := contract.InitialRenterFunds.Mul64(6).Div64(5)
 
 	// estimate the txn fee
 	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)

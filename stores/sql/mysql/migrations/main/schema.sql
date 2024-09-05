@@ -90,7 +90,7 @@ CREATE TABLE `contracts` (
   `window_end` bigint unsigned NOT NULL DEFAULT '0',
 
   `contract_price` longtext,
-  `total_cost` longtext,
+  `initial_renter_funds` longtext,
 
   `delete_spending` longtext,
   `fund_account_spending` longtext,

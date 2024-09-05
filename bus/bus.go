@@ -210,8 +210,8 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
+		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
+		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -532,8 +532,8 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 	)
 }
 
-func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	c, err := b.ms.AddContract(ctx, rev, contractPrice, totalCost, startHeight, state)
+func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	c, err := b.ms.AddContract(ctx, rev, contractPrice, initialRenterFunds, startHeight, state)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -549,8 +549,8 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 	return c, nil
 }
 
-func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
+func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, initialRenterFunds, startHeight, renewedFrom, state)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}

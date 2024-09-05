@@ -223,8 +223,8 @@ func TestNewTestCluster(t *testing.T) {
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	if contract.EndHeight() != expectedEndHeight || contract.Revision.EndHeight() != expectedEndHeight {
 		t.Fatal("wrong endHeight", contract.EndHeight(), contract.Revision.EndHeight())
-	} else if contract.TotalCost.IsZero() || contract.ContractPrice.IsZero() {
-		t.Fatal("TotalCost and ContractPrice shouldn't be zero")
+	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
+		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}
 
 	// Wait for contract set to form

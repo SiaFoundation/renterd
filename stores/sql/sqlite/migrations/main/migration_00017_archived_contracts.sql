@@ -19,7 +19,7 @@ CREATE TABLE contracts_temp (
     `window_end` integer NOT NULL DEFAULT 0,
 
     `contract_price` text,
-    `total_cost` text,
+    `initial_renter_funds` text,
 
     `delete_spending` text,
     `list_spending` text,
@@ -54,7 +54,7 @@ INSERT INTO contracts_temp (
     window_start,
     window_end,
     contract_price,
-    total_cost,
+    initial_renter_funds,
     delete_spending,
     fund_account_spending,
     list_spending,
@@ -98,7 +98,7 @@ INSERT INTO contracts_temp (
     window_start,
     window_end,
     contract_price,
-    total_cost,
+    initial_renter_funds,
     delete_spending,
     fund_account_spending,
     list_spending,

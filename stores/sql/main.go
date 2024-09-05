@@ -137,7 +137,7 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 		SELECT
 			c.created_at, c.fcid, c.host_key,
 			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
-			c.contract_price, c.total_cost,
+			c.contract_price, c.initial_renter_funds,
 			c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
 			"", COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
 		FROM contracts AS c
@@ -711,7 +711,7 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 	return bufferedSlabID, nil
 }
 
-func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
 	var contractState ContractState
 	if err := contractState.LoadString(state); err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
@@ -726,12 +726,12 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 INSERT INTO contracts (
 	created_at, fcid, host_key,
 	proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
-	contract_price, total_cost,
+	contract_price, initial_renter_funds,
 	delete_spending, fund_account_spending, list_spending, upload_spending
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now(), FileContractID(rev.ID()), PublicKey(rev.HostKey()),
 		0, 0, "0", rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
-		Currency(contractPrice), Currency(totalCost),
+		Currency(contractPrice), Currency(initialRenterFunds),
 		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
@@ -1861,7 +1861,7 @@ WHERE h.recent_downtime >= ? AND h.recent_scan_failures >= ?`, maxDownTime, minR
 	return res.RowsAffected()
 }
 
-func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
+func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
 	var contractState ContractState
 	if err := contractState.LoadString(state); err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
@@ -1873,7 +1873,7 @@ func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, c
 SELECT
 	c.created_at, c.fcid, c.host_key,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
-	c.contract_price, c.total_cost,
+	c.contract_price, c.initial_renter_funds,
 	c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
 	"", "", ""
 FROM contracts AS c
@@ -1889,12 +1889,12 @@ WHERE fcid = ?`, FileContractID(renewedFrom)))
 UPDATE contracts SET
 	created_at = ?, fcid = ?,
 	proof_height = ?, renewed_from = ?, renewed_to = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
-	contract_price = ?, total_cost = ?,
+	contract_price = ?, initial_renter_funds = ?,
 	delete_spending = ?, fund_account_spending = ?, list_spending = ?, upload_spending = ?
 WHERE fcid = ?`,
 		time.Now(), FileContractID(rev.ID()),
 		0, FileContractID(renewedFrom), FileContractID(types.FileContractID{}), 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
-		Currency(contractPrice), Currency(totalCost),
+		Currency(contractPrice), Currency(initialRenterFunds),
 		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
 		FileContractID(renewedFrom),
 	)
@@ -1907,12 +1907,12 @@ WHERE fcid = ?`,
 INSERT INTO contracts (
 	created_at, fcid, host_key,
 	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
-	contract_price, total_cost,
+	contract_price, initial_renter_funds,
 	delete_spending, fund_account_spending, list_spending, upload_spending
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.CreatedAt, r.FCID, r.HostKey,
 		api.ContractArchivalReasonRenewed, r.ProofHeight, r.RenewedFrom, FileContractID(rev.ID()), r.RevisionHeight, r.RevisionNumber, r.Size, r.StartHeight, r.State, r.WindowStart, r.WindowEnd,
-		r.ContractPrice, r.TotalCost,
+		r.ContractPrice, r.InitialRenterFunds,
 		r.DeleteSpending, r.FundAccountSpending, r.ListSpending, r.UploadSpending)
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to insert archived contract: %w", err)
@@ -1935,7 +1935,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 SELECT
 	c.created_at, c.fcid, c.host_key,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
-	c.contract_price, c.total_cost,
+	c.contract_price, c.initial_renter_funds,
 	c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
 	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 FROM contracts AS c

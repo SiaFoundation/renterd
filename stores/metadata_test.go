@@ -446,25 +446,25 @@ func TestSQLContractStore(t *testing.T) {
 
 	// Insert it.
 	contractPrice := types.NewCurrency64(1)
-	totalCost := types.NewCurrency64(456)
+	initialRenterFunds := types.NewCurrency64(456)
 	startHeight := uint64(100)
-	returned, err := ss.AddContract(ctx, c, contractPrice, totalCost, startHeight, api.ContractStatePending)
+	returned, err := ss.AddContract(ctx, c, contractPrice, initialRenterFunds, startHeight, api.ContractStatePending)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expected := api.ContractMetadata{
-		ID:            fcid,
-		HostIP:        "address",
-		HostKey:       hk,
-		StartHeight:   100,
-		State:         api.ContractStatePending,
-		WindowStart:   400,
-		WindowEnd:     500,
-		RenewedFrom:   types.FileContractID{},
-		Spending:      api.ContractSpending{},
-		ContractPrice: types.NewCurrency64(1),
-		TotalCost:     totalCost,
-		Size:          c.Revision.Filesize,
+		ID:                 fcid,
+		HostIP:             "address",
+		HostKey:            hk,
+		StartHeight:        100,
+		State:              api.ContractStatePending,
+		WindowStart:        400,
+		WindowEnd:          500,
+		RenewedFrom:        types.FileContractID{},
+		Spending:           api.ContractSpending{},
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: initialRenterFunds,
+		Size:               c.Revision.Filesize,
 	}
 	if !reflect.DeepEqual(returned, expected) {
 		t.Fatal("contract mismatch", cmp.Diff(returned, expected))
@@ -736,9 +736,9 @@ func TestRenewedContract(t *testing.T) {
 			Uploads:     types.ZeroCurrency,
 			FundAccount: types.ZeroCurrency,
 		},
-		ContractPrice: types.NewCurrency64(3),
-		ContractSets:  []string{"test"},
-		TotalCost:     types.NewCurrency64(4),
+		ContractPrice:      types.NewCurrency64(3),
+		ContractSets:       []string{"test"},
+		InitialRenterFunds: types.NewCurrency64(4),
 	}
 	if !reflect.DeepEqual(renewal, expected) {
 		t.Fatal("mismatch")
@@ -751,15 +751,7 @@ func TestRenewedContract(t *testing.T) {
 	} else if len(ancestors) != 1 {
 		t.Fatalf("expected 1 ancestor but got %v", len(ancestors))
 	}
-	t.Log("del", s.Deletions.String())
-	t.Log("ul", s.Uploads.String())
-	t.Log("roots", s.SectorRoots.String())
-	t.Log("fund", s.FundAccount.String())
-	t.Log("- - ")
-	t.Log("del", ancestors[0].Spending.Deletions.String())
-	t.Log("ul", ancestors[0].Spending.Uploads.String())
-	t.Log("roots", ancestors[0].Spending.SectorRoots.String())
-	t.Log("fund", ancestors[0].Spending.FundAccount.String())
+
 	expectedContract := api.ContractMetadata{
 		ID:        fcid,
 		HostIP:    "address",
@@ -767,18 +759,18 @@ func TestRenewedContract(t *testing.T) {
 		RenewedTo: fcidR,
 		Spending:  s,
 
-		ArchivalReason: api.ContractArchivalReasonRenewed,
-		ContractPrice:  types.NewCurrency64(1),
-		ProofHeight:    0,
-		RenewedFrom:    types.FileContractID{},
-		RevisionHeight: 0,
-		RevisionNumber: 1,
-		Size:           rhpv2.SectorSize,
-		StartHeight:    1,
-		State:          api.ContractStatePending,
-		TotalCost:      types.NewCurrency64(2),
-		WindowStart:    400,
-		WindowEnd:      500,
+		ArchivalReason:     api.ContractArchivalReasonRenewed,
+		ContractPrice:      types.NewCurrency64(1),
+		ProofHeight:        0,
+		RenewedFrom:        types.FileContractID{},
+		RevisionHeight:     0,
+		RevisionNumber:     1,
+		Size:               rhpv2.SectorSize,
+		StartHeight:        1,
+		State:              api.ContractStatePending,
+		InitialRenterFunds: types.NewCurrency64(2),
+		WindowStart:        400,
+		WindowEnd:          500,
 	}
 	if !reflect.DeepEqual(ancestors[0], expectedContract) {
 		t.Fatal("mismatch", cmp.Diff(ancestors[0], expectedContract))
@@ -1013,8 +1005,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	fcid1, fcid2 := fcids[0], fcids[1]
 
 	// Extract start height and total cost
-	startHeight1, totalCost1 := contracts[0].StartHeight, contracts[0].TotalCost
-	startHeight2, totalCost2 := contracts[1].StartHeight, contracts[1].TotalCost
+	startHeight1, initialRenterFunds1 := contracts[0].StartHeight, contracts[0].InitialRenterFunds
+	startHeight2, initialRenterFunds2 := contracts[1].StartHeight, contracts[1].InitialRenterFunds
 
 	// Create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
@@ -1168,23 +1160,23 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedContract1 := api.ContractMetadata{
-		ID:             fcid1,
-		HostIP:         "",
-		HostKey:        hk1,
-		SiamuxAddr:     "",
-		ProofHeight:    0,
-		RevisionHeight: 0,
-		RevisionNumber: 0,
-		Size:           4096,
-		StartHeight:    startHeight1,
-		State:          api.ContractStatePending,
-		WindowStart:    400,
-		WindowEnd:      500,
-		ContractPrice:  types.ZeroCurrency,
-		RenewedFrom:    types.FileContractID{},
-		Spending:       api.ContractSpending{},
-		TotalCost:      totalCost1,
-		ContractSets:   nil,
+		ID:                 fcid1,
+		HostIP:             "",
+		HostKey:            hk1,
+		SiamuxAddr:         "",
+		ProofHeight:        0,
+		RevisionHeight:     0,
+		RevisionNumber:     0,
+		Size:               4096,
+		StartHeight:        startHeight1,
+		State:              api.ContractStatePending,
+		WindowStart:        400,
+		WindowEnd:          500,
+		ContractPrice:      types.ZeroCurrency,
+		RenewedFrom:        types.FileContractID{},
+		Spending:           api.ContractSpending{},
+		InitialRenterFunds: initialRenterFunds1,
+		ContractSets:       nil,
 	}
 
 	expectedObjSlab2 := object.Slab{
@@ -1203,23 +1195,23 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedContract2 := api.ContractMetadata{
-		ID:             fcid2,
-		HostIP:         "",
-		HostKey:        hk2,
-		SiamuxAddr:     "",
-		ProofHeight:    0,
-		RevisionHeight: 0,
-		RevisionNumber: 0,
-		Size:           4096,
-		StartHeight:    startHeight2,
-		State:          api.ContractStatePending,
-		WindowStart:    400,
-		WindowEnd:      500,
-		ContractPrice:  types.ZeroCurrency,
-		RenewedFrom:    types.FileContractID{},
-		Spending:       api.ContractSpending{},
-		TotalCost:      totalCost2,
-		ContractSets:   nil,
+		ID:                 fcid2,
+		HostIP:             "",
+		HostKey:            hk2,
+		SiamuxAddr:         "",
+		ProofHeight:        0,
+		RevisionHeight:     0,
+		RevisionNumber:     0,
+		Size:               4096,
+		StartHeight:        startHeight2,
+		State:              api.ContractStatePending,
+		WindowStart:        400,
+		WindowEnd:          500,
+		ContractPrice:      types.ZeroCurrency,
+		RenewedFrom:        types.FileContractID{},
+		Spending:           api.ContractSpending{},
+		InitialRenterFunds: initialRenterFunds2,
+		ContractSets:       nil,
 	}
 
 	// Compare slabs.

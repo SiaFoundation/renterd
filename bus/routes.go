@@ -1081,12 +1081,12 @@ func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
 	} else if req.Contract.ID() != id {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
-	} else if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+	} else if req.InitialRenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "InitialRenterFunds can not be zero", http.StatusBadRequest)
 		return
 	}
 
-	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
+	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.InitialRenterFunds, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
@@ -1183,14 +1183,14 @@ func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
 		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
 		return
 	}
-	if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+	if req.InitialRenterFunds.IsZero() {
+		http.Error(jc.ResponseWriter, "InitialRenterFunds can not be zero", http.StatusBadRequest)
 		return
 	}
 	if req.State == "" {
 		req.State = api.ContractStatePending
 	}
-	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
+	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.InitialRenterFunds, req.StartHeight, req.State)
 	if jc.Check("couldn't store contract", err) != nil {
 		return
 	}
