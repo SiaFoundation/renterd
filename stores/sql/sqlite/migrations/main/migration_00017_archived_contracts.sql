@@ -127,7 +127,12 @@ INSERT INTO contracts_temp (
 FROM `archived_contracts` ac
 LEFT JOIN hosts h ON ac.host = h.public_key;
 
+ALTER TABLE contract_sectors DROP FOREIGN KEY fk_contract_sectors_db_contract;
+ALTER TABLE contract_set_contracts DROP FOREIGN KEY fk_contract_set_contracts_db_contract;
+
 DROP TABLE `contracts`;
 DROP TABLE `archived_contracts`;
 
 ALTER TABLE contracts_temp RENAME TO contracts;
+ALTER TABLE contract_sectors ADD CONSTRAINT fk_contract_sectors_db_contract FOREIGN KEY (db_contract_id) REFERENCES contracts(id) ON DELETE CASCADE;
+ALTER TABLE contract_set_contracts ADD CONSTRAINT fk_contract_set_contracts_db_contract FOREIGN KEY (db_contract_id) REFERENCES contracts(id) ON DELETE CASCADE;
