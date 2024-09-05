@@ -70,34 +70,34 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 		}.SiamuxAddr()
 	}
 
+	spending := api.ContractSpending{
+		Uploads:     types.Currency(r.UploadSpending),
+		FundAccount: types.Currency(r.FundAccountSpending),
+		Deletions:   types.Currency(r.DeleteSpending),
+		SectorRoots: types.Currency(r.SectorRootsSpending),
+	}
+
 	return api.ContractMetadata{
-		ID:         types.FileContractID(r.FCID),
-		HostIP:     r.NetAddress,
-		HostKey:    types.PublicKey(r.HostKey),
-		SiamuxAddr: siamuxAddr,
+		ID:      types.FileContractID(r.FCID),
+		HostIP:  r.NetAddress,
+		HostKey: types.PublicKey(r.HostKey),
+
+		ContractPrice:      types.Currency(r.ContractPrice),
+		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
 
 		ArchivalReason: r.ArchivalReason,
+		ContractSets:   sets,
 		ProofHeight:    r.ProofHeight,
 		RenewedFrom:    types.FileContractID(r.RenewedFrom),
 		RenewedTo:      types.FileContractID(r.RenewedTo),
 		RevisionHeight: r.RevisionHeight,
 		RevisionNumber: r.RevisionNumber,
+		SiamuxAddr:     siamuxAddr,
 		Size:           r.Size,
+		Spending:       spending,
 		StartHeight:    r.StartHeight,
 		State:          r.State.String(),
 		WindowStart:    r.WindowStart,
 		WindowEnd:      r.WindowEnd,
-
-		ContractPrice:      types.Currency(r.ContractPrice),
-		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
-
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(r.UploadSpending),
-			FundAccount: types.Currency(r.FundAccountSpending),
-			Deletions:   types.Currency(r.DeleteSpending),
-			SectorRoots: types.Currency(r.SectorRootsSpending),
-		},
-
-		ContractSets: sets,
 	}
 }

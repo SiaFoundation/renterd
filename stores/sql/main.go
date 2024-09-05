@@ -1888,12 +1888,12 @@ WHERE fcid = ?`, FileContractID(renewedFrom)))
 	_, err = tx.Exec(ctx, `
 UPDATE contracts SET
 	created_at = ?, fcid = ?,
-	proof_height = ?, renewed_from = ?, renewed_to = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
+	proof_height = ?, renewed_from = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
 	contract_price = ?, initial_renter_funds = ?,
 	delete_spending = ?, fund_account_spending = ?, sector_roots_spending = ?, upload_spending = ?
 WHERE fcid = ?`,
 		time.Now(), FileContractID(rev.ID()),
-		0, FileContractID(renewedFrom), FileContractID(types.FileContractID{}), 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
+		0, FileContractID(renewedFrom), 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
 		Currency(contractPrice), Currency(initialRenterFunds),
 		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
 		FileContractID(renewedFrom),

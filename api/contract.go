@@ -50,29 +50,27 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		ID         types.FileContractID `json:"id"`
-		HostIP     string               `json:"hostIP"`
-		HostKey    types.PublicKey      `json:"hostKey"`
-		SiamuxAddr string               `json:"siamuxAddr,omitempty"`
+		ID      types.FileContractID `json:"id"`
+		HostIP  string               `json:"hostIP"`
+		HostKey types.PublicKey      `json:"hostKey"`
+
+		ContractPrice      types.Currency `json:"contractPrice"`
+		InitialRenterFunds types.Currency `json:"initialRenterFunds"`
 
 		ArchivalReason string               `json:"archivalReason,omitempty"`
+		ContractSets   []string             `json:"contractSets,omitempty"`
 		ProofHeight    uint64               `json:"proofHeight"`
 		RenewedFrom    types.FileContractID `json:"renewedFrom"`
 		RenewedTo      types.FileContractID `json:"renewedTo,omitempty"`
 		RevisionHeight uint64               `json:"revisionHeight"`
 		RevisionNumber uint64               `json:"revisionNumber"`
+		SiamuxAddr     string               `json:"siamuxAddr,omitempty"`
 		Size           uint64               `json:"size"`
+		Spending       ContractSpending     `json:"spending"`
 		StartHeight    uint64               `json:"startHeight"`
 		State          string               `json:"state"`
 		WindowStart    uint64               `json:"windowStart"`
 		WindowEnd      uint64               `json:"windowEnd"`
-
-		ContractPrice      types.Currency `json:"contractPrice"`
-		InitialRenterFunds types.Currency `json:"initialRenterFunds"`
-
-		Spending ContractSpending `json:"spending"`
-
-		ContractSets []string `json:"contractSets,omitempty"`
 	}
 
 	// ContractPrunableData wraps a contract's size information with its id.
@@ -83,10 +81,10 @@ type (
 
 	// ContractSpending contains all spending details for a contract.
 	ContractSpending struct {
-		Uploads     types.Currency `json:"uploads"`
 		Deletions   types.Currency `json:"deletions"`
 		FundAccount types.Currency `json:"fundAccount"`
 		SectorRoots types.Currency `json:"sectorRoots"`
+		Uploads     types.Currency `json:"uploads"`
 	}
 
 	ContractSpendingRecord struct {
