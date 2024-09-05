@@ -239,9 +239,9 @@ var (
 				},
 			},
 			{
-				ID: "00003_drop_download_spending",
+				ID: "00003_contract_spending",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_drop_download_spending", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_contract_spending", log)
 				},
 			},
 		}

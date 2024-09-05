@@ -22,7 +22,7 @@ CREATE TABLE contracts_temp (
     `initial_renter_funds` text,
 
     `delete_spending` text,
-    `list_spending` text,
+    `sector_roots_spending` text,
     `fund_account_spending` text,
     `upload_spending` text
 );
@@ -57,7 +57,7 @@ INSERT INTO contracts_temp (
     initial_renter_funds,
     delete_spending,
     fund_account_spending,
-    list_spending,
+    sector_roots_spending,
     upload_spending
 ) SELECT
     c.id,
@@ -101,7 +101,7 @@ INSERT INTO contracts_temp (
     initial_renter_funds,
     delete_spending,
     fund_account_spending,
-    list_spending,
+    sector_roots_spending,
     upload_spending
 ) SELECT
     ac.created_at,

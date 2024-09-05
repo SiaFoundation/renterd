@@ -384,7 +384,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				UploadSpending:      contract.Spending.Uploads.Add(newSpending.Uploads),
 				FundAccountSpending: contract.Spending.FundAccount.Add(newSpending.FundAccount),
 				DeleteSpending:      contract.Spending.Deletions.Add(newSpending.Deletions),
-				ListSpending:        contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
+				SectorRootsSpending: contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
 			}
 			metrics = append(metrics, m)
 
@@ -399,7 +399,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				updates.Deletions = m.DeleteSpending
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates.SectorRoots = m.ListSpending
+				updates.SectorRoots = m.SectorRootsSpending
 			}
 			return tx.RecordContractSpending(ctx, fcid, latestValues[fcid].revision, latestValues[fcid].size, updates)
 		})

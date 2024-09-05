@@ -37,7 +37,7 @@ type ContractRow struct {
 	// spending fields
 	DeleteSpending      Currency
 	FundAccountSpending Currency
-	ListSpending        Currency
+	SectorRootsSpending Currency
 	UploadSpending      Currency
 
 	// decorated fields
@@ -51,7 +51,7 @@ func (r *ContractRow) Scan(s Scanner) error {
 		&r.CreatedAt, &r.FCID, &r.HostKey,
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
-		&r.DeleteSpending, &r.FundAccountSpending, &r.ListSpending, &r.UploadSpending,
+		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
 		&r.ContractSet, &r.NetAddress, &r.SiamuxPort,
 	)
 }
@@ -95,7 +95,7 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 			Uploads:     types.Currency(r.UploadSpending),
 			FundAccount: types.Currency(r.FundAccountSpending),
 			Deletions:   types.Currency(r.DeleteSpending),
-			SectorRoots: types.Currency(r.ListSpending),
+			SectorRoots: types.Currency(r.SectorRootsSpending),
 		},
 
 		ContractSets: sets,

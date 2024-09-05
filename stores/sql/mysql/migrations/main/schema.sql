@@ -94,7 +94,7 @@ CREATE TABLE `contracts` (
 
   `delete_spending` longtext,
   `fund_account_spending` longtext,
-  `list_spending` longtext,
+  `sector_roots_spending` longtext,
   `upload_spending` longtext,
   PRIMARY KEY (`id`),
   UNIQUE KEY `fcid` (`fcid`),

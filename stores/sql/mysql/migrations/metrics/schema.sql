@@ -67,8 +67,8 @@ CREATE TABLE `contracts` (
   `fund_account_spending_hi` bigint NOT NULL,
   `delete_spending_lo` bigint NOT NULL,
   `delete_spending_hi` bigint NOT NULL,
-  `list_spending_lo` bigint NOT NULL,
-  `list_spending_hi` bigint NOT NULL,
+  `sector_roots_spending_lo` bigint NOT NULL,
+  `sector_roots_spending_hi` bigint NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_contracts_fc_id` (`fcid`),
   KEY `idx_contracts_host` (`host`),
@@ -79,7 +79,7 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_timestamp` (`timestamp`),
   KEY `idx_remaining_funds` (`remaining_funds_lo`,`remaining_funds_hi`),
   KEY `idx_delete_spending` (`delete_spending_lo`,`delete_spending_hi`),
-  KEY `idx_list_spending` (`list_spending_lo`,`list_spending_hi`),
+  KEY `idx_sector_roots_spending` (`sector_roots_spending_lo`,`sector_roots_spending_hi`),
   KEY `idx_contracts_fcid_timestamp` (`fcid`,`timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

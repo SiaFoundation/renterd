@@ -138,7 +138,7 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			c.created_at, c.fcid, c.host_key,
 			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 			c.contract_price, c.initial_renter_funds,
-			c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
+			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
 			"", COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
 		FROM contracts AS c
 		LEFT JOIN hosts h ON h.public_key = c.host_key
@@ -727,7 +727,7 @@ INSERT INTO contracts (
 	created_at, fcid, host_key,
 	proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
 	contract_price, initial_renter_funds,
-	delete_spending, fund_account_spending, list_spending, upload_spending
+	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now(), FileContractID(rev.ID()), PublicKey(rev.HostKey()),
 		0, 0, "0", rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
@@ -1874,7 +1874,7 @@ SELECT
 	c.created_at, c.fcid, c.host_key,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
-	c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
+	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
 	"", "", ""
 FROM contracts AS c
 WHERE fcid = ?`, FileContractID(renewedFrom)))
@@ -1890,7 +1890,7 @@ UPDATE contracts SET
 	created_at = ?, fcid = ?,
 	proof_height = ?, renewed_from = ?, renewed_to = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
 	contract_price = ?, initial_renter_funds = ?,
-	delete_spending = ?, fund_account_spending = ?, list_spending = ?, upload_spending = ?
+	delete_spending = ?, fund_account_spending = ?, sector_roots_spending = ?, upload_spending = ?
 WHERE fcid = ?`,
 		time.Now(), FileContractID(rev.ID()),
 		0, FileContractID(renewedFrom), FileContractID(types.FileContractID{}), 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
@@ -1908,12 +1908,12 @@ INSERT INTO contracts (
 	created_at, fcid, host_key,
 	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
 	contract_price, initial_renter_funds,
-	delete_spending, fund_account_spending, list_spending, upload_spending
+	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.CreatedAt, r.FCID, r.HostKey,
 		api.ContractArchivalReasonRenewed, r.ProofHeight, r.RenewedFrom, FileContractID(rev.ID()), r.RevisionHeight, r.RevisionNumber, r.Size, r.StartHeight, r.State, r.WindowStart, r.WindowEnd,
 		r.ContractPrice, r.InitialRenterFunds,
-		r.DeleteSpending, r.FundAccountSpending, r.ListSpending, r.UploadSpending)
+		r.DeleteSpending, r.FundAccountSpending, r.SectorRootsSpending, r.UploadSpending)
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to insert archived contract: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
@@ -1936,7 +1936,7 @@ SELECT
 	c.created_at, c.fcid, c.host_key,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
-	c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
+	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
 	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 FROM contracts AS c
 LEFT JOIN hosts h ON h.public_key = c.host_key
@@ -2775,7 +2775,7 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 		updateValues = append(updateValues, Currency(newSpending.Deletions))
 	}
 	if !newSpending.SectorRoots.IsZero() {
-		updateKeys = append(updateKeys, "list_spending = ?")
+		updateKeys = append(updateKeys, "sector_roots_spending = ?")
 		updateValues = append(updateValues, Currency(newSpending.SectorRoots))
 	}
 	updateKeys = append(updateKeys, "revision_number = ?", "size = ?")

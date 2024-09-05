@@ -2454,8 +2454,8 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected non-zero FundAccountSpending")
 	} else if !m.DeleteSpending.IsZero() {
 		t.Fatal("expected zero DeleteSpending")
-	} else if !m.ListSpending.IsZero() {
-		t.Fatal("expected zero ListSpending")
+	} else if !m.SectorRootsSpending.IsZero() {
+		t.Fatal("expected zero SectorRootsSpending")
 	}
 
 	// prune one of the metrics
