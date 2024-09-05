@@ -17,7 +17,15 @@ var (
 
 // Host returns information about a host.
 func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
-	hosts, err := s.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
+	hosts, err := s.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		AddressContains: "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		KeyIn:           []types.PublicKey{hostKey},
+		Offset:          0,
+		Limit:           1,
+	})
 	if err != nil {
 		return api.Host{}, err
 	} else if len(hosts) == 0 {
@@ -48,10 +56,10 @@ func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) err
 	})
 }
 
-func (s *SQLStore) Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+func (s *SQLStore) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	var hosts []api.Host
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		hosts, err = tx.Hosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
+		hosts, err = tx.Hosts(ctx, opts)
 		return
 	})
 	return hosts, err

@@ -161,7 +161,6 @@ func (ap *Autopilot) Handler() http.Handler {
 		"GET    /config":        ap.configHandlerGET,
 		"PUT    /config":        ap.configHandlerPUT,
 		"POST   /config":        ap.configHandlerPOST,
-		"POST   /hosts":         ap.hostsHandlerPOST,
 		"GET    /host/:hostKey": ap.hostHandlerGET,
 		"GET    /state":         ap.stateHandlerGET,
 		"POST   /trigger":       ap.triggerHandlerPOST,
@@ -734,48 +733,6 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.HostResponse{Host: hi})
-}
-
-func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.HostsRequest
-	if jc.Decode(&req) != nil {
-		return
-	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
-		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
-		return
-	}
-
-	hosts, err := ap.bus.Hosts(jc.Request.Context(), api.HostOptions{
-		AutopilotID:     ap.id,
-		Offset:          req.Offset,
-		Limit:           req.Limit,
-		FilterMode:      req.FilterMode,
-		UsabilityMode:   req.UsabilityMode,
-		AddressContains: req.AddressContains,
-		KeyIn:           req.KeyIn,
-	})
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-	resps := make([]api.HostResponse, len(hosts))
-	for i, host := range hosts {
-		if check, ok := host.Checks[ap.id]; ok {
-			resps[i] = api.HostResponse{
-				Host: host,
-				Checks: &api.HostChecks{
-					Gouging:          check.Gouging.Gouging(),
-					GougingBreakdown: check.Gouging,
-					Score:            check.Score.Score(),
-					ScoreBreakdown:   check.Score,
-					Usable:           check.Usability.IsUsable(),
-					UnusableReasons:  check.Usability.UnusableReasons(),
-				},
-			}
-		} else {
-			resps[i] = api.HostResponse{Host: host}
-		}
-	}
-	jc.Encode(resps)
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {

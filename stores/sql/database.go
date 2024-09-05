@@ -186,7 +186,7 @@ type (
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
 		// Hosts returns a list of hosts that match the provided filters
-		Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 
 		// HostsForScanning returns a list of hosts to scan which haven't been
 		// scanned since at least maxLastScan.

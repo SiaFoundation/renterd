@@ -632,7 +632,15 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		req.Limit = -1
 	}
 
-	hosts, err := b.hs.Hosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	hosts, err := b.hs.Hosts(jc.Request.Context(), api.HostOptions{
+		AutopilotID:     req.AutopilotID,
+		FilterMode:      req.FilterMode,
+		UsabilityMode:   req.UsabilityMode,
+		AddressContains: req.AddressContains,
+		KeyIn:           req.KeyIn,
+		Offset:          req.Offset,
+		Limit:           req.Limit,
+	})
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
