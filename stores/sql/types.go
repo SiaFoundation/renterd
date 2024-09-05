@@ -204,6 +204,9 @@ func (hs *HostSettings) Scan(value interface{}) error {
 
 // Value returns a HostSettings value, implements driver.Valuer interface.
 func (hs HostSettings) Value() (driver.Value, error) {
+	if hs == (HostSettings{}) {
+		return []byte("{}"), nil
+	}
 	return json.Marshal(hs)
 }
 
@@ -218,6 +221,9 @@ func (pt *PriceTable) Scan(value interface{}) error {
 
 // Value returns a PriceTable value, implements driver.Valuer interface.
 func (pt PriceTable) Value() (driver.Value, error) {
+	if pt == (PriceTable{}) {
+		return []byte("{}"), nil
+	}
 	return json.Marshal(pt)
 }
 
