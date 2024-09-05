@@ -222,7 +222,7 @@ type (
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
@@ -417,7 +417,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"POST   /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,

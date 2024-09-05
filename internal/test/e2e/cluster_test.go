@@ -877,7 +877,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	cfg, _ := cluster.AutopilotConfig(context.Background())
 	cfg.Contracts.Set = t.Name()
 	cluster.UpdateAutopilotConfig(context.Background(), cfg)
-	tt.OK(b.SetContractSet(context.Background(), t.Name(), nil))
+	tt.OK(b.UpdateContractSet(context.Background(), t.Name(), nil, nil))
 
 	// assert there are no contracts in the set
 	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})

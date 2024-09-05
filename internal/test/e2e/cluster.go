@@ -476,7 +476,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
-	tt.OK(busClient.SetContractSet(ctx, test.ContractSet, []types.FileContractID{}))
+	tt.OK(busClient.UpdateContractSet(ctx, test.ContractSet, nil, nil))
 
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
