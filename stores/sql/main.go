@@ -222,7 +222,7 @@ func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 }
 
 func Contract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractMetadata, error) {
-	contracts, err := QueryContracts(ctx, tx, []string{"c.fcid = ?"}, []any{FileContractID(fcid)})
+	contracts, err := QueryContracts(ctx, tx, []string{"c.fcid = ?", "c.archival_reason = ''"}, []any{FileContractID(fcid)})
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract: %w", err)
 	} else if len(contracts) == 0 {
@@ -267,6 +267,9 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 		}
 		whereExprs = append(whereExprs, "cs.id = ?")
 		whereArgs = append(whereArgs, contractSetID)
+	}
+	if !opts.IncludeArchived {
+		whereExprs = append(whereExprs, "c.archival_reason = ''")
 	}
 	return QueryContracts(ctx, tx, whereExprs, whereArgs)
 }
@@ -1927,9 +1930,9 @@ INSERT INTO contracts (
 }
 
 func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
-	whereExpr := "WHERE c.archival_reason = ''"
+	var whereExpr string
 	if len(whereExprs) > 0 {
-		whereExpr += " AND " + strings.Join(whereExprs, " AND ")
+		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
 	}
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`

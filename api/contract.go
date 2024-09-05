@@ -222,7 +222,8 @@ type (
 	}
 
 	ContractsOpts struct {
-		ContractSet string `json:"contractset"`
+		ContractSet     string `json:"contractset"`
+		IncludeArchived bool   `json:"includeArchived"`
 	}
 )
 
