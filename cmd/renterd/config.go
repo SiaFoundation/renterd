@@ -42,7 +42,6 @@ var (
 	enableANSI   = runtime.GOOS != "windows"
 
 	hostBasesStr         string
-	keyPairsV4           string
 	workerRemotePassStr  string
 	workerRemoteAddrsStr string
 )
@@ -350,7 +349,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_DB_PASSWORD", &cfg.Database.MySQL.Password)
 	parseEnvVar("RENTERD_DB_NAME", &cfg.Database.MySQL.Database)
 	parseEnvVar("RENTERD_DB_METRICS_NAME", &cfg.Database.MySQL.MetricsDatabase)
-
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
 
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
@@ -384,8 +382,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
-
-	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
 }
 
 // readPasswordInput reads a password from stdin.
@@ -662,25 +658,4 @@ func setS3Config(cfg *config.Config) {
 	fmt.Println("The S3 API provides an S3-compatible gateway for uploading data to Sia.")
 	fmt.Println("It should not be exposed to the public internet without setting up a reverse proxy.")
 	setListenAddress("S3 Address", &cfg.S3.Address, true)
-
-	var accessKey, secretKey string
-	for {
-		fmt.Println("")
-		fmt.Println("Enter your S3 access key. It must between 16 and 128 characters long.")
-		accessKey = readInput("Enter access key")
-		if len(accessKey) >= 16 && len(accessKey) <= 128 {
-			break
-		}
-		fmt.Println(wrapANSI("\033[31m", "Access key must be between 16 and 128 characters!", "\033[0m"))
-	}
-
-	for {
-		fmt.Println("")
-		fmt.Println("Enter your S3 secret key. It must be 40 characters long.")
-		secretKey = readInput("Enter secret key")
-		if len(secretKey) == 40 {
-			break
-		}
-		fmt.Println(wrapANSI("\033[31m", "Secret key must be be 40 characters!", "\033[0m"))
-	}
 }

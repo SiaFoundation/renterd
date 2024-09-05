@@ -1584,23 +1584,30 @@ func TestWalletEvents(t *testing.T) {
 	time.Sleep(time.Second)
 	cluster.MineBlocks(1)
 
-	// Get all transactions of the wallet.
+	// Get all events of the wallet.
 	allTxns, err := b.WalletEvents(context.Background())
 	tt.OK(err)
 	if len(allTxns) < 5 {
-		t.Fatalf("expected at least 5 transactions, got %v", len(allTxns))
+		t.Fatalf("expected at least 5 events, got %v", len(allTxns))
 	}
 	if !sort.SliceIsSorted(allTxns, func(i, j int) bool {
 		return allTxns[i].Timestamp.Unix() > allTxns[j].Timestamp.Unix()
 	}) {
-		t.Fatal("transactions are not sorted by timestamp")
+		t.Fatal("events are not sorted by timestamp")
 	}
 
-	// Get the transactions at an offset and compare.
+	// Get the events at an offset and compare.
 	txns, err := b.WalletEvents(context.Background(), api.WalletTransactionsWithOffset(2))
 	tt.OK(err)
 	if !reflect.DeepEqual(txns, allTxns[2:]) {
-		t.Fatal("transactions don't match", cmp.Diff(txns, allTxns[2:]))
+		t.Fatal("events don't match", cmp.Diff(txns, allTxns[2:]))
+	}
+
+	// Limit the number of events to 5.
+	txns, err = b.WalletEvents(context.Background(), api.WalletTransactionsWithLimit(5))
+	tt.OK(err)
+	if len(txns) != 5 {
+		t.Fatalf("expected exactly 5 events, got %v", len(txns))
 	}
 }
 
