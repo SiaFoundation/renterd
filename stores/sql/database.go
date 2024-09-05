@@ -66,7 +66,7 @@ type (
 
 		// AncestorContracts returns all ancestor contracts of the contract up
 		// until the given start height.
-		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error)
+		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error)
 
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.

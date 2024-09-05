@@ -122,47 +122,43 @@ func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, erro
 	return accounts, nil
 }
 
-func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) (ancestors []api.ContractMetadata, _ error) {
 	rows, err := tx.Query(ctx, `
-		WITH RECURSIVE ancestors AS
+		WITH RECURSIVE c AS
 		(
 			SELECT *
 			FROM contracts
 			WHERE renewed_to = ?
 			UNION ALL
 			SELECT contracts.*
-			FROM ancestors, contracts
-			WHERE contracts.renewed_to = ancestors.fcid
+			FROM c, contracts
+			WHERE contracts.renewed_to = c.fcid
 		)
-		SELECT fcid, h.public_key, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
-		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
-		COALESCE(h.net_address, ''), contract_price, renewed_from, total_cost, archival_reason
-		FROM ancestors
-		LEFT JOIN hosts h ON h.public_key = ancestors.host_key
-		WHERE start_height >= ?
+		SELECT
+			c.created_at, c.fcid, c.host_key,
+			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
+			c.contract_price, c.total_cost,
+			c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
+			"", COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
+		FROM contracts AS c
+		LEFT JOIN hosts h ON h.public_key = c.host_key
+		WHERE start_height >= ? AND archival_reason != ''
+		ORDER BY start_height DESC
 	`, FileContractID(fcid), startHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ancestor contracts: %w", err)
 	}
 	defer rows.Close()
 
-	var contracts []api.ArchivedContract
 	for rows.Next() {
-		var c api.ArchivedContract
-		var state ContractState
-		err := rows.Scan((*FileContractID)(&c.ID), (*PublicKey)(&c.HostKey), (*FileContractID)(&c.RenewedTo),
-			(*Currency)(&c.Spending.Uploads), (*Currency)(&c.Spending.Downloads), (*Currency)(&c.Spending.FundAccount),
-			(*Currency)(&c.Spending.Deletions), &c.ProofHeight,
-			&c.RevisionHeight, &c.RevisionNumber, &c.Size, &c.StartHeight, &state, &c.WindowStart,
-			&c.WindowEnd, &c.HostIP, (*Currency)(&c.ContractPrice), (*FileContractID)(&c.RenewedFrom),
-			(*Currency)(&c.TotalCost), &c.ArchivalReason)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan contract: %w", err)
+		var r ContractRow
+		if err := r.Scan(rows); err != nil {
+			return nil, fmt.Errorf("failed to scan ancestor: %w", err)
 		}
-		c.State = state.String()
-		contracts = append(contracts, c)
+		ancestors = append(ancestors, r.ContractMetadata())
 	}
-	return contracts, nil
+
+	return
 }
 
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
@@ -728,15 +724,15 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 
 	res, err := tx.Exec(ctx, `
 INSERT INTO contracts (
-	created_at,
-	fcid, host_key, proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
+	created_at, fcid, host_key,
+	proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
 	contract_price, total_cost,
-	delete_spending, download_spending, fund_account_spending, list_spending,upload_spending
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		time.Now(),
-		FileContractID(rev.ID()), PublicKey(rev.HostKey()), 0, 0, "0", rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
+	delete_spending, fund_account_spending, list_spending, upload_spending
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		time.Now(), FileContractID(rev.ID()), PublicKey(rev.HostKey()),
+		0, 0, "0", rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
 		Currency(contractPrice), Currency(totalCost),
-		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
+		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
 	}
@@ -1878,7 +1874,7 @@ SELECT
 	c.created_at, c.fcid, c.host_key,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 	c.contract_price, c.total_cost,
-	c.delete_spending, c.download_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
+	c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
 	"", "", ""
 FROM contracts AS c
 WHERE fcid = ?`, FileContractID(renewedFrom)))
@@ -1894,12 +1890,12 @@ UPDATE contracts SET
 	created_at = ?, fcid = ?,
 	proof_height = ?, renewed_from = ?, renewed_to = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
 	contract_price = ?, total_cost = ?,
-	delete_spending = ?, download_spending = ?, fund_account_spending = ?, list_spending = ?, upload_spending = ?
+	delete_spending = ?, fund_account_spending = ?, list_spending = ?, upload_spending = ?
 WHERE fcid = ?`,
 		time.Now(), FileContractID(rev.ID()),
 		0, FileContractID(renewedFrom), FileContractID(types.FileContractID{}), 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight, contractState, rev.Revision.WindowStart, rev.Revision.WindowEnd,
 		Currency(contractPrice), Currency(totalCost),
-		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
+		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
 		FileContractID(renewedFrom),
 	)
 	if err != nil {
@@ -1912,12 +1908,12 @@ INSERT INTO contracts (
 	created_at, fcid, host_key,
 	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
 	contract_price, total_cost,
-	delete_spending, download_spending, fund_account_spending, list_spending, upload_spending
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	delete_spending, fund_account_spending, list_spending, upload_spending
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.CreatedAt, r.FCID, r.HostKey,
 		api.ContractArchivalReasonRenewed, r.ProofHeight, r.RenewedFrom, FileContractID(rev.ID()), r.RevisionHeight, r.RevisionNumber, r.Size, r.StartHeight, r.State, r.WindowStart, r.WindowEnd,
 		r.ContractPrice, r.TotalCost,
-		r.DeleteSpending, r.DownloadSpending, r.FundAccountSpending, r.ListSpending, r.UploadSpending)
+		r.DeleteSpending, r.FundAccountSpending, r.ListSpending, r.UploadSpending)
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to insert archived contract: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
@@ -1940,10 +1936,10 @@ SELECT
 	c.created_at, c.fcid, c.host_key,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 	c.contract_price, c.total_cost,
-	c.delete_spending, c.download_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
-	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), h.settings->>'$.siamuxport' AS siamux_port
+	c.delete_spending, c.fund_account_spending, c.list_spending, c.upload_spending,
+	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 FROM contracts AS c
-INNER JOIN hosts h ON h.public_key = c.host_key
+LEFT JOIN hosts h ON h.public_key = c.host_key
 LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
 LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
 %s
@@ -2769,10 +2765,6 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 	if !newSpending.Uploads.IsZero() {
 		updateKeys = append(updateKeys, "upload_spending = ?")
 		updateValues = append(updateValues, Currency(newSpending.Uploads))
-	}
-	if !newSpending.Downloads.IsZero() {
-		updateKeys = append(updateKeys, "download_spending = ?")
-		updateValues = append(updateValues, Currency(newSpending.Downloads))
 	}
 	if !newSpending.FundAccount.IsZero() {
 		updateKeys = append(updateKeys, "fund_account_spending = ?")

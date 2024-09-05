@@ -22,7 +22,6 @@ CREATE TABLE contracts_temp (
     `total_cost` text,
 
     `delete_spending` text,
-    `download_spending` text,
     `list_spending` text,
     `fund_account_spending` text,
     `upload_spending` text
@@ -57,7 +56,6 @@ INSERT INTO contracts_temp (
     contract_price,
     total_cost,
     delete_spending,
-    download_spending,
     fund_account_spending,
     list_spending,
     upload_spending
@@ -78,7 +76,6 @@ INSERT INTO contracts_temp (
     c.contract_price,
     c.total_cost,
     c.delete_spending,
-    c.download_spending,
     c.fund_account_spending,
     c.list_spending,
     c.upload_spending
@@ -103,7 +100,6 @@ INSERT INTO contracts_temp (
     contract_price,
     total_cost,
     delete_spending,
-    download_spending,
     fund_account_spending,
     list_spending,
     upload_spending
@@ -125,7 +121,6 @@ INSERT INTO contracts_temp (
     ac.contract_price,
     ac.total_cost,
     ac.delete_spending,
-    ac.download_spending,
     ac.fund_account_spending,
     ac.list_spending,
     ac.upload_spending

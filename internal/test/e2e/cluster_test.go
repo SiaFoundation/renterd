@@ -269,7 +269,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Now wait for the revision and proof to be caught by the hostdb.
-	var ac api.ArchivedContract
+	var ac api.ContractMetadata
 	tt.Retry(20, time.Second, func() error {
 		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), renewalID, 0)
 		if err != nil {
@@ -935,9 +935,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 			if !c.Spending.Uploads.IsZero() {
 				t.Fatal("upload spending should be zero")
 			}
-			if !c.Spending.Downloads.IsZero() {
-				t.Fatal("download spending should be zero")
-			}
 			if !c.Spending.FundAccount.IsZero() {
 				nFunded++
 				if c.RevisionNumber == 0 {
@@ -1063,9 +1060,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 		for _, c := range cms {
 			if c.Spending.Uploads.IsZero() {
 				t.Fatal("upload spending shouldn't be zero")
-			}
-			if !c.Spending.Downloads.IsZero() {
-				t.Fatal("download spending should be zero")
 			}
 			if c.RevisionNumber == 0 {
 				t.Fatalf("revision number for contract wasn't recorded: %v", c.RevisionNumber)
@@ -2456,8 +2450,6 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero RevisionNumber")
 	} else if !m.UploadSpending.IsZero() {
 		t.Fatal("expected zero UploadSpending")
-	} else if !m.DownloadSpending.IsZero() {
-		t.Fatal("expected zero DownloadSpending")
 	} else if m.FundAccountSpending == (types.Currency{}) {
 		t.Fatal("expected non-zero FundAccountSpending")
 	} else if !m.DeleteSpending.IsZero() {

@@ -453,19 +453,15 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := api.ContractMetadata{
-		ID:          fcid,
-		HostIP:      "address",
-		HostKey:     hk,
-		StartHeight: 100,
-		State:       api.ContractStatePending,
-		WindowStart: 400,
-		WindowEnd:   500,
-		RenewedFrom: types.FileContractID{},
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
+		ID:            fcid,
+		HostIP:        "address",
+		HostKey:       hk,
+		StartHeight:   100,
+		State:         api.ContractStatePending,
+		WindowStart:   400,
+		WindowEnd:     500,
+		RenewedFrom:   types.FileContractID{},
+		Spending:      api.ContractSpending{},
 		ContractPrice: types.NewCurrency64(1),
 		TotalCost:     totalCost,
 		Size:          c.Revision.Filesize,
@@ -641,14 +637,14 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// record contract spending
+	s := api.ContractSpending{
+		Uploads:     types.Siacoins(1),
+		FundAccount: types.Siacoins(2),
+		Deletions:   types.Siacoins(3),
+		SectorRoots: types.Siacoins(4),
+	}
 	if err := ss.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
-		{ContractID: fcid, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: api.ContractSpending{
-			Uploads:     types.Siacoins(1),
-			Downloads:   types.Siacoins(2),
-			FundAccount: types.Siacoins(3),
-			Deletions:   types.Siacoins(4),
-			SectorRoots: types.Siacoins(5),
-		}},
+		{ContractID: fcid, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: s},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +734,6 @@ func TestRenewedContract(t *testing.T) {
 		State:       api.ContractStatePending,
 		Spending: api.ContractSpending{
 			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
 			FundAccount: types.ZeroCurrency,
 		},
 		ContractPrice: types.NewCurrency64(3),
@@ -756,18 +751,21 @@ func TestRenewedContract(t *testing.T) {
 	} else if len(ancestors) != 1 {
 		t.Fatalf("expected 1 ancestor but got %v", len(ancestors))
 	}
-	expectedContract := api.ArchivedContract{
+	t.Log("del", s.Deletions.String())
+	t.Log("ul", s.Uploads.String())
+	t.Log("roots", s.SectorRoots.String())
+	t.Log("fund", s.FundAccount.String())
+	t.Log("- - ")
+	t.Log("del", ancestors[0].Spending.Deletions.String())
+	t.Log("ul", ancestors[0].Spending.Uploads.String())
+	t.Log("roots", ancestors[0].Spending.SectorRoots.String())
+	t.Log("fund", ancestors[0].Spending.FundAccount.String())
+	expectedContract := api.ContractMetadata{
 		ID:        fcid,
 		HostIP:    "address",
 		HostKey:   c.HostKey(),
 		RenewedTo: fcidR,
-		Spending: api.ContractSpending{
-			Uploads:     types.Siacoins(1),
-			Downloads:   types.Siacoins(2),
-			FundAccount: types.Siacoins(3),
-			Deletions:   types.Siacoins(4),
-			SectorRoots: types.ZeroCurrency, // currently not persisted
-		},
+		Spending:  s,
 
 		ArchivalReason: api.ContractArchivalReasonRenewed,
 		ContractPrice:  types.NewCurrency64(1),
@@ -857,7 +855,7 @@ func TestAncestorsContracts(t *testing.T) {
 		if j := len(fcids) - 1 - i; j >= 0 {
 			renewedTo = fcids[j]
 		}
-		expected := api.ArchivedContract{
+		expected := api.ContractMetadata{
 			ArchivalReason: api.ContractArchivalReasonRenewed,
 			ID:             fcids[len(fcids)-2-i],
 			HostKey:        hk,
@@ -1184,13 +1182,9 @@ func TestSQLMetadataStore(t *testing.T) {
 		WindowEnd:      500,
 		ContractPrice:  types.ZeroCurrency,
 		RenewedFrom:    types.FileContractID{},
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
-		TotalCost:    totalCost1,
-		ContractSets: nil,
+		Spending:       api.ContractSpending{},
+		TotalCost:      totalCost1,
+		ContractSets:   nil,
 	}
 
 	expectedObjSlab2 := object.Slab{
@@ -1223,13 +1217,9 @@ func TestSQLMetadataStore(t *testing.T) {
 		WindowEnd:      500,
 		ContractPrice:  types.ZeroCurrency,
 		RenewedFrom:    types.FileContractID{},
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
-		TotalCost:    totalCost2,
-		ContractSets: nil,
+		Spending:       api.ContractSpending{},
+		TotalCost:      totalCost2,
+		ContractSets:   nil,
 	}
 
 	// Compare slabs.
@@ -2413,10 +2403,9 @@ func TestRecordContractSpending(t *testing.T) {
 	// Record some spending.
 	expectedSpending := api.ContractSpending{
 		Uploads:     types.Siacoins(1),
-		Downloads:   types.Siacoins(2),
-		FundAccount: types.Siacoins(3),
-		Deletions:   types.Siacoins(4),
-		SectorRoots: types.Siacoins(5),
+		FundAccount: types.Siacoins(2),
+		Deletions:   types.Siacoins(3),
+		SectorRoots: types.Siacoins(4),
 	}
 	err = ss.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
 		// non-existent contract

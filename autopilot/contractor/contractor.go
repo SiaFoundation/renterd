@@ -81,7 +81,7 @@ const (
 )
 
 type Bus interface {
-	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)

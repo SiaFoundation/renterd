@@ -1,5 +1,5 @@
 -- dbContractMetric
-CREATE TABLE `contracts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`fcid` blob NOT NULL,`host` blob NOT NULL,`remaining_collateral_lo` BIGINT NOT NULL,`remaining_collateral_hi` BIGINT NOT NULL,`remaining_funds_lo` BIGINT NOT NULL,`remaining_funds_hi` BIGINT NOT NULL,`revision_number` BIGINT NOT NULL,`upload_spending_lo` BIGINT NOT NULL,`upload_spending_hi` BIGINT NOT NULL,`download_spending_lo` BIGINT NOT NULL,`download_spending_hi` BIGINT NOT NULL,`fund_account_spending_lo` BIGINT NOT NULL,`fund_account_spending_hi` BIGINT NOT NULL,`delete_spending_lo` BIGINT NOT NULL,`delete_spending_hi` BIGINT NOT NULL,`list_spending_lo` BIGINT NOT NULL,`list_spending_hi` BIGINT NOT NULL);
+CREATE TABLE `contracts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`fcid` blob NOT NULL,`host` blob NOT NULL,`remaining_collateral_lo` BIGINT NOT NULL,`remaining_collateral_hi` BIGINT NOT NULL,`remaining_funds_lo` BIGINT NOT NULL,`remaining_funds_hi` BIGINT NOT NULL,`revision_number` BIGINT NOT NULL,`upload_spending_lo` BIGINT NOT NULL,`upload_spending_hi` BIGINT NOT NULL,`fund_account_spending_lo` BIGINT NOT NULL,`fund_account_spending_hi` BIGINT NOT NULL,`delete_spending_lo` BIGINT NOT NULL,`delete_spending_hi` BIGINT NOT NULL,`list_spending_lo` BIGINT NOT NULL,`list_spending_hi` BIGINT NOT NULL);
 CREATE INDEX `idx_list_spending` ON `contracts`(`list_spending_lo`,`list_spending_hi`);
 CREATE INDEX `idx_fund_account_spending` ON `contracts`(`fund_account_spending_lo`,`fund_account_spending_hi`);
 CREATE INDEX `idx_contracts_fc_id` ON `contracts`(`fcid`);
@@ -7,7 +7,6 @@ CREATE INDEX `idx_remaining_collateral` ON `contracts`(`remaining_collateral_lo`
 CREATE INDEX `idx_contracts_host` ON `contracts`(`host`);
 CREATE INDEX `idx_contracts_timestamp` ON `contracts`(`timestamp`);
 CREATE INDEX `idx_delete_spending` ON `contracts`(`delete_spending_lo`,`delete_spending_hi`);
-CREATE INDEX `idx_download_spending` ON `contracts`(`download_spending_lo`,`download_spending_hi`);
 CREATE INDEX `idx_upload_spending` ON `contracts`(`upload_spending_lo`,`upload_spending_hi`);
 CREATE INDEX `idx_contracts_revision_number` ON `contracts`(`revision_number`);
 CREATE INDEX `idx_remaining_funds` ON `contracts`(`remaining_funds_lo`,`remaining_funds_hi`);

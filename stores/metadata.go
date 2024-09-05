@@ -146,7 +146,7 @@ func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevis
 	return
 }
 
-func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
+func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ContractMetadata, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
 		return err
@@ -382,7 +382,6 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				RemainingFunds:      latestValues[fcid].validRenterPayout,
 				RevisionNumber:      latestValues[fcid].revision,
 				UploadSpending:      contract.Spending.Uploads.Add(newSpending.Uploads),
-				DownloadSpending:    contract.Spending.Downloads.Add(newSpending.Downloads),
 				FundAccountSpending: contract.Spending.FundAccount.Add(newSpending.FundAccount),
 				DeleteSpending:      contract.Spending.Deletions.Add(newSpending.Deletions),
 				ListSpending:        contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
@@ -392,9 +391,6 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			var updates api.ContractSpending
 			if !newSpending.Uploads.IsZero() {
 				updates.Uploads = m.UploadSpending
-			}
-			if !newSpending.Downloads.IsZero() {
-				updates.Downloads = m.DownloadSpending
 			}
 			if !newSpending.FundAccount.IsZero() {
 				updates.FundAccount = m.FundAccountSpending

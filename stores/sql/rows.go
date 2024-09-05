@@ -36,7 +36,6 @@ type ContractRow struct {
 
 	// spending fields
 	DeleteSpending      Currency
-	DownloadSpending    Currency
 	FundAccountSpending Currency
 	ListSpending        Currency
 	UploadSpending      Currency
@@ -52,7 +51,7 @@ func (r *ContractRow) Scan(s Scanner) error {
 		&r.CreatedAt, &r.FCID, &r.HostKey,
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.TotalCost,
-		&r.DeleteSpending, &r.DownloadSpending, &r.FundAccountSpending, &r.ListSpending, &r.UploadSpending,
+		&r.DeleteSpending, &r.FundAccountSpending, &r.ListSpending, &r.UploadSpending,
 		&r.ContractSet, &r.NetAddress, &r.SiamuxPort,
 	)
 }
@@ -62,33 +61,43 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 	if r.ContractSet != "" {
 		sets = append(sets, r.ContractSet)
 	}
-	return api.ContractMetadata{
-		ContractPrice: types.Currency(r.ContractPrice),
-		ID:            types.FileContractID(r.FCID),
-		HostIP:        r.NetAddress,
-		HostKey:       types.PublicKey(r.HostKey),
-		SiamuxAddr: rhpv2.HostSettings{
+
+	var siamuxAddr string
+	if r.NetAddress != "" && r.SiamuxPort != "" {
+		siamuxAddr = rhpv2.HostSettings{
 			NetAddress: r.NetAddress,
 			SiaMuxPort: r.SiamuxPort,
-		}.SiamuxAddr(),
+		}.SiamuxAddr()
+	}
 
-		RenewedFrom: types.FileContractID(r.RenewedFrom),
-		TotalCost:   types.Currency(r.TotalCost),
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(r.UploadSpending),
-			Downloads:   types.Currency(r.DownloadSpending),
-			FundAccount: types.Currency(r.FundAccountSpending),
-			Deletions:   types.Currency(r.DeleteSpending),
-			SectorRoots: types.Currency(r.ListSpending),
-		},
+	return api.ContractMetadata{
+		ID:         types.FileContractID(r.FCID),
+		HostIP:     r.NetAddress,
+		HostKey:    types.PublicKey(r.HostKey),
+		SiamuxAddr: siamuxAddr,
+
+		ArchivalReason: r.ArchivalReason,
 		ProofHeight:    r.ProofHeight,
+		RenewedFrom:    types.FileContractID(r.RenewedFrom),
+		RenewedTo:      types.FileContractID(r.RenewedTo),
 		RevisionHeight: r.RevisionHeight,
 		RevisionNumber: r.RevisionNumber,
-		ContractSets:   sets,
 		Size:           r.Size,
 		StartHeight:    r.StartHeight,
 		State:          r.State.String(),
 		WindowStart:    r.WindowStart,
 		WindowEnd:      r.WindowEnd,
+
+		ContractPrice: types.Currency(r.ContractPrice),
+		TotalCost:     types.Currency(r.TotalCost),
+
+		Spending: api.ContractSpending{
+			Uploads:     types.Currency(r.UploadSpending),
+			FundAccount: types.Currency(r.FundAccountSpending),
+			Deletions:   types.Currency(r.DeleteSpending),
+			SectorRoots: types.Currency(r.ListSpending),
+		},
+
+		ContractSets: sets,
 	}
 }

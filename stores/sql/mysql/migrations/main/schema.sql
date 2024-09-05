@@ -93,7 +93,6 @@ CREATE TABLE `contracts` (
   `total_cost` longtext,
 
   `delete_spending` longtext,
-  `download_spending` longtext,
   `fund_account_spending` longtext,
   `list_spending` longtext,
   `upload_spending` longtext,

@@ -1,6 +1,5 @@
 /*
 TODOs:
-- drop download_spending
 - rename total_cost
 */
 
@@ -28,7 +27,6 @@ CREATE TABLE contracts_temp (
   `total_cost` longtext,
 
   `delete_spending` longtext,
-  `download_spending` longtext,
   `fund_account_spending` longtext,
   `list_spending` longtext,
   `upload_spending` longtext,
@@ -64,7 +62,6 @@ INSERT INTO contracts_temp (
     contract_price,
     total_cost,
     delete_spending,
-    download_spending,
     fund_account_spending,
     list_spending,
     upload_spending
@@ -85,7 +82,6 @@ INSERT INTO contracts_temp (
     c.contract_price,
     c.total_cost,
     c.delete_spending,
-    c.download_spending,
     c.fund_account_spending,
     c.list_spending,
     c.upload_spending
@@ -110,7 +106,6 @@ INSERT INTO contracts_temp (
     contract_price,
     total_cost,
     delete_spending,
-    download_spending,
     fund_account_spending,
     list_spending,
     upload_spending
@@ -132,7 +127,6 @@ INSERT INTO contracts_temp (
     ac.contract_price,
     ac.total_cost,
     ac.delete_spending,
-    ac.download_spending,
     ac.fund_account_spending,
     ac.list_spending,
     ac.upload_spending

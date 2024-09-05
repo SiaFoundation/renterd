@@ -37,7 +37,7 @@ func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.Contract
 }
 
 // AncestorContracts returns any ancestors of a given contract.
-func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
+func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), contractID), &contracts)

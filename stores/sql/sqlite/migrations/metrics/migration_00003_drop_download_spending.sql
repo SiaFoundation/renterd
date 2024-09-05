@@ -1,0 +1,1 @@
+ALTER TABLE contracts DROP COLUMN download_spending_lo, download_spending_hi;
