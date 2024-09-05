@@ -1,6 +1,5 @@
 /*
 TODOs:
-- drop list_spending
 - drop download_spending
 - rename total_cost
 */
