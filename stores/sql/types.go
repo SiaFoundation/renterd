@@ -159,6 +159,10 @@ func (c Currency) Value() (driver.Value, error) {
 
 // Scan scan value into fileContractID, implements sql.Scanner interface.
 func (fcid *FileContractID) Scan(value interface{}) error {
+	if value == nil {
+		*fcid = FileContractID{}
+		return nil
+	}
 	bytes, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal fcid value:", value))
