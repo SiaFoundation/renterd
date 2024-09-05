@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"errors"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -12,7 +13,7 @@ func randomAlertID() types.Hash256 {
 	return frand.Entropy256()
 }
 
-func newDownloadFailedAlert(bucket, path, prefix, marker string, offset, length, contracts int64, err error) alerts.Alert {
+func newDownloadFailedAlert(bucket, path string, offset, length, contracts int64, err error) alerts.Alert {
 	return alerts.Alert{
 		ID:       randomAlertID(),
 		Severity: alerts.SeverityError,
@@ -20,8 +21,6 @@ func newDownloadFailedAlert(bucket, path, prefix, marker string, offset, length,
 		Data: map[string]any{
 			"bucket":    bucket,
 			"path":      path,
-			"prefix":    prefix,
-			"marker":    marker,
 			"offset":    offset,
 			"length":    length,
 			"contracts": contracts,
@@ -47,6 +46,18 @@ func newUploadFailedAlert(bucket, path, contractSet, mimeType string, minShards,
 	}
 	if multipart {
 		data["multipart"] = true
+	}
+
+	hostErr := err
+	for errors.Unwrap(hostErr) != nil {
+		hostErr = errors.Unwrap(hostErr)
+	}
+	if set, ok := hostErr.(HostErrorSet); ok {
+		hostErrors := make(map[string]string, len(set))
+		for hk, err := range set {
+			hostErrors[hk.String()] = err.Error()
+		}
+		data["hosts"] = hostErrors
 	}
 
 	return alerts.Alert{

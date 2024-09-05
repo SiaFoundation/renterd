@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -45,8 +46,20 @@ func TestFormContract(t *testing.T) {
 	_, err = b.Contract(context.Background(), contract.ID)
 	tt.OK(err)
 
+	// fetch autopilot config
+	old, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
+	tt.OK(err)
+
 	// mine to the renew window
 	cluster.MineToRenewWindow()
+
+	// wait until autopilot updated the current period
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		if curr, _ := b.Autopilot(context.Background(), api.DefaultAutopilotID); curr.CurrentPeriod == old.CurrentPeriod {
+			return errors.New("autopilot didn't update the current period")
+		}
+		return nil
+	})
 
 	// update autopilot config to allow for 1 contract, this won't form a
 	// contract but will ensure we don't skip contract maintenance, which should
@@ -56,7 +69,7 @@ func TestFormContract(t *testing.T) {
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID
-	tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
@@ -72,11 +85,14 @@ func TestFormContract(t *testing.T) {
 	})
 
 	// assert the contract is part of the contract set
-	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
-	tt.OK(err)
-	if len(contracts) != 1 {
-		t.Fatalf("expected 1 contract, got %v", len(contracts))
-	} else if contracts[0].ID != renewalID {
-		t.Fatalf("expected contract %v, got %v", contract.ID, contracts[0].ID)
-	}
+	tt.Retry(300, 100*time.Millisecond, func() error {
+		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
+		tt.OK(err)
+		if len(contracts) != 1 {
+			return fmt.Errorf("expected 1 contract, got %v", len(contracts))
+		} else if contracts[0].ID != renewalID {
+			return fmt.Errorf("expected contract %v, got %v", contract.ID, contracts[0].ID)
+		}
+		return nil
+	})
 }

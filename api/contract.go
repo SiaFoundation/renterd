@@ -161,10 +161,35 @@ type (
 		LockID   uint64     `json:"lockID"`
 	}
 
+	// ContractPruneRequest is the request type for the /contract/:id/prune
+	// endpoint.
+	ContractPruneRequest struct {
+		Timeout DurationMS `json:"timeout"`
+	}
+
+	// ContractPruneResponse is the response type for the /contract/:id/prune
+	// endpoint.
+	ContractPruneResponse struct {
+		ContractSize uint64 `json:"size"`
+		Pruned       uint64 `json:"pruned"`
+		Remaining    uint64 `json:"remaining"`
+		Error        string `json:"error,omitempty"`
+	}
+
 	// ContractAcquireRequest is the request type for the /contract/:id/release
 	// endpoint.
 	ContractReleaseRequest struct {
 		LockID uint64 `json:"lockID"`
+	}
+
+	// ContractRenewRequest is the request type for the /contract/:id/renew
+	// endpoint.
+	ContractRenewRequest struct {
+		EndHeight          uint64         `json:"endHeight"`
+		ExpectedNewStorage uint64         `json:"expectedNewStorage"`
+		MaxFundAmount      types.Currency `json:"maxFundAmount"`
+		MinNewCollateral   types.Currency `json:"minNewCollateral"`
+		RenterFunds        types.Currency `json:"renterFunds"`
 	}
 
 	// ContractRenewedRequest is the request type for the /contract/:id/renewed
@@ -200,6 +225,11 @@ type (
 		ContractSet string `json:"contractset"`
 	}
 )
+
+// Total returns the total cost of the contract spending.
+func (x ContractSpending) Total() types.Currency {
+	return x.Uploads.Add(x.Downloads).Add(x.FundAccount).Add(x.Deletions).Add(x.SectorRoots)
+}
 
 // Add returns the sum of the current and given contract spending.
 func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {

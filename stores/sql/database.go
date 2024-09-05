@@ -52,7 +52,7 @@ type (
 		AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error
 
 		// Accounts returns all accounts from the db.
-		Accounts(ctx context.Context) ([]api.Account, error)
+		Accounts(ctx context.Context, owner string) ([]api.Account, error)
 
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
@@ -246,6 +246,10 @@ type (
 		// ProcessChainUpdate applies the given chain update to the database.
 		ProcessChainUpdate(ctx context.Context, applyFn func(ChainUpdateTx) error) error
 
+		// PrunableContractRoots returns the indices of roots that are not in
+		// the contract.
+		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 
@@ -310,16 +314,12 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 
 		// SaveAccounts saves the given accounts in the db, overwriting any
-		// existing ones and setting the clean shutdown flag.
+		// existing ones.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
 		// SearchObjects returns a list of objects that contain the provided
 		// substring.
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-
-		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
-		// 'false' and also marks them as requiring a resync.
-		SetUncleanShutdown(ctx context.Context) error
 
 		// SetContractSet creates the contract set with the given name and
 		// associates it with the provided contract IDs.

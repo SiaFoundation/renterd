@@ -81,14 +81,15 @@ const (
 )
 
 type Bus interface {
-	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
+	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
@@ -98,9 +99,7 @@ type Bus interface {
 
 type Worker interface {
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
-	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
-	RHPRenew(ctx context.Context, fcid types.FileContractID, endHeight uint64, hk types.PublicKey, hostIP string, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage, windowSize uint64) (api.RHPRenewResponse, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
@@ -132,9 +131,6 @@ type (
 		revisionSubmissionBuffer  uint64
 
 		firstRefreshFailure map[types.FileContractID]time.Time
-
-		shutdownCtx       context.Context
-		shutdownCtxCancel context.CancelFunc
 	}
 
 	scoredHost struct {
@@ -167,7 +163,6 @@ type (
 
 func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
 	logger = logger.Named("contractor")
-	ctx, cancel := context.WithCancel(context.Background())
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
@@ -179,15 +174,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 		revisionSubmissionBuffer:  revisionSubmissionBuffer,
 
 		firstRefreshFailure: make(map[types.FileContractID]time.Time),
-
-		shutdownCtx:       ctx,
-		shutdownCtxCancel: cancel,
 	}
-}
-
-func (c *Contractor) Close() error {
-	c.shutdownCtxCancel()
-	return nil
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, state *MaintenanceState) (bool, error) {
@@ -319,7 +306,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	maxFundAmount := budget.Add(rev.ValidRenterPayout())
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, contract.ID, contract.EndHeight(), hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage, settings.WindowSize)
+	renewal, err := c.bus.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral, maxFundAmount, expectedNewStorage)
 	if err != nil {
 		if strings.Contains(err.Error(), "new collateral is too low") {
 			logger.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
@@ -338,25 +325,16 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	}
 
 	// update the budget
-	*budget = budget.Sub(resp.FundAmount)
-
-	// persist the contract
-	refreshedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, contract.ID, api.ContractStatePending)
-	if err != nil {
-		logger.Errorw("adding refreshed contract failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		return api.ContractMetadata{}, false, err
-	}
+	*budget = budget.Sub(renewal.TotalCost)
 
 	// add to renewed set
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	logger.Infow("refresh succeeded",
-		"fcid", refreshedContract.ID,
-		"renewedFrom", contract.ID,
+		"fcid", renewal.ID,
+		"renewedFrom", renewal.RenewedFrom,
 		"renterFunds", renterFunds.String(),
 		"minNewCollateral", minNewCollateral.String(),
-		"newCollateral", newCollateral.String(),
 	)
-	return refreshedContract, true, nil
+	return renewal, true, nil
 }
 
 func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, host api.Host, budget *types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
@@ -366,11 +344,9 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 
 	// convenience variables
-	settings := host.Settings
 	pt := host.PriceTable.HostPriceTable
 	fcid := contract.ID
 	rev := contract.Revision
-	hk := contract.HostKey
 
 	// fetch consensus state
 	cs, err := c.bus.ConsensusState(ctx)
@@ -400,7 +376,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, pt)
 
 	// renew the contract
-	resp, err := w.RHPRenew(ctx, fcid, endHeight, hk, contract.SiamuxAddr, settings.Address, ctx.state.Address, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage, settings.WindowSize)
+	renewal, err := c.bus.RenewContract(ctx, fcid, endHeight, renterFunds, types.ZeroCurrency, *budget, expectedNewStorage)
 	if err != nil {
 		logger.Errorw(
 			"renewal failed",
@@ -416,24 +392,15 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	}
 
 	// update the budget
-	*budget = budget.Sub(resp.FundAmount)
+	*budget = budget.Sub(renewal.TotalCost)
 
-	// persist the contract
-	renewedContract, err := c.bus.AddRenewedContract(ctx, resp.Contract, resp.ContractPrice, renterFunds, cs.BlockHeight, fcid, api.ContractStatePending)
-	if err != nil {
-		logger.Errorw(fmt.Sprintf("renewal failed to persist, err: %v", err))
-		return api.ContractMetadata{}, false, err
-	}
-
-	newCollateral := resp.Contract.Revision.MissedHostPayout().Sub(resp.ContractPrice)
 	logger.Infow(
 		"renewal succeeded",
-		"fcid", renewedContract.ID,
-		"renewedFrom", fcid,
+		"fcid", renewal.ID,
+		"renewedFrom", renewal.RenewedFrom,
 		"renterFunds", renterFunds.String(),
-		"newCollateral", newCollateral.String(),
 	)
-	return renewedContract, true, nil
+	return renewal, true, nil
 }
 
 // broadcastRevisions broadcasts contract revisions from the current set of
@@ -466,7 +433,7 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, w Worker, contracts
 
 		// broadcast revision
 		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
-		err := w.RHPBroadcast(ctx, contract.ID)
+		_, err := c.bus.BroadcastContract(ctx, contract.ID)
 		cancel()
 		if utils.IsErr(err, errors.New("transaction has a file contract with an outdated revision number")) {
 			continue // don't log - revision was already broadcasted
