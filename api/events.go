@@ -58,9 +58,10 @@ type (
 	}
 
 	EventContractSetUpdate struct {
-		Name        string                 `json:"name"`
-		ContractIDs []types.FileContractID `json:"contractIDs"`
-		Timestamp   time.Time              `json:"timestamp"`
+		Name      string                 `json:"name"`
+		ToAdd     []types.FileContractID `json:"toAdd"`
+		ToRemove  []types.FileContractID `json:"toRemove"`
+		Timestamp time.Time              `json:"timestamp"`
 	}
 
 	EventSettingUpdate struct {

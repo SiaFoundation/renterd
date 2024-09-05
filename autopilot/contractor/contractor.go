@@ -83,6 +83,7 @@ const (
 type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
@@ -92,13 +93,12 @@ type Bus interface {
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
-	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
 
 type Worker interface {
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
-	RHPBroadcast(ctx context.Context, fcid types.FileContractID) (err error)
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
 	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
@@ -433,7 +433,7 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, w Worker, contracts
 
 		// broadcast revision
 		ctx, cancel := context.WithTimeout(ctx, timeoutBroadcastRevision)
-		err := w.RHPBroadcast(ctx, contract.ID)
+		_, err := c.bus.BroadcastContract(ctx, contract.ID)
 		cancel()
 		if utils.IsErr(err, errors.New("transaction has a file contract with an outdated revision number")) {
 			continue // don't log - revision was already broadcasted
@@ -1335,16 +1335,14 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		return false, fmt.Errorf("failed to fetch old contract set: %w", err)
 	}
 
-	// STEP 4: update contract set
+	// merge kept and formed contracts into new set
 	newSet := make([]api.ContractMetadata, 0, len(keptContracts)+len(formedContracts))
 	newSet = append(newSet, keptContracts...)
 	newSet = append(newSet, formedContracts...)
-	var newSetIDs []types.FileContractID
-	for _, contract := range newSet {
-		newSetIDs = append(newSetIDs, contract.ID)
-	}
-	if err := bus.SetContractSet(ctx, ctx.ContractSet(), newSetIDs); err != nil {
-		return false, fmt.Errorf("failed to update contract set: %w", err)
+
+	// STEP 4: update contract set
+	if err := updateContractSet(ctx, bus, oldSet, newSet); err != nil {
+		return false, err
 	}
 
 	// STEP 5: perform minor maintenance such as cleanups and broadcasting
@@ -1355,4 +1353,32 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 
 	// STEP 6: log changes and register alerts
 	return computeContractSetChanged(ctx, alerter, bus, churn, logger, oldSet, newSet, churnReasons)
+}
+
+func updateContractSet(ctx *mCtx, bus Bus, oldSet, newSet []api.ContractMetadata) error {
+	var newSetIDs []types.FileContractID
+	for _, contract := range newSet {
+		newSetIDs = append(newSetIDs, contract.ID)
+	}
+	inOldSet := make(map[types.FileContractID]struct{})
+	for _, c := range oldSet {
+		inOldSet[c.ID] = struct{}{}
+	}
+	var toAdd []types.FileContractID
+	for _, c := range newSet {
+		if _, ok := inOldSet[c.ID]; !ok {
+			toAdd = append(toAdd, c.ID)
+		}
+		// only keep contracts that are in the old but not the new set
+		delete(inOldSet, c.ID)
+	}
+
+	var toRemove []types.FileContractID
+	for id := range inOldSet {
+		toRemove = append(toRemove, id)
+	}
+	if err := bus.UpdateContractSet(ctx, ctx.ContractSet(), newSetIDs, toRemove); err != nil {
+		return fmt.Errorf("failed to update contract set: %w", err)
+	}
+	return nil
 }

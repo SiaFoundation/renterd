@@ -237,12 +237,15 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (c
 	return cs, err
 }
 
-func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	wanted := make(map[types.FileContractID]struct{})
-	for _, fcid := range contractIds {
-		wanted[types.FileContractID(fcid)] = struct{}{}
+func (s *SQLStore) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
+	toAddMap := make(map[types.FileContractID]struct{})
+	for _, fcid := range toAdd {
+		toAddMap[fcid] = struct{}{}
 	}
-
+	toRemoveMap := make(map[types.FileContractID]struct{})
+	for _, fcid := range toRemove {
+		toRemoveMap[fcid] = struct{}{}
+	}
 	var diff []types.FileContractID
 	var nContractsAfter int
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
@@ -251,19 +254,20 @@ func (s *SQLStore) SetContractSet(ctx context.Context, name string, contractIds 
 		if err != nil && !errors.Is(err, api.ErrContractSetNotFound) {
 			return fmt.Errorf("failed to fetch contracts: %w", err)
 		}
+
 		diff = nil // reset
 		for _, c := range prevContracts {
-			if _, exists := wanted[c.ID]; !exists {
+			if _, exists := toAddMap[c.ID]; exists {
+				delete(toAddMap, c.ID) // already exists
+			} else if _, exists := toRemoveMap[c.ID]; exists {
 				diff = append(diff, c.ID) // removal
-			} else {
-				delete(wanted, c.ID)
 			}
 		}
-		for fcid := range wanted {
+		for _, fcid := range toAdd {
 			diff = append(diff, fcid) // addition
 		}
 		// update contract set
-		if err := tx.SetContractSet(ctx, name, contractIds); err != nil {
+		if err := tx.UpdateContractSet(ctx, name, toAdd, toRemove); err != nil {
 			return fmt.Errorf("failed to set contract set: %w", err)
 		}
 		// fetch contracts after update
