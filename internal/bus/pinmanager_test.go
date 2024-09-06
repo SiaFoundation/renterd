@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -17,7 +16,6 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -182,19 +180,6 @@ func (ms *mockPinStore) UpdateAutopilot(ctx context.Context, autopilot api.Autop
 	return nil
 }
 
-func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
-	config := zap.NewProductionEncoderConfig()
-	config.EncodeTime = zapcore.RFC3339TimeEncoder
-	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	config.StacktraceKey = ""
-	consoleEncoder := zapcore.NewConsoleEncoder(config)
-
-	return zap.New(
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level),
-		zap.AddCaller(),
-		zap.AddStacktrace(level),
-	)
-}
 func TestPinManager(t *testing.T) {
 	// mock dependencies
 	a := &mockAlerter{}
@@ -203,8 +188,7 @@ func TestPinManager(t *testing.T) {
 	s := newTestStore()
 
 	// create a pinmanager
-
-	pm := NewPinManager(a, b, e, s, testUpdateInterval, time.Minute, newTestLoggerCustom(zap.DebugLevel))
+	pm := NewPinManager(a, b, e, s, testUpdateInterval, time.Minute, zap.NewNop())
 	defer func() {
 		if err := pm.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
