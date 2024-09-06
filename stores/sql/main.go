@@ -689,7 +689,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	}
 
 	var whereExprs []string
-	var args []any
+	var whereArgs []any
 
 	// fetch autopilot id
 	var autopilotID int64
@@ -728,7 +728,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	// filter address
 	if opts.AddressContains != "" {
 		whereExprs = append(whereExprs, "h.net_address LIKE ?")
-		args = append(args, "%"+opts.AddressContains+"%")
+		whereArgs = append(whereArgs, "%"+opts.AddressContains+"%")
 	}
 
 	// filter public key
@@ -739,7 +739,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		}
 		placeholders := strings.Repeat("?, ", len(opts.KeyIn)-1) + "?"
 		whereExprs = append(whereExprs, fmt.Sprintf("h.public_key IN (%s)", placeholders))
-		args = append(args, pubKeys...)
+		whereArgs = append(whereArgs, pubKeys...)
 	}
 
 	// filter usability
@@ -750,10 +750,10 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		switch opts.UsabilityMode {
 		case api.UsabilityFilterModeUsable:
 			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
-			args = append(args, autopilotID)
+			whereArgs = append(whereArgs, autopilotID)
 		case api.UsabilityFilterModeUnusable:
 			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
-			args = append(args, autopilotID)
+			whereArgs = append(whereArgs, autopilotID)
 		}
 	}
 
@@ -788,6 +788,34 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	if hasBlocklist {
 		blockedExprs = append(blockedExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
 	}
+
+	var orderByExpr string
+	var orderByArgs []any
+	if opts.SortBy != "" {
+		if opts.SortDir != "" &&
+			opts.SortDir != api.SortDirAsc &&
+			opts.SortDir != api.SortDirDesc {
+			return nil, fmt.Errorf("invalid sort order: %v", opts.SortDir)
+		} else if _, valid := api.ValidHostSortBy[opts.SortBy]; !valid {
+			return nil, fmt.Errorf("%w: invalid sortBy parameter: %v", api.ErrInvalidHostSortBy, opts.SortBy)
+		}
+
+		var fieldExpr string
+		if strings.HasPrefix(opts.SortBy, "settings.") {
+			field := strings.TrimPrefix(opts.SortBy, "settings.")
+			fieldExpr = fmt.Sprintf("h.settings ->> '$.%s'", field)
+		} else if strings.HasPrefix(opts.SortBy, "price_table.") {
+			field := strings.TrimPrefix(opts.SortBy, "price_table.")
+			fieldExpr = fmt.Sprintf("h.price_table ->> '$.%s'", field)
+		} else {
+			return nil, fmt.Errorf("invalid sortBy parameter: %v", opts.SortBy)
+		}
+		orderByExpr = fmt.Sprintf("ORDER BY %s %s", fieldExpr, opts.SortDir)
+		orderByArgs = append(orderByArgs, fieldExpr)
+		whereExprs = append(whereExprs, "COALESCE(?, '') != ''")
+		whereArgs = append(whereArgs, fieldExpr)
+	}
+
 	var blockedExpr string
 	if len(blockedExprs) > 0 {
 		blockedExpr = strings.Join(blockedExprs, " OR ")
@@ -798,6 +826,10 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	if len(whereExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
 	}
+	var args []any
+	args = append(args, whereArgs...)
+	args = append(args, orderByArgs...)
+
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
@@ -806,7 +838,8 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		FROM hosts h
 		%s
 		%s
-	`, blockedExpr, whereExpr, offsetLimitStr), args...)
+		%s
+	`, blockedExpr, whereExpr, orderByExpr, offsetLimitStr), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -1178,7 +1211,7 @@ func whereObjectMarker(marker, sortBy, sortDir string, queryMarker func(dst any,
 		return nil, nil, fmt.Errorf("sortBy and sortDir must be set")
 	}
 
-	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
+	desc := strings.ToLower(sortDir) == api.SortDirDesc
 	switch strings.ToLower(sortBy) {
 	case api.ObjectSortByName:
 		if desc {
@@ -1221,8 +1254,8 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	}
 
 	dir2SQL := map[string]string{
-		api.ObjectSortDirAsc:  "ASC",
-		api.ObjectSortDirDesc: "DESC",
+		api.SortDirAsc:  "ASC",
+		api.SortDirDesc: "DESC",
 	}
 	if _, ok := dir2SQL[strings.ToLower(sortDir)]; !ok {
 		return nil, fmt.Errorf("invalid sortDir: %v", sortDir)
@@ -1258,7 +1291,7 @@ func ListObjects(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, ma
 		sortBy = api.ObjectSortByName
 	}
 	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
+		sortDir = api.SortDirAsc
 	}
 
 	// filter by bucket
@@ -1610,7 +1643,7 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 		sortBy = api.ObjectSortByName
 	}
 	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
+		sortDir = api.SortDirAsc
 	}
 
 	// fetch directory id

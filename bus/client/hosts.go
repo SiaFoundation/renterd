@@ -26,6 +26,8 @@ func (c *Client) Hosts(ctx context.Context, opts api.HostOptions) (hosts []api.H
 		UsabilityMode:   opts.UsabilityMode,
 		AddressContains: opts.AddressContains,
 		KeyIn:           opts.KeyIn,
+		SortBy:          opts.SortBy,
+		SortDir:         opts.SortDir,
 	}, &hosts)
 	return
 }

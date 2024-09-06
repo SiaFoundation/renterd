@@ -138,6 +138,34 @@ func TestHosts(t *testing.T) {
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
+	err := ss.RecordHostScans(context.Background(), []api.HostScan{
+		{
+			HostKey: hk1,
+			PriceTable: rhpv3.HostPriceTable{
+				InitBaseCost: types.NewCurrency64(2),
+			},
+			Settings: rhpv2.HostSettings{
+				BaseRPCPrice: types.NewCurrency64(2),
+			},
+			Success:   true,
+			Timestamp: time.Now(),
+		},
+		{
+			HostKey: hk3,
+			PriceTable: rhpv3.HostPriceTable{
+				InitBaseCost: types.NewCurrency64(1),
+			},
+			Settings: rhpv2.HostSettings{
+				BaseRPCPrice: types.NewCurrency64(1),
+			},
+			Success:   true,
+			Timestamp: time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// search all hosts
 	his, err := ss.Hosts(context.Background(), api.HostOptions{
 		AutopilotID:     "",
@@ -152,6 +180,59 @@ func TestHosts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(his) != 3 {
 		t.Fatal("unexpected")
+	}
+
+	// search all hosts sorted by initbasecost
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		FilterMode: api.HostFilterModeAll,
+		SortBy:     "price_table.initbasecost",
+		Limit:      -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 3 {
+		t.Fatal("unexpected", len(his))
+	} else if his[0].PublicKey != hk2 || his[1].PublicKey != hk3 || his[2].PublicKey != hk1 {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey, his[2].PublicKey)
+	}
+
+	// reverse order
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		FilterMode: api.HostFilterModeAll,
+		SortBy:     "price_table.initbasecost",
+		SortDir:    api.SortDirDesc,
+		Limit:      -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 3 {
+		t.Fatal("unexpected", len(his))
+	} else if his[0].PublicKey != hk1 || his[1].PublicKey != hk3 || his[2].PublicKey != hk2 {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey, his[2].PublicKey)
+	}
+
+	// search all hosts sorted by baserpcprice
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		FilterMode: api.HostFilterModeAll,
+		SortBy:     "settings.baserpcprice",
+		Limit:      -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(his) != 3 {
+		t.Fatal("unexpected", len(his))
+	} else if his[0].PublicKey != hk2 || his[1].PublicKey != hk3 || his[2].PublicKey != hk1 {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey, his[2].PublicKey)
+	}
+
+	// search by invalid key
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		FilterMode: api.HostFilterModeAll,
+		SortBy:     "price_table.invalid",
+		Limit:      -1,
+	})
+	if !errors.Is(err, api.ErrInvalidHostSortBy) {
+		t.Fatal(err)
 	}
 
 	// assert offset & limit are taken into account
