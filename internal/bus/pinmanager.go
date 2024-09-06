@@ -17,6 +17,14 @@ import (
 )
 
 type (
+	// An ExchangeRateExplorer retrieves exchange rate data about
+	// the SC token.
+	ExchangeRateExplorer interface {
+		Enabled() bool
+		BaseURL() string
+		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
+	}
+
 	Store interface {
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
@@ -27,17 +35,12 @@ type (
 		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
 		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
 	}
-
-	Explorer interface {
-		Enabled() bool
-		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
-	}
 )
 
 type (
 	pinManager struct {
 		a           alerts.Alerter
-		e           Explorer
+		e           ExchangeRateExplorer
 		s           Store
 		broadcaster webhooks.Broadcaster
 
@@ -59,7 +62,7 @@ type (
 // NewPinManager returns a new PinManager, responsible for pinning prices to a
 // fixed value in an underlying currency. The returned pin manager is already
 // running and can be stopped by calling Shutdown.
-func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, e Explorer, s Store, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, e ExchangeRateExplorer, s Store, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	pm := &pinManager{
 		a:           alerts,
 		e:           e,
@@ -323,8 +326,8 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	settings, err := pm.s.PinnedSettings(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch pinned settings: %w", err)
-	} else if !settings.Enabled {
-		pm.logger.Debug("price pinning is disabled, skipping price update")
+	} else if !settings.Enabled() {
+		pm.logger.Debug("no pinned settings, skipping price update")
 		return nil
 	}
 

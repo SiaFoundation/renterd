@@ -194,12 +194,12 @@ type (
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
+		Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
@@ -315,7 +315,6 @@ type Bus struct {
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 	cm          ChainManager
-	e           Explorer
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
@@ -331,6 +330,7 @@ type Bus struct {
 	rhp3 *rhp3.Client
 
 	contractLocker        ContractLocker
+	explorer              *ibus.Explorer
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 
@@ -338,7 +338,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, e Explorer, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
@@ -348,7 +348,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		accounts: store,
 		s:        s,
 		cm:       cm,
-		e:        e,
 		w:        w,
 		hs:       store,
 		as:       store,
@@ -367,6 +366,10 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
+
+	// create explorer
+	e := ibus.NewExplorer(explorerURL)
+	b.explorer = e
 
 	// create sectors cache
 	b.sectors = ibus.NewSectorsCache()
@@ -435,7 +438,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 
-		"GET    /hosts":                          b.hostsHandlerGETDeprecated,
+		"POST   /hosts":                          b.hostsHandlerPOST,
 		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
 		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
@@ -473,7 +476,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
 		"GET    /search/objects": b.searchObjectsHandlerGET,
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
@@ -510,15 +512,11 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 
-		"GET    /wallet":              b.walletHandler,
-		"POST   /wallet/discard":      b.walletDiscardHandler,
-		"POST   /wallet/fund":         b.walletFundHandler,
-		"GET    /wallet/outputs":      b.walletOutputsHandler,
-		"GET    /wallet/pending":      b.walletPendingHandler,
-		"POST   /wallet/redistribute": b.walletRedistributeHandler,
-		"POST   /wallet/send":         b.walletSendSiacoinsHandler,
-		"POST   /wallet/sign":         b.walletSignHandler,
-		"GET    /wallet/transactions": b.walletTransactionsHandler,
+		"GET  /wallet":              b.walletHandler,
+		"GET  /wallet/events":       b.walletEventsHandler,
+		"GET  /wallet/pending":      b.walletPendingHandler,
+		"POST /wallet/redistribute": b.walletRedistributeHandler,
+		"POST /wallet/send":         b.walletSendSiacoinsHandler,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,

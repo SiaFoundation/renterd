@@ -185,6 +185,9 @@ type (
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
+		// Hosts returns a list of hosts that match the provided filters
+		Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
+
 		// HostsForScanning returns a list of hosts to scan which haven't been
 		// scanned since at least maxLastScan.
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
@@ -313,9 +316,6 @@ type (
 		// SaveAccounts saves the given accounts in the db, overwriting any
 		// existing ones.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
-
-		// SearchHosts returns a list of hosts that match the provided filters
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 
 		// SearchObjects returns a list of objects that contain the provided
 		// substring.

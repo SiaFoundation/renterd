@@ -258,8 +258,11 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 }
 
 func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
-	// create explorer
-	e := bus.NewExplorer(cfg.Explorer.URL, !cfg.Explorer.Disable)
+	// get explorer URL
+	var explorerURL string
+	if !cfg.Explorer.Disable {
+		explorerURL = cfg.Explorer.URL
+	}
 
 	// create store
 	alertsMgr := alerts.NewManager()
@@ -267,7 +270,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	if err != nil {
 		return nil, nil, err
 	}
-	sqlStore, err := stores.NewSQLStore(storeCfg, e, network)
+	sqlStore, err := stores.NewSQLStore(storeCfg, explorerURL, network)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -383,7 +386,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, e, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}

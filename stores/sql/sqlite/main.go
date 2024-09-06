@@ -401,6 +401,10 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 	return ssql.HostBlocklist(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+	return ssql.Hosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
+}
+
 func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
 	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
@@ -833,10 +837,6 @@ func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md 
 		return api.ObjectMetadata{}, fmt.Errorf("failed to parse created at time: %w", err)
 	}
 	return md, nil
-}
-
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {

@@ -76,9 +76,10 @@ func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}
 		return fmt.Errorf("failed to fetch setting from db: %w", err)
 	} else if err != nil {
 		value = s.defaultSetting(key)
-	} else if key == SettingPinned && !s.explorer.Enabled() {
+	} else if key == SettingPinned && s.explorerURL == "" {
 		var ps api.PinnedSettings
-		if err := json.Unmarshal([]byte(value), &ps); err == nil && ps.Enabled {
+		if err := json.Unmarshal([]byte(value), &ps); err == nil && ps.Enabled() {
+			s.logger.Warn("pinned settings are enabled but explorer is disabled, using default settings")
 			value = s.defaultSetting(key)
 		}
 	}

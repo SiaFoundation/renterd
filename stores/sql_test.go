@@ -52,10 +52,6 @@ type testSQLStoreConfig struct {
 	skipContractSet bool
 }
 
-type testExplorer struct{}
-
-func (e *testExplorer) Enabled() bool { return true }
-
 var defaultTestSQLStoreConfig = testSQLStoreConfig{}
 
 func randomDBName() string {
@@ -184,7 +180,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		LongQueryDuration:             100 * time.Millisecond,
 		LongTxDuration:                100 * time.Millisecond,
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
-	}, &testExplorer{}, &consensus.Network{})
+	}, "", &consensus.Network{})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
