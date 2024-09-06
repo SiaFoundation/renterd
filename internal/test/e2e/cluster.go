@@ -778,8 +778,8 @@ func (c *TestCluster) WaitForContracts() []api.Contract {
 	// fetch all contracts
 	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
 	c.tt.OK(err)
-	if resp.Error != "" {
-		c.tt.Fatal(resp.Error)
+	if len(resp.Errors) > 0 {
+		c.tt.Fatal(resp.Errors)
 	}
 	return resp.Contracts
 }

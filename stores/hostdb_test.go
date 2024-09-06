@@ -337,7 +337,7 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	if host.Interactions != (api.HostInteractions{}) {
-		t.Fatal("mismatch")
+		t.Fatal("mismatch", cmp.Diff(host.Interactions, api.HostInteractions{}))
 	}
 	if host.Settings != (rhpv2.HostSettings{}) {
 		t.Fatal("mismatch")
@@ -394,7 +394,7 @@ func TestRecordScan(t *testing.T) {
 	// We expect no uptime or downtime from only a single scan.
 	uptime := time.Duration(0)
 	downtime := time.Duration(0)
-	if host.Interactions.LastScan.UnixNano() != firstScanTime.UnixNano() {
+	if host.Interactions.LastScan.UnixMilli() != firstScanTime.UnixMilli() {
 		t.Fatal("wrong time")
 	}
 	host.Interactions.LastScan = time.Time{}
@@ -424,7 +424,7 @@ func TestRecordScan(t *testing.T) {
 	host, err = ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	} else if host.Interactions.LastScan.UnixNano() != secondScanTime.UnixNano() {
+	} else if host.Interactions.LastScan.UnixMilli() != secondScanTime.UnixMilli() {
 		t.Fatal("wrong time")
 	} else if time.Now().After(host.PriceTable.Expiry) {
 		t.Fatal("invalid expiry")
@@ -462,7 +462,7 @@ func TestRecordScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.Interactions.LastScan.UnixNano() != thirdScanTime.UnixNano() {
+	if host.Interactions.LastScan.UnixMilli() != thirdScanTime.UnixMilli() {
 		t.Fatal("wrong time")
 	}
 	host.Interactions.LastScan = time.Time{}

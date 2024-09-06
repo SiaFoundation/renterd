@@ -814,8 +814,8 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 		var resolvedAddresses string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
-			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &resolvedAddresses, &h.Blocked,
 		)
@@ -896,7 +896,7 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 	}
 
 	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
-		maxLastScan.UnixNano(), limit, offset)
+		UnixTimeMS(maxLastScan), limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
 	}
@@ -1977,7 +1977,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 
 	now := time.Now()
 	for _, scan := range scans {
-		scanTime := scan.Timestamp.UnixNano()
+		scanTime := scan.Timestamp.UnixMilli()
 		_, err = stmt.Exec(ctx,
 			scan.Success,                                    // scanned
 			scan.Success,                                    // last_scan_success
@@ -2053,7 +2053,7 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		FROM contracts
 		INNER JOIN hosts h ON h.id = contracts.host_id
 		WHERE recent_downtime >= ? AND recent_scan_failures >= ?
-	`, maxDownTime, minRecentFailures)
+	`, DurationMS(maxDownTime), minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch contracts: %w", err)
 	}
@@ -2077,7 +2077,7 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 
 	// delete hosts
 	res, err := tx.Exec(ctx, "DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?",
-		maxDownTime, minRecentFailures)
+		DurationMS(maxDownTime), minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
@@ -2135,7 +2135,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
+			COALESCE(cs.name, ""), h.net_address, h.public_key, COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 			FROM contracts AS c
 			INNER JOIN hosts h ON h.id = c.host_id
 			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
@@ -2547,7 +2547,7 @@ func scanWalletEvent(s Scanner) (wallet.Event, error) {
 	var inflow, outflow Currency
 	var edata []byte
 	var etype string
-	var ts UnixTimeNS
+	var ts UnixTimeMS
 	if err := s.Scan(
 		&eventID,
 		&blockID,

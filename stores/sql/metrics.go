@@ -89,7 +89,7 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 			&m.HostVersion,
 			(*Unsigned64)(&m.Pruned),
 			(*Unsigned64)(&m.Remaining),
-			&m.Duration,
+			(*DurationMS)(&m.Duration),
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to scan contract prune metric: %w", err)
@@ -134,29 +134,6 @@ func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint6
 			&timestamp,
 			&m.Name,
 			&m.Contracts,
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
-func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.PerformanceMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			&m.Action,
-			(*PublicKey)(&m.HostKey),
-			&m.Origin,
-			&m.Duration,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to scan contract set metric: %w", err)
@@ -269,7 +246,7 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 			metric.HostVersion,
 			Unsigned64(metric.Pruned),
 			Unsigned64(metric.Remaining),
-			metric.Duration,
+			(DurationMS)(metric.Duration),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert contract prune metric: %w", err)
@@ -331,34 +308,6 @@ func RecordContractSetMetric(ctx context.Context, tx sql.Tx, metrics ...api.Cont
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert contract set metric: no rows affected")
-		}
-	}
-
-	return nil
-}
-
-func RecordPerformanceMetric(ctx context.Context, tx sql.Tx, metrics ...api.PerformanceMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO performance (created_at, timestamp, action, host, origin, duration) VALUES (?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert performance metric: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, metric := range metrics {
-		res, err := insertStmt.Exec(ctx,
-			time.Now().UTC(),
-			UnixTimeMS(metric.Timestamp),
-			metric.Action,
-			PublicKey(metric.HostKey),
-			metric.Origin,
-			metric.Duration,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert performance metric: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert performance metric: no rows affected")
 		}
 	}
 
