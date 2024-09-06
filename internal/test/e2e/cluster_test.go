@@ -292,7 +292,7 @@ func TestNewTestCluster(t *testing.T) {
 	})
 
 	// Get host info for every host.
-	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+	hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	for _, host := range hosts {
 		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)
@@ -746,7 +746,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// check that stored data on hosts was updated
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+		hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 		tt.OK(err)
 		for _, host := range hosts {
 			if host.StoredData != rhpv2.SectorSize {

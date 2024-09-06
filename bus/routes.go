@@ -452,32 +452,49 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(events)
 }
 
-func (b *Bus) hostsHandlerGETDeprecated(jc jape.Context) {
-	offset := 0
-	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
-
-	// fetch hosts
-	hosts, err := b.hs.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
-	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
-		return
-	}
-	jc.Encode(hosts)
-}
-
-func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
+func (b *Bus) hostsHandlerPOST(jc jape.Context) {
+	var req api.HostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
 
-	// TODO: on the next major release:
-	// - properly default search params (currently no defaults are set)
-	// - properly validate and return 400 (currently validation is done in autopilot and the store)
+	// validate the usability mode
+	switch req.UsabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	case "":
+		req.UsabilityMode = api.UsabilityFilterModeAll
+	default:
+		jc.Error(fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", req.UsabilityMode), http.StatusBadRequest)
+		return
+	}
 
-	hosts, err := b.hs.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	// validate the filter mode
+	switch req.FilterMode {
+	case api.HostFilterModeAllowed:
+	case api.HostFilterModeBlocked:
+	case api.HostFilterModeAll:
+	case "":
+		req.FilterMode = api.HostFilterModeAllowed
+	default:
+		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for 'allowed' filter", req.FilterMode), http.StatusBadRequest)
+		return
+	}
+
+	// validate the offset and limit
+	if req.Offset < 0 {
+		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
+		return
+	}
+	if req.Limit < 0 && req.Limit != -1 {
+		jc.Error(errors.New("limit must be non-negative or equal to -1 to indicate no limit"), http.StatusBadRequest)
+		return
+	} else if req.Limit == 0 {
+		req.Limit = -1
+	}
+
+	hosts, err := b.hs.Hosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
