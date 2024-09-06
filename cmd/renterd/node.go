@@ -258,19 +258,13 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 }
 
 func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
-	// get explorer URL
-	var explorerURL string
-	if !cfg.Explorer.Disable {
-		explorerURL = cfg.Explorer.URL
-	}
-
 	// create store
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, cfg, pk, logger)
 	if err != nil {
 		return nil, nil, err
 	}
-	sqlStore, err := stores.NewSQLStore(storeCfg, explorerURL, network)
+	sqlStore, err := stores.NewSQLStore(storeCfg, cfg.Explorer.Disable, network)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -383,6 +377,12 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	// create master key - we currently derive the same key used by the workers
 	// to ensure contracts formed by the bus can be renewed by the autopilot
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
+
+	// get explorer URL
+	var explorerURL string
+	if !cfg.Explorer.Disable {
+		explorerURL = cfg.Explorer.URL
+	}
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour

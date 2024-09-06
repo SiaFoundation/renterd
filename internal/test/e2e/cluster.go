@@ -554,7 +554,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create store
 	network, genesis := testNetwork()
-	sqlStore, err := stores.NewSQLStore(storeCfg, "", network)
+	sqlStore, err := stores.NewSQLStore(storeCfg, true, network)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
