@@ -25,7 +25,6 @@ import (
 )
 
 const (
-	testNetwork     = "zen"
 	testContractSet = "test"
 	testMimeType    = "application/octet-stream"
 	testETag        = "d34db33f"
@@ -52,6 +51,10 @@ type testSQLStoreConfig struct {
 	skipMigrate     bool
 	skipContractSet bool
 }
+
+type testExplorer struct{}
+
+func (e *testExplorer) Enabled() bool { return true }
 
 var defaultTestSQLStoreConfig = testSQLStoreConfig{}
 
@@ -98,11 +101,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, 100*time.Millisecond, 100*time.Millisecond, testNetwork, zap.NewNop())
+		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, 100*time.Millisecond, 100*time.Millisecond, zap.NewNop())
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -116,11 +119,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, 100*time.Millisecond, 100*time.Millisecond, testNetwork, zap.NewNop())
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, 100*time.Millisecond, 100*time.Millisecond, zap.NewNop())
+		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
@@ -134,11 +137,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open ephemeral SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, 100*time.Millisecond, 100*time.Millisecond, testNetwork, zap.NewNop())
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite main database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, 100*time.Millisecond, 100*time.Millisecond, zap.NewNop())
+		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite metrics database: %w", err)
 		}
@@ -181,13 +184,13 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		LongQueryDuration:             100 * time.Millisecond,
 		LongTxDuration:                100 * time.Millisecond,
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
-	}, &consensus.Network{})
+	}, &testExplorer{}, &consensus.Network{})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
 
 	if !cfg.skipContractSet {
-		err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
+		err = sqlStore.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{}, nil)
 		if err != nil {
 			t.Fatal("failed to set contract set", err)
 		}

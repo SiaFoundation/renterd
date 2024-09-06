@@ -219,7 +219,7 @@ type (
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
@@ -291,8 +291,8 @@ type (
 		GougingSettings(ctx context.Context) (api.GougingSettings, error)
 		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
 
-		PinningSettings(ctx context.Context) (api.PinningSettings, error)
-		UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error
+		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
 
 		UploadSettings(ctx context.Context) (api.UploadSettings, error)
 		UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error
@@ -315,6 +315,7 @@ type Bus struct {
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 	cm          ChainManager
+	e           Explorer
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
@@ -337,7 +338,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, e Explorer, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
@@ -347,6 +348,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		accounts: store,
 		s:        s,
 		cm:       cm,
+		e:        e,
 		w:        w,
 		hs:       store,
 		as:       store,
@@ -370,7 +372,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, e, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
@@ -416,7 +418,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"PUT    /contracts/set/:set":     b.contractsSetHandlerPUT,
+		"POST   /contracts/set/:set":     b.contractsSetHandlerPUT,
 		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,

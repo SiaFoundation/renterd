@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	SettingGouging      = "gouging"
-	SettingPricePinning = "pricepinning"
-	SettingS3           = "s3"
-	SettingUpload       = "upload"
+	SettingGouging = "gouging"
+	SettingPinned  = "pinned"
+	SettingS3      = "s3"
+	SettingUpload  = "upload"
 )
 
 func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
@@ -26,13 +26,13 @@ func (s *SQLStore) UpdateGougingSettings(ctx context.Context, gs api.GougingSett
 	return s.updateSetting(ctx, SettingGouging, gs)
 }
 
-func (s *SQLStore) PinningSettings(ctx context.Context) (ps api.PinningSettings, err error) {
-	err = s.fetchSetting(ctx, SettingPricePinning, &ps)
+func (s *SQLStore) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
+	err = s.fetchSetting(ctx, SettingPinned, &ps)
 	return
 }
 
-func (s *SQLStore) UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error {
-	return s.updateSetting(ctx, SettingPricePinning, ps)
+func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+	return s.updateSetting(ctx, SettingPinned, ps)
 }
 
 func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, err error) {
@@ -57,19 +57,30 @@ func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}
 	s.settingsMu.Lock()
 	defer s.settingsMu.Unlock()
 
-	// fetch setting value
+	// fetch setting from cache
 	value, ok := s.settings[key]
-	if !ok {
-		var err error
-		if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-			value, err = tx.Setting(ctx, key)
-			return err
-		}); err != nil && !errors.Is(err, sql.ErrSettingNotFound) {
-			return fmt.Errorf("failed to fetch setting from db: %w", err)
-		} else if err != nil {
+	if ok {
+		if err := json.Unmarshal([]byte(value), &out); err != nil {
+			s.logger.Warnf("failed to unmarshal %s setting '%s': %v, using default", key, value, err)
+			return json.Unmarshal([]byte(s.defaultSetting(key)), &out)
+		}
+		return nil
+	}
+
+	// fetch setting from database
+	var err error
+	if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		value, err = tx.Setting(ctx, key)
+		return err
+	}); err != nil && !errors.Is(err, sql.ErrSettingNotFound) {
+		return fmt.Errorf("failed to fetch setting from db: %w", err)
+	} else if err != nil {
+		value = s.defaultSetting(key)
+	} else if key == SettingPinned && !s.explorer.Enabled() {
+		var ps api.PinnedSettings
+		if err := json.Unmarshal([]byte(value), &ps); err == nil && ps.Enabled {
 			value = s.defaultSetting(key)
 		}
-		s.settings[key] = value
 	}
 
 	// unmarshal setting
@@ -77,6 +88,9 @@ func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}
 		s.logger.Warnf("failed to unmarshal %s setting '%s': %v, using default", key, value, err)
 		return json.Unmarshal([]byte(s.defaultSetting(key)), &out)
 	}
+
+	// update cache
+	s.settings[key] = value
 
 	return nil
 }
@@ -109,7 +123,7 @@ func (s *SQLStore) defaultSetting(key string) string {
 	case SettingGouging:
 		b, _ := json.Marshal(api.DefaultGougingSettings)
 		return string(b)
-	case SettingPricePinning:
+	case SettingPinned:
 		b, _ := json.Marshal(api.DefaultPinnedSettings)
 		return string(b)
 	case SettingS3:

@@ -31,7 +31,6 @@ type (
 	MainMigrator interface {
 		Migrator
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
-		Network() string
 	}
 )
 
@@ -216,9 +215,15 @@ var (
 				},
 			},
 			{
-				ID: "00017_settings",
+				ID: "00017_unix_ms",
 				Migrate: func(tx Tx) error {
-					log.Infof("performing %s migration '00017_settings'", dbIdentifier)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+				},
+			},
+			{
+				ID: "00018_settings",
+				Migrate: func(tx Tx) error {
+					log.Infof("performing %s migration '00018_settings'", dbIdentifier)
 
 					// fetch all settings
 					rows, err := tx.Query(ctx, "SELECT key, value FROM settings")
@@ -251,12 +256,12 @@ var (
 							}
 						}
 					} else {
-						log.Warn("no pricepinning settings found")
+						log.Warn("no gouging settings found")
 					}
 
 					// migrate pinning settings
 					if v, ok := settings["pricepinning"]; ok {
-						var ps api.PinningSettings
+						var ps api.PinnedSettings
 						err := json.Unmarshal([]byte(v), &ps)
 						if err == nil {
 							err = ps.Validate()
@@ -268,8 +273,9 @@ var (
 							}
 						} else {
 							b, _ := json.Marshal(ps)
-							if _, err := tx.Exec(ctx, "UPDATE settings SET value = ? WHERE `key` = ?", string(b), "pricepinning"); err != nil {
-								return fmt.Errorf("failed to update pricepinning settings: %v", err)
+							if _, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
+								time.Now(), "pinned", string(b)); err != nil {
+								return fmt.Errorf("failed to insert pinned settings: %v", err)
 							}
 						}
 					} else {
@@ -300,7 +306,7 @@ var (
 					}
 
 					// migrate upload settings
-					us := api.DefaultUploadSettings(m.Network())
+					us := api.DefaultUploadSettings("mainnet")
 
 					if v, ok := settings["contractset"]; ok {
 						var css struct {
@@ -356,7 +362,7 @@ var (
 						}
 					}
 
-					log.Info("migration '00017_settings' complete")
+					log.Info("migration '00018_settings' complete")
 					return nil
 				},
 			},

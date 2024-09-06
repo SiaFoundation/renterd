@@ -32,8 +32,6 @@ const (
 
 type (
 	MainDatabase struct {
-		network string
-
 		db  *sql.DB
 		log *zap.SugaredLogger
 	}
@@ -45,12 +43,10 @@ type (
 )
 
 // NewMainDatabase creates a new MySQL backend.
-func NewMainDatabase(db *dsql.DB, lqd, ltd time.Duration, network string, log *zap.Logger) (*MainDatabase, error) {
+func NewMainDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration) (*MainDatabase, error) {
 	log = log.Named("main")
 	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
-		network: network,
-
 		db:  store,
 		log: log.Sugar(),
 	}, err
@@ -83,10 +79,6 @@ func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path stri
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
-}
-
-func (b *MainDatabase) Network() string {
-	return b.network
 }
 
 func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.DatabaseTx) error) error {
@@ -836,57 +828,6 @@ func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag"
 }
 
-func (tx *MainDatabaseTx) SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error {
-	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
-	if err != nil {
-		return fmt.Errorf("failed to insert contract set: %w", err)
-	}
-
-	csID, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-
-	// handle empty set
-	if len(contractIds) == 0 {
-		_, err := tx.Exec(ctx, "DELETE FROM contract_set_contracts WHERE db_contract_set_id = ?", csID)
-		return err
-	}
-
-	// prepare fcid args and query
-	fcidQuery := strings.Repeat("?, ", len(contractIds)-1) + "?"
-	fcidArgs := make([]interface{}, len(contractIds))
-	for i, fcid := range contractIds {
-		fcidArgs[i] = ssql.FileContractID(fcid)
-	}
-
-	// remove unwanted contracts
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		DELETE csc
-		FROM contract_set_contracts csc
-		INNER JOIN contracts c ON c.id = csc.db_contract_id
-		WHERE c.fcid NOT IN (%s)
-	`, fcidQuery), fcidArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to delete contract set contracts: %w", err)
-	}
-
-	// add missing contracts
-	args := []interface{}{csID}
-	args = append(args, fcidArgs...)
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
-		SELECT ?, c.id
-		FROM contracts c
-		WHERE c.fcid IN (%s)
-		ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
-	`, fcidQuery), args...)
-	if err != nil {
-		return fmt.Errorf("failed to add contract set contracts: %w", err)
-	}
-	return nil
-}
-
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
 }
@@ -924,6 +865,62 @@ func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot)
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
+}
+
+func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
+	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
+	if err != nil {
+		return fmt.Errorf("failed to insert contract set: %w", err)
+	}
+
+	// if no changes are needed, return after creating the set
+	if len(toAdd)+len(toRemove) == 0 {
+		return nil
+	}
+
+	csID, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to fetch contract set id: %w", err)
+	}
+
+	prepareQuery := func(fcids []types.FileContractID) (string, []any) {
+		args := []any{csID}
+		query := strings.Repeat("?, ", len(fcids)-1) + "?"
+		for _, fcid := range fcids {
+			args = append(args, ssql.FileContractID(fcid))
+		}
+		return query, args
+	}
+
+	// remove unwanted contracts first
+	if len(toRemove) > 0 {
+		query, args := prepareQuery(toRemove)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			DELETE csc
+			FROM contract_set_contracts csc
+			INNER JOIN contracts c ON c.id = csc.db_contract_id
+			WHERE csc.db_contract_set_id = ? AND c.fcid IN (%s)
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to remove contracts: %w", err)
+		}
+	}
+
+	// add new contracts
+	if len(toAdd) > 0 {
+		query, args := prepareQuery(toAdd)
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
+			SELECT ?, c.id
+			FROM contracts c
+			WHERE c.fcid IN (%s)
+			ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
+		`, query), args...)
+		if err != nil {
+			return fmt.Errorf("failed to add contract set contracts: %w", err)
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {

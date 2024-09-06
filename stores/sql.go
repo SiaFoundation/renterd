@@ -32,6 +32,10 @@ type (
 		LongTxDuration                time.Duration
 	}
 
+	Explorer interface {
+		Enabled() bool
+	}
+
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		alerts    alerts.Alerter
@@ -39,8 +43,9 @@ type (
 		dbMetrics sql.MetricsDatabase
 		logger    *zap.SugaredLogger
 
-		walletAddress types.Address
+		explorer      Explorer
 		network       *consensus.Network
+		walletAddress types.Address
 
 		// ObjectDB related fields
 		slabBufferMgr *SlabBufferManager
@@ -66,7 +71,7 @@ type (
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(cfg Config, network *consensus.Network) (*SQLStore, error) {
+func NewSQLStore(cfg Config, explorer Explorer, network *consensus.Network) (*SQLStore, error) {
 	if err := os.MkdirAll(cfg.PartialSlabDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create partial slab dir '%s': %v", cfg.PartialSlabDir, err)
 	}
@@ -99,6 +104,7 @@ func NewSQLStore(cfg Config, network *consensus.Network) (*SQLStore, error) {
 
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
+		explorer:      explorer,
 		network:       network,
 
 		slabPruneSigChan:          make(chan struct{}, 1),

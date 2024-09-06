@@ -68,6 +68,9 @@ func defaultConfig() config.Config {
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
+		Explorer: config.ExplorerData{
+			URL: "https://api.siascan.com",
+		},
 		Log: config.Log{
 			Path:  "", // deprecated. included for compatibility.
 			Level: "",
@@ -339,6 +342,10 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.BoolVar(&cfg.S3.Enabled, "s3.enabled", cfg.S3.Enabled, "Enables/disables S3 API (requires worker.enabled to be 'true', overrides with RENTERD_S3_ENABLED)")
 	flag.StringVar(&hostBasesStr, "s3.hostBases", "", "Enables bucket rewriting in the router for specific hosts provided via comma-separated list (overrides with RENTERD_S3_HOST_BUCKET_BASES)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router for all hosts (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
+
+	// explorer
+	flag.StringVar(&cfg.Explorer.URL, "explorer.url", cfg.Explorer.URL, "URL of service to retrieve data about the Sia network (overrides with RENTERD_EXPLORER_URL)")
+	flag.BoolVar(&cfg.Explorer.Disable, "explorer.disable", cfg.Explorer.Disable, "Disables explorer service (overrides with RENTERD_EXPLORER_DISABLE)")
 
 	// custom usage
 	flag.Usage = func() {

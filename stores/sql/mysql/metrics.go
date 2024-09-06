@@ -30,7 +30,7 @@ type (
 var _ ssql.MetricsDatabaseTx = (*MetricsDatabaseTx)(nil)
 
 // NewMetricsDatabase creates a new MySQL backend.
-func NewMetricsDatabase(db *dsql.DB, lqd, ltd time.Duration, log *zap.Logger) (*MetricsDatabase, error) {
+func NewMetricsDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration) (*MetricsDatabase, error) {
 	log = log.Named("metrics")
 	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
 	return &MetricsDatabase{
@@ -89,10 +89,6 @@ func (tx *MetricsDatabaseTx) ContractSetMetrics(ctx context.Context, start time.
 	return ssql.ContractSetMetrics(ctx, tx, start, n, interval, opts)
 }
 
-func (tx *MetricsDatabaseTx) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
-	return ssql.PerformanceMetrics(ctx, tx, start, n, interval, opts)
-}
-
 func (tx *MetricsDatabaseTx) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
 	return ssql.PruneMetrics(ctx, tx, metric, cutoff)
 }
@@ -111,10 +107,6 @@ func (tx *MetricsDatabaseTx) RecordContractSetChurnMetric(ctx context.Context, m
 
 func (tx *MetricsDatabaseTx) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
 	return ssql.RecordContractSetMetric(ctx, tx, metrics...)
-}
-
-func (tx *MetricsDatabaseTx) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
-	return ssql.RecordPerformanceMetric(ctx, tx, metrics...)
 }
 
 func (tx *MetricsDatabaseTx) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {

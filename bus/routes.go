@@ -17,7 +17,6 @@ import (
 
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 
-	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
@@ -793,22 +792,23 @@ func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
-	var contractIds []types.FileContractID
+	var req api.ContractSetUpdateRequest
 	if set := jc.PathParam("set"); set == "" {
 		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
 		return
-	} else if jc.Decode(&contractIds) != nil {
+	} else if jc.Decode(&req) != nil {
 		return
-	} else if jc.Check("could not add contracts to set", b.ms.SetContractSet(jc.Request.Context(), set, contractIds)) != nil {
+	} else if jc.Check("could not add contracts to set", b.ms.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
 	} else {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleContractSet,
 			Event:  api.EventUpdate,
 			Payload: api.EventContractSetUpdate{
-				Name:        set,
-				ContractIDs: contractIds,
-				Timestamp:   time.Now().UTC(),
+				Name:      set,
+				ToAdd:     req.ToAdd,
+				ToRemove:  req.ToRemove,
+				Timestamp: time.Now().UTC(),
 			},
 		})
 	}
@@ -1488,8 +1488,8 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	pps, err := b.ss.PinningSettings(jc.Request.Context())
-	if jc.Check("failed to get pinning settings", err) == nil {
+	pps, err := b.ss.PinnedSettings(jc.Request.Context())
+	if jc.Check("failed to get pinned settings", err) == nil {
 		// populate the Autopilots map with the current autopilots
 		aps, err := b.as.Autopilots(jc.Request.Context())
 		if jc.Check("failed to fetch autopilots", err) != nil {
@@ -1508,19 +1508,18 @@ func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
-	var ps api.PinningSettings
+	var ps api.PinnedSettings
 	if jc.Decode(&ps) != nil {
 		return
 	} else if err := ps.Validate(); err != nil {
-		jc.Error(fmt.Errorf("couldn't update pinning settings, error: %v", err), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("couldn't update pinned settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if ps.Enabled {
-		if _, err := ibus.NewForexClient(ps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), ps.Currency); err != nil {
-			jc.Error(fmt.Errorf("couldn't update pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
-			return
-		}
+	} else if ps.Enabled && !b.e.Enabled() {
+		jc.Error(fmt.Errorf("can't enable price pinning, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
+		return
 	}
-	if jc.Check("could not update pinning settings", b.ss.UpdatePinningSettings(jc.Request.Context(), ps)) == nil {
+
+	if jc.Check("could not update pinned settings", b.ss.UpdatePinnedSettings(jc.Request.Context(), ps)) == nil {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,

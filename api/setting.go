@@ -37,13 +37,13 @@ var (
 		MigrationSurchargeMultiplier:  10,                                               // 10x
 	}
 
-	// DefaultPinnedSettings define the default pin settings the bus is
-	// configured with on startup.
-	DefaultPinnedSettings = PinningSettings{
-		Enabled:          false,
-		Currency:         "usd",
-		ForexEndpointURL: "https://api.siascan.com/exchange-rate/siacoin",
-		Threshold:        0.05,
+	// DefaultPinnedSettings define the default price pin settings the bus is
+	// configured with on startup. These values can be adjusted using the
+	// settings API.
+	DefaultPinnedSettings = PinnedSettings{
+		Enabled:   false,
+		Currency:  "usd",
+		Threshold: 0.05,
 	}
 
 	// DefaultRedundancySettingsTestnet defines redundancy settings for the
@@ -123,24 +123,20 @@ type (
 		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
-	// PinningSettings holds the configuration for pinning certain settings to a
-	// specific currency (e.g., USD). It uses a Forex API to fetch the current
-	// exchange rate, allowing users to set prices in USD instead of SC.
-	PinningSettings struct {
+	// PinnedSettings holds the configuration for pinning certain settings to a
+	// specific currency (e.g., USD). It uses the configured explorer to fetch
+	// the current exchange rate, allowing users to set prices in USD instead of
+	// SC.
+	PinnedSettings struct {
 		// Enabled can be used to either enable or temporarily disable price
-		// pinning. If enabled, both the currency and the Forex endpoint URL
-		// must be valid.
+		// pinning. If enabled, the currency and threshold must be valid.
 		Enabled bool `json:"enabled"`
 
 		// Currency is the external three-letter currency code.
 		Currency string `json:"currency"`
 
-		// ForexEndpointURL is the endpoint that returns the exchange rate for
-		// Siacoin against the underlying currency.
-		ForexEndpointURL string `json:"forexEndpointURL"`
-
 		// Threshold is a percentage between 0 and 1 that determines when the
-		// pinning settings are updated based on the exchange rate at the time.
+		// pinned settings are updated based on the exchange rate at the time.
 		Threshold float64 `json:"threshold"`
 
 		// Autopilots contains the pinned settings for every autopilot.
@@ -205,9 +201,9 @@ func (p Pin) IsPinned() bool {
 }
 
 // Validate returns an error if the price pin settings are not considered valid.
-func (pps PinningSettings) Validate() error {
-	if pps.ForexEndpointURL == "" {
-		return fmt.Errorf("price pin settings must have a forex endpoint URL")
+func (pps PinnedSettings) Validate() error {
+	if !pps.Enabled {
+		return nil
 	}
 	if pps.Currency == "" {
 		return fmt.Errorf("price pin settings must have a currency")

@@ -186,12 +186,10 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatalf("expected upload packing to be disabled by default, got %v", us.Packing.Enabled)
 	}
 
-	// PricePinningSettings should have default values
-	pps, err := b.PricePinningSettings(context.Background())
+	// PinnedSettings should have default values
+	pps, err := b.PinnedSettings(context.Background())
 	tt.OK(err)
-	if pps.ForexEndpointURL == "" {
-		t.Fatal("expected default value for ForexEndpointURL")
-	} else if pps.Currency == "" {
+	if pps.Currency == "" {
 		t.Fatal("expected default value for Currency")
 	} else if pps.Threshold == 0 {
 		t.Fatal("expected default value for Threshold")
@@ -877,7 +875,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	cfg, _ := cluster.AutopilotConfig(context.Background())
 	cfg.Contracts.Set = t.Name()
 	cluster.UpdateAutopilotConfig(context.Background(), cfg)
-	tt.OK(b.SetContractSet(context.Background(), t.Name(), nil))
+	tt.OK(b.UpdateContractSet(context.Background(), t.Name(), nil, nil))
 
 	// assert there are no contracts in the set
 	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
@@ -2695,7 +2693,7 @@ func TestHostScan(t *testing.T) {
 	// fetch hosts again with the unix epoch timestamp which should only return
 	// 1 host since that one hasn't been scanned yet
 	toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
-		MaxLastScan: api.TimeRFC3339(time.Unix(0, 1)),
+		MaxLastScan: api.TimeRFC3339(time.UnixMilli(1)),
 	})
 	tt.OK(err)
 	if len(toScan) != 1 {

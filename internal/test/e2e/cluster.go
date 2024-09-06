@@ -93,6 +93,11 @@ type dbConfig struct {
 	RetryTxIntervals []time.Duration
 }
 
+type explorerConfig struct {
+	URL     string
+	Disable bool
+}
+
 func (tc *TestCluster) Accounts() []api.Account {
 	tc.tt.Helper()
 	accounts, err := tc.Worker.Accounts(context.Background())
@@ -264,7 +269,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
-	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
+	busCfg, workerCfg, apCfg, dbCfg, explorerCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg(), testExplorerCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
 	}
@@ -364,7 +369,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, explorerCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -476,7 +481,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
-	tt.OK(busClient.SetContractSet(ctx, test.ContractSet, []types.FileContractID{}))
+	tt.OK(busClient.UpdateContractSet(ctx, test.ContractSet, nil, nil))
 
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
@@ -502,7 +507,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Update the bus settings.
 	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
-	tt.OK(busClient.UpdatePinningSettings(ctx, test.PricePinSettings))
+	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
 	tt.OK(busClient.UpdateUploadSettings(ctx, us))
 	tt.OK(busClient.UpdateS3Settings(ctx, s3))
 
@@ -544,17 +549,20 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
-	network, genesis := testNetwork()
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, cfgExplorer explorerConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+	// create explorer
+	e := bus.NewExplorer(cfgExplorer.URL, !cfgExplorer.Disable)
 
-	// create store
+	// create store config
 	alertsMgr := alerts.NewManager()
-	storeCfg, err := buildStoreConfig(alertsMgr, dir, network.Name, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
+	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	sqlStore, err := stores.NewSQLStore(storeCfg, network)
+	// create store
+	network, genesis := testNetwork()
+	sqlStore, err := stores.NewSQLStore(storeCfg, e, network)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -639,7 +647,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, e, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -1092,6 +1100,12 @@ func testDBCfg() dbConfig {
 	}
 }
 
+func testExplorerCfg() explorerConfig {
+	return explorerConfig{
+		Disable: true,
+	}
+}
+
 func testWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   time.Second,
@@ -1120,7 +1134,7 @@ func testApCfg() config.Autopilot {
 	}
 }
 
-func buildStoreConfig(am alerts.Alerter, dir, network string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -1144,11 +1158,11 @@ func buildStoreConfig(am alerts.Alerter, dir, network string, slabBufferCompleti
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, network, logger)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, logger)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -1164,7 +1178,7 @@ func buildStoreConfig(am alerts.Alerter, dir, network string, slabBufferCompleti
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, network, logger)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1173,7 +1187,7 @@ func buildStoreConfig(am alerts.Alerter, dir, network string, slabBufferCompleti
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, logger)
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}

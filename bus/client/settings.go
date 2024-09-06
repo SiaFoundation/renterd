@@ -17,14 +17,14 @@ func (c *Client) UpdateGougingSettings(ctx context.Context, gs api.GougingSettin
 	return c.c.WithContext(ctx).PUT("/settings/gouging", gs)
 }
 
-// PricePinningSettings returns the contract set settings.
-func (c *Client) PricePinningSettings(ctx context.Context) (ps api.PinningSettings, err error) {
+// PinnedSettings returns the pinned settings.
+func (c *Client) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
 	err = c.c.WithContext(ctx).GET("/settings/pinned", &ps)
 	return
 }
 
-// UpdatePinningSettings updates the given setting.
-func (c *Client) UpdatePinningSettings(ctx context.Context, ps api.PinningSettings) error {
+// UpdatePinnedSettings updates the given setting.
+func (c *Client) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
 	return c.c.WithContext(ctx).PUT("/settings/pinned", ps)
 }
 

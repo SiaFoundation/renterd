@@ -51,9 +51,10 @@ type (
 	}
 
 	EventContractSetUpdate struct {
-		Name        string                 `json:"name"`
-		ContractIDs []types.FileContractID `json:"contractIDs"`
-		Timestamp   time.Time              `json:"timestamp"`
+		Name      string                 `json:"name"`
+		ToAdd     []types.FileContractID `json:"toAdd"`
+		ToRemove  []types.FileContractID `json:"toRemove"`
+		Timestamp time.Time              `json:"timestamp"`
 	}
 
 	EventHostUpdate struct {
@@ -64,7 +65,7 @@ type (
 
 	EventSettingUpdate struct {
 		GougingSettings *GougingSettings `json:"gougingSettings,omitempty"`
-		PinnedSettings  *PinningSettings `json:"pinnedSettings,omitempty"`
+		PinnedSettings  *PinnedSettings  `json:"pinnedSettings,omitempty"`
 		S3Settings      *S3Settings      `json:"s3Settings,omitempty"`
 		UploadSettings  *UploadSettings  `json:"uploadSettings,omitempty"`
 		Timestamp       time.Time        `json:"timestamp"`
