@@ -34,7 +34,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestListObjects(t *testing.T) {
+func TestListObjectsWithNoDelimiter(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -45,13 +45,13 @@ func TestListObjects(t *testing.T) {
 	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
 			// assert mod time
-			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
+			if !strings.HasSuffix(entries[i].Key, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			isDir := strings.HasSuffix(entries[i].Name, "/") && entries[i].Name != "//double/" // double is a file
+			isDir := strings.HasSuffix(entries[i].Key, "/") && entries[i].Key != "//double/" // double is a file
 			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
@@ -77,7 +77,7 @@ func TestListObjects(t *testing.T) {
 
 	// upload the following paths
 	uploads := []struct {
-		path string
+		key  string
 		size int
 	}{
 		{"/foo/bar", 1},
@@ -90,11 +90,11 @@ func TestListObjects(t *testing.T) {
 
 	for _, upload := range uploads {
 		if upload.size == 0 {
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, upload.key, api.UploadObjectOptions{}))
 		} else {
 			data := make([]byte, upload.size)
 			frand.Read(data)
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, upload.key, api.UploadObjectOptions{}))
 		}
 	}
 
@@ -104,21 +104,20 @@ func TestListObjects(t *testing.T) {
 		sortDir string
 		want    []api.ObjectMetadata
 	}{
-		{"/", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", api.ObjectSortDirAsc, []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", api.ObjectSortDirDesc, []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/FOO/bar", Size: 6, Health: 1}}},
-		{"/", api.ObjectSortByHealth, api.ObjectSortDirAsc, []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", api.ObjectSortByHealth, api.ObjectSortDirDesc, []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/foo/b", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/", "", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", api.ObjectSortDirAsc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", api.ObjectSortDirDesc, []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/FOO/bar", Size: 6, Health: 1}}},
+		{"/", api.ObjectSortByHealth, api.ObjectSortDirAsc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", api.ObjectSortByHealth, api.ObjectSortDirDesc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
 		{"o/baz/quu", "", "", []api.ObjectMetadata{}},
-		{"/foo", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/foo", api.ObjectSortBySize, api.ObjectSortDirAsc, []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/foo", api.ObjectSortBySize, api.ObjectSortDirDesc, []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
+		{"/foo", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/foo", api.ObjectSortBySize, api.ObjectSortDirAsc, []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/foo", api.ObjectSortBySize, api.ObjectSortDirDesc, []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}}},
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-			Prefix:  test.prefix,
+		res, err := b.Objects(context.Background(), api.DefaultBucketName, test.prefix, api.ListObjectOptions{
 			SortBy:  test.sortBy,
 			SortDir: test.sortDir,
 			Limit:   -1,
@@ -136,8 +135,7 @@ func TestListObjects(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
-					Prefix:  test.prefix,
+				res, err := b.Objects(context.Background(), api.DefaultBucketName, test.prefix, api.ListObjectOptions{
 					SortBy:  test.sortBy,
 					SortDir: test.sortDir,
 					Marker:  marker,
@@ -153,8 +151,8 @@ func TestListObjects(t *testing.T) {
 				got := res.Objects
 				if len(got) != 1 {
 					t.Fatalf("expected 1 object, got %v", len(got))
-				} else if got[0].Name != test.want[offset].Name {
-					t.Fatalf("expected %v, got %v, offset %v, marker %v, sortBy %v, sortDir %v", test.want[offset].Name, got[0].Name, offset, marker, test.sortBy, test.sortDir)
+				} else if got[0].Key != test.want[offset].Key {
+					t.Fatalf("expected %v, got %v, offset %v, marker %v, sortBy %v, sortDir %v", test.want[offset].Key, got[0].Key, offset, marker, test.sortBy, test.sortDir)
 				}
 				marker = res.NextMarker
 			}
@@ -162,7 +160,7 @@ func TestListObjects(t *testing.T) {
 	}
 
 	// list invalid marker
-	_, err := b.ListObjects(context.Background(), api.DefaultBucketName, api.ListObjectOptions{
+	_, err := b.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{
 		Marker: "invalid",
 		SortBy: api.ObjectSortByHealth,
 	})
@@ -376,11 +374,11 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
-// TestObjectEntries is an integration test that verifies objects are uploaded,
-// download and deleted from and to the paths we would expect. It is similar to
-// the TestObjectEntries unit test, but uses the worker and bus client to verify
-// paths are passed correctly.
-func TestObjectEntries(t *testing.T) {
+// TestListObjectsWithDelimiterSlash is an integration test that verifies
+// objects are uploaded, download and deleted from and to the paths we
+// would expect. It is similar to the TestObjectEntries unit test, but uses
+// the worker and bus client to verify paths are passed correctly.
+func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -391,13 +389,13 @@ func TestObjectEntries(t *testing.T) {
 	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
 			// assert mod time
-			if !strings.HasSuffix(entries[i].Name, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
+			if !strings.HasSuffix(entries[i].Key, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			isDir := strings.HasSuffix(entries[i].Name, "/") && entries[i].Name != "//double/" // double is a file
+			isDir := strings.HasSuffix(entries[i].Key, "/") && entries[i].Key != "//double/" // double is a file
 			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
@@ -423,7 +421,7 @@ func TestObjectEntries(t *testing.T) {
 
 	// upload the following paths
 	uploads := []struct {
-		path string
+		key  string
 		size int
 	}{
 		{"/foo/bar", 1},
@@ -439,11 +437,11 @@ func TestObjectEntries(t *testing.T) {
 
 	for _, upload := range uploads {
 		if upload.size == 0 {
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), api.DefaultBucketName, upload.key, api.UploadObjectOptions{}))
 		} else {
 			data := make([]byte, upload.size)
 			frand.Read(data)
-			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, upload.path, api.UploadObjectOptions{}))
+			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, upload.key, api.UploadObjectOptions{}))
 		}
 	}
 
@@ -454,59 +452,61 @@ func TestObjectEntries(t *testing.T) {
 		sortDir string
 		want    []api.ObjectMetadata
 	}{
-		{"/", "", "", "", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"//", "", "", "", []api.ObjectMetadata{{Name: "///", Size: 8, Health: 1}, {Name: "//double/", Size: 7, Health: 1}}},
-		{"///", "", "", "", []api.ObjectMetadata{{Name: "///triple", Size: 8, Health: 1}}},
-		{"/foo/", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: 1}}},
-		{"/FOO/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 9, Health: 1}}},
-		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/gab/", "", "", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/fileś/", "", "", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Key: "//", Size: 15, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"//", "", "", "", []api.ObjectMetadata{{Key: "///", Size: 8, Health: 1}, {Key: "//double/", Size: 7, Health: 1}}},
+		{"///", "", "", "", []api.ObjectMetadata{{Key: "///triple", Size: 8, Health: 1}}},
+		{"/foo/", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/", Size: 7, Health: 1}}},
+		{"/FOO/", "", "", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 9, Health: 1}}},
+		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/gab/", "", "", "", []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", "", "", []api.ObjectMetadata{{Key: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", "", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}}},
+		{"/", "f", "", "", []api.ObjectMetadata{{Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}}},
 		{"/foo/", "fo", "", "", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}}},
+		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}}},
 		{"/gab/", "/guub", "", "", []api.ObjectMetadata{}},
 
-		{"/", "", "name", "ASC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "name", "DESC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "//", Size: 15, Health: 1}}},
+		{"/", "", "name", "ASC", []api.ObjectMetadata{{Key: "//", Size: 15, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "name", "DESC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "//", Size: 15, Health: 1}}},
 
-		{"/", "", "health", "ASC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "health", "DESC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "health", "ASC", []api.ObjectMetadata{{Key: "//", Size: 15, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "health", "DESC", []api.ObjectMetadata{{Key: "//", Size: 15, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
 
-		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "//", Size: 15, Health: 1}}},
-		{"/", "", "size", "DESC", []api.ObjectMetadata{{Name: "//", Size: 15, Health: 1}, {Name: "/foo/", Size: 10, Health: 1}, {Name: "/FOO/", Size: 9, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "size", "ASC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "//", Size: 15, Health: 1}}},
+		{"/", "", "size", "DESC", []api.ObjectMetadata{{Key: "//", Size: 15, Health: 1}, {Key: "/foo/", Size: 10, Health: 1}, {Key: "/FOO/", Size: 9, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-			Prefix:  test.prefix,
-			SortBy:  test.sortBy,
-			SortDir: test.sortDir,
+		res, err := b.Objects(context.Background(), api.DefaultBucketName, test.path+test.prefix, api.ListObjectOptions{
+			Delimiter: "/",
+			SortBy:    test.sortBy,
+			SortDir:   test.sortDir,
 		})
 		if err != nil {
 			t.Fatal(err, test.path)
 		}
-		assertMetadata(res.Entries)
+		assertMetadata(res.Objects)
 
-		if !(len(res.Entries) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Entries, test.want) {
-			t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Entries, test.want)
+		if !(len(res.Objects) == 0 && len(test.want) == 0) && !reflect.DeepEqual(res.Objects, test.want) {
+			t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Objects, test.want)
 		}
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			res, err := b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-				Prefix:  test.prefix,
-				SortBy:  test.sortBy,
-				SortDir: test.sortDir,
-				Offset:  offset,
-				Limit:   1,
+			res, err := b.Objects(context.Background(), api.DefaultBucketName, test.path+test.prefix, api.ListObjectOptions{
+				Delimiter: "/",
+				SortBy:    test.sortBy,
+				SortDir:   test.sortDir,
+				Marker:    marker,
+				Limit:     1,
 			})
+			marker = res.NextMarker
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertMetadata(res.Entries)
+			assertMetadata(res.Objects)
 
-			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset] {
-				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Entries, test.want[offset])
+			if len(res.Objects) != 1 || res.Objects[0] != test.want[offset] {
+				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.sortBy, test.sortDir, res.Objects, test.want[offset])
 			}
 			moreRemaining := len(test.want)-offset-1 > 0
 			if res.HasMore != moreRemaining {
@@ -518,64 +518,39 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			res, err = b.Object(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-				Prefix:  test.prefix,
-				SortBy:  test.sortBy,
-				SortDir: test.sortDir,
-				Marker:  test.want[offset].Name,
-				Limit:   1,
+			res, err = b.Objects(context.Background(), api.DefaultBucketName, test.path+test.prefix, api.ListObjectOptions{
+				Delimiter: "/",
+				SortBy:    test.sortBy,
+				SortDir:   test.sortDir,
+				Marker:    test.want[offset].Key,
+				Limit:     1,
 			})
 			if err != nil {
-				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %vmarker: %v\n\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, err)
+				t.Fatalf("\nlist: %v\nprefix: %v\nsortBy: %v\nsortDir: %vmarker: %v\n\nerr: %v", test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Key, err)
 			}
-			assertMetadata(res.Entries)
+			assertMetadata(res.Objects)
 
-			if len(res.Entries) != 1 || res.Entries[0] != test.want[offset+1] {
-				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Name, res.Entries, test.want[offset+1])
+			if len(res.Objects) != 1 || res.Objects[0] != test.want[offset+1] {
+				t.Errorf("\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", test.path, test.prefix, test.want[offset].Key, res.Objects, test.want[offset+1])
 			}
 
 			moreRemaining = len(test.want)-offset-2 > 0
 			if res.HasMore != moreRemaining {
-				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", res.HasMore, test.want[offset].Name, test)
-			}
-		}
-
-		// use the worker client
-		got, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, test.path, api.GetObjectOptions{
-			Prefix:  test.prefix,
-			SortBy:  test.sortBy,
-			SortDir: test.sortDir,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertMetadata(got)
-
-		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
-			t.Errorf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
-		}
-		for _, entry := range got {
-			if !strings.HasSuffix(entry.Name, "/") {
-				buf := new(bytes.Buffer)
-				if err := w.DownloadObject(context.Background(), buf, api.DefaultBucketName, entry.Name, api.DownloadObjectOptions{}); err != nil {
-					t.Fatal(err)
-				} else if buf.Len() != int(entry.Size) {
-					t.Fatal("unexpected", buf.Len(), entry.Size)
-				}
+				t.Errorf("invalid value for hasMore (%t) at marker (%s) test (%+v)", res.HasMore, test.want[offset].Key, test)
 			}
 		}
 	}
 
 	// delete all uploads
 	for _, upload := range uploads {
-		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, upload.path, api.DeleteObjectOptions{}))
+		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, upload.key, api.DeleteObjectOptions{}))
 	}
 
 	// assert root dir is empty
-	if entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.GetObjectOptions{}); err != nil {
+	if resp, err := b.Objects(context.Background(), api.DefaultBucketName, "/", api.ListObjectOptions{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 0 {
-		t.Fatal("there should be no entries left", entries)
+	} else if len(resp.Objects) != 0 {
+		t.Fatal("there should be no entries left", resp.Objects)
 	}
 }
 
@@ -786,37 +761,36 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), api.DefaultBucketName, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	entries, err := cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{})
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "fileś/", api.ListObjectOptions{
+		Delimiter: "/",
+	})
 	tt.OK(err)
 
-	if len(entries) != 2 {
-		t.Fatal("expected two entries to be returned", len(entries))
+	if len(resp.Objects) != 2 {
+		t.Fatal("expected two entries to be returned", len(resp.Objects))
 	}
-	for _, entry := range entries {
+	for _, entry := range resp.Objects {
 		if entry.MimeType != "application/octet-stream" {
 			t.Fatal("wrong mime type", entry.MimeType)
 		}
 	}
 
-	// fetch entries with "file" prefix
-	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{Prefix: "file"})
+	// fetch entries in /fileś starting with "file"
+	res, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "fileś/file", api.ListObjectOptions{
+		Delimiter: "/",
+	})
 	tt.OK(err)
-	if len(res.Entries) != 2 {
-		t.Fatal("expected two entry to be returned", len(entries))
+	if len(res.Objects) != 2 {
+		t.Fatal("expected two entry to be returned", len(res.Objects))
 	}
 
-	// fetch entries with "fileś" prefix
-	res, err = cluster.Bus.Object(context.Background(), api.DefaultBucketName, "fileś/", api.GetObjectOptions{Prefix: "foo"})
+	// fetch entries in /fileś starting with "foo"
+	res, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "fileś/foo", api.ListObjectOptions{
+		Delimiter: "/",
+	})
 	tt.OK(err)
-	if len(res.Entries) != 0 {
-		t.Fatal("expected no entries to be returned", len(entries))
-	}
-
-	// fetch entries from the worker for unexisting path
-	entries, err = cluster.Worker.ObjectEntries(context.Background(), api.DefaultBucketName, "bar/", api.GetObjectOptions{})
-	tt.OK(err)
-	if len(entries) != 0 {
-		t.Fatal("expected no entries to be returned", len(entries))
+	if len(res.Objects) != 0 {
+		t.Fatal("expected no entries to be returned", len(res.Objects))
 	}
 
 	// prepare two files, a small one and a large one
@@ -965,19 +939,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
 
 			// Should be registered in bus.
-			res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, "", api.GetObjectOptions{})
+			_, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
 			tt.OK(err)
-
-			var found bool
-			for _, entry := range res.Entries {
-				if entry.Name == fmt.Sprintf("/%s", path) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatal("uploaded object not found in bus")
-			}
 
 			// download the data
 			var buffer bytes.Buffer
@@ -994,20 +957,20 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{})
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{})
 	tt.OK(err)
-	if len(objects) != 2 {
-		t.Fatalf("should have 2 objects but got %v", len(objects))
+	if len(resp.Objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(resp.Objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "ata"})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "ata"})
 	tt.OK(err)
-	if len(objects) != 2 {
-		t.Fatalf("should have 2 objects but got %v", len(objects))
+	if len(resp.Objects) != 2 {
+		t.Fatalf("should have 2 objects but got %v", len(resp.Objects))
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "1258"})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "1258"})
 	tt.OK(err)
-	if len(objects) != 1 {
-		t.Fatalf("should have 1 objects but got %v", len(objects))
+	if len(resp.Objects) != 1 {
+		t.Fatalf("should have 1 objects but got %v", len(resp.Objects))
 	}
 
 	// renew contracts.
@@ -1238,28 +1201,29 @@ func TestParallelUpload(t *testing.T) {
 	wg.Wait()
 
 	// Check if objects exist.
-	objects, err := cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/dir/", Limit: 100})
+	resp, err := cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/dir/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 3 {
-		t.Fatal("wrong number of objects", len(objects))
+	if len(resp.Objects) != 3 {
+		t.Fatal("wrong number of objects", len(resp.Objects))
 	}
 
 	// Upload one more object.
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), api.DefaultBucketName, "/foo", api.UploadObjectOptions{}))
 
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 4 {
-		t.Fatal("wrong number of objects", len(objects))
+	if len(resp.Objects) != 4 {
+		t.Fatal("wrong number of objects", len(resp.Objects))
 	}
 
 	// Delete all objects under /dir/.
 	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/dir/", api.DeleteObjectOptions{Batch: true}); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
+	cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 1 {
+	if len(resp.Objects) != 1 {
 		t.Fatal("objects weren't deleted")
 	}
 
@@ -1267,9 +1231,10 @@ func TestParallelUpload(t *testing.T) {
 	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/", api.DeleteObjectOptions{Batch: true}); err != nil {
 		t.Fatal(err)
 	}
-	objects, err = cluster.Bus.SearchObjects(context.Background(), api.DefaultBucketName, api.SearchObjectOptions{Key: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
+	cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
 	tt.OK(err)
-	if len(objects) != 0 {
+	if len(resp.Objects) != 0 {
 		t.Fatal("objects weren't deleted")
 	}
 }
@@ -1419,7 +1384,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload 3 objects so every host has 3 sectors
 	var err error
-	var res api.ObjectsResponse
+	var res api.Object
 	shards := make(map[types.PublicKey][]object.Sector)
 	for i := 0; i < 3; i++ {
 		// upload object
@@ -1445,7 +1410,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
-	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), api.DefaultBucketName, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "frankenstein", api.DownloadObjectOptions{}))
@@ -1643,14 +1608,14 @@ func TestUploadPacking(t *testing.T) {
 	frand.Read(data3)
 
 	// declare helpers
-	download := func(path string, data []byte, offset, length int64) {
+	download := func(key string, data []byte, offset, length int64) {
 		t.Helper()
 		var buffer bytes.Buffer
 		if err := w.DownloadObject(
 			context.Background(),
 			&buffer,
 			api.DefaultBucketName,
-			path,
+			key,
 			api.DownloadObjectOptions{Range: &api.DownloadRange{Offset: offset, Length: length}},
 		); err != nil {
 			t.Fatal(err)
@@ -1667,16 +1632,16 @@ func TestUploadPacking(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res.Object.Size != int64(len(data)) {
-			t.Fatal("unexpected size after upload", res.Object.Size, len(data))
+		if res.Size != int64(len(data)) {
+			t.Fatal("unexpected size after upload", res.Size, len(data))
 		}
-		entries, err := w.ObjectEntries(context.Background(), api.DefaultBucketName, "/", api.GetObjectOptions{})
+		resp, err := b.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		var found bool
-		for _, entry := range entries {
-			if entry.Name == "/"+name {
+		for _, entry := range resp.Objects {
+			if entry.Key == "/"+name {
 				if entry.Size != int64(len(data)) {
 					t.Fatal("unexpected size after upload", entry.Size, len(data))
 				}
@@ -1685,7 +1650,7 @@ func TestUploadPacking(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Fatal("object not found in list", name, entries)
+			t.Fatal("object not found in list", name, resp.Objects)
 		}
 	}
 
@@ -1773,12 +1738,12 @@ func TestUploadPacking(t *testing.T) {
 		t.Fatal("expected 2 objects", len(objs))
 	}
 	sort.Slice(objs, func(i, j int) bool {
-		return objs[i].Name < objs[j].Name // make result deterministic
+		return objs[i].Key < objs[j].Key // make result deterministic
 	})
-	if objs[0].Name != "/file1" {
-		t.Fatal("expected file1", objs[0].Name)
-	} else if objs[1].Name != "/file2" {
-		t.Fatal("expected file2", objs[1].Name)
+	if objs[0].Key != "/file1" {
+		t.Fatal("expected file1", objs[0].Key)
+	} else if objs[1].Key != "/file2" {
+		t.Fatal("expected file2", objs[1].Key)
 	}
 }
 
@@ -2136,7 +2101,7 @@ func TestMultipartUploads(t *testing.T) {
 	tt.OK(err)
 	if len(lmu.Uploads) != 1 {
 		t.Fatal("expected 1 upload got", len(lmu.Uploads))
-	} else if upload := lmu.Uploads[0]; upload.UploadID != mpr.UploadID || upload.Path != objPath {
+	} else if upload := lmu.Uploads[0]; upload.UploadID != mpr.UploadID || upload.Key != objPath {
 		t.Fatal("unexpected upload:", upload)
 	}
 

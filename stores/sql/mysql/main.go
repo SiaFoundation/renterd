@@ -95,8 +95,8 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
-func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, key, uploadID)
 }
 
 func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Account, error) {
@@ -478,8 +478,8 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 	return ssql.ListBuckets(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
@@ -538,12 +538,8 @@ func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.O
 	return ssql.Object(ctx, tx, bucket, key)
 }
 
-func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	return ssql.ObjectEntries(ctx, tx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-}
-
-func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
-	return ssql.ObjectMetadata(ctx, tx, bucket, path)
+func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {
+	return ssql.ObjectMetadata(ctx, tx, bucket, key)
 }
 
 func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
@@ -812,16 +808,12 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 }
 
 func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
-	dst := []any{&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag}
+	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag}
 	dst = append(dst, others...)
 	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
 	}
 	return md, nil
-}
-
-func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	return ssql.SearchObjects(ctx, tx, bucket, substring, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {

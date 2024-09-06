@@ -392,7 +392,7 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	// helper to fetch metadata
 	fetchMetadata := func(objID int64) (om api.ObjectMetadata, err error) {
 		err = tx.QueryRow(ctx, "SELECT etag, health, created_at, object_id, size, mime_type FROM objects WHERE id = ?", objID).
-			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Name, &om.Size, &om.MimeType)
+			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Key, &om.Size, &om.MimeType)
 		if err != nil {
 			return api.ObjectMetadata{}, fmt.Errorf("failed to fetch new object: %w", err)
 		}
@@ -1239,102 +1239,16 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	return orderByExprs, nil
 }
 
-func ListObjects(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else if limit != math.MaxInt {
-		limit++
+func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+	switch delim {
+	case "":
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
+	case "/":
+		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+	default:
+		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
 	}
-
-	// establish sane defaults for sorting
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
-	}
-
-	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
-	whereArgs := []any{bucket}
-
-	// apply prefix
-	if prefix != "" {
-		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
-		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
-	}
-
-	// apply sorting
-	orderByExprs, err := orderByObject(sortBy, sortDir)
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
-	}
-
-	// apply marker
-	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
-		err := tx.QueryRow(ctx, fmt.Sprintf(`
-			SELECT o.%s
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-		`, col), bucket, marker).Scan(dst)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return api.ErrMarkerNotFound
-		} else {
-			return err
-		}
-	})
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to get marker exprs: %w", err)
-	}
-	whereExprs = append(whereExprs, markerExprs...)
-	whereArgs = append(whereArgs, markerArgs...)
-
-	// apply limit
-	whereArgs = append(whereArgs, limit)
-
-	// run query
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?
-	`,
-		tx.SelectObjectMetadataExpr(),
-		strings.Join(whereExprs, " AND "),
-		strings.Join(orderByExprs, ", ")),
-		whereArgs...)
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-
-	var hasMore bool
-	var nextMarker string
-	if len(objects) == limit {
-		objects = objects[:len(objects)-1]
-		if len(objects) > 0 {
-			hasMore = true
-			nextMarker = objects[len(objects)-1].Name
-		}
-	}
-
-	return api.ObjectsListResponse{
-		HasMore:    hasMore,
-		NextMarker: nextMarker,
-		Objects:    objects,
-	}, nil
+	return
 }
 
 func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.MultipartUpload, error) {
@@ -1446,7 +1360,7 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 	if limitUsed && len(uploads) > int(limit) {
 		hasMore = true
 		uploads = uploads[:len(uploads)-1]
-		nextPathMarker = uploads[len(uploads)-1].Path
+		nextPathMarker = uploads[len(uploads)-1].Key
 		nextUploadIDMarker = uploads[len(uploads)-1].UploadID
 	}
 
@@ -1577,167 +1491,6 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
-}
-
-func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	// sanity check we are passing a directory
-	if !strings.HasSuffix(path, "/") {
-		panic("path must end in /")
-	}
-
-	// sanity check we are passing sane paging parameters
-	usingMarker := marker != ""
-	usingOffset := offset > 0
-	if usingMarker && usingOffset {
-		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
-	}
-
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else if limit != math.MaxInt {
-		limit++
-	}
-
-	// establish sane defaults for sorting
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
-	}
-
-	// fetch directory id
-	dirID, err := dirID(ctx, tx, path)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return []api.ObjectMetadata{}, false, nil
-	} else if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch directory id: %w", err)
-	}
-
-	args := []any{
-		path,
-		dirID, bucket,
-	}
-
-	// apply prefix
-	var prefixExpr string
-	if prefix != "" {
-		prefixExpr = "AND SUBSTR(o.object_id, 1, ?) = ?"
-		args = append(args,
-			utf8.RuneCountInString(path+prefix), path+prefix,
-			utf8.RuneCountInString(path+prefix), path+prefix,
-		)
-	}
-
-	args = append(args,
-		bucket,
-		path+"%",
-		utf8.RuneCountInString(path), path,
-		dirID,
-	)
-
-	// apply marker
-	var whereExpr string
-	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
-		var groupFn string
-		switch col {
-		case "size":
-			groupFn = "SUM"
-		case "health":
-			groupFn = "MIN"
-		default:
-			return fmt.Errorf("unknown column: %v", col)
-		}
-		err := tx.QueryRow(ctx, fmt.Sprintf(`
-			SELECT o.%s
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-			UNION ALL
-			SELECT %s(o.%s)
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
-			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return api.ErrMarkerNotFound
-		} else {
-			return err
-		}
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to query marker: %w", err)
-	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
-	}
-	args = append(args, markerArgs...)
-
-	// apply sorting
-	orderByExprs, err := orderByObject(sortBy, sortDir)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to apply sorting: %w", err)
-	}
-
-	// apply offset and limit
-	args = append(args, limit, offset)
-
-	// objectsQuery consists of 2 parts
-	// 1. fetch all objects in requested directory
-	// 2. fetch all sub-directories
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
-			FROM objects o
-			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
-			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
-			FROM objects o
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
-			GROUP BY d.id
-		) AS o
-		%s
-		ORDER BY %s
-		LIMIT ? OFFSET ?
-	`,
-		tx.SelectObjectMetadataExpr(),
-		prefixExpr,
-		tx.CharLengthExpr(),
-		prefixExpr,
-		whereExpr,
-		strings.Join(orderByExprs, ", "),
-	), args...)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, false, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-
-	// trim last element if we have more
-	var hasMore bool
-	if len(objects) == limit {
-		hasMore = true
-		objects = objects[:len(objects)-1]
-	}
-
-	return objects, hasMore, nil
 }
 
 func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {
@@ -2371,7 +2124,7 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 	var slabs []api.UnhealthySlab
 	for rows.Next() {
 		var slab api.UnhealthySlab
-		if err := rows.Scan((*EncryptionKey)(&slab.Key), &slab.Health); err != nil {
+		if err := rows.Scan((*EncryptionKey)(&slab.EncryptionKey), &slab.Health); err != nil {
 			return nil, fmt.Errorf("failed to scan unhealthy slab: %w", err)
 		}
 		slabs = append(slabs, slab)
@@ -2532,7 +2285,7 @@ func scanBucket(s Scanner) (api.Bucket, error) {
 }
 
 func scanMultipartUpload(s Scanner) (resp api.MultipartUpload, _ error) {
-	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.Key), &resp.Path, &resp.UploadID, &resp.CreatedAt)
+	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.EncryptionKey), &resp.Key, &resp.UploadID, &resp.CreatedAt)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.MultipartUpload{}, api.ErrMultipartUploadNotFound
 	} else if err != nil {
@@ -2615,35 +2368,6 @@ func scanStateElement(s Scanner) (types.StateElement, error) {
 		LeafIndex:   leafIndex,
 		MerkleProof: merkleProof.Hashes,
 	}, nil
-}
-
-func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	if limit <= -1 {
-		limit = math.MaxInt
-	}
-
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON o.db_bucket_id = b.id
-		WHERE INSTR(o.object_id, ?) > 0 AND b.name = ?
-		ORDER BY o.object_id ASC
-		LIMIT ? OFFSET ?
-	`, tx.SelectObjectMetadataExpr()), substring, bucket, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-	return objects, nil
 }
 
 func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
@@ -2912,5 +2636,276 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 			Key:   ec,
 			Slabs: slabSlices,
 		},
+	}, nil
+}
+
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else if limit != math.MaxInt {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// filter by bucket
+	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
+	whereArgs := []any{bucket}
+
+	// apply prefix
+	if prefix != "" {
+		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
+		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
+	}
+
+	// apply substring
+	if substring != "" {
+		whereExprs = append(whereExprs, "INSTR(o.object_id, ?) > 0")
+		whereArgs = append(whereArgs, substring)
+	}
+
+	// apply sorting
+	orderByExprs, err := orderByObject(sortBy, sortDir)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
+	}
+
+	// apply marker
+	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+		`, col), bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	})
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to get marker exprs: %w", err)
+	}
+	whereExprs = append(whereExprs, markerExprs...)
+	whereArgs = append(whereArgs, markerArgs...)
+
+	// apply limit
+	whereArgs = append(whereArgs, limit)
+
+	// run query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM objects o
+		WHERE %s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		tx.SelectObjectMetadataExpr(),
+		strings.Join(whereExprs, " AND "),
+		strings.Join(orderByExprs, ", ")),
+		whereArgs...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := tx.ScanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Key
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
+	}, nil
+}
+
+func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// split prefix into path and object prefix
+	path := "/" // root of bucket
+	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
+		path = prefix[:idx+1]
+		prefix = prefix[idx+1:]
+	}
+	if !strings.HasSuffix(path, "/") {
+		panic("path must end with /")
+	}
+
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else if limit != math.MaxInt {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// fetch directory id
+	dirID, err := dirID(ctx, tx, path)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectsListResponse{}, nil
+	} else if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch directory id: %w", err)
+	}
+
+	args := []any{
+		path,
+		dirID, bucket,
+	}
+
+	// apply prefix
+	var prefixExpr string
+	if prefix != "" {
+		prefixExpr = "AND SUBSTR(o.object_id, 1, ?) = ?"
+		args = append(args,
+			utf8.RuneCountInString(path+prefix), path+prefix,
+			utf8.RuneCountInString(path+prefix), path+prefix,
+		)
+	}
+
+	args = append(args,
+		bucket,
+		path+"%",
+		utf8.RuneCountInString(path), path,
+		dirID,
+	)
+
+	// apply marker
+	var whereExpr string
+	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		var groupFn string
+		switch col {
+		case "size":
+			groupFn = "SUM"
+		case "health":
+			groupFn = "MIN"
+		default:
+			return fmt.Errorf("unknown column: %v", col)
+		}
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+			UNION ALL
+			SELECT %s(o.%s)
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
+			WHERE b.name = ? AND d.name = ?
+			GROUP BY d.id
+		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	})
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to query marker: %w", err)
+	} else if len(markerExprs) > 0 {
+		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
+	}
+	args = append(args, markerArgs...)
+
+	// apply sorting
+	orderByExprs, err := orderByObject(sortBy, sortDir)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
+	}
+
+	// apply offset and limit
+	args = append(args, limit)
+
+	// objectsQuery consists of 2 parts
+	// 1. fetch all objects in requested directory
+	// 2. fetch all sub-directories
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM (
+			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+			FROM objects o
+			LEFT JOIN directories d ON d.name = o.object_id
+			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
+				AND d.id IS NULL
+			UNION ALL
+			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+			FROM objects o
+			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
+			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
+			AND o.object_id LIKE ?
+			AND SUBSTR(o.object_id, 1, ?) = ?
+			AND d.db_parent_id = ?
+			GROUP BY d.id
+		) AS o
+		%s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		tx.SelectObjectMetadataExpr(),
+		prefixExpr,
+		tx.CharLengthExpr(),
+		prefixExpr,
+		whereExpr,
+		strings.Join(orderByExprs, ", "),
+	), args...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := tx.ScanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	// trim last element if we have more
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Key
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
 	}, nil
 }

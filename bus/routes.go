@@ -1103,34 +1103,8 @@ func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
 	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
-func (b *Bus) searchObjectsHandlerGET(jc jape.Context) {
-	offset := 0
-	limit := -1
-	var key string
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-	keys, err := b.ms.SearchObjects(jc.Request.Context(), bucket, key, offset, limit)
-	if jc.Check("couldn't list objects", err) != nil {
-		return
-	}
-	jc.Encode(keys)
-}
-
-func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
-		return
-	}
-	path := jc.PathParam("path")
-	if strings.HasSuffix(path, "/") && !ignoreDelim {
-		b.objectEntriesHandlerGET(jc, path)
-		return
-	}
+func (b *Bus) objectHandlerGET(jc jape.Context) {
+	key := jc.PathParam("key")
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
@@ -1142,10 +1116,11 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 
 	var o api.Object
 	var err error
+
 	if onlymetadata {
-		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, path)
+		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, key)
 	} else {
-		o, err = b.ms.Object(jc.Request.Context(), bucket, path)
+		o, err = b.ms.Object(jc.Request.Context(), bucket, key)
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1153,51 +1128,43 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	} else if jc.Check("couldn't load object", err) != nil {
 		return
 	}
-	jc.Encode(api.ObjectsResponse{Object: &o})
+	jc.Encode(o)
 }
 
-func (b *Bus) objectEntriesHandlerGET(jc jape.Context, path string) {
+func (b *Bus) objectsHandlerGET(jc jape.Context) {
+	var marker, delim, sortBy, sortDir, substring string
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-
-	var prefix string
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
-
-	var sortBy string
-	if jc.DecodeForm("sortBy", &sortBy) != nil {
-		return
-	}
-
-	var sortDir string
-	if jc.DecodeForm("sortDir", &sortDir) != nil {
-		return
-	}
-
-	var marker string
-	if jc.DecodeForm("marker", &marker) != nil {
-		return
-	}
-
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
+	if jc.DecodeForm("delimiter", &delim) != nil {
 		return
 	}
 	limit := -1
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-
-	// look for object entries
-	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-	if jc.Check("couldn't list object entries", err) != nil {
+	if jc.DecodeForm("marker", &marker) != nil {
+		return
+	}
+	if jc.DecodeForm("sortBy", &sortBy) != nil {
+		return
+	}
+	if jc.DecodeForm("sortDir", &sortDir) != nil {
+		return
+	}
+	if jc.DecodeForm("substring", &substring) != nil {
 		return
 	}
 
-	jc.Encode(api.ObjectsResponse{Entries: entries, HasMore: hasMore})
+	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
+	if errors.Is(err, api.ErrUnsupportedDelimiter) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to query objects", err) != nil {
+		return
+	}
+	jc.Encode(resp)
 }
 
 func (b *Bus) objectsHandlerPUT(jc jape.Context) {
@@ -1207,7 +1174,7 @@ func (b *Bus) objectsHandlerPUT(jc jape.Context) {
 	} else if aor.Bucket == "" {
 		aor.Bucket = api.DefaultBucketName
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
+	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
 
 func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1215,7 +1182,7 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	}
-	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath, orr.MimeType, orr.Metadata)
+	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourceKey, orr.DestinationKey, orr.MimeType, orr.Metadata)
 	if jc.Check("couldn't copy object", err) != nil {
 		return
 	}
@@ -1223,24 +1190,6 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("Last-Modified", om.ModTime.Std().Format(http.TimeFormat))
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(om.ETag))
 	jc.Encode(om)
-}
-
-func (b *Bus) objectsListHandlerPOST(jc jape.Context) {
-	var req api.ObjectsListRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
-	}
-	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.SortBy, req.SortDir, req.Marker, req.Limit)
-	if errors.Is(err, api.ErrMarkerNotFound) {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	} else if jc.Check("couldn't list objects", err) != nil {
-		return
-	}
-	jc.Encode(resp)
 }
 
 func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
@@ -1284,9 +1233,9 @@ func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
 	}
 	var err error
 	if batch {
-		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("path"))
+		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("key"))
 	} else {
-		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("path"))
+		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("key"))
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -2176,7 +2125,7 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 		key = object.GenerateEncryptionKey()
 	}
 
-	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType, req.Metadata)
+	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, key, req.MimeType, req.Metadata)
 	if jc.Check("failed to create multipart upload", err) != nil {
 		return
 	}
@@ -2188,7 +2137,7 @@ func (b *Bus) multipartHandlerAbortPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
+	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, req.UploadID)
 	if jc.Check("failed to abort multipart upload", err) != nil {
 		return
 	}
@@ -2199,7 +2148,7 @@ func (b *Bus) multipartHandlerCompletePOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts, api.CompleteMultipartOptions{
+	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, req.UploadID, req.Parts, api.CompleteMultipartOptions{
 		Metadata: req.Metadata,
 	})
 	if jc.Check("failed to complete multipart upload", err) != nil {
@@ -2228,7 +2177,7 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices)
+	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Key, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}
@@ -2247,7 +2196,7 @@ func (b *Bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.PathMarker, req.UploadIDMarker, req.Limit)
+	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.KeyMarker, req.UploadIDMarker, req.Limit)
 	if jc.Check("failed to list multipart uploads", err) != nil {
 		return
 	}
@@ -2259,7 +2208,7 @@ func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
+	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Key, req.UploadID, req.PartNumberMarker, int64(req.Limit))
 	if jc.Check("failed to list multipart upload parts", err) != nil {
 		return
 	}

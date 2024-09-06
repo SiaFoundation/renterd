@@ -169,7 +169,7 @@ type (
 
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
-		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
 
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.
@@ -196,7 +196,7 @@ type (
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 		// ListObjects returns a list of objects from the given bucket.
-		ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -219,9 +219,6 @@ type (
 
 		// Object returns an object from the database.
 		Object(ctx context.Context, bucket, key string) (api.Object, error)
-
-		// ObjectEntries queries the database for objects in a given dir.
-		ObjectEntries(ctx context.Context, bucket, key, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
@@ -317,15 +314,6 @@ type (
 		// existing ones.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
-		// SearchObjects returns a list of objects that contain the provided
-		// substring.
-		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-
-		// UpdateContractSet adds/removes the provided contract ids to/from
-		// the contract set. The contract set is created in the process if
-		// it doesn't exist already.
-		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
-
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
 
@@ -356,6 +344,11 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't exist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
