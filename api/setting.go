@@ -54,7 +54,6 @@ var (
 	// configured with on startup. These values can be adjusted using the
 	// settings API.
 	DefaultPricePinSettings = PricePinSettings{
-		Enabled:   false,
 		Currency:  "usd",
 		Threshold: 0.05,
 	}
@@ -136,10 +135,6 @@ type (
 	// the current exchange rate, allowing users to set prices in USD instead of
 	// SC.
 	PricePinSettings struct {
-		// Enabled can be used to either enable or temporarily disable price
-		// pinning. If enabled, the currency and threshold must be valid.
-		Enabled bool `json:"enabled"`
-
 		// Currency is the external three-letter currency code.
 		Currency string `json:"currency"`
 
@@ -198,9 +193,26 @@ func (p Pin) IsPinned() bool {
 	return p.Pinned && p.Value > 0
 }
 
+// Enabled returns true if any pins are enabled.
+func (pps PricePinSettings) Enabled() bool {
+	if pps.GougingSettingsPins.MaxDownload.Pinned ||
+		pps.GougingSettingsPins.MaxStorage.Pinned ||
+		pps.GougingSettingsPins.MaxUpload.Pinned {
+		return true
+	}
+
+	for _, pin := range pps.Autopilots {
+		if pin.Allowance.Pinned {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Validate returns an error if the price pin settings are not considered valid.
 func (pps PricePinSettings) Validate() error {
-	if !pps.Enabled {
+	if !pps.Enabled() {
 		return nil
 	}
 	if pps.Currency == "" {

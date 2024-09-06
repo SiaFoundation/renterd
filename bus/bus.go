@@ -775,13 +775,8 @@ func (b *Bus) initSettings(ctx context.Context) error {
 		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
 			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
 		}
-	} else if pps.Enabled && !b.e.Enabled() {
-		b.logger.Warn("pinning can not be enabled, explorer is disabled, pinning will be disabled")
-		pps.Enabled = false
-		updated, _ := json.Marshal(pps)
-		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
-			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
-		}
+	} else if pps.Enabled() && !b.e.Enabled() {
+		return fmt.Errorf("price pinning can not be enabled, %w", api.ErrExplorerDisabled)
 	}
 
 	return nil

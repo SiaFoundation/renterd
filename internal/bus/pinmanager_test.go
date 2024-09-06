@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -176,6 +178,19 @@ func (ms *mockPinStore) UpdateAutopilot(ctx context.Context, autopilot api.Autop
 	return nil
 }
 
+func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
+	config := zap.NewProductionEncoderConfig()
+	config.EncodeTime = zapcore.RFC3339TimeEncoder
+	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	config.StacktraceKey = ""
+	consoleEncoder := zapcore.NewConsoleEncoder(config)
+
+	return zap.New(
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level),
+		zap.AddCaller(),
+		zap.AddStacktrace(level),
+	)
+}
 func TestPinManager(t *testing.T) {
 	// mock dependencies
 	a := &mockAlerter{}
@@ -184,7 +199,8 @@ func TestPinManager(t *testing.T) {
 	s := newTestStore()
 
 	// create a pinmanager
-	pm := NewPinManager(a, b, e, s, testUpdateInterval, time.Minute, zap.NewNop())
+
+	pm := NewPinManager(a, b, e, s, testUpdateInterval, time.Minute, newTestLoggerCustom(zap.DebugLevel))
 	defer func() {
 		if err := pm.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
@@ -206,18 +222,11 @@ func TestPinManager(t *testing.T) {
 
 	// enable price pinning
 	pps := api.DefaultPricePinSettings
-	pps.Enabled = true
 	pps.Currency = "usd"
 	pps.Threshold = 0.5
 	s.updatPinnedSettings(pps)
 
-	// assert price manager is running now
-	if cnt := len(rates()); cnt < 1 {
-		t.Fatal("expected at least one rate")
-	}
-
 	// update exchange rate and fetch current gouging settings
-	e.setRate(2.5)
 	gs := s.gougingSettings()
 
 	// configure all pins but disable them for now
@@ -231,9 +240,15 @@ func TestPinManager(t *testing.T) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
-	// enable the max download pin, with the threshold at 0.5 it should remain unchanged
+	// enable the max download pin
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
 	s.updatPinnedSettings(pps)
+
+	// adjust the rate
+	e.setRate(1.5)
+	time.Sleep(2 * testUpdateInterval)
+
+	// at threshold of .5 the prices should not be updated
 	if gss := s.gougingSettings(); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
@@ -241,7 +256,7 @@ func TestPinManager(t *testing.T) {
 	// lower the threshold, gouging settings should be updated
 	pps.Threshold = 0.05
 	s.updatPinnedSettings(pps)
-	if gss := s.gougingSettings(); gss.MaxContractPrice.Equals(gs.MaxDownloadPrice) {
+	if gss := s.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
 
@@ -289,7 +304,7 @@ func TestPinManager(t *testing.T) {
 		t.Fatalf("expected autopilot to be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
 	}
 
-	// make forex API return an error
+	// make explorer return an error
 	e.setUnreachable(true)
 
 	// assert alert was registered
@@ -299,7 +314,7 @@ func TestPinManager(t *testing.T) {
 		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
 	}
 
-	// make forex API return a valid response
+	// make explorer return a valid response
 	e.setUnreachable(false)
 
 	// assert alert was dismissed
