@@ -48,7 +48,6 @@ type (
 	}
 
 	Database struct {
-		Log DatabaseLog `yaml:"log,omitempty"` // deprecated. included for compatibility.
 		// optional fields depending on backend
 		MySQL MySQL `yaml:"mysql,omitempty"`
 	}
@@ -62,7 +61,6 @@ type (
 		RemotePassword                string        `yaml:"remotePassword,omitempty"`
 		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry,omitempty"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
-		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"` // deprecated
 	}
 
 	// LogFile configures the file output of the logger.
@@ -83,7 +81,6 @@ type (
 	}
 
 	Log struct {
-		Path     string      `yaml:"path,omitempty"`  // deprecated. included for compatibility.
 		Level    string      `yaml:"level,omitempty"` // global log level
 		StdOut   StdOut      `yaml:"stdout,omitempty"`
 		File     LogFile     `yaml:"file,omitempty"`
@@ -111,12 +108,11 @@ type (
 	}
 
 	S3 struct {
-		Address           string            `yaml:"address,omitempty"`
-		DisableAuth       bool              `yaml:"disableAuth,omitempty"`
-		Enabled           bool              `yaml:"enabled,omitempty"`
-		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"` // deprecated. included for compatibility.
-		HostBucketEnabled bool              `yaml:"hostBucketEnabled,omitempty"`
-		HostBucketBases   []string          `yaml:"hostBucketBases,omitempty"`
+		Address           string   `yaml:"address,omitempty"`
+		DisableAuth       bool     `yaml:"disableAuth,omitempty"`
+		Enabled           bool     `yaml:"enabled,omitempty"`
+		HostBucketEnabled bool     `yaml:"hostBucketEnabled,omitempty"`
+		HostBucketBases   []string `yaml:"hostBucketBases,omitempty"`
 	}
 
 	// Worker contains the configuration for a worker.

@@ -60,7 +60,6 @@ type busMock struct {
 	*settingStoreMock
 	*syncerMock
 	*s3Mock
-	*walletMock
 	*webhookBroadcasterMock
 	*webhookStoreMock
 }
@@ -76,7 +75,6 @@ func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *
 		objectStoreMock:        os,
 		settingStoreMock:       &settingStoreMock{},
 		syncerMock:             &syncerMock{},
-		walletMock:             &walletMock{},
 		webhookBroadcasterMock: &webhookBroadcasterMock{},
 	}
 }
@@ -684,22 +682,6 @@ func (*syncerMock) BroadcastTransaction(context.Context, []types.Transaction) er
 
 func (*syncerMock) SyncerPeers(context.Context) ([]string, error) {
 	return nil, nil
-}
-
-var _ Wallet = (*walletMock)(nil)
-
-type walletMock struct{}
-
-func (*walletMock) WalletDiscard(context.Context, types.Transaction) error {
-	return nil
-}
-
-func (*walletMock) WalletFund(context.Context, *types.Transaction, types.Currency, bool) ([]types.Hash256, []types.Transaction, error) {
-	return nil, nil, nil
-}
-
-func (*walletMock) WalletSign(context.Context, *types.Transaction, []types.Hash256, types.CoveredFields) error {
-	return nil
 }
 
 var _ webhooks.Broadcaster = (*webhookBroadcasterMock)(nil)

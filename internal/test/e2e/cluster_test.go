@@ -290,7 +290,7 @@ func TestNewTestCluster(t *testing.T) {
 	})
 
 	// Get host info for every host.
-	hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+	hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	for _, host := range hosts {
 		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)
@@ -744,7 +744,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 	// check that stored data on hosts was updated
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		hosts, err := cluster.Bus.Hosts(context.Background(), api.GetHostsOptions{})
+		hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 		tt.OK(err)
 		for _, host := range hosts {
 			if host.StoredData != rhpv2.SectorSize {
@@ -1566,7 +1566,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	})
 }
 
-func TestWalletTransactions(t *testing.T) {
+func TestWalletEvents(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -1582,68 +1582,30 @@ func TestWalletTransactions(t *testing.T) {
 	time.Sleep(time.Second)
 	cluster.MineBlocks(1)
 
-	// Get all transactions of the wallet.
-	allTxns, err := b.WalletTransactions(context.Background())
+	// Get all events of the wallet.
+	allTxns, err := b.WalletEvents(context.Background())
 	tt.OK(err)
 	if len(allTxns) < 5 {
-		t.Fatalf("expected at least 5 transactions, got %v", len(allTxns))
+		t.Fatalf("expected at least 5 events, got %v", len(allTxns))
 	}
 	if !sort.SliceIsSorted(allTxns, func(i, j int) bool {
 		return allTxns[i].Timestamp.Unix() > allTxns[j].Timestamp.Unix()
 	}) {
-		t.Fatal("transactions are not sorted by timestamp")
+		t.Fatal("events are not sorted by timestamp")
 	}
 
-	// Get the transactions at an offset and compare.
-	txns, err := b.WalletTransactions(context.Background(), api.WalletTransactionsWithOffset(2))
+	// Get the events at an offset and compare.
+	txns, err := b.WalletEvents(context.Background(), api.WalletTransactionsWithOffset(2))
 	tt.OK(err)
 	if !reflect.DeepEqual(txns, allTxns[2:]) {
-		t.Fatal("transactions don't match", cmp.Diff(txns, allTxns[2:]))
+		t.Fatal("events don't match", cmp.Diff(txns, allTxns[2:]))
 	}
 
-	// Find the first index that has a different timestamp than the first.
-	var txnIdx int
-	for i := 1; i < len(allTxns); i++ {
-		if allTxns[i].Timestamp.Unix() != allTxns[0].Timestamp.Unix() {
-			txnIdx = i
-			break
-		}
-	}
-	medianTxnTimestamp := allTxns[txnIdx].Timestamp
-
-	// Limit the number of transactions to 5.
-	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithLimit(5))
+	// Limit the number of events to 5.
+	txns, err = b.WalletEvents(context.Background(), api.WalletTransactionsWithLimit(5))
 	tt.OK(err)
 	if len(txns) != 5 {
-		t.Fatalf("expected exactly 5 transactions, got %v", len(txns))
-	}
-
-	// Fetch txns before and since median.
-	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithBefore(medianTxnTimestamp))
-	tt.OK(err)
-	if len(txns) == 0 {
-		for _, txn := range allTxns {
-			fmt.Println(txn.Timestamp.Unix())
-		}
-		t.Fatal("expected at least 1 transaction before median timestamp", medianTxnTimestamp.Unix())
-	}
-	for _, txn := range txns {
-		if txn.Timestamp.Unix() >= medianTxnTimestamp.Unix() {
-			t.Fatal("expected only transactions before median timestamp")
-		}
-	}
-	txns, err = b.WalletTransactions(context.Background(), api.WalletTransactionsWithSince(medianTxnTimestamp))
-	tt.OK(err)
-	if len(txns) == 0 {
-		for _, txn := range allTxns {
-			fmt.Println(txn.Timestamp.Unix())
-		}
-		t.Fatal("expected at least 1 transaction after median timestamp")
-	}
-	for _, txn := range txns {
-		if txn.Timestamp.Unix() < medianTxnTimestamp.Unix() {
-			t.Fatal("expected only transactions after median timestamp", medianTxnTimestamp.Unix())
-		}
+		t.Fatalf("expected exactly 5 events, got %v", len(txns))
 	}
 }
 
@@ -1831,57 +1793,64 @@ func TestWallet(t *testing.T) {
 	tt := cluster.tt
 
 	// Check wallet info is sane after startup.
-	wallet, err := b.Wallet(context.Background())
+	wr, err := b.Wallet(context.Background())
 	tt.OK(err)
-	if wallet.ScanHeight == 0 {
-		t.Fatal("wallet scan height should not be 0")
-	}
-	if wallet.Confirmed.IsZero() {
+	if wr.Confirmed.IsZero() {
 		t.Fatal("wallet confirmed balance should not be zero")
 	}
-	if !wallet.Spendable.Equals(wallet.Confirmed) {
+	if !wr.Spendable.Equals(wr.Confirmed) {
 		t.Fatal("wallet spendable balance should match confirmed")
 	}
-	if !wallet.Unconfirmed.IsZero() {
+	if !wr.Unconfirmed.IsZero() {
 		t.Fatal("wallet unconfirmed balance should be zero")
 	}
-	if wallet.Address == (types.Address{}) {
+	if wr.Address == (types.Address{}) {
 		t.Fatal("wallet address should be set")
 	}
 
-	// Send 1 SC to an address outside our wallet. We manually do this to be in
-	// control of the miner fees.
+	// Send 1 SC to an address outside our wallet.
 	sendAmt := types.HastingsPerSiacoin
-	minerFee := types.NewCurrency64(1)
-	txn := types.Transaction{
-		SiacoinOutputs: []types.SiacoinOutput{
-			{Value: sendAmt, Address: types.VoidAddress},
-		},
-		MinerFees: []types.Currency{minerFee},
+	_, err = b.SendSiacoins(context.Background(), types.Address{1, 2, 3}, sendAmt, false)
+	tt.OK(err)
+
+	txns, err := b.WalletEvents(context.Background())
+	tt.OK(err)
+
+	txns, err = b.WalletPending(context.Background())
+	tt.OK(err)
+	if len(txns) != 1 {
+		t.Fatalf("expected 1 txn got %v", len(txns))
 	}
-	toSign, parents, err := b.WalletFund(context.Background(), &txn, txn.SiacoinOutputs[0].Value, false)
-	tt.OK(err)
-	err = b.WalletSign(context.Background(), &txn, toSign, types.CoveredFields{WholeTransaction: true})
-	tt.OK(err)
-	tt.OK(b.BroadcastTransaction(context.Background(), append(parents, txn)))
+
+	var minerFee types.Currency
+	switch txn := txns[0].Data.(type) {
+	case wallet.EventV1Transaction:
+		for _, fee := range txn.Transaction.MinerFees {
+			minerFee = minerFee.Add(fee)
+		}
+	case wallet.EventV2Transaction:
+		minerFee = txn.MinerFee
+	default:
+		t.Fatalf("unexpected event %T", txn)
+	}
 
 	// The wallet should still have the same confirmed balance, a lower
 	// spendable balance and a greater unconfirmed balance.
 	tt.Retry(600, 100*time.Millisecond, func() error {
 		updated, err := b.Wallet(context.Background())
 		tt.OK(err)
-		if !updated.Confirmed.Equals(wallet.Confirmed) {
-			return fmt.Errorf("wallet confirmed balance should not have changed: %v %v", updated.Confirmed, wallet.Confirmed)
+		if !updated.Confirmed.Equals(wr.Confirmed) {
+			return fmt.Errorf("wr confirmed balance should not have changed: %v %v", updated.Confirmed, wr.Confirmed)
 		}
 
 		// The diffs of the spendable balance and unconfirmed balance should add up
 		// to the amount of money sent as well as the miner fees used.
-		spendableDiff := wallet.Spendable.Sub(updated.Spendable)
+		spendableDiff := wr.Spendable.Sub(updated.Spendable)
 		if updated.Unconfirmed.Cmp(spendableDiff) > 0 {
 			t.Fatalf("unconfirmed balance can't be greater than the difference in spendable balance here: \nconfirmed %v (%v) - >%v (%v) \nunconfirmed %v (%v) -> %v (%v) \nspendable %v (%v) -> %v (%v) \nfee %v (%v)",
-				wallet.Confirmed, wallet.Confirmed.ExactString(), updated.Confirmed, updated.Confirmed.ExactString(),
-				wallet.Unconfirmed, wallet.Unconfirmed.ExactString(), updated.Unconfirmed, updated.Unconfirmed.ExactString(),
-				wallet.Spendable, wallet.Spendable.ExactString(), updated.Spendable, updated.Spendable.ExactString(),
+				wr.Confirmed, wr.Confirmed.ExactString(), updated.Confirmed, updated.Confirmed.ExactString(),
+				wr.Unconfirmed, wr.Unconfirmed.ExactString(), updated.Unconfirmed, updated.Unconfirmed.ExactString(),
+				wr.Spendable, wr.Spendable.ExactString(), updated.Spendable, updated.Spendable.ExactString(),
 				minerFee, minerFee.ExactString())
 		}
 		withdrawnAmt := spendableDiff.Sub(updated.Unconfirmed)
@@ -2156,7 +2125,7 @@ func TestMultipartUploads(t *testing.T) {
 
 	// Start a new multipart upload.
 	objPath := "/foo"
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{GenerateKey: true})
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -2492,8 +2461,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 
 	// start a new multipart upload. We upload the parts in reverse order
 	objPath := "/foo"
-	key := object.GenerateEncryptionKey()
-	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{Key: &key})
+	mpr, err := b.CreateMultipartUpload(context.Background(), api.DefaultBucketName, objPath, api.CreateMultipartOptions{})
 	tt.OK(err)
 	if mpr.UploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -2566,34 +2534,51 @@ func TestWalletRedistribute(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	// redistribute into 5 outputs
-	_, err := cluster.Bus.WalletRedistribute(context.Background(), 5, types.Siacoins(10))
+	// redistribute into 2 outputs of 500KS each
+	numOutputs := 2
+	outputAmt := types.Siacoins(500e3)
+	txnSet, err := cluster.Bus.WalletRedistribute(context.Background(), numOutputs, outputAmt)
 	if err != nil {
 		t.Fatal(err)
+	} else if len(txnSet) == 0 {
+		t.Fatal("nothing happened")
 	}
 	cluster.MineBlocks(1)
 
 	// assert we have 5 outputs with 10 SC
-	outputs, err := cluster.Bus.WalletOutputs(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	txns, err := cluster.Bus.WalletEvents(context.Background())
+	cluster.tt.OK(err)
 
-	var cnt int
-	for _, output := range outputs {
-		if output.Value.Cmp(types.Siacoins(10)) == 0 {
-			cnt++
+	nOutputs := 0
+	for _, txn := range txns {
+		switch txn := txn.Data.(type) {
+		case wallet.EventV1Transaction:
+			for _, sco := range txn.Transaction.SiacoinOutputs {
+				if sco.Value.Equals(types.Siacoins(500e3)) {
+					nOutputs++
+				}
+			}
+		case wallet.EventV2Transaction:
+			for _, sco := range txn.SiacoinOutputs {
+				if sco.Value.Equals(types.Siacoins(500e3)) {
+					nOutputs++
+				}
+			}
+		case wallet.EventPayout:
+		default:
+			t.Fatalf("unexpected transaction type %T", txn)
 		}
 	}
-	if cnt != 5 {
+	if cnt := nOutputs; cnt != numOutputs {
 		t.Fatalf("expected 5 outputs with 10 SC, got %v", cnt)
 	}
 
 	// assert redistributing into 3 outputs succeeds, used to fail because we
 	// were broadcasting an empty transaction set
-	_, err = cluster.Bus.WalletRedistribute(context.Background(), 3, types.Siacoins(10))
-	if err != nil {
-		t.Fatal(err)
+	txnSet, err = cluster.Bus.WalletRedistribute(context.Background(), nOutputs, outputAmt)
+	cluster.tt.OK(err)
+	if len(txnSet) != 0 {
+		t.Fatal("txnSet should be empty")
 	}
 }
 
