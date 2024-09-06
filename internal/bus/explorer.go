@@ -20,16 +20,14 @@ type (
 	}
 
 	explorer struct {
-		enabled bool
-		url     string
+		url string
 	}
 )
 
 // NewExplorer returns a new Explorer.
-func NewExplorer(url string, enabled bool) Explorer {
+func NewExplorer(url string) Explorer {
 	return &explorer{
-		enabled: enabled,
-		url:     url,
+		url: url,
 	}
 }
 
@@ -40,13 +38,13 @@ func (e *explorer) BaseURL() string {
 
 // Enabled returns true if the explorer is enabled.
 func (e *explorer) Enabled() bool {
-	return e.enabled
+	return e.url != ""
 }
 
 // SiacoinExchangeRate returns the exchange rate for the given currency.
 func (e *explorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
 	// return early if the explorer is disabled
-	if !e.enabled {
+	if !e.Enabled() {
 		return 0, api.ErrExplorerDisabled
 	}
 

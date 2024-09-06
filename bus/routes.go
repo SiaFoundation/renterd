@@ -1721,7 +1721,7 @@ func (b *Bus) settingKeyHandlerPUT(jc jape.Context) {
 		} else if err := pps.Validate(); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
 			return
-		} else if pps.Enabled() && !b.e.Enabled() {
+		} else if pps.Enabled() && !b.explorer.Enabled() {
 			jc.Error(fmt.Errorf("pinning can not be enabled, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
 			return
 		}
@@ -2052,8 +2052,8 @@ func (b *Bus) stateHandlerGET(jc jape.Context) {
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
 		},
 		Explorer: api.ExplorerState{
-			Enabled: b.e.Enabled(),
-			URL:     b.e.BaseURL(),
+			Enabled: b.explorer.Enabled(),
+			URL:     b.explorer.BaseURL(),
 		},
 		Network: b.cm.TipState().Network.Name,
 	})

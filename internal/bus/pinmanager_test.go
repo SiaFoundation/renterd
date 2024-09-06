@@ -81,6 +81,10 @@ func (e *mockExplorer) Enabled() bool {
 	return true
 }
 
+func (e *mockExplorer) BaseURL() string {
+	return ""
+}
+
 func (e *mockExplorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

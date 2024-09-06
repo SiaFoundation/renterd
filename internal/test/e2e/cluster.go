@@ -585,9 +585,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 	}
 	cm := chain.NewManager(store, state)
 
-	// create explorer
-	e := bus.NewExplorer(cfgExplorer.URL, !cfgExplorer.Disable)
-
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
@@ -639,7 +636,11 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, e, s, w, sqlStore, announcementMaxAgeHours, logger)
+	var explorerURL string
+	if cfgExplorer.URL != "" {
+		explorerURL = cfgExplorer.URL
+	}
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

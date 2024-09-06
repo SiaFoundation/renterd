@@ -101,6 +101,11 @@ type (
 		Shutdown(context.Context) error
 	}
 
+	Explorer interface {
+		Enabled() bool
+		BaseURL() string
+	}
+
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
@@ -311,7 +316,6 @@ type Bus struct {
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 	cm          ChainManager
-	e           Explorer
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
@@ -327,6 +331,7 @@ type Bus struct {
 	rhp3 *rhp3.Client
 
 	contractLocker        ContractLocker
+	explorer              Explorer
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 
@@ -334,7 +339,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, e Explorer, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
@@ -344,7 +349,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		accounts: store,
 		s:        s,
 		cm:       cm,
-		e:        e,
 		w:        w,
 		hs:       store,
 		as:       store,
@@ -368,6 +372,10 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
+
+	// create explorer
+	e := ibus.NewExplorer(explorerURL)
+	b.explorer = e
 
 	// create sectors cache
 	b.sectors = ibus.NewSectorsCache()
@@ -775,7 +783,7 @@ func (b *Bus) initSettings(ctx context.Context) error {
 		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
 			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
 		}
-	} else if pps.Enabled() && !b.e.Enabled() {
+	} else if pps.Enabled() && !b.explorer.Enabled() {
 		return fmt.Errorf("price pinning can not be enabled, %w", api.ErrExplorerDisabled)
 	}
 

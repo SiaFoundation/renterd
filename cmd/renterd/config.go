@@ -171,6 +171,12 @@ func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.
 		return
 	}
 
+	// check explorer
+	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
+		err = fmt.Errorf("explorer is disabled but no URL is set")
+		return
+	}
+
 	return
 }
 
@@ -419,6 +425,9 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
 
 	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
+
+	parseEnvVar("RENTERD_EXPLORER_DISABLE", &cfg.Explorer.Disable)
+	parseEnvVar("RENTERD_EXPLORER_URL", &cfg.Explorer.URL)
 }
 
 // readPasswordInput reads a password from stdin.

@@ -24,11 +24,6 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 		UpdateSetting(ctx context.Context, key, value string) error
 	}
-
-	Explorer interface {
-		Enabled() bool
-		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
-	}
 )
 
 type (
