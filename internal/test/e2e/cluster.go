@@ -545,14 +545,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 }
 
 func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+	network, genesis := testNetwork()
+
 	// create store
 	alertsMgr := alerts.NewManager()
-	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
+	storeCfg, err := buildStoreConfig(alertsMgr, dir, network.Name, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	network, genesis := testNetwork()
 	sqlStore, err := stores.NewSQLStore(storeCfg, network)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -1119,7 +1120,7 @@ func testApCfg() config.Autopilot {
 	}
 }
 
-func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+func buildStoreConfig(am alerts.Alerter, dir, network string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -1143,11 +1144,11 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, network, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -1163,7 +1164,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, network, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1172,7 +1173,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}

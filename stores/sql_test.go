@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	testNetwork     = "zen"
 	testContractSet = "test"
 	testMimeType    = "application/octet-stream"
 	testETag        = "d34db33f"
@@ -97,11 +98,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = mysql.NewMainDatabase(connMain, 100*time.Millisecond, 100*time.Millisecond, testNetwork, zap.NewNop())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, 100*time.Millisecond, 100*time.Millisecond, zap.NewNop())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -115,11 +116,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, 100*time.Millisecond, 100*time.Millisecond, testNetwork, zap.NewNop())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, 100*time.Millisecond, 100*time.Millisecond, zap.NewNop())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
@@ -133,11 +134,11 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open ephemeral SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, 100*time.Millisecond, 100*time.Millisecond, testNetwork, zap.NewNop())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite main database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMetrics, err = sqlite.NewMetricsDatabase(connMetrics, 100*time.Millisecond, 100*time.Millisecond, zap.NewNop())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite metrics database: %w", err)
 		}

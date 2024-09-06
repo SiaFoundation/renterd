@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
@@ -66,16 +65,20 @@ var (
 
 // DefaultUploadSettings define the default upload settings the bus is
 // configured with on startup.
-func DefaultUploadSettings(network *consensus.Network) UploadSettings {
+func DefaultUploadSettings(network string) UploadSettings {
+	rs := RedundancySettings{
+		MinShards:   10,
+		TotalShards: 30,
+	}
+	if network != "mainnet" {
+		rs = DefaultRedundancySettingsTestnet
+	}
 	return UploadSettings{
 		Packing: UploadPackingSettings{
 			Enabled:               true,
 			SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB
 		},
-		Redundancy: RedundancySettings{
-			MinShards:   10,
-			TotalShards: 30,
-		},
+		Redundancy: rs,
 	}
 }
 

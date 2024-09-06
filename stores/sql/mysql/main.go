@@ -32,6 +32,8 @@ const (
 
 type (
 	MainDatabase struct {
+		network string
+
 		db  *sql.DB
 		log *zap.SugaredLogger
 	}
@@ -43,10 +45,12 @@ type (
 )
 
 // NewMainDatabase creates a new MySQL backend.
-func NewMainDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration) (*MainDatabase, error) {
+func NewMainDatabase(db *dsql.DB, lqd, ltd time.Duration, network string, log *zap.Logger) (*MainDatabase, error) {
 	log = log.Named("main")
 	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
+		network: network,
+
 		db:  store,
 		log: log.Sugar(),
 	}, err
@@ -79,6 +83,10 @@ func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path stri
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
+}
+
+func (b *MainDatabase) Network() string {
+	return b.network
 }
 
 func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.DatabaseTx) error) error {

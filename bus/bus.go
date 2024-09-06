@@ -299,8 +299,6 @@ type (
 
 		S3Settings(ctx context.Context) (api.S3Settings, error)
 		UpdateS3Settings(ctx context.Context, s3as api.S3Settings) error
-
-		MigrateV2Settings(ctx context.Context) error
 	}
 
 	WalletMetricsRecorder interface {
@@ -363,11 +361,6 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 
 		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
-	}
-
-	// migrate settings store
-	if err := store.MigrateV2Settings(ctx); err != nil {
-		return nil, err
 	}
 
 	// create contract locker

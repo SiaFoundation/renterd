@@ -153,7 +153,7 @@ func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {
 		return nil, err
 	}
 
-	dbMain, err := sqlite.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+	dbMain, err := sqlite.NewMainDatabase(db, 100*time.Millisecond, 100*time.Millisecond, "mainnet", zap.NewNop())
 	if err != nil {
 		return nil, err
 	}

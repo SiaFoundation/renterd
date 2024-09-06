@@ -491,11 +491,11 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold, cfg.Network, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
-		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		dbMetrics, err = mysql.NewMetricsDatabase(connMetrics, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL metrics database: %w", err)
 		}
@@ -511,7 +511,7 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold, cfg.Network, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -520,7 +520,7 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		dbMetrics, err = sqlite.NewMetricsDatabase(dbm, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold, logger)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}

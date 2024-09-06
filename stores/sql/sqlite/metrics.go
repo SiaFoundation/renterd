@@ -29,7 +29,7 @@ type (
 var _ ssql.MetricsDatabaseTx = (*MetricsDatabaseTx)(nil)
 
 // NewSQLiteDatabase creates a new SQLite backend.
-func NewMetricsDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration) (*MetricsDatabase, error) {
+func NewMetricsDatabase(db *dsql.DB, lqd, ltd time.Duration, log *zap.Logger) (*MetricsDatabase, error) {
 	log = log.Named("metrics")
 	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
 	return &MetricsDatabase{
