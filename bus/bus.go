@@ -101,11 +101,6 @@ type (
 		Shutdown(context.Context) error
 	}
 
-	Explorer interface {
-		Enabled() bool
-		BaseURL() string
-	}
-
 	// A TransactionPool can validate and relay unconfirmed transactions.
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
@@ -331,7 +326,7 @@ type Bus struct {
 	rhp3 *rhp3.Client
 
 	contractLocker        ContractLocker
-	explorer              Explorer
+	explorer              *ibus.Explorer
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 

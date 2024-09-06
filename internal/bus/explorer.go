@@ -12,37 +12,30 @@ import (
 )
 
 type (
-	// An explorer retrieves data about the Sia network from an external source.
-	Explorer interface {
-		Enabled() bool
-		BaseURL() string
-		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
-	}
-
-	explorer struct {
+	Explorer struct {
 		url string
 	}
 )
 
 // NewExplorer returns a new Explorer.
-func NewExplorer(url string) Explorer {
-	return &explorer{
+func NewExplorer(url string) *Explorer {
+	return &Explorer{
 		url: url,
 	}
 }
 
 // BaseURL returns the base URL of the Explorer.
-func (e *explorer) BaseURL() string {
+func (e *Explorer) BaseURL() string {
 	return e.url
 }
 
 // Enabled returns true if the explorer is enabled.
-func (e *explorer) Enabled() bool {
+func (e *Explorer) Enabled() bool {
 	return e.url != ""
 }
 
 // SiacoinExchangeRate returns the exchange rate for the given currency.
-func (e *explorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
+func (e *Explorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
 	// return early if the explorer is disabled
 	if !e.Enabled() {
 		return 0, api.ErrExplorerDisabled
