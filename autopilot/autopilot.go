@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -85,9 +86,7 @@ type Bus interface {
 
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error)
-	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
+	WalletPending(ctx context.Context) (resp []wallet.Event, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
 
@@ -612,27 +611,15 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	}
 	for _, txn := range pending {
 		for _, mTxnID := range ap.maintenanceTxnIDs {
-			if mTxnID == txn.ID() {
+			if mTxnID == types.TransactionID(txn.ID) {
 				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
 			}
 		}
 	}
 
-	wantedNumOutputs := 10
-
-	// enough outputs - nothing to do
-	available, err := b.WalletOutputs(ctx)
-	if err != nil {
-		return err
-	}
-	if uint64(len(available)) >= uint64(wantedNumOutputs) {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
-		return nil
-	}
-	wantedNumOutputs -= len(available)
-
 	// figure out the amount per output
+	wantedNumOutputs := 10
 	amount := cfg.Contracts.Allowance.Div64(uint64(wantedNumOutputs))
 
 	// redistribute outputs

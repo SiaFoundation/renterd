@@ -23,7 +23,6 @@ import (
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -272,18 +271,13 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	tip := b.w.Tip()
 	jc.Encode(api.WalletResponse{
-		ScanHeight:  tip.Height,
-		Address:     address,
-		Confirmed:   balance.Confirmed,
-		Spendable:   balance.Spendable,
-		Unconfirmed: balance.Unconfirmed,
-		Immature:    balance.Immature,
+		Balance: balance,
+		Address: address,
 	})
 }
 
-func (b *Bus) walletTransactionsHandler(jc jape.Context) {
+func (b *Bus) walletEventsHandler(jc jape.Context) {
 	offset := 0
 	limit := -1
 	if jc.DecodeForm("offset", &offset) != nil ||
@@ -291,126 +285,11 @@ func (b *Bus) walletTransactionsHandler(jc jape.Context) {
 		return
 	}
 
-	// TODO: deprecate these parameters when moving to v2.0.0
-	var before, since time.Time
-	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
-		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil {
+	events, err := b.w.Events(offset, limit)
+	if jc.Check("couldn't load events", err) != nil {
 		return
 	}
-
-	// convertToTransaction converts wallet event data to a Transaction.
-	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
-		ok = true
-		switch kind {
-		case wallet.EventTypeMinerPayout,
-			wallet.EventTypeFoundationSubsidy,
-			wallet.EventTypeSiafundClaim:
-			payout, _ := data.(wallet.EventPayout)
-			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
-		case wallet.EventTypeV1Transaction:
-			v1Txn, _ := data.(wallet.EventV1Transaction)
-			txn = types.Transaction(v1Txn.Transaction)
-		case wallet.EventTypeV1ContractResolution:
-			fce, _ := data.(wallet.EventV1ContractResolution)
-			txn = types.Transaction{
-				FileContracts:  []types.FileContract{fce.Parent.FileContract},
-				SiacoinOutputs: []types.SiacoinOutput{fce.SiacoinElement.SiacoinOutput},
-			}
-		default:
-			ok = false
-		}
-		return
-	}
-
-	// convertToTransactions converts wallet events to API transactions.
-	convertToTransactions := func(events []wallet.Event) []api.Transaction {
-		var transactions []api.Transaction
-		for _, e := range events {
-			if txn, ok := convertToTransaction(e.Type, e.Data); ok {
-				transactions = append(transactions, api.Transaction{
-					Raw:       txn,
-					Index:     e.Index,
-					ID:        types.TransactionID(e.ID),
-					Inflow:    e.SiacoinInflow(),
-					Outflow:   e.SiacoinOutflow(),
-					Timestamp: e.Timestamp,
-				})
-			}
-		}
-		return transactions
-	}
-
-	if before.IsZero() && since.IsZero() {
-		events, err := b.w.Events(offset, limit)
-		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(convertToTransactions(events))
-		}
-		return
-	}
-
-	// TODO: remove this when 'before' and 'since' are deprecated, until then we
-	// fetch all transactions and paginate manually if either is specified
-	events, err := b.w.Events(0, -1)
-	if jc.Check("couldn't load transactions", err) != nil {
-		return
-	}
-	filtered := events[:0]
-	for _, txn := range events {
-		if (before.IsZero() || txn.Timestamp.Before(before)) &&
-			(since.IsZero() || txn.Timestamp.After(since)) {
-			filtered = append(filtered, txn)
-		}
-	}
-	events = filtered
-	if limit == 0 || limit == -1 {
-		jc.Encode(convertToTransactions(events[offset:]))
-	} else {
-		jc.Encode(convertToTransactions(events[offset : offset+limit]))
-	}
-}
-
-func (b *Bus) walletOutputsHandler(jc jape.Context) {
-	utxos, err := b.w.SpendableOutputs()
-	if jc.Check("couldn't load outputs", err) == nil {
-		// convert to siacoin elements
-		elements := make([]api.SiacoinElement, len(utxos))
-		for i, sce := range utxos {
-			elements[i] = api.SiacoinElement{
-				ID: sce.StateElement.ID,
-				SiacoinOutput: types.SiacoinOutput{
-					Value:   sce.SiacoinOutput.Value,
-					Address: sce.SiacoinOutput.Address,
-				},
-				MaturityHeight: sce.MaturityHeight,
-			}
-		}
-		jc.Encode(elements)
-	}
-}
-
-func (b *Bus) walletFundHandler(jc jape.Context) {
-	var wfr api.WalletFundRequest
-	if jc.Decode(&wfr) != nil {
-		return
-	}
-	txn := wfr.Transaction
-
-	if len(txn.MinerFees) == 0 {
-		// if no fees are specified, we add some
-		fee := b.cm.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
-		txn.MinerFees = []types.Currency{fee}
-	}
-
-	toSign, err := b.w.FundTransaction(&txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
-	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	jc.Encode(api.WalletFundResponse{
-		Transaction: txn,
-		ToSign:      toSign,
-		DependsOn:   b.cm.UnconfirmedParents(txn),
-	})
+	jc.Encode(events)
 }
 
 func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
@@ -488,15 +367,6 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletSignHandler(jc jape.Context) {
-	var wsr api.WalletSignRequest
-	if jc.Decode(&wsr) != nil {
-		return
-	}
-	b.w.SignTransaction(&wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
-	jc.Encode(wsr.Transaction)
-}
-
 func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	var wfr api.WalletRedistributeRequest
 	if jc.Decode(&wfr) != nil {
@@ -507,10 +377,27 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
+	spendableOutputs, err := b.w.SpendableOutputs()
+	if jc.Check("couldn't fetch spendable outputs", err) != nil {
+		return
+	}
+	var available int
+	for _, so := range spendableOutputs {
+		if so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0 {
+			available++
+		}
+	}
+	if available >= wfr.Outputs {
+		b.logger.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", available, wfr.Outputs)
+		jc.Encode([]types.TransactionID{})
+		return
+	}
+	wantedOutputs := wfr.Outputs - available
+
 	var ids []types.TransactionID
 	if state := b.cm.TipState(); state.Index.Height < state.Network.HardforkV2.AllowHeight {
 		// v1 redistribution
-		txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		txns, toSign, err := b.w.Redistribute(wantedOutputs, wfr.Amount, b.cm.RecommendedFee())
 		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 			return
 		}
@@ -532,7 +419,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 	} else {
 		// v2 redistribution
-		txns, toSign, err := b.w.RedistributeV2(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		txns, toSign, err := b.w.RedistributeV2(wantedOutputs, wfr.Amount, b.cm.RecommendedFee())
 		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 			return
 		}
@@ -557,37 +444,12 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	jc.Encode(ids)
 }
 
-func (b *Bus) walletDiscardHandler(jc jape.Context) {
-	var txn types.Transaction
-	if jc.Decode(&txn) == nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-	}
-}
-
 func (b *Bus) walletPendingHandler(jc jape.Context) {
-	isRelevant := func(txn types.Transaction) bool {
-		addr := b.w.Address()
-		for _, sci := range txn.SiacoinInputs {
-			if sci.UnlockConditions.UnlockHash() == addr {
-				return true
-			}
-		}
-		for _, sco := range txn.SiacoinOutputs {
-			if sco.Address == addr {
-				return true
-			}
-		}
-		return false
+	events, err := b.w.UnconfirmedEvents()
+	if jc.Check("couldn't fetch unconfirmed events", err) != nil {
+		return
 	}
-
-	txns := b.cm.PoolTransactions()
-	relevant := txns[:0]
-	for _, txn := range txns {
-		if isRelevant(txn) {
-			relevant = append(relevant, txn)
-		}
-	}
-	jc.Encode(relevant)
+	jc.Encode(events)
 }
 
 func (b *Bus) hostsHandlerGETDeprecated(jc jape.Context) {
@@ -2290,12 +2152,10 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 	}
 
 	var key object.EncryptionKey
-	if req.GenerateKey {
-		key = object.GenerateEncryptionKey()
-	} else if req.Key == nil {
+	if req.DisableClientSideEncryption {
 		key = object.NoOpKey
 	} else {
-		key = *req.Key
+		key = object.GenerateEncryptionKey()
 	}
 
 	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType, req.Metadata)
