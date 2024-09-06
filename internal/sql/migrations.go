@@ -226,7 +226,7 @@ var (
 					log.Infof("performing %s migration '00018_settings'", dbIdentifier)
 
 					// fetch all settings
-					rows, err := tx.Query(ctx, "SELECT key, value FROM settings")
+					rows, err := tx.Query(ctx, "SELECT `key`, value FROM settings")
 					if err != nil {
 						return fmt.Errorf("failed to fetch settings: %v", err)
 					}
@@ -297,9 +297,9 @@ var (
 							}
 						} else {
 							log.Warnf("s3authentication settings are not being migrated, err: %v", err)
-							if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "s3authentication"); err != nil {
-								log.Warnf("failed to delete s3authentication settings: %v", err)
-							}
+						}
+						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "s3authentication"); err != nil {
+							log.Warnf("failed to delete s3authentication settings: %v", err)
 						}
 					} else {
 						log.Warn("no s3authentication setting found")
