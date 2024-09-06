@@ -97,6 +97,8 @@ overview of all settings configurable through the CLI.
 | `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
 | `S3.HostBucketBases`       | Enables bucket rewriting in the router for the provided bases  | -                                 | `--s3.hostBucketBases`           | `RENTERD_S3_HOST_BUCKET_BASES`               | `s3.hostBucketBases`              |
 | `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
+| `Explorer.Disable`                    | Disables explorer service                            | `false`                           | `--explorer.disable`               | `RENTERD_EXPLORER_DISABLE`                      | `explorer.disable`                  |
+| `Explorer.URL`                        | URL of service to retrieve data about the Sia network | `https://api.siascan.com`         | `--explorer.url`                   | `RENTERD_EXPLORER_URL`                          | `explorer.url`                      |
 
 ### Single-Node Setup
 

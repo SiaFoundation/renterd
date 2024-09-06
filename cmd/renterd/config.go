@@ -64,6 +64,9 @@ func defaultConfig() config.Config {
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
+		Explorer: config.ExplorerData{
+			URL: "https://api.siascan.com",
+		},
 		Log: config.Log{
 			Level: "",
 			File: config.LogFile{
@@ -159,6 +162,12 @@ func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.
 		network, genesis = chain.TestnetZen()
 	default:
 		err = fmt.Errorf("unknown network '%s'", cfg.Network)
+		return
+	}
+
+	// check explorer
+	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
+		err = fmt.Errorf("explorer is disabled but no URL is set")
 		return
 	}
 
@@ -316,6 +325,10 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.StringVar(&hostBasesStr, "s3.hostBases", "", "Enables bucket rewriting in the router for specific hosts provided via comma-separated list (overrides with RENTERD_S3_HOST_BUCKET_BASES)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router for all hosts (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
+	// explorer
+	flag.StringVar(&cfg.Explorer.URL, "explorer.url", cfg.Explorer.URL, "URL of service to retrieve data about the Sia network (overrides with RENTERD_EXPLORER_URL)")
+	flag.BoolVar(&cfg.Explorer.Disable, "explorer.disable", cfg.Explorer.Disable, "Disables explorer service (overrides with RENTERD_EXPLORER_DISABLE)")
+
 	// custom usage
 	flag.Usage = func() {
 		log.Print(usageHeader)
@@ -382,6 +395,9 @@ func parseEnvironmentVariables(cfg *config.Config) {
 
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
+
+	parseEnvVar("RENTERD_EXPLORER_DISABLE", &cfg.Explorer.Disable)
+	parseEnvVar("RENTERD_EXPLORER_URL", &cfg.Explorer.URL)
 }
 
 // readPasswordInput reads a password from stdin.
