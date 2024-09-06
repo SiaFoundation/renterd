@@ -22,7 +22,7 @@ const (
 	UsabilityFilterModeUnusable = "unusable"
 )
 
-var ValidHostSortBy = map[string]any{
+var validHostSortBy = map[string]any{
 	// price table
 	"price_table.uid":                          nil,
 	"price_table.validity":                     nil,
@@ -83,6 +83,11 @@ var ValidHostSortBy = map[string]any{
 	"settings.version":                    nil,
 	"settings.release":                    nil,
 	"settings.siamuxport":                 nil,
+}
+
+func IsValidHostSortBy(sortBy string) bool {
+	_, ok := validHostSortBy[sortBy]
+	return ok
 }
 
 var (

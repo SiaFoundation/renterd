@@ -488,7 +488,7 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 
 	// validate sorting params
 	if req.SortBy != "" {
-		if _, valid := api.ValidHostSortBy[req.SortBy]; !valid {
+		if !api.IsValidHostSortBy(req.SortBy) {
 			jc.Error(fmt.Errorf("%w: %v", api.ErrInvalidHostSortBy, req.SortBy), http.StatusBadRequest)
 			return
 		}

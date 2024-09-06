@@ -796,7 +796,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		default:
 			return nil, fmt.Errorf("invalid sort order: %v", opts.SortDir)
 		}
-		if _, valid := api.ValidHostSortBy[opts.SortBy]; !valid {
+		if !api.IsValidHostSortBy(opts.SortBy) {
 			return nil, fmt.Errorf("%w: %s", api.ErrInvalidHostSortBy, opts.SortBy)
 		}
 
