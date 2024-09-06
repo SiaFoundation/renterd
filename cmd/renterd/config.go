@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,10 +19,8 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/worker/s3"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
-	"lukechampine.com/frand"
 )
 
 // TODO: handle RENTERD_S3_HOST_BUCKET_BASES correctly
@@ -45,7 +42,6 @@ var (
 	enableANSI   = runtime.GOOS != "windows"
 
 	hostBasesStr         string
-	keyPairsV4           string
 	workerRemotePassStr  string
 	workerRemoteAddrsStr string
 )
@@ -68,8 +64,10 @@ func defaultConfig() config.Config {
 				MetricsDatabase: "renterd_metrics",
 			},
 		},
+		Explorer: config.ExplorerData{
+			URL: "https://api.siascan.com",
+		},
 		Log: config.Log{
-			Path:  "", // deprecated. included for compatibility.
 			Level: "",
 			File: config.LogFile{
 				Enabled: true,
@@ -127,7 +125,6 @@ func defaultConfig() config.Config {
 			Address:     "localhost:8080",
 			Enabled:     true,
 			DisableAuth: false,
-			KeypairsV4:  nil,
 		},
 	}
 }
@@ -165,6 +162,12 @@ func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.
 		network, genesis = chain.TestnetZen()
 	default:
 		err = fmt.Errorf("unknown network '%s'", cfg.Network)
+		return
+	}
+
+	// check explorer
+	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
+		err = fmt.Errorf("explorer is disabled but no URL is set")
 		return
 	}
 
@@ -219,17 +222,6 @@ func sanitizeConfig(cfg *config.Config) error {
 		}
 	}
 
-	// parse S3 auth keys
-	if cfg.S3.Enabled {
-		if !cfg.S3.DisableAuth && keyPairsV4 != "" {
-			var err error
-			cfg.S3.KeypairsV4, err = s3.Parsev4AuthKeys(strings.Split(keyPairsV4, ";"))
-			if err != nil {
-				return fmt.Errorf("failed to parse keypairs: %v", err)
-			}
-		}
-	}
-
 	// default log levels
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
@@ -267,12 +259,6 @@ func parseYamlConfig(cfg *config.Config) {
 }
 
 func parseCLIFlags(cfg *config.Config) {
-	// deprecated - these go first so that they can be overwritten by the non-deprecated flags
-	flag.StringVar(&cfg.Log.Database.Level, "db.logger.logLevel", cfg.Log.Database.Level, "(deprecated) Logger level (overrides with RENTERD_DB_LOGGER_LOG_LEVEL)")
-	flag.BoolVar(&cfg.Database.Log.IgnoreRecordNotFoundError, "db.logger.ignoreNotFoundError", cfg.Database.Log.IgnoreRecordNotFoundError, "(deprecated) Ignores 'not found' errors in logger (overrides with RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR)")
-	flag.DurationVar(&cfg.Database.Log.SlowThreshold, "db.logger.slowThreshold", cfg.Database.Log.SlowThreshold, "(deprecated) Threshold for slow queries in logger (overrides with RENTERD_DB_LOGGER_SLOW_THRESHOLD)")
-	flag.StringVar(&cfg.Log.Path, "log-path", cfg.Log.Path, "(deprecated) Path to directory for logs (overrides with RENTERD_LOG_PATH)")
-
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
@@ -303,7 +289,6 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
 	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "Bootstraps gateway and consensus modules")
 	flag.StringVar(&cfg.Bus.GatewayAddr, "bus.gatewayAddr", cfg.Bus.GatewayAddr, "Address for Sia peer connections (overrides with RENTERD_BUS_GATEWAY_ADDR)")
-	flag.DurationVar(&cfg.Bus.PersistInterval, "bus.persistInterval", cfg.Bus.PersistInterval, "(deprecated) Interval for persisting consensus updates")
 	flag.DurationVar(&cfg.Bus.UsedUTXOExpiry, "bus.usedUTXOExpiry", cfg.Bus.UsedUTXOExpiry, "Expiry for used UTXOs in transactions")
 	flag.Int64Var(&cfg.Bus.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", cfg.Bus.SlabBufferCompletionThreshold, "Threshold for slab buffer upload (overrides with RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD)")
 
@@ -340,6 +325,10 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.StringVar(&hostBasesStr, "s3.hostBases", "", "Enables bucket rewriting in the router for specific hosts provided via comma-separated list (overrides with RENTERD_S3_HOST_BUCKET_BASES)")
 	flag.BoolVar(&cfg.S3.HostBucketEnabled, "s3.hostBucketEnabled", cfg.S3.HostBucketEnabled, "Enables bucket rewriting in the router for all hosts (overrides with RENTERD_S3_HOST_BUCKET_ENABLED)")
 
+	// explorer
+	flag.StringVar(&cfg.Explorer.URL, "explorer.url", cfg.Explorer.URL, "URL of service to retrieve data about the Sia network (overrides with RENTERD_EXPLORER_URL)")
+	flag.BoolVar(&cfg.Explorer.Disable, "explorer.disable", cfg.Explorer.Disable, "Disables explorer service (overrides with RENTERD_EXPLORER_DISABLE)")
+
 	// custom usage
 	flag.Usage = func() {
 		log.Print(usageHeader)
@@ -373,10 +362,7 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_DB_PASSWORD", &cfg.Database.MySQL.Password)
 	parseEnvVar("RENTERD_DB_NAME", &cfg.Database.MySQL.Database)
 	parseEnvVar("RENTERD_DB_METRICS_NAME", &cfg.Database.MySQL.MetricsDatabase)
-
-	parseEnvVar("RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR", &cfg.Database.Log.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_DB_LOGGER_LOG_LEVEL", &cfg.Log.Level)
-	parseEnvVar("RENTERD_DB_LOGGER_SLOW_THRESHOLD", &cfg.Database.Log.SlowThreshold)
 
 	parseEnvVar("RENTERD_WORKER_ENABLED", &cfg.Worker.Enabled)
 	parseEnvVar("RENTERD_WORKER_ID", &cfg.Worker.ID)
@@ -395,7 +381,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_ENABLED", &cfg.S3.HostBucketEnabled)
 	parseEnvVar("RENTERD_S3_HOST_BUCKET_BASES", &cfg.S3.HostBucketBases)
 
-	parseEnvVar("RENTERD_LOG_PATH", &cfg.Log.Path)
 	parseEnvVar("RENTERD_LOG_LEVEL", &cfg.Log.Level)
 	parseEnvVar("RENTERD_LOG_FILE_ENABLED", &cfg.Log.File.Enabled)
 	parseEnvVar("RENTERD_LOG_FILE_FORMAT", &cfg.Log.File.Format)
@@ -411,7 +396,8 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
 	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
 
-	parseEnvVar("RENTERD_S3_KEYPAIRS_V4", &keyPairsV4)
+	parseEnvVar("RENTERD_EXPLORER_DISABLE", &cfg.Explorer.Disable)
+	parseEnvVar("RENTERD_EXPLORER_URL", &cfg.Explorer.URL)
 }
 
 // readPasswordInput reads a password from stdin.
@@ -688,54 +674,4 @@ func setS3Config(cfg *config.Config) {
 	fmt.Println("The S3 API provides an S3-compatible gateway for uploading data to Sia.")
 	fmt.Println("It should not be exposed to the public internet without setting up a reverse proxy.")
 	setListenAddress("S3 Address", &cfg.S3.Address, true)
-
-	// s3 access key
-	if len(cfg.S3.KeypairsV4) != 0 {
-		fmt.Println("")
-		fmt.Println("A S3 keypair has already been created.")
-		fmt.Println("If you change your S3 key pair, you will need to update any scripts or applications that use the S3 API.")
-		if !promptYesNo("Would you like to change your S3 key pair?") {
-			return
-		}
-	}
-
-	cfg.S3.KeypairsV4 = make(map[string]string)
-
-	fmt.Println("")
-	answer := promptQuestion("Would you like to automatically generate a new S3 key pair or set your own?", []string{"auto", "manual"})
-	if strings.EqualFold(answer, "auto") {
-		// generate a new key pair
-		accessKey := hex.EncodeToString(frand.Bytes(20))
-		secretKey := hex.EncodeToString(frand.Bytes(20))
-		cfg.S3.KeypairsV4[accessKey] = secretKey
-		fmt.Println("")
-		fmt.Println("A new S3 key pair has been generated below.")
-		fmt.Println(wrapANSI("\033[34;1m", "Access Key:", "\033[0m"), accessKey)
-		fmt.Println(wrapANSI("\033[34;1m", "Secret Key:", "\033[0m"), secretKey)
-		fmt.Println("")
-		return
-	}
-
-	var accessKey, secretKey string
-	for {
-		fmt.Println("")
-		fmt.Println("Enter your S3 access key. It must between 16 and 128 characters long.")
-		accessKey = readInput("Enter access key")
-		if len(accessKey) >= 16 && len(accessKey) <= 128 {
-			break
-		}
-		fmt.Println(wrapANSI("\033[31m", "Access key must be between 16 and 128 characters!", "\033[0m"))
-	}
-
-	for {
-		fmt.Println("")
-		fmt.Println("Enter your S3 secret key. It must be 40 characters long.")
-		secretKey = readInput("Enter secret key")
-		if len(secretKey) == 40 {
-			break
-		}
-		fmt.Println(wrapANSI("\033[31m", "Secret key must be be 40 characters!", "\033[0m"))
-	}
-
-	cfg.S3.KeypairsV4[accessKey] = secretKey
 }

@@ -93,6 +93,11 @@ type dbConfig struct {
 	RetryTxIntervals []time.Duration
 }
 
+type explorerConfig struct {
+	URL     string
+	Disable bool
+}
+
 func (tc *TestCluster) Accounts() []api.Account {
 	tc.tt.Helper()
 	accounts, err := tc.Worker.Accounts(context.Background())
@@ -264,7 +269,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
-	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
+	busCfg, workerCfg, apCfg, dbCfg, explorerCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg(), testExplorerCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
 	}
@@ -364,7 +369,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, explorerCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -537,7 +542,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, cfgExplorer explorerConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
 	// create store
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
@@ -631,7 +636,11 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	var explorerURL string
+	if cfgExplorer.URL != "" {
+		explorerURL = cfgExplorer.URL
+	}
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -778,8 +787,8 @@ func (c *TestCluster) WaitForContracts() []api.Contract {
 	// fetch all contracts
 	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
 	c.tt.OK(err)
-	if resp.Error != "" {
-		c.tt.Fatal(resp.Error)
+	if len(resp.Errors) > 0 {
+		c.tt.Fatal(resp.Errors)
 	}
 	return resp.Contracts
 }
@@ -1081,6 +1090,12 @@ func testDBCfg() dbConfig {
 			time.Second,
 			5 * time.Second,
 		},
+	}
+}
+
+func testExplorerCfg() explorerConfig {
+	return explorerConfig{
+		Disable: true,
 	}
 }
 

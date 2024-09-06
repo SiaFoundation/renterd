@@ -211,6 +211,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00016_account_owner", log)
 				},
 			},
+			{
+				ID: "00017_unix_ms",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {

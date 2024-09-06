@@ -14,10 +14,6 @@ import (
 func NewLogger(dir, filename string, cfg config.Log) (*zap.Logger, func(context.Context) error, error) {
 	// path
 	path := filepath.Join(dir, filename)
-	if cfg.Path != "" {
-		path = filepath.Join(cfg.Path, filename)
-	}
-
 	if cfg.File.Path != "" {
 		path = cfg.File.Path
 	}
