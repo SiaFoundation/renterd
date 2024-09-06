@@ -86,23 +86,6 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_fcid_timestamp` (`fcid`,`timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbPerformanceMetric
-CREATE TABLE `performance` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `timestamp` bigint NOT NULL,
-  `action` varchar(191) NOT NULL,
-  `host` varbinary(32) NOT NULL,
-  `origin` varchar(191) NOT NULL,
-  `duration` bigint NOT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_performance_host` (`host`),
-  KEY `idx_performance_origin` (`origin`),
-  KEY `idx_performance_duration` (`duration`),
-  KEY `idx_performance_timestamp` (`timestamp`),
-  KEY `idx_performance_action` (`action`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbWalletMetric
 CREATE TABLE `wallets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

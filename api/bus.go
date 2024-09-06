@@ -66,4 +66,9 @@ type (
 		Network   string      `json:"network"`
 		BuildState
 	}
+
+	ContractSetUpdateRequest struct {
+		ToAdd    []types.FileContractID `json:"toAdd"`
+		ToRemove []types.FileContractID `json:"toRemove"`
+	}
 )

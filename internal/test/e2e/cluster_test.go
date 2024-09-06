@@ -877,7 +877,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	cfg, _ := cluster.AutopilotConfig(context.Background())
 	cfg.Contracts.Set = t.Name()
 	cluster.UpdateAutopilotConfig(context.Background(), cfg)
-	tt.OK(b.SetContractSet(context.Background(), t.Name(), nil))
+	tt.OK(b.UpdateContractSet(context.Background(), t.Name(), nil, nil))
 
 	// assert there are no contracts in the set
 	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
@@ -2680,7 +2680,7 @@ func TestHostScan(t *testing.T) {
 	// fetch hosts again with the unix epoch timestamp which should only return
 	// 1 host since that one hasn't been scanned yet
 	toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
-		MaxLastScan: api.TimeRFC3339(time.Unix(0, 1)),
+		MaxLastScan: api.TimeRFC3339(time.UnixMilli(1)),
 	})
 	tt.OK(err)
 	if len(toScan) != 1 {

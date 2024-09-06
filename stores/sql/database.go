@@ -321,9 +321,10 @@ type (
 		// substring.
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 
-		// SetContractSet creates the contract set with the given name and
-		// associates it with the provided contract IDs.
-		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't exist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
@@ -426,9 +427,6 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// PerformanceMetrics returns performance metrics for the given time range
-		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
-
 		// PruneMetrics deletes metrics of a certain type older than the given
 		// cutoff time.
 		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
@@ -444,9 +442,6 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
-
-		// RecordPerformanceMetric records performance metrics.
-		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
 
 		// RecordWalletMetric records wallet metrics.
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error

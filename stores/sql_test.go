@@ -185,7 +185,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 
 	if !cfg.skipContractSet {
-		err = sqlStore.SetContractSet(context.Background(), testContractSet, []types.FileContractID{})
+		err = sqlStore.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{}, nil)
 		if err != nil {
 			t.Fatal("failed to set contract set", err)
 		}
