@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"go.sia.tech/renterd/api"
@@ -31,6 +30,7 @@ type (
 	MainMigrator interface {
 		Migrator
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
 
@@ -236,7 +236,6 @@ var (
 					for rows.Next() {
 						var k, v string
 						if err := rows.Scan(&k, &v); err != nil {
-							_ = rows.Close()
 							return fmt.Errorf("failed to scan setting: %v", err)
 						}
 						settings[k] = v
@@ -266,17 +265,18 @@ var (
 						if err == nil {
 							err = ps.Validate()
 						}
-						if err != nil {
-							log.Warnf("pricepinning settings are not being migrated, err: %v", err)
-							if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "pricepinning"); err != nil {
-								return fmt.Errorf("failed to delete pricepinning settings: %v", err)
-							}
-						} else {
-							b, _ := json.Marshal(ps)
-							if _, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
-								time.Now(), "pinned", string(b)); err != nil {
+						if err == nil {
+							updated, _ := json.Marshal(ps)
+							if err := m.UpdateSetting(ctx, tx, "pinned", string(updated)); err != nil {
 								return fmt.Errorf("failed to insert pinned settings: %v", err)
 							}
+						} else {
+							log.Warnf("pricepinning settings are not being migrated, err: %v", err)
+						}
+
+						// always delete because it got renamed
+						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "pricepinning"); err != nil {
+							log.Warnf("failed to delete pricepinning settings: %v", err)
 						}
 					} else {
 						log.Warn("no pricepinning settings found")
@@ -290,14 +290,15 @@ var (
 							err = s3s.Validate()
 						}
 						if err == nil {
-							b, _ := json.Marshal(s3s)
-							if _, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
-								time.Now(), "s3", string(b)); err != nil {
+							updated, _ := json.Marshal(s3s)
+							if err := m.UpdateSetting(ctx, tx, "s3", string(updated)); err != nil {
 								return fmt.Errorf("failed to insert s3 settings: %v", err)
 							}
 						} else {
 							log.Warnf("s3authentication settings are not being migrated, err: %v", err)
 						}
+
+						// always delete because it got renamed
 						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "s3authentication"); err != nil {
 							log.Warnf("failed to delete s3authentication settings: %v", err)
 						}
@@ -317,6 +318,8 @@ var (
 						} else {
 							us.DefaultContractSet = css.Default
 						}
+
+						// always delete because it got replaced
 						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "contractset"); err != nil {
 							return err
 						}
@@ -329,6 +332,8 @@ var (
 						} else {
 							us.Packing = ups
 						}
+
+						// always delete because it got replaced
 						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "uploadpacking"); err != nil {
 							return err
 						}
@@ -345,6 +350,8 @@ var (
 						} else {
 							us.Redundancy = rs
 						}
+
+						// always delete because it got replaced
 						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "redundancy"); err != nil {
 							return err
 						}
@@ -355,10 +362,9 @@ var (
 						log.Warnf("upload settings are not being migrated, err: %v", err)
 						return err // developer error
 					} else {
-						b, _ := json.Marshal(us)
-						if _, err := tx.Exec(ctx, "INSERT INTO settings (created_at, `key`, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)",
-							time.Now(), "upload", string(b)); err != nil {
-							return fmt.Errorf("failed to insert s3 settings: %v", err)
+						updated, _ := json.Marshal(us)
+						if err := m.UpdateSetting(ctx, tx, "upload", string(updated)); err != nil {
+							return fmt.Errorf("failed to insert upload settings: %v", err)
 						}
 					}
 
