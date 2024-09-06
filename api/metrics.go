@@ -50,14 +50,6 @@ type (
 		Reason    string
 	}
 
-	PerformanceMetric struct {
-		Action    string          `json:"action"`
-		HostKey   types.PublicKey `json:"hostKey"`
-		Origin    string          `json:"origin"`
-		Duration  time.Duration   `json:"duration"`
-		Timestamp TimeRFC3339     `json:"timestamp"`
-	}
-
 	PerformanceMetricsQueryOpts struct {
 		Action  string
 		HostKey types.PublicKey

@@ -212,9 +212,15 @@ var (
 				},
 			},
 			{
-				ID: "00017_archived_contracts",
+				ID: "00017_unix_ms",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_archived_contracts", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+				},
+			},
+			{
+				ID: "00018_archived_contracts",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_archived_contracts", log)
 				},
 			},
 		}
