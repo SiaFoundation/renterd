@@ -185,6 +185,9 @@ type (
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
+		// Hosts returns a list of hosts that match the provided filters
+		Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
+
 		// HostsForScanning returns a list of hosts to scan which haven't been
 		// scanned since at least maxLastScan.
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
@@ -311,14 +314,6 @@ type (
 		// existing ones.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
-		// SearchHosts returns a list of hosts that match the provided filters
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
-
-		// UpdateContractSet adds/removes the provided contract ids to/from
-		// the contract set. The contract set is created in the process if
-		// it doesn't exist already.
-		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
-
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
 
@@ -349,6 +344,11 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't exist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
@@ -420,9 +420,6 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// PerformanceMetrics returns performance metrics for the given time range
-		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
-
 		// PruneMetrics deletes metrics of a certain type older than the given
 		// cutoff time.
 		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
@@ -438,9 +435,6 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
-
-		// RecordPerformanceMetric records performance metrics.
-		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
 
 		// RecordWalletMetric records wallet metrics.
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error

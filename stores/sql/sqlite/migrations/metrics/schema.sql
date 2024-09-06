@@ -37,14 +37,6 @@ CREATE INDEX `idx_contract_sets_churn_fc_id` ON `contract_sets_churn`(`fc_id`);
 CREATE INDEX `idx_contract_sets_churn_name` ON `contract_sets_churn`(`name`);
 CREATE INDEX `idx_contract_sets_churn_timestamp` ON `contract_sets_churn`(`timestamp`);
 
--- dbPerformanceMetric
-CREATE TABLE `performance` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`action` text NOT NULL,`host` blob NOT NULL,`origin` text NOT NULL,`duration` integer NOT NULL);
-CREATE INDEX `idx_performance_duration` ON `performance`(`duration`);
-CREATE INDEX `idx_performance_origin` ON `performance`(`origin`);
-CREATE INDEX `idx_performance_host` ON `performance`(`host`);
-CREATE INDEX `idx_performance_action` ON `performance`(`action`);
-CREATE INDEX `idx_performance_timestamp` ON `performance`(`timestamp`);
-
 -- dbWalletMetric
 CREATE TABLE `wallets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`confirmed_lo` BIGINT NOT NULL,`confirmed_hi` BIGINT NOT NULL,`spendable_lo` BIGINT NOT NULL,`spendable_hi` BIGINT NOT NULL,`unconfirmed_lo` BIGINT NOT NULL,`unconfirmed_hi` BIGINT NOT NULL,`immature_lo` BIGINT NOT NULL,`immature_hi` BIGINT NOT NULL);
 CREATE INDEX `idx_unconfirmed` ON `wallets`(`unconfirmed_lo`,`unconfirmed_hi`);

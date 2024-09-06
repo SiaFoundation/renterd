@@ -51,10 +51,9 @@ type (
 	}
 
 	CreateMultipartOptions struct {
-		GenerateKey bool
-		Key         *object.EncryptionKey
-		MimeType    string
-		Metadata    ObjectUserMetadata
+		DisableClientSideEncryption bool
+		MimeType                    string
+		Metadata                    ObjectUserMetadata
 	}
 
 	CompleteMultipartOptions struct {
@@ -92,15 +91,11 @@ type (
 	}
 
 	MultipartCreateRequest struct {
-		Bucket        string                `json:"bucket"`
-		EncryptionKey *object.EncryptionKey `json:"encryptionKey"`
-		Key           string                `json:"key"`
-		MimeType      string                `json:"mimeType"`
-		Metadata      ObjectUserMetadata    `json:"metadata"`
-
-		// TODO: The next major version change should invert this to create a
-		// key by default
-		GenerateKey bool `json:"generateKey"`
+		Bucket                      string             `json:"bucket"`
+		Key                         string             `json:"key"`
+		MimeType                    string             `json:"mimeType"`
+		Metadata                    ObjectUserMetadata `json:"metadata"`
+		DisableClientSideEncryption bool               `json:"disableClientSideEncryption"`
 	}
 
 	MultipartCreateResponse struct {

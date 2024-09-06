@@ -105,7 +105,7 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 				e.Type,
 				data,
 				e.MaturityHeight,
-				ssql.UnixTimeNS(e.Timestamp),
+				ssql.UnixTimeMS(e.Timestamp),
 			); err != nil {
 				return fmt.Errorf("failed to insert new event: %w", err)
 			}

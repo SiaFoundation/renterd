@@ -80,7 +80,6 @@ type (
 		WebhookStore
 
 		Syncer
-		Wallet
 	}
 
 	AccountFunder interface {
@@ -135,12 +134,6 @@ type (
 	Syncer interface {
 		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 		SyncerPeers(ctx context.Context) (resp []string, err error)
-	}
-
-	Wallet interface {
-		WalletDiscard(ctx context.Context, txn types.Transaction) error
-		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
 
 	WebhookStore interface {
@@ -811,7 +804,6 @@ func (w *Worker) rhpContractsHandlerGET(jc jape.Context) {
 	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
-		resp.Error = errs.Error()
 		resp.Errors = make(map[types.PublicKey]string)
 		for pk, err := range errs {
 			resp.Errors[pk] = err.Error()

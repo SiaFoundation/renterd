@@ -57,9 +57,8 @@ type (
 		MaxConsecutiveScanFailures uint64    `json:"maxConsecutiveScanFailures"`
 	}
 
-	// SearchHostsRequest is the request type for the /api/bus/search/hosts
-	// endpoint.
-	SearchHostsRequest struct {
+	// HostsRequest is the request type for the /api/bus/hosts endpoint.
+	HostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
 		AutopilotID     string            `json:"autopilotID"`
@@ -104,17 +103,13 @@ type (
 
 // Option types.
 type (
-	GetHostsOptions struct {
-		Offset int
-		Limit  int
-	}
 	HostsForScanningOptions struct {
 		MaxLastScan TimeRFC3339
 		Limit       int
 		Offset      int
 	}
 
-	SearchHostOptions struct {
+	HostOptions struct {
 		AutopilotID     string
 		AddressContains string
 		FilterMode      string
@@ -124,15 +119,6 @@ type (
 		Offset          int
 	}
 )
-
-func (opts GetHostsOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-}
 
 func (opts HostsForScanningOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {

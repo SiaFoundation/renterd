@@ -91,8 +91,8 @@ type Bus interface {
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
@@ -1096,11 +1096,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 	for _, c := range contracts {
 		usedHosts[c.HostKey] = struct{}{}
 	}
-	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-		Limit:         -1,
-		FilterMode:    api.HostFilterModeAllowed,
-		UsabilityMode: api.UsabilityFilterModeAll,
-	})
+	allHosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch usable hosts: %w", err)
 	}
@@ -1199,7 +1195,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 	var usabilityBreakdown unusableHostsBreakdown
 	// fetch all hosts that are not blocked
-	hosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
+	hosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to fetch all hosts: %w", err)
 	}
@@ -1252,11 +1248,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, w Worker, alerter alerts.Al
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
-	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-		Limit:         -1,
-		FilterMode:    api.HostFilterModeAllowed,
-		UsabilityMode: api.UsabilityFilterModeAll,
-	})
+	allHosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to fetch all hosts: %w", err)
 	}
