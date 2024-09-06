@@ -311,6 +311,9 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 	cm := chain.NewManager(store, state)
 
+	// create explorer
+	e := bus.NewExplorer(cfg.Explorer.URL, !cfg.Explorer.Disable)
+
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
 	if err != nil {
@@ -382,7 +385,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, e, s, w, sqlStore, announcementMaxAgeHours, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}

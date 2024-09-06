@@ -24,11 +24,17 @@ type (
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 		UpdateSetting(ctx context.Context, key, value string) error
 	}
+
+	Explorer interface {
+		Enabled() bool
+		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
+	}
 )
 
 type (
 	pinManager struct {
 		a           alerts.Alerter
+		e           Explorer
 		s           Store
 		broadcaster webhooks.Broadcaster
 
@@ -50,9 +56,10 @@ type (
 // NewPinManager returns a new PinManager, responsible for pinning prices to a
 // fixed value in an underlying currency. The returned pin manager is already
 // running and can be stopped by calling Shutdown.
-func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, s Store, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, e Explorer, s Store, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	pm := &pinManager{
 		a:           alerts,
+		e:           e,
 		s:           s,
 		broadcaster: broadcaster,
 
@@ -66,11 +73,14 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, s St
 	}
 
 	// start the pin manager
-	pm.wg.Add(1)
-	go func() {
-		pm.run()
-		pm.wg.Done()
-	}()
+	if e.Enabled() {
+		pm.wg.Add(1)
+		go func() {
+			pm.run()
+			pm.wg.Done()
+		}()
+	}
+
 	return pm
 }
 
@@ -334,7 +344,7 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	}
 
 	// fetch exchange rate
-	rate, err := NewForexClient(settings.ForexEndpointURL).SiacoinExchangeRate(ctx, settings.Currency)
+	rate, err := pm.e.SiacoinExchangeRate(ctx, settings.Currency)
 	if err != nil {
 		return fmt.Errorf("failed to fetch exchange rate for '%s': %w", settings.Currency, err)
 	} else if rate <= 0 {

@@ -311,6 +311,7 @@ type Bus struct {
 	pinMgr      PinManager
 	webhooksMgr WebhooksManager
 	cm          ChainManager
+	e           Explorer
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
@@ -333,7 +334,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, e Explorer, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
@@ -343,6 +344,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		accounts: store,
 		s:        s,
 		cm:       cm,
+		e:        e,
 		w:        w,
 		hs:       store,
 		as:       store,
@@ -371,7 +373,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, e, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
@@ -753,10 +755,6 @@ func (b *Bus) initSettings(ctx context.Context) error {
 	} else if err := pps.Validate(); err != nil {
 		// overwrite values with defaults
 		var updates []string
-		if pps.ForexEndpointURL == "" {
-			pps.ForexEndpointURL = api.DefaultPricePinSettings.ForexEndpointURL
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.ForexEndpointURL to %v", pps.ForexEndpointURL))
-		}
 		if pps.Currency == "" {
 			pps.Currency = api.DefaultPricePinSettings.Currency
 			updates = append(updates, fmt.Sprintf("set PricePinSettings.Currency to %v", pps.Currency))
@@ -774,9 +772,15 @@ func (b *Bus) initSettings(ctx context.Context) error {
 			b.logger.Warn(fmt.Sprintf("updated price pinning settings are invalid (%v), they have been overwritten with the default settings", err))
 			updated, _ = json.Marshal(api.DefaultPricePinSettings)
 		}
-
 		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
-			return err
+			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
+		}
+	} else if pps.Enabled && !b.e.Enabled() {
+		b.logger.Warn("pinning can not be enabled, explorer is disabled, pinning will be disabled")
+		pps.Enabled = false
+		updated, _ := json.Marshal(pps)
+		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
+			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
 		}
 	}
 

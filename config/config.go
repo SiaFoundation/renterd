@@ -24,7 +24,14 @@ type (
 		Worker    Worker    `yaml:"worker,omitempty"`
 		S3        S3        `yaml:"s3,omitempty"`
 
-		Database Database `yaml:"database,omitempty"`
+		Database Database     `yaml:"database,omitempty"`
+		Explorer ExplorerData `yaml:"explorer,omitempty"`
+	}
+
+	// ExplorerData contains the configuration for using an external explorer.
+	ExplorerData struct {
+		Disable bool   `yaml:"disable,omitempty"`
+		URL     string `yaml:"url,omitempty"`
 	}
 
 	// HTTP contains the configuration for the HTTP server.

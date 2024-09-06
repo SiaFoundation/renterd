@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"sync"
 	"testing"
@@ -71,42 +69,36 @@ func (meb *mockBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Even
 	return nil
 }
 
-type mockForexAPI struct {
-	s *httptest.Server
-
+type mockExplorer struct {
 	mu          sync.Mutex
 	rate        float64
 	unreachable bool
 }
 
-func newTestForexAPI() *mockForexAPI {
-	api := &mockForexAPI{rate: 1}
-	api.s = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.mu.Lock()
-		defer api.mu.Unlock()
-		if api.unreachable {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		json.NewEncoder(w).Encode(api.rate)
-	}))
-	return api
+func (e *mockExplorer) Enabled() bool {
+	return true
 }
 
-func (api *mockForexAPI) Close() {
-	api.s.Close()
+func (e *mockExplorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.unreachable {
+		return 0, errors.New("unreachable")
+	}
+	return e.rate, nil
 }
 
-func (api *mockForexAPI) setRate(rate float64) {
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	api.rate = rate
+func (e *mockExplorer) setRate(rate float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rate = rate
 }
 
-func (api *mockForexAPI) setUnreachable(unreachable bool) {
-	api.mu.Lock()
-	defer api.mu.Unlock()
-	api.unreachable = unreachable
+func (e *mockExplorer) setUnreachable(unreachable bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.unreachable = unreachable
 }
 
 type mockPinStore struct {
@@ -186,16 +178,13 @@ func (ms *mockPinStore) UpdateAutopilot(ctx context.Context, autopilot api.Autop
 
 func TestPinManager(t *testing.T) {
 	// mock dependencies
-	ms := newTestStore()
-	eb := &mockBroadcaster{}
 	a := &mockAlerter{}
-
-	// mock forex api
-	forex := newTestForexAPI()
-	defer forex.Close()
+	b := &mockBroadcaster{}
+	e := &mockExplorer{rate: 1}
+	s := newTestStore()
 
 	// create a pinmanager
-	pm := NewPinManager(a, eb, ms, testUpdateInterval, time.Minute, zap.NewNop())
+	pm := NewPinManager(a, b, e, s, testUpdateInterval, time.Minute, zap.NewNop())
 	defer func() {
 		if err := pm.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)
@@ -220,8 +209,7 @@ func TestPinManager(t *testing.T) {
 	pps.Enabled = true
 	pps.Currency = "usd"
 	pps.Threshold = 0.5
-	pps.ForexEndpointURL = forex.s.URL
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 
 	// assert price manager is running now
 	if cnt := len(rates()); cnt < 1 {
@@ -229,31 +217,31 @@ func TestPinManager(t *testing.T) {
 	}
 
 	// update exchange rate and fetch current gouging settings
-	forex.setRate(2.5)
-	gs := ms.gougingSettings()
+	e.setRate(2.5)
+	gs := s.gougingSettings()
 
 	// configure all pins but disable them for now
 	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
 	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 
 	// assert gouging settings are unchanged
-	if gss := ms.gougingSettings(); !reflect.DeepEqual(gs, gss) {
+	if gss := s.gougingSettings(); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
 	// enable the max download pin, with the threshold at 0.5 it should remain unchanged
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	ms.updatPinnedSettings(pps)
-	if gss := ms.gougingSettings(); !reflect.DeepEqual(gs, gss) {
+	s.updatPinnedSettings(pps)
+	if gss := s.gougingSettings(); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
 	// lower the threshold, gouging settings should be updated
 	pps.Threshold = 0.05
-	ms.updatPinnedSettings(pps)
-	if gss := ms.gougingSettings(); gss.MaxContractPrice.Equals(gs.MaxDownloadPrice) {
+	s.updatPinnedSettings(pps)
+	if gss := s.gougingSettings(); gss.MaxContractPrice.Equals(gs.MaxDownloadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
 
@@ -261,20 +249,20 @@ func TestPinManager(t *testing.T) {
 	pps.GougingSettingsPins.MaxDownload.Pinned = true
 	pps.GougingSettingsPins.MaxStorage.Pinned = true
 	pps.GougingSettingsPins.MaxUpload.Pinned = true
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 
 	// assert they're all updated
-	if gss := ms.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
+	if gss := s.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
 		gss.MaxStoragePrice.Equals(gs.MaxStoragePrice) ||
 		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss, gs)
 	}
 
 	// increase rate so average isn't catching up to us
-	forex.setRate(3)
+	e.setRate(3)
 
 	// fetch autopilot
-	ap, _ := ms.Autopilot(context.Background(), testAutopilotID)
+	ap, _ := s.Autopilot(context.Background(), testAutopilotID)
 
 	// add autopilot pin, but disable it
 	pins := api.AutopilotPins{
@@ -284,38 +272,38 @@ func TestPinManager(t *testing.T) {
 		},
 	}
 	pps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 
 	// assert autopilot was not updated
-	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
+	if app, _ := s.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
 		t.Fatalf("expected autopilot to not be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
 	}
 
 	// enable the pin
 	pins.Allowance.Pinned = true
 	pps.Autopilots[testAutopilotID] = pins
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 
 	// assert autopilot was updated
-	if app, _ := ms.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
+	if app, _ := s.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
 		t.Fatalf("expected autopilot to be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
 	}
 
 	// make forex API return an error
-	forex.setUnreachable(true)
+	e.setUnreachable(true)
 
 	// assert alert was registered
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 	res, _ := a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) == 0 {
 		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
 	}
 
 	// make forex API return a valid response
-	forex.setUnreachable(false)
+	e.setUnreachable(false)
 
 	// assert alert was dismissed
-	ms.updatPinnedSettings(pps)
+	s.updatPinnedSettings(pps)
 	res, _ = a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(a.alerts))

@@ -189,9 +189,7 @@ func TestNewTestCluster(t *testing.T) {
 	// PricePinningSettings should have default values
 	pps, err := b.PricePinningSettings(context.Background())
 	tt.OK(err)
-	if pps.ForexEndpointURL == "" {
-		t.Fatal("expected default value for ForexEndpointURL")
-	} else if pps.Currency == "" {
+	if pps.Currency == "" {
 		t.Fatal("expected default value for Currency")
 	} else if pps.Threshold == 0 {
 		t.Fatal("expected default value for Threshold")

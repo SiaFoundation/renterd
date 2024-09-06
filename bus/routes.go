@@ -17,7 +17,6 @@ import (
 
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 
-	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
@@ -1722,11 +1721,9 @@ func (b *Bus) settingKeyHandlerPUT(jc jape.Context) {
 		} else if err := pps.Validate(); err != nil {
 			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
 			return
-		} else if pps.Enabled {
-			if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
-				jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
-				return
-			}
+		} else if pps.Enabled && !b.e.Enabled() {
+			jc.Error(fmt.Errorf("pinning can not be enabled, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
+			return
 		}
 		b.pinMgr.TriggerUpdate()
 	}
