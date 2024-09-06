@@ -1,13 +1,11 @@
 package client
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 // A Client provides methods for interacting with a bus.
@@ -34,18 +32,6 @@ func (c *Client) do(req *http.Request, resp interface{}) error {
 	if c.c.Password != "" {
 		req.SetBasicAuth("", c.c.Password)
 	}
-	r, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer io.Copy(io.Discard, r.Body)
-	defer r.Body.Close()
-	if !(200 <= r.StatusCode && r.StatusCode < 300) {
-		err, _ := io.ReadAll(r.Body)
-		return errors.New(string(err))
-	}
-	if resp == nil {
-		return nil
-	}
-	return json.NewDecoder(r.Body).Decode(resp)
+	_, _, err := utils.SendRequest(req, &resp)
+	return err
 }

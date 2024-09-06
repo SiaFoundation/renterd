@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
 
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
@@ -268,18 +268,7 @@ func sendEvent(ctx context.Context, url string, headers map[string]string, actio
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	defer io.ReadAll(req.Body) // always drain body
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		errStr, err := io.ReadAll(req.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
-		return fmt.Errorf("Webhook returned unexpected status %v: %v", resp.StatusCode, string(errStr))
-	}
-	return nil
+	_, _, err = utils.SendRequest(req, nil)
+	return err
 }

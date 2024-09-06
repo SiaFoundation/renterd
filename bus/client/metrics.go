@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error) {
@@ -130,16 +129,8 @@ func (c *Client) PruneMetrics(ctx context.Context, metric string, cutoff time.Ti
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := io.ReadAll(resp.Body)
-		return errors.New(string(err))
-	}
-	return nil
+	_, _, err = utils.SendRequest(req, nil)
+	return err
 }
 
 func (c *Client) recordMetric(ctx context.Context, key string, d interface{}) error {
@@ -159,17 +150,8 @@ func (c *Client) recordMetric(ctx context.Context, key string, d interface{}) er
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer io.Copy(io.Discard, resp.Body)
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := io.ReadAll(resp.Body)
-		return errors.New(string(err))
-	}
-	return nil
+	_, _, err = utils.SendRequest(req, nil)
+	return err
 }
 
 func (c *Client) metric(ctx context.Context, key string, values url.Values, res interface{}) error {
@@ -185,16 +167,6 @@ func (c *Client) metric(ctx context.Context, key string, values url.Values, res 
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer io.Copy(io.Discard, resp.Body)
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		err, _ := io.ReadAll(resp.Body)
-		return errors.New(string(err))
-	}
-	return json.NewDecoder(resp.Body).Decode(&res)
+	_, _, err = utils.SendRequest(req, &res)
+	return err
 }

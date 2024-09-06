@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -79,4 +81,26 @@ func OpenBrowser(url string) error {
 	default:
 		return fmt.Errorf("unsupported platform %q", runtime.GOOS)
 	}
+}
+
+func SendRequest(req *http.Request, resp interface{}) (header http.Header, statusCode int, err error) {
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer r.Body.Close()
+	defer io.Copy(io.Discard, r.Body)
+
+	header = r.Header
+	statusCode = r.StatusCode
+
+	if statusCode < 200 || statusCode >= 300 {
+		lr := io.LimitReader(r.Body, 1<<20) // 1MiB
+		errMsg, _ := io.ReadAll(lr)
+		err = fmt.Errorf("HTTP error: %s (status: %d)", string(errMsg), statusCode)
+	} else if resp != nil {
+		err = json.NewDecoder(r.Body).Decode(resp)
+	}
+
+	return
 }
