@@ -43,9 +43,8 @@ type (
 		dbMetrics sql.MetricsDatabase
 		logger    *zap.SugaredLogger
 
-		explorerDisabled bool
-		network          *consensus.Network
-		walletAddress    types.Address
+		network       *consensus.Network
+		walletAddress types.Address
 
 		// ObjectDB related fields
 		slabBufferMgr *SlabBufferManager
@@ -71,7 +70,7 @@ type (
 // NewSQLStore uses a given Dialector to connect to a SQL database.  NOTE: Only
 // pass migrate=true for the first instance of SQLHostDB if you connect via the
 // same Dialector multiple times.
-func NewSQLStore(cfg Config, explorerDisabled bool, network *consensus.Network) (*SQLStore, error) {
+func NewSQLStore(cfg Config, network *consensus.Network) (*SQLStore, error) {
 	if err := os.MkdirAll(cfg.PartialSlabDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create partial slab dir '%s': %v", cfg.PartialSlabDir, err)
 	}
@@ -102,10 +101,9 @@ func NewSQLStore(cfg Config, explorerDisabled bool, network *consensus.Network) 
 		dbMetrics: dbMetrics,
 		logger:    l.Sugar(),
 
-		settings:         make(map[string]string),
-		walletAddress:    cfg.WalletAddress,
-		explorerDisabled: explorerDisabled,
-		network:          network,
+		settings:      make(map[string]string),
+		walletAddress: cfg.WalletAddress,
+		network:       network,
 
 		slabPruneSigChan:          make(chan struct{}, 1),
 		lastPrunedAt:              time.Now(),

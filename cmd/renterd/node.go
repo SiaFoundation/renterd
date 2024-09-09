@@ -264,7 +264,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	if err != nil {
 		return nil, nil, err
 	}
-	sqlStore, err := stores.NewSQLStore(storeCfg, cfg.Explorer.Disable, network)
+	sqlStore, err := stores.NewSQLStore(storeCfg, network)
 	if err != nil {
 		return nil, nil, err
 	}
