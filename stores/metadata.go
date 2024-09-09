@@ -314,25 +314,9 @@ func (s *SQLStore) RenewedContract(ctx context.Context, renewedFrom types.FileCo
 	return
 }
 
-func (s *SQLStore) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) (objects []api.ObjectMetadata, err error) {
+func (s *SQLStore) Object(ctx context.Context, bucket, key string) (obj api.Object, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		objects, err = tx.SearchObjects(ctx, bucket, substring, offset, limit)
-		return err
-	})
-	return
-}
-
-func (s *SQLStore) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) (metadata []api.ObjectMetadata, hasMore bool, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		metadata, hasMore, err = tx.ObjectEntries(ctx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-		return err
-	})
-	return
-}
-
-func (s *SQLStore) Object(ctx context.Context, bucket, path string) (obj api.Object, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		obj, err = tx.Object(ctx, bucket, path)
+		obj, err = tx.Object(ctx, bucket, key)
 		return err
 	})
 	return
@@ -482,7 +466,7 @@ func (s *SQLStore) DeleteHostSector(ctx context.Context, hk types.PublicKey, roo
 	return
 }
 
-func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
+func (s *SQLStore) UpdateObject(ctx context.Context, bucket, key, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	// Sanity check input.
 	for _, s := range o.Slabs {
 		for i, shard := range s.Shards {
@@ -507,19 +491,19 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 		// if we stop recreating the object we have to make sure to delete the
 		// object's metadata before trying to recreate it
 		var err error
-		prune, err = tx.DeleteObject(ctx, bucket, path)
+		prune, err = tx.DeleteObject(ctx, bucket, key)
 		if err != nil {
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
 		// create the dir
-		dirID, err := tx.MakeDirsForPath(ctx, path)
+		dirID, err := tx.MakeDirsForPath(ctx, key)
 		if err != nil {
-			return fmt.Errorf("failed to create directories for path '%s': %w", path, err)
+			return fmt.Errorf("failed to create directories for key '%s': %w", key, err)
 		}
 
 		// Insert a new object.
-		err = tx.InsertObject(ctx, bucket, path, contractSet, dirID, o, mimeType, eTag, metadata)
+		err = tx.InsertObject(ctx, bucket, key, contractSet, dirID, o, mimeType, eTag, metadata)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
@@ -534,16 +518,16 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 	return nil
 }
 
-func (s *SQLStore) RemoveObject(ctx context.Context, bucket, path string) error {
+func (s *SQLStore) RemoveObject(ctx context.Context, bucket, key string) error {
 	var prune bool
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		prune, err = tx.DeleteObject(ctx, bucket, path)
+		prune, err = tx.DeleteObject(ctx, bucket, key)
 		return
 	})
 	if err != nil {
 		return fmt.Errorf("RemoveObject: failed to delete object: %w", err)
 	} else if !prune {
-		return fmt.Errorf("%w: key: %s", api.ErrObjectNotFound, path)
+		return fmt.Errorf("%w: key: %s", api.ErrObjectNotFound, key)
 	}
 	s.triggerSlabPruning()
 	return nil
@@ -650,9 +634,9 @@ func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, set
 }
 
 // ObjectMetadata returns an object's metadata
-func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj api.Object, err error) {
+func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, key string) (obj api.Object, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		obj, err = tx.ObjectMetadata(ctx, bucket, path)
+		obj, err = tx.ObjectMetadata(ctx, bucket, key)
 		return err
 	})
 	return
@@ -806,12 +790,9 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 	}
 }
 
-// TODO: we can use ObjectEntries instead of ListObject if we want to use '/' as
-// a delimiter for now (see backend.go) but it would be interesting to have
-// arbitrary 'delim' support in ListObjects.
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		resp, err = tx.ListObjects(ctx, bucket, prefix, sortBy, sortDir, marker, limit)
+		resp, err = tx.ListObjects(ctx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 		return err
 	})
 	return

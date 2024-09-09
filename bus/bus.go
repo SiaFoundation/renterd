@@ -197,12 +197,12 @@ type (
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
+		Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
@@ -237,24 +237,22 @@ type (
 		ListBuckets(_ context.Context) ([]api.Bucket, error)
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
-		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
-		Object(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectMetadata(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
+		ListObjects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
+		Object(ctx context.Context, bucketName, key string) (api.Object, error)
+		ObjectMetadata(ctx context.Context, bucketName, key string) (api.Object, error)
 		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
-		RemoveObject(ctx context.Context, bucketName, path string) error
+		RemoveObject(ctx context.Context, bucketName, key string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
 		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
-		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
+		UpdateObject(ctx context.Context, bucketName, key, contractSet, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
 
-		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
-		CompleteMultipartUpload(ctx context.Context, bucketName, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
-		CreateMultipartUpload(ctx context.Context, bucketName, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
+		AbortMultipartUpload(ctx context.Context, bucketName, key string, uploadID string) (err error)
+		AddMultipartPart(ctx context.Context, bucketName, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		CompleteMultipartUpload(ctx context.Context, bucketName, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
+		CreateMultipartUpload(ctx context.Context, bucketName, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
 		MultipartUploads(ctx context.Context, bucketName, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 		MultipartUploadParts(ctx context.Context, bucketName, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
@@ -326,6 +324,7 @@ type Bus struct {
 	rhp3 *rhp3.Client
 
 	contractLocker        ContractLocker
+	explorer              *ibus.Explorer
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 
@@ -333,7 +332,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
@@ -367,11 +366,15 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
+	// create explorer
+	e := ibus.NewExplorer(explorerURL)
+	b.explorer = e
+
 	// create sectors cache
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, e, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
@@ -434,7 +437,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 
-		"GET    /hosts":                          b.hostsHandlerGETDeprecated,
+		"POST   /hosts":                          b.hostsHandlerPOST,
 		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
 		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
@@ -458,12 +461,12 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
-		"GET    /objects/*path":  b.objectsHandlerGET,
-		"PUT    /objects/*path":  b.objectsHandlerPUT,
-		"DELETE /objects/*path":  b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
-		"POST   /objects/list":   b.objectsListHandlerPOST,
+		"GET    /listobjects/*prefix": b.objectsHandlerGET,
+		"GET    /objects/*key":        b.objectHandlerGET,
+		"PUT    /objects/*key":        b.objectsHandlerPUT,
+		"DELETE /objects/*key":        b.objectsHandlerDELETE,
+		"POST   /objects/copy":        b.objectsCopyHandlerPOST,
+		"POST   /objects/rename":      b.objectsRenameHandlerPOST,
 
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
@@ -471,9 +474,6 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
-		"GET    /search/objects": b.searchObjectsHandlerGET,
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
@@ -505,15 +505,11 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 
-		"GET    /wallet":              b.walletHandler,
-		"POST   /wallet/discard":      b.walletDiscardHandler,
-		"POST   /wallet/fund":         b.walletFundHandler,
-		"GET    /wallet/outputs":      b.walletOutputsHandler,
-		"GET    /wallet/pending":      b.walletPendingHandler,
-		"POST   /wallet/redistribute": b.walletRedistributeHandler,
-		"POST   /wallet/send":         b.walletSendSiacoinsHandler,
-		"POST   /wallet/sign":         b.walletSignHandler,
-		"GET    /wallet/transactions": b.walletTransactionsHandler,
+		"GET  /wallet":              b.walletHandler,
+		"GET  /wallet/events":       b.walletEventsHandler,
+		"GET  /wallet/pending":      b.walletPendingHandler,
+		"POST /wallet/redistribute": b.walletRedistributeHandler,
+		"POST /wallet/send":         b.walletSendSiacoinsHandler,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
@@ -753,10 +749,6 @@ func (b *Bus) initSettings(ctx context.Context) error {
 	} else if err := pps.Validate(); err != nil {
 		// overwrite values with defaults
 		var updates []string
-		if pps.ForexEndpointURL == "" {
-			pps.ForexEndpointURL = api.DefaultPricePinSettings.ForexEndpointURL
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.ForexEndpointURL to %v", pps.ForexEndpointURL))
-		}
 		if pps.Currency == "" {
 			pps.Currency = api.DefaultPricePinSettings.Currency
 			updates = append(updates, fmt.Sprintf("set PricePinSettings.Currency to %v", pps.Currency))
@@ -774,10 +766,11 @@ func (b *Bus) initSettings(ctx context.Context) error {
 			b.logger.Warn(fmt.Sprintf("updated price pinning settings are invalid (%v), they have been overwritten with the default settings", err))
 			updated, _ = json.Marshal(api.DefaultPricePinSettings)
 		}
-
 		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
-			return err
+			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
 		}
+	} else if pps.Enabled() && !b.explorer.Enabled() {
+		return fmt.Errorf("price pinning can not be enabled, %w", api.ErrExplorerDisabled)
 	}
 
 	return nil
