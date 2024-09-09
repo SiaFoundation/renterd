@@ -50,7 +50,7 @@ type (
 )
 
 func (j *job) execute(ctx context.Context, w Worker) (_ api.MigrateSlabResponse, err error) {
-	slab, err := j.b.Slab(ctx, j.Key)
+	slab, err := j.b.Slab(ctx, j.EncryptionKey)
 	if err != nil {
 		return api.MigrateSlabResponse{}, fmt.Errorf("failed to fetch slab; %w", err)
 	}
@@ -161,7 +161,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 						res, err := j.execute(ctx, w)
 						m.statsSlabMigrationSpeedMS.Track(float64(time.Since(start).Milliseconds()))
 						if err != nil {
-							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
+							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.EncryptionKey, j.Health, res.SurchargeApplied, err)
 							if utils.IsErr(err, api.ErrConsensusNotSynced) {
 								// interrupt migrations if consensus is not synced
 								select {
@@ -172,7 +172,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 							} else if !utils.IsErr(err, api.ErrSlabNotFound) {
 								// fetch all object IDs for the slab we failed to migrate
 								var objectIds map[string][]string
-								if res, err := m.objectIDsForSlabKey(ctx, j.Key); err != nil {
+								if res, err := m.objectIDsForSlabKey(ctx, j.EncryptionKey); err != nil {
 									m.logger.Errorf("failed to fetch object ids for slab key; %w", err)
 								} else {
 									objectIds = res
@@ -180,20 +180,20 @@ func (m *migrator) performMigrations(p *workerPool) {
 
 								// register the alert
 								if res.SurchargeApplied {
-									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, objectIds, err))
+									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.EncryptionKey, j.Health, objectIds, err))
 								} else {
-									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, objectIds, err))
+									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.EncryptionKey, j.Health, objectIds, err))
 								}
 							}
 						} else {
-							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
-							m.ap.DismissAlert(ctx, alerts.IDForSlab(alertMigrationID, j.Key))
+							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.EncryptionKey, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
+							m.ap.DismissAlert(ctx, alerts.IDForSlab(alertMigrationID, j.EncryptionKey))
 							if res.SurchargeApplied {
 								// this alert confirms the user his gouging
 								// settings are working, it will be dismissed
 								// automatically the next time this slab is
 								// successfully migrated
-								m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.Key))
+								m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.EncryptionKey))
 							}
 						}
 					}
@@ -238,13 +238,13 @@ func (m *migrator) performMigrations(p *workerPool) {
 		// starvation.
 		migrateNewMap := make(map[object.EncryptionKey]*api.UnhealthySlab)
 		for i, slab := range toMigrateNew {
-			migrateNewMap[slab.Key] = &toMigrateNew[i]
+			migrateNewMap[slab.EncryptionKey] = &toMigrateNew[i]
 		}
 		removed := 0
 		for i := 0; i < len(toMigrate)-removed; {
 			slab := toMigrate[i]
-			if _, exists := migrateNewMap[slab.Key]; exists {
-				delete(migrateNewMap, slab.Key) // delete from map to leave only new slabs
+			if _, exists := migrateNewMap[slab.EncryptionKey]; exists {
+				delete(migrateNewMap, slab.EncryptionKey) // delete from map to leave only new slabs
 				i++
 			} else {
 				toMigrate[i] = toMigrate[len(toMigrate)-1-removed]
@@ -337,7 +337,7 @@ func (m *migrator) objectIDsForSlabKey(ctx context.Context, key object.Encryptio
 
 		idsPerBucket[bucket.Name] = make([]string, len(objects))
 		for i, object := range objects {
-			idsPerBucket[bucket.Name][i] = object.Name
+			idsPerBucket[bucket.Name][i] = object.Key
 		}
 	}
 

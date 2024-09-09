@@ -44,8 +44,8 @@ func TestObjectMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(or.Object.Metadata, opts.Metadata) {
-		t.Fatal("metadata mismatch", or.Object.Metadata)
+	if !reflect.DeepEqual(or.Metadata, opts.Metadata) {
+		t.Fatal("metadata mismatch", or.Metadata)
 	}
 
 	// get the object from the worker and assert it has the metadata
@@ -62,7 +62,7 @@ func TestObjectMetadata(t *testing.T) {
 	// HeadObject retrieves the modtime from a http header so it's not as
 	// accurate as the modtime from the object GET endpoint which returns it in
 	// the body.
-	orModtime, err := time.Parse(http.TimeFormat, or.Object.ModTime.Std().Format(http.TimeFormat))
+	orModtime, err := time.Parse(http.TimeFormat, or.ModTime.Std().Format(http.TimeFormat))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestObjectMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{
-		ContentType:  or.Object.ContentType(),
+		ContentType:  or.ContentType(),
 		Etag:         gor.Etag,
 		LastModified: api.TimeRFC3339(orModtime),
 		Range:        &api.ContentRange{Offset: 1, Length: 1, Size: int64(len(data))},

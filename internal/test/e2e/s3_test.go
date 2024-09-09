@@ -85,8 +85,8 @@ func TestS3Basic(t *testing.T) {
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
-	} else if api.FormatETag(busObject.Object.ETag) != *uploadInfo.ETag {
-		t.Fatalf("expected ETag %v, got %v", *uploadInfo.ETag, busObject.Object.ETag)
+	} else if api.FormatETag(busObject.ETag) != *uploadInfo.ETag {
+		t.Fatalf("expected ETag %v, got %v", uploadInfo.ETag, busObject.ETag)
 	}
 
 	_, err = s3.PutObject(&s3aws.PutObjectInput{
