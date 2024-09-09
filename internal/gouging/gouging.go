@@ -326,7 +326,7 @@ func checkUploadGougingRHPv3(gs api.GougingSettings, pt *rhpv3.HostPriceTable) e
 	}
 	uploadPrice := sectorUploadPricePerMonth.Div64(rhpv2.SectorSize)
 	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
-		return fmt.Errorf("%w: cost per TiB exceeds max ul price: %v > %v", ErrPriceTableGouging, uploadPrice, gs.MaxUploadPrice)
+		return fmt.Errorf("%w: cost per byte exceeds max ul price: %v > %v", ErrPriceTableGouging, uploadPrice, gs.MaxUploadPrice)
 	}
 	return nil
 }
