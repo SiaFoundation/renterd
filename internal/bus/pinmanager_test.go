@@ -154,7 +154,10 @@ func (ms *mockPinStore) gougingSettings() api.GougingSettings {
 
 func (ms *mockPinStore) updatPinnedSettings(pps api.PricePinSettings) {
 	b, _ := json.Marshal(pps)
-	ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
+	err := ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
+	if err != nil {
+		panic(err)
+	}
 	time.Sleep(2 * testUpdateInterval)
 }
 
