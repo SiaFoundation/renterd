@@ -32,6 +32,6 @@ func (c *Client) do(req *http.Request, resp interface{}) error {
 	if c.c.Password != "" {
 		req.SetBasicAuth("", c.c.Password)
 	}
-	_, _, err := utils.SendRequest(req, &resp)
+	_, _, err := utils.DoRequest(req, &resp)
 	return err
 }

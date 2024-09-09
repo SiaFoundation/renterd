@@ -129,7 +129,7 @@ func (c *Client) PruneMetrics(ctx context.Context, metric string, cutoff time.Ti
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	_, _, err = utils.SendRequest(req, nil)
+	_, _, err = utils.DoRequest(req, nil)
 	return err
 }
 
@@ -150,7 +150,7 @@ func (c *Client) recordMetric(ctx context.Context, key string, d interface{}) er
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	_, _, err = utils.SendRequest(req, nil)
+	_, _, err = utils.DoRequest(req, nil)
 	return err
 }
 
@@ -167,6 +167,6 @@ func (c *Client) metric(ctx context.Context, key string, values url.Values, res 
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	_, _, err = utils.SendRequest(req, &res)
+	_, _, err = utils.DoRequest(req, &res)
 	return err
 }
