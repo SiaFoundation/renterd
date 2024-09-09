@@ -34,7 +34,7 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	var apsr api.AddPartialSlabResponse
-	_, _, err = utils.SendRequest(req, &apsr)
+	_, _, err = utils.DoRequest(req, &apsr)
 	if err != nil {
 		return nil, false, err
 	}

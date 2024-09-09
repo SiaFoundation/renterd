@@ -83,7 +83,7 @@ func OpenBrowser(url string) error {
 	}
 }
 
-func SendRequest(req *http.Request, resp interface{}) (header http.Header, statusCode int, err error) {
+func DoRequest(req *http.Request, resp interface{}) (header http.Header, statusCode int, err error) {
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, 0, err

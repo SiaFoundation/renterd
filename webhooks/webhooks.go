@@ -269,6 +269,6 @@ func sendEvent(ctx context.Context, url string, headers map[string]string, actio
 		req.Header.Set(k, v)
 	}
 
-	_, _, err = utils.SendRequest(req, nil)
+	_, _, err = utils.DoRequest(req, nil)
 	return err
 }

@@ -26,6 +26,6 @@ func (f *client) SiacoinExchangeRate(ctx context.Context, currency string) (rate
 	}
 	req.Header.Set("Accept", "application/json")
 
-	_, _, err = utils.SendRequest(req, &rate)
+	_, _, err = utils.DoRequest(req, &rate)
 	return
 }

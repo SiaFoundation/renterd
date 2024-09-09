@@ -109,7 +109,7 @@ func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.H
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	opts.ApplyHeaders(req.Header)
 
-	headers, statusCode, err := utils.SendRequest(req, nil)
+	headers, statusCode, err := utils.DoRequest(req, nil)
 	if err != nil && statusCode == http.StatusNotFound {
 		return nil, api.ErrObjectNotFound
 	} else if err != nil {
@@ -219,7 +219,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	} else if req.ContentLength, err = sizeFromSeeker(r); err != nil {
 		return nil, fmt.Errorf("failed to get content length from seeker: %w", err)
 	}
-	header, _, err := utils.SendRequest(req, nil)
+	header, _, err := utils.DoRequest(req, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	} else if req.ContentLength, err = sizeFromSeeker(r); err != nil {
 		return nil, fmt.Errorf("failed to get content length from seeker: %w", err)
 	}
-	header, _, err := utils.SendRequest(req, nil)
+	header, _, err := utils.DoRequest(req, nil)
 	if err != nil {
 		return nil, err
 	}

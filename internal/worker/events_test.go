@@ -203,6 +203,6 @@ func sendEvent(url string, event webhooks.Event) error {
 		return err
 	}
 
-	_, _, err = utils.SendRequest(req, nil)
+	_, _, err = utils.DoRequest(req, nil)
 	return err
 }
