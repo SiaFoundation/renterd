@@ -811,7 +811,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 			return nil, fmt.Errorf("invalid sortBy parameter: %v", opts.SortBy)
 		}
 		orderByExpr = fmt.Sprintf("ORDER BY %s %s", fieldExpr, opts.SortDir)
-		whereExprs = append(whereExprs, fmt.Sprintf("COALESCE(%s, '') != ''", fieldExpr))
 	}
 
 	var blockedExpr string

@@ -151,6 +151,13 @@ func TestHosts(t *testing.T) {
 			Timestamp: time.Now(),
 		},
 		{
+			HostKey:    hk2,
+			PriceTable: rhpv3.HostPriceTable{}, // empty price table
+			Settings:   rhpv2.HostSettings{},   // empty settings
+			Success:    true,
+			Timestamp:  time.Now(),
+		},
+		{
 			HostKey: hk3,
 			PriceTable: rhpv3.HostPriceTable{
 				InitBaseCost: types.NewCurrency64(1),
@@ -190,10 +197,10 @@ func TestHosts(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 2 {
+	} else if len(his) != 3 {
 		t.Fatal("unexpected", len(his))
-	} else if his[0].PublicKey != hk3 || his[1].PublicKey != hk1 {
-		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey)
+	} else if his[0].PublicKey != hk2 || his[1].PublicKey != hk3 || his[2].PublicKey != hk1 {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey, his[2].PublicKey)
 	}
 
 	// reverse order
@@ -205,10 +212,10 @@ func TestHosts(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 2 {
+	} else if len(his) != 3 {
 		t.Fatal("unexpected", len(his))
-	} else if his[0].PublicKey != hk1 || his[1].PublicKey != hk3 {
-		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey)
+	} else if his[0].PublicKey != hk1 || his[1].PublicKey != hk3 || his[2].PublicKey != hk2 {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey, his[2].PublicKey)
 	}
 
 	// search all hosts sorted by baserpcprice
@@ -219,10 +226,10 @@ func TestHosts(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(his) != 2 {
+	} else if len(his) != 3 {
 		t.Fatal("unexpected", len(his))
-	} else if his[0].PublicKey != hk3 || his[1].PublicKey != hk1 {
-		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey)
+	} else if his[0].PublicKey != hk2 || his[1].PublicKey != hk3 || his[2].PublicKey != hk1 {
+		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey, his[2].PublicKey)
 	}
 
 	// search by invalid key
