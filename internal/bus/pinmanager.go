@@ -47,7 +47,7 @@ type (
 		updateInterval time.Duration
 		rateWindow     time.Duration
 
-		triggerChan chan struct{}
+		triggerChan chan bool
 		closedChan  chan struct{}
 		wg          sync.WaitGroup
 
@@ -74,7 +74,7 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, e Ex
 		updateInterval: updateInterval,
 		rateWindow:     rateWindow,
 
-		triggerChan: make(chan struct{}, 1),
+		triggerChan: make(chan bool, 1),
 		closedChan:  make(chan struct{}),
 	}
 
@@ -109,7 +109,7 @@ func (pm *pinManager) Shutdown(ctx context.Context) error {
 
 func (pm *pinManager) TriggerUpdate() {
 	select {
-	case pm.triggerChan <- struct{}{}:
+	case pm.triggerChan <- true:
 	default:
 	}
 }
@@ -174,8 +174,7 @@ func (pm *pinManager) run() {
 		select {
 		case <-pm.closedChan:
 			return
-		case <-pm.triggerChan:
-			forced = true
+		case forced = <-pm.triggerChan:
 		case <-t.C:
 		}
 	}

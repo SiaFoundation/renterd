@@ -152,6 +152,9 @@ func (ms *mockPinStore) PinnedSettings(ctx context.Context) (api.PinnedSettings,
 }
 
 func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
 	b, err := json.Marshal(ps)
 	if err != nil {
 		return err
@@ -160,10 +163,7 @@ func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedS
 	if err := json.Unmarshal(b, &cloned); err != nil {
 		return err
 	}
-	ms.mu.Lock()
 	ms.ps = cloned
-	ms.mu.Unlock()
-	time.Sleep(2 * testUpdateInterval)
 	return nil
 }
 
@@ -195,17 +195,11 @@ func TestPinManager(t *testing.T) {
 		}
 	}()
 
-	// define a small helper to fetch the price manager's rates
-	rates := func() []float64 {
+	// waitForUpdate waits for the price manager to update
+	waitForUpdate := func() {
 		t.Helper()
-		pm.mu.Lock()
-		defer pm.mu.Unlock()
-		return pm.rates
-	}
-
-	// assert price manager is disabled by default
-	if cnt := len(rates()); cnt != 0 {
-		t.Fatalf("expected no rates, got %d", cnt)
+		pm.triggerChan <- false
+		time.Sleep(testUpdateInterval)
 	}
 
 	// enable price pinning
@@ -214,7 +208,7 @@ func TestPinManager(t *testing.T) {
 	ps.Threshold = 0.5
 	s.UpdatePinnedSettings(context.Background(), ps)
 
-	// update exchange rate and fetch current gouging settings
+	// fetch current gouging settings
 	gs, _ := s.GougingSettings(context.Background())
 
 	// configure all pins but disable them for now
@@ -231,19 +225,20 @@ func TestPinManager(t *testing.T) {
 	// enable the max download pin
 	ps.GougingSettingsPins.MaxDownload.Pinned = true
 	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
-	// adjust the rate
-	e.setRate(1.5)
-	time.Sleep(2 * testUpdateInterval)
-
-	// at threshold of .5 the prices should not be updated
+	// assert prices are not updated
 	if gss, _ := s.GougingSettings(context.Background()); !reflect.DeepEqual(gs, gss) {
-		t.Fatalf("expected gouging settings to be the same, got %v", gss)
+		t.Fatalf("expected gouging settings to be the same, got %v expected %v", gss, gs)
 	}
 
-	// lower the threshold, gouging settings should be updated
+	// adjust and lower the threshold
+	e.setRate(1.5)
 	ps.Threshold = 0.05
 	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
+
+	// assert prices are updated
 	if gss, _ := s.GougingSettings(context.Background()); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
@@ -253,6 +248,7 @@ func TestPinManager(t *testing.T) {
 	ps.GougingSettingsPins.MaxStorage.Pinned = true
 	ps.GougingSettingsPins.MaxUpload.Pinned = true
 	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
 	// assert they're all updated
 	if gss, _ := s.GougingSettings(context.Background()); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
@@ -276,6 +272,7 @@ func TestPinManager(t *testing.T) {
 	}
 	ps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
 	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
 	// assert autopilot was not updated
 	if app, _ := s.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -286,6 +283,7 @@ func TestPinManager(t *testing.T) {
 	pins.Allowance.Pinned = true
 	ps.Autopilots[testAutopilotID] = pins
 	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
 	// assert autopilot was updated
 	if app, _ := s.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -294,9 +292,9 @@ func TestPinManager(t *testing.T) {
 
 	// make explorer return an error
 	e.setUnreachable(true)
+	waitForUpdate()
 
 	// assert alert was registered
-	s.UpdatePinnedSettings(context.Background(), ps)
 	res, _ := a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) == 0 {
 		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
@@ -304,9 +302,9 @@ func TestPinManager(t *testing.T) {
 
 	// make explorer return a valid response
 	e.setUnreachable(false)
+	waitForUpdate()
 
 	// assert alert was dismissed
-	s.UpdatePinnedSettings(context.Background(), ps)
 	res, _ = a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(a.alerts))
