@@ -1351,6 +1351,11 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 	acc := accounts[0]
 
+	// stop autopilot and mine transactions, this prevents an NDF where we
+	// double spend outputs after restarting the bus
+	cluster.ShutdownAutopilot(context.Background())
+	tt.OK(cluster.MineTransactions(context.Background()))
+
 	// stop the cluster
 	host := cluster.hosts[0]
 	cluster.hosts = nil // exclude hosts from shutdown
