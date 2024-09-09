@@ -154,7 +154,7 @@ func (ms *mockPinStore) updatPinnedSettings(pps api.PricePinSettings) {
 	if err != nil {
 		panic(err)
 	}
-	time.Sleep(2 * testUpdateInterval)
+	time.Sleep(10 * testUpdateInterval)
 }
 
 func (ms *mockPinStore) Setting(ctx context.Context, key string) (string, error) {
