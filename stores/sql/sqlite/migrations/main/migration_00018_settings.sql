@@ -9,10 +9,10 @@ FROM (
     SELECT
 			"upload" as k,
            json_patch(
-               json_object("packing", (SELECT JSON_EXTRACT(value, "$") FROM settings WHERE key = "uploadpacking")),
+               json_object("packing", (SELECT json_extract(value, "$") FROM settings WHERE key = "uploadpacking")),
                json_patch(
-                   json_object("redundancy", (SELECT JSON_EXTRACT(value, "$") FROM settings WHERE key = "redundancy")),
-                   json_object("defaultContractSet", (SELECT JSON_EXTRACT(value, "$.default") FROM settings WHERE key = "contractset"))
+                   json_object("redundancy", (SELECT json_extract(value, "$") FROM settings WHERE key = "redundancy")),
+                   json_object("defaultContractSet", (SELECT json_extract(value, "$.default") FROM settings WHERE key = "contractset"))
                )
            ) as v
     WHERE json_extract(v, "$.packing") IS NOT NULL
@@ -23,7 +23,7 @@ FROM (
     -- s3 wraps the s3authentication setting
 	SELECT
 		"s3" as k,
-		json_object("authentication", (SELECT JSON_EXTRACT(value, "$") FROM settings WHERE key = "s3authentication")) as v
+		json_object("authentication", (SELECT json_extract(value, "$") FROM settings WHERE key = "s3authentication")) as v
     WHERE json_extract(v, "$.authentication") IS NOT NULL
 
 	UNION ALL
@@ -33,7 +33,7 @@ FROM (
 		"pinned" as k,
 		json_remove(
             json_remove(
-                (SELECT JSON_EXTRACT(value, "$") FROM settings WHERE key = "pricepinning"),
+                (SELECT json_extract(value, "$") FROM settings WHERE key = "pricepinning"),
                 "$.enabled"
             ),
             "$.forexEndpointURL"
