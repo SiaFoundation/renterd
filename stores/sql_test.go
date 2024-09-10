@@ -314,7 +314,7 @@ func (s *testSQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.F
 }
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
-	if err := s.AddContract(context.Background(), newTestContract(fcid, hk)); err != nil {
+	if err := s.InsertContract(context.Background(), newTestContract(fcid, hk)); err != nil {
 		return api.ContractMetadata{}, err
 	}
 	return s.Contract(context.Background(), fcid)
@@ -338,5 +338,5 @@ func (s *testSQLStore) renewTestContract(hk types.PublicKey, renewedFrom, renewe
 	renewal := newTestContract(renewedTo, hk)
 	renewal.StartHeight = startHeight
 	renewal.RenewedFrom = renewedFrom
-	return s.RenewContract(context.Background(), renewal)
+	return s.AddRenewal(context.Background(), renewal)
 }

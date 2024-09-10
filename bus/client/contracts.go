@@ -6,21 +6,14 @@ import (
 	"net/url"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
-// AddContract adds the provided contract to the metadata store.
-func (c *Client) AddContract(ctx context.Context, revision rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", revision.ID()), api.ContractAddRequest{
-		Revision:           revision,
-		ContractPrice:      contractPrice,
-		InitialRenterFunds: initialRenterFunds,
-		StartHeight:        startHeight,
-		State:              state,
-	}, &added)
-	return
+// AddContract adds the provided contract to the metadata store, if the contract
+// already exists it will be replaced.
+func (c *Client) AddContract(ctx context.Context, contract api.ContractMetadata) error {
+	return c.c.WithContext(ctx).PUT("/contracts", contract)
 }
 
 // AncestorContracts returns any ancestors of a given contract.
@@ -128,7 +121,7 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 
 // FormContract forms a contract with a host and adds it to the bus.
 func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST("/contracts", api.ContractFormRequest{
+	err = c.c.WithContext(ctx).POST("/contracts/form", api.ContractFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
 		HostKey:        hostKey,

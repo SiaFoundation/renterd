@@ -670,6 +670,62 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadata) error {
+	// assert decorated fields are unset
+	if c.HostIP != "" {
+		return errors.New("host IP should not be set")
+	} else if c.ContractSets != nil {
+		return errors.New("contract sets should not be set")
+	} else if c.SiamuxAddr != "" {
+		return errors.New("siamux address should not be set")
+	}
+
+	// validate metadata
+	var state ssql.ContractState
+	if err := state.LoadString(c.State); err != nil {
+		return err
+	} else if c.ID == (types.FileContractID{}) {
+		return errors.New("contract id is required")
+	} else if c.HostKey == (types.PublicKey{}) {
+		return errors.New("host key is required")
+	}
+
+	// fetch host id
+	var hostID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = ?`, ssql.PublicKey(c.HostKey)).Scan(&hostID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrHostNotFound
+	}
+
+	// set created at if it's not set
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now().UTC()
+	}
+
+	// update contract
+	_, err = tx.Exec(ctx, `
+INSERT INTO contracts (
+	created_at, fcid, host_id, host_key,
+	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
+	contract_price, initial_renter_funds,
+	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	created_at = VALUES(created_at), fcid = VALUES(fcid), host_id = VALUES(host_id), host_key = VALUES(host_key),
+	archival_reason = VALUES(archival_reason), proof_height = VALUES(proof_height), renewed_from = VALUES(renewed_from), renewed_to = VALUES(renewed_to), revision_height = VALUES(revision_height), revision_number = VALUES(revision_number), size = VALUES(size), start_height = VALUES(start_height), state = VALUES(state), window_start = VALUES(window_start), window_end = VALUES(window_end),
+	contract_price = VALUES(contract_price), initial_renter_funds = VALUES(initial_renter_funds),
+	delete_spending = VALUES(delete_spending), fund_account_spending = VALUES(fund_account_spending), sector_roots_spending = VALUES(sector_roots_spending), upload_spending = VALUES(upload_spending)`,
+		c.CreatedAt, ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey),
+		ssql.NullableString(c.ArchivalReason), c.ProofHeight, ssql.FileContractID(c.RenewedFrom), ssql.FileContractID(c.RenewedTo), c.RevisionHeight, c.RevisionNumber, c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
+		ssql.Currency(c.ContractPrice), ssql.Currency(c.InitialRenterFunds),
+		ssql.Currency(c.Spending.Deletions), ssql.Currency(c.Spending.FundAccount), ssql.Currency(c.Spending.SectorRoots), ssql.Currency(c.Spending.Uploads),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update contract: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
 	return ssql.RecordContractSpending(ctx, tx, fcid, revisionNumber, size, newSpending)
 }

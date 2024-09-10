@@ -399,18 +399,20 @@ func TestSQLContractStore(t *testing.T) {
 			Uploads:     types.NewCurrency64(6),
 		},
 	}
-	if err := ss.AddContract(context.Background(), c); err != nil {
+	if err := ss.InsertContract(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
-
-	// decorate the host IP
-	c.HostIP = "address"
 
 	// fetch the contract
 	inserted, err := ss.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(inserted, c) {
+	}
+
+	// assert it's equal
+	c.CreatedAt = inserted.CreatedAt
+	c.HostIP = inserted.HostIP
+	if !reflect.DeepEqual(inserted, c) {
 		t.Fatal("contract mismatch", cmp.Diff(inserted, c))
 	}
 
@@ -528,11 +530,7 @@ func TestContractRoots(t *testing.T) {
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
-	cfg.dir = "/Users/peterjan/testing3"
-	os.RemoveAll(cfg.dir)
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	hk := types.PublicKey{1, 2, 3}
@@ -576,7 +574,7 @@ func TestAncestorsContracts(t *testing.T) {
 		expected.RenewedTo = renewedTo
 		expected.ArchivalReason = api.ContractArchivalReasonRenewed
 		expected.StartHeight = uint64(len(fcids) - 2 - i)
-		expected.Spending = api.ContractSpending{}
+		expected.CreatedAt = contracts[i].CreatedAt
 		if !reflect.DeepEqual(contracts[i], expected) {
 			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
@@ -888,9 +886,11 @@ func TestSQLMetadataStore(t *testing.T) {
 	if !reflect.DeepEqual(slab2, expectedObjSlab2) {
 		t.Fatal("mismatch", cmp.Diff(slab2, expectedObjSlab2))
 	}
+	expectedContract1.CreatedAt = contract1.CreatedAt
 	if !reflect.DeepEqual(contract1, expectedContract1) {
 		t.Fatal("mismatch", cmp.Diff(contract1, expectedContract1))
 	}
+	expectedContract2.CreatedAt = contract2.CreatedAt
 	if !reflect.DeepEqual(contract2, expectedContract2) {
 		t.Fatal("mismatch", cmp.Diff(contract2, expectedContract2))
 	}
@@ -3447,6 +3447,7 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatalf("expected slab id to be %v, got %v", slabID, sectors[0].SlabID)
 	}
 }
+
 func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) []object.Sector {
 	return []object.Sector{
 		newTestShard(hk, fcid, root),
@@ -4452,5 +4453,95 @@ func TestDirectories(t *testing.T) {
 
 	if n := ss.Count("directories"); n != 1 {
 		t.Fatal("expected 1 dir, got", n)
+	}
+}
+
+func TestPutContract(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	hk := types.PublicKey{1}
+	if err := ss.addTestHost(hk); err != nil {
+		t.Fatal(err)
+	}
+
+	c := api.ContractMetadata{
+		CreatedAt: time.Now(),
+		ID:        types.FileContractID{1},
+		HostKey:   hk,
+
+		ProofHeight:    2,
+		RenewedFrom:    types.FileContractID{3},
+		RevisionHeight: 4,
+		RevisionNumber: 5,
+		Size:           6,
+		StartHeight:    7,
+		State:          api.ContractStateComplete,
+		WindowStart:    8,
+		WindowEnd:      9,
+
+		ContractPrice:      types.NewCurrency64(10),
+		InitialRenterFunds: types.NewCurrency64(11),
+		Spending: api.ContractSpending{
+			Deletions:   types.NewCurrency64(12),
+			FundAccount: types.NewCurrency64(13),
+			SectorRoots: types.NewCurrency64(14),
+			Uploads:     types.NewCurrency64(15),
+		},
+
+		ArchivalReason: api.ContractArchivalReasonHostPruned,
+		RenewedTo:      types.FileContractID{16},
+	}
+	if err := ss.PutContract(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+
+	// insert and assert the returned metadata is equal to the inserted metadata
+	if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll}); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, instead got %d", len(contracts))
+	} else if contracts[0].CreatedAt = c.CreatedAt; !reflect.DeepEqual(contracts[0], c) {
+		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], c))
+	}
+
+	u := api.ContractMetadata{
+		CreatedAt: time.Now(),
+		ID:        types.FileContractID{1},
+		HostKey:   hk,
+
+		ProofHeight:    17,
+		RenewedFrom:    types.FileContractID{18},
+		RevisionHeight: 19,
+		RevisionNumber: 20,
+		Size:           21,
+		StartHeight:    22,
+		State:          api.ContractStateFailed,
+		WindowStart:    23,
+		WindowEnd:      24,
+
+		ContractPrice:      types.NewCurrency64(25),
+		InitialRenterFunds: types.NewCurrency64(26),
+		Spending: api.ContractSpending{
+			Deletions:   types.NewCurrency64(27),
+			FundAccount: types.NewCurrency64(28),
+			SectorRoots: types.NewCurrency64(29),
+			Uploads:     types.NewCurrency64(30),
+		},
+
+		ArchivalReason: api.ContractArchivalReasonRemoved,
+		RenewedTo:      types.FileContractID{31},
+	}
+	if err := ss.PutContract(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+
+	// update and assert the returned metadata is equal to the metadata
+	if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll}); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, instead got %d", len(contracts))
+	} else if contracts[0].CreatedAt = u.CreatedAt; !reflect.DeepEqual(contracts[0], u) {
+		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], u))
 	}
 }

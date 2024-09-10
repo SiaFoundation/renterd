@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -50,8 +51,9 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		ID      types.FileContractID `json:"id"`
-		HostKey types.PublicKey      `json:"hostKey"`
+		CreatedAt time.Time            `json:"createdAt"`
+		ID        types.FileContractID `json:"id"`
+		HostKey   types.PublicKey      `json:"hostKey"`
 
 		ProofHeight    uint64               `json:"proofHeight"`
 		RenewedFrom    types.FileContractID `json:"renewedFrom"`
@@ -119,9 +121,9 @@ type (
 
 	// ContractAddRequest is the request type for the /contract/:id endpoint.
 	ContractAddRequest struct {
-		Revision           rhpv2.ContractRevision `json:"revision"`
 		ContractPrice      types.Currency         `json:"contractPrice"`
 		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
+		Revision           rhpv2.ContractRevision `json:"revision"`
 		StartHeight        uint64                 `json:"startHeight"`
 		State              string                 `json:"state,omitempty"`
 	}
@@ -172,17 +174,6 @@ type (
 		MaxFundAmount      types.Currency `json:"maxFundAmount"`
 		MinNewCollateral   types.Currency `json:"minNewCollateral"`
 		RenterFunds        types.Currency `json:"renterFunds"`
-	}
-
-	// ContractRenewedRequest is the request type for the /contract/:id/renewed
-	// endpoint.
-	ContractRenewedRequest struct {
-		Contract           rhpv2.ContractRevision `json:"contract"`
-		ContractPrice      types.Currency         `json:"contractPrice"`
-		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
-		RenewedFrom        types.FileContractID   `json:"renewedFrom"`
-		StartHeight        uint64                 `json:"startHeight"`
-		State              string                 `json:"state,omitempty"`
 	}
 
 	// ContractRootsResponse is the response type for the /contract/:id/roots

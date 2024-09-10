@@ -210,7 +210,7 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c api.ContractMetadata) error
+		AddRenewal(ctx context.Context, c api.ContractMetadata) error
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -218,9 +218,10 @@ type (
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		ContractSets(ctx context.Context) ([]string, error)
+		InsertContract(ctx context.Context, c api.ContractMetadata) error
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
-		RenewContract(ctx context.Context, c api.ContractMetadata) error
+		PutContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 
@@ -410,10 +411,11 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
-		"POST   /contracts":              b.contractsFormHandler,
+		"PUT    /contracts":              b.contractsHandlerPUT,
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"POST   /contracts/form":         b.contractsFormHandler,
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
@@ -421,7 +423,6 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
-		"POST   /contract/:id":           b.contractIDHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
@@ -532,7 +533,7 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 }
 
 func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.ms.AddContract(ctx, api.ContractMetadata{
+	if err := b.ms.InsertContract(ctx, api.ContractMetadata{
 		ID:                 rev.ID(),
 		HostKey:            rev.HostKey(),
 		StartHeight:        startHeight,
@@ -563,7 +564,7 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 }
 
 func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.ms.RenewContract(ctx, api.ContractMetadata{
+	if err := b.ms.AddRenewal(ctx, api.ContractMetadata{
 		ID:                 rev.ID(),
 		HostKey:            rev.HostKey(),
 		RenewedFrom:        renewedFrom,

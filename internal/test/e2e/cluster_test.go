@@ -1517,7 +1517,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	c := contracts[0]
 
 	// add a contract to the bus
-	err = cluster.bs.AddContract(context.Background(), api.ContractMetadata{
+	err = cluster.bs.InsertContract(context.Background(), api.ContractMetadata{
 		ID:                 types.FileContractID{1},
 		HostKey:            types.PublicKey{1},
 		StartHeight:        cs.BlockHeight,

@@ -680,6 +680,53 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadata) error {
+	// validate metadata
+	var state ssql.ContractState
+	if err := state.LoadString(c.State); err != nil {
+		return err
+	} else if c.ID == (types.FileContractID{}) {
+		return errors.New("contract id is required")
+	} else if c.HostKey == (types.PublicKey{}) {
+		return errors.New("host key is required")
+	}
+
+	// fetch host id
+	var hostID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = ?`, ssql.PublicKey(c.HostKey)).Scan(&hostID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrHostNotFound
+	}
+
+	// set created at if it's not set
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now()
+	}
+
+	// update contract
+	_, err = tx.Exec(ctx, `
+INSERT INTO contracts (
+	created_at, fcid, host_id, host_key,
+	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
+	contract_price, initial_renter_funds,
+	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(fcid) DO UPDATE SET
+	created_at = EXCLUDED.created_at, fcid = EXCLUDED.fcid, host_id = EXCLUDED.host_id, host_key = EXCLUDED.host_key,
+	archival_reason = EXCLUDED.archival_reason, proof_height = EXCLUDED.proof_height, renewed_from = EXCLUDED.renewed_from, renewed_to = EXCLUDED.renewed_to, revision_height = EXCLUDED.revision_height, revision_number = EXCLUDED.revision_number, size = EXCLUDED.size, start_height = EXCLUDED.start_height, state = EXCLUDED.state, window_start = EXCLUDED.window_start, window_end = EXCLUDED.window_end,
+	contract_price = EXCLUDED.contract_price, initial_renter_funds = EXCLUDED.initial_renter_funds,
+	delete_spending = EXCLUDED.delete_spending, fund_account_spending = EXCLUDED.fund_account_spending, sector_roots_spending = EXCLUDED.sector_roots_spending, upload_spending = EXCLUDED.upload_spending`,
+		c.CreatedAt, ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey),
+		ssql.NullableString(c.ArchivalReason), c.ProofHeight, ssql.FileContractID(c.RenewedFrom), ssql.FileContractID(c.RenewedTo), c.RevisionHeight, c.RevisionNumber, c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
+		ssql.Currency(c.ContractPrice), ssql.Currency(c.InitialRenterFunds),
+		ssql.Currency(c.Spending.Deletions), ssql.Currency(c.Spending.FundAccount), ssql.Currency(c.Spending.SectorRoots), ssql.Currency(c.Spending.Uploads),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update contract: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
 	return ssql.RecordContractSpending(ctx, tx, fcid, revisionNumber, size, newSpending)
 }

@@ -108,6 +108,27 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 	return buffers, nil
 }
 
+func (s *SQLStore) AddRenewal(ctx context.Context, c api.ContractMetadata) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		// fetch renewed contract
+		renewed, err := tx.Contract(ctx, c.RenewedFrom)
+		if err != nil {
+			return err
+		}
+
+		// insert renewal by updating the renewed contract
+		err = tx.UpdateContract(ctx, c.RenewedFrom, c)
+		if err != nil {
+			return err
+		}
+
+		// reinsert renewed contract
+		renewed.ArchivalReason = api.ContractArchivalReasonRenewed
+		renewed.RenewedTo = c.ID
+		return tx.InsertContract(ctx, renewed)
+	})
+}
+
 func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ContractMetadata, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
@@ -208,9 +229,15 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (c
 	return cs, err
 }
 
-func (s *SQLStore) AddContract(ctx context.Context, c api.ContractMetadata) error {
+func (s *SQLStore) InsertContract(ctx context.Context, c api.ContractMetadata) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.InsertContract(ctx, c)
+	})
+}
+
+func (s *SQLStore) PutContract(ctx context.Context, c api.ContractMetadata) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.PutContract(ctx, c)
 	})
 }
 
@@ -554,27 +581,6 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 	}
 	s.triggerSlabPruning()
 	return nil
-}
-
-func (s *SQLStore) RenewContract(ctx context.Context, c api.ContractMetadata) error {
-	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		// fetch renewed contract
-		renewed, err := tx.Contract(ctx, c.RenewedFrom)
-		if err != nil {
-			return err
-		}
-
-		// insert renewal by updating the renewed contract
-		err = tx.UpdateContract(ctx, c.RenewedFrom, c)
-		if err != nil {
-			return err
-		}
-
-		// reinsert renewed contract
-		renewed.ArchivalReason = api.ContractArchivalReasonRenewed
-		renewed.RenewedTo = c.ID
-		return tx.InsertContract(ctx, renewed)
-	})
 }
 
 func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {

@@ -93,8 +93,9 @@ type (
 		// duplicates but can contain gaps.
 		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
 
-		// Contract returns the metadata of the contract with the given ID or
-		// ErrContractNotFound.
+		// Contract returns the metadata of the contract with the given id, if
+		// the requested contract does not exist, or if it is archived,
+		// ErrContractNotFound is returned.
 		Contract(ctx context.Context, id types.FileContractID) (cm api.ContractMetadata, err error)
 
 		// ContractRoots returns the roots of the contract with the given ID.
@@ -252,6 +253,10 @@ type (
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
+
+		// PutContract inserts the contract if it does not exist, otherwise it
+		// will overwrite all fields.
+		PutContract(ctx context.Context, c api.ContractMetadata) error
 
 		// RecordContractSpending records new spending for a contract
 		RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error

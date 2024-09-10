@@ -763,7 +763,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	case api.ContractFilterModeActive:
 	case api.ContractFilterModeArchived:
 	default:
-		jc.Error(fmt.Errorf("invalid filter mode: %v", filterMode), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
 		return
 	}
 
@@ -1088,36 +1088,23 @@ func (b *Bus) contractIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
-	// decode parameters
-	var id types.FileContractID
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	var req api.ContractAddRequest
-	if jc.Decode(&req) != nil {
+func (b *Bus) contractsHandlerPUT(jc jape.Context) {
+	// decode request
+	var c api.ContractMetadata
+	if jc.Decode(&c) != nil {
 		return
 	}
 
-	// validate the request
-	if req.InitialRenterFunds.IsZero() {
-		http.Error(jc.ResponseWriter, "InitialRenterFunds can not be zero", http.StatusBadRequest)
-		return
-	} else if req.Revision.ID() != id {
-		http.Error(jc.ResponseWriter, "Contract ID missmatch", http.StatusBadRequest)
-		return
-	} else if req.Revision.ID() == (types.FileContractID{}) {
-		http.Error(jc.ResponseWriter, "Contract ID is required", http.StatusBadRequest)
-		return
-	} else if req.Revision.HostKey() == (types.PublicKey{}) {
-		http.Error(jc.ResponseWriter, "HostKey is required", http.StatusBadRequest)
-		return
-	}
-
-	// add the contract
-	metadata, err := b.addContract(jc.Request.Context(), req.Revision, req.ContractPrice, req.InitialRenterFunds, req.StartHeight, req.State)
-	if jc.Check("couldn't add contract", err) == nil {
-		jc.Encode(metadata)
+	// upsert the contract
+	if jc.Check("failed to add contract", b.ms.PutContract(jc.Request.Context(), c)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleContract,
+			Event:  api.EventAdd,
+			Payload: api.EventContractAdd{
+				Added:     c,
+				Timestamp: time.Now().UTC(),
+			},
+		})
 	}
 }
 
