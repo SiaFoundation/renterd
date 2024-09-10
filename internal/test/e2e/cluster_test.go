@@ -1572,6 +1572,15 @@ func TestWalletEvents(t *testing.T) {
 	if len(txns) != 5 {
 		t.Fatalf("expected exactly 5 events, got %v", len(txns))
 	}
+
+	// Events should have 'Relevant' field set.
+	resp, err := b.Wallet(context.Background())
+	tt.OK(err)
+	for _, txn := range txns {
+		if len(txn.Relevant) != 1 || txn.Relevant[0] != resp.Address {
+			t.Fatal("invalid 'Relevant' field in wallet event", txn.Relevant, resp.Address)
+		}
+	}
 }
 
 func TestUploadPacking(t *testing.T) {

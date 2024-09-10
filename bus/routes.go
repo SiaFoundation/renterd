@@ -288,14 +288,14 @@ func (b *Bus) walletEventsHandler(jc jape.Context) {
 	if jc.Check("couldn't load events", err) != nil {
 		return
 	}
-	addr := b.w.Address()
+	relevant := []types.Address{b.w.Address()}
 	for i := range events {
 		// NOTE: add the wallet's address to every event. Theoretically,
 		// this information should be persisted next to the event but
 		// using a SingleAddress the address should always be set because
 		// only relevant events are persisted and because the wallet only
 		// has one address.
-		events[i].Relevant = []types.Address{addr}
+		events[i].Relevant = relevant
 	}
 	jc.Encode(events)
 }
