@@ -11,6 +11,9 @@ CREATE INDEX `idx_contracts_archival_reason` ON `contracts`(`archival_reason`);
 CREATE INDEX `idx_contracts_host_key` ON `contracts`(`host_key`);
 CREATE INDEX `idx_contracts_renewed_to` ON `contracts`(`renewed_to`);
 
+DROP INDEX `idx_contracts_fc_id` ON table_name;
+CREATE INDEX `idx_contracts_fc_id` ON `contracts`(`fcid`);
+
 UPDATE contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 SET c.host_key = h.public_key;
