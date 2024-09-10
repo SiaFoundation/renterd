@@ -385,16 +385,16 @@ func TestS3List(t *testing.T) {
 		tt.OKAll(s3.PutObject(context.Background(), "bucket", object, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{}))
 	}
 
-	flatten := func(res minio.ListBucketResult) []string {
+	flatten := func(res listObjectsResponse) []string {
 		var objs []string
-		for _, obj := range res.Contents {
-			if !strings.HasSuffix(obj.Key, "/") && obj.LastModified.IsZero() {
-				t.Fatal("expected non-zero LastModified", obj.Key)
+		for _, obj := range res.contents {
+			if !strings.HasSuffix(obj.key, "/") && obj.lastModified.IsZero() {
+				t.Fatal("expected non-zero LastModified", obj.key)
 			}
-			objs = append(objs, obj.Key)
+			objs = append(objs, obj.key)
 		}
-		for _, cp := range res.CommonPrefixes {
-			objs = append(objs, cp.Prefix)
+		for _, cp := range res.commonPrefixes {
+			objs = append(objs, cp)
 		}
 		return objs
 	}
@@ -467,7 +467,12 @@ func TestS3List(t *testing.T) {
 		},
 	}
 	for i, test := range tests {
-		result, err := core.ListObjects("bucket", test.prefix, test.marker, test.delimiter, 1000)
+		result, err := cluster.S3Aws.ListObjects("bucket", listObjectsOptions{
+			prefix:    test.prefix,
+			marker:    test.marker,
+			delimiter: test.delimiter,
+			maxKeys:   1000,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -475,10 +480,10 @@ func TestS3List(t *testing.T) {
 		if !cmp.Equal(test.want, got) {
 			t.Errorf("test %d: unexpected response, want %v got %v", i, test.want, got)
 		}
-		for _, obj := range result.Contents {
-			if obj.ETag == "" {
+		for _, obj := range result.contents {
+			if obj.etag == "" {
 				t.Fatal("expected non-empty ETag")
-			} else if obj.LastModified.IsZero() {
+			} else if obj.lastModified.IsZero() {
 				t.Fatal("expected non-zero LastModified")
 			}
 		}

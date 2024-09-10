@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"encoding/base64"
 	"io"
 	"time"
 
@@ -42,6 +43,8 @@ type (
 	headObjectResponse struct {
 		contentLength int64
 		etag          string
+		key           string
+		lastModified  time.Time
 	}
 
 	putObjectOptions struct {
@@ -157,6 +160,8 @@ func (c *s3TestClient) HeadObject(bucket, objKey string) (headObjectResponse, er
 	return headObjectResponse{
 		etag:          *resp.ETag,
 		contentLength: *resp.ContentLength,
+		key:           objKey,
+		lastModified:  *resp.LastModified,
 	}, nil
 }
 
@@ -172,6 +177,62 @@ func (c *s3TestClient) ListBuckets() (lbr listBucketResponse, err error) {
 		})
 	}
 	return lbr, nil
+}
+
+type listObjectsOptions struct {
+	prefix    string
+	marker    string
+	delimiter string
+	maxKeys   int64
+}
+
+type listObjectsResponse struct {
+	contents       []headObjectResponse
+	commonPrefixes []string
+	nextMarker     string
+	truncated      bool
+}
+
+func (c *s3TestClient) ListObjects(bucket string, opts listObjectsOptions) (lor listObjectsResponse, err error) {
+	var input s3aws.ListObjectsV2Input
+	input.SetBucket(bucket)
+	if opts.prefix != "" {
+		input.SetPrefix(opts.prefix)
+	}
+	if opts.marker != "" {
+		opts.marker = base64.URLEncoding.EncodeToString([]byte(opts.marker))
+		input.SetContinuationToken(opts.marker)
+	}
+	if opts.delimiter != "" {
+		input.SetDelimiter(opts.delimiter)
+	}
+	if opts.maxKeys != 0 {
+		input.SetMaxKeys(opts.maxKeys)
+	}
+	resp, err := c.s3.ListObjectsV2(&input)
+	if err != nil {
+		return listObjectsResponse{}, err
+	}
+	for _, content := range resp.Contents {
+		lor.contents = append(lor.contents, headObjectResponse{
+			contentLength: *content.Size,
+			etag:          *content.ETag,
+			key:           *content.Key,
+			lastModified:  *content.LastModified,
+		})
+	}
+	for _, prefix := range resp.CommonPrefixes {
+		lor.commonPrefixes = append(lor.commonPrefixes, *prefix.Prefix)
+	}
+	lor.truncated = *resp.IsTruncated
+	if resp.NextContinuationToken != nil {
+		m, err := base64.URLEncoding.DecodeString(*resp.NextContinuationToken)
+		if err != nil {
+			return listObjectsResponse{}, err
+		}
+		lor.nextMarker = string(m)
+	}
+	return lor, nil
 }
 
 func (c *s3TestClient) NewMultipartUpload(bucket, objKey string, opts putObjectOptions) (string, error) {
