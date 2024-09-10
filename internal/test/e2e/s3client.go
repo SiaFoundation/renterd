@@ -30,6 +30,20 @@ type (
 		buckets []bucketInfo
 	}
 
+	listObjectsOptions struct {
+		prefix    string
+		marker    string
+		delimiter string
+		maxKeys   int64
+	}
+
+	listObjectsResponse struct {
+		contents       []headObjectResponse
+		commonPrefixes []string
+		nextMarker     string
+		truncated      bool
+	}
+
 	completePart struct {
 		partNumber int64
 		etag       string
@@ -63,6 +77,8 @@ type (
 	}
 
 	uploadInfo struct {
+		key      string
+		uploadID string
 	}
 )
 
@@ -85,7 +101,10 @@ func (c *s3TestClient) CompleteMultipartUpload(bucket, object, uploadID string, 
 	if err != nil {
 		return uploadInfo{}, err
 	}
-	return uploadInfo{}, nil
+	return uploadInfo{
+		key:      object,
+		uploadID: uploadID,
+	}, nil
 }
 
 func (c *s3TestClient) CopyObject(bucket, srcKey, dstKey string) (copyObjectResponse, error) {
@@ -179,18 +198,21 @@ func (c *s3TestClient) ListBuckets() (lbr listBucketResponse, err error) {
 	return lbr, nil
 }
 
-type listObjectsOptions struct {
-	prefix    string
-	marker    string
-	delimiter string
-	maxKeys   int64
-}
-
-type listObjectsResponse struct {
-	contents       []headObjectResponse
-	commonPrefixes []string
-	nextMarker     string
-	truncated      bool
+func (c *s3TestClient) ListMultipartUploads(bucket string) ([]uploadInfo, error) {
+	var input s3aws.ListMultipartUploadsInput
+	input.SetBucket(bucket)
+	resp, err := c.s3.ListMultipartUploads(&input)
+	if err != nil {
+		return nil, err
+	}
+	var uploads []uploadInfo
+	for _, u := range resp.Uploads {
+		uploads = append(uploads, uploadInfo{
+			key:      *u.Key,
+			uploadID: *u.UploadId,
+		})
+	}
+	return uploads, nil
 }
 
 func (c *s3TestClient) ListObjects(bucket string, opts listObjectsOptions) (lor listObjectsResponse, err error) {

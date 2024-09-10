@@ -355,7 +355,6 @@ func TestS3List(t *testing.T) {
 	defer cluster.Shutdown()
 
 	s3 := cluster.S3
-	core := cluster.S3Core
 	tt := cluster.tt
 
 	// create bucket
@@ -494,16 +493,19 @@ func TestS3List(t *testing.T) {
 	expectedOrder := []string{"a/", "a/a/a", "a/b", "ab", "b", "c/a", "d", "y/", "y/y/y/y"}
 	hasMore := true
 	for i := 0; hasMore; i++ {
-		result, err := core.ListObjectsV2("bucket", "", "", marker, "", 1)
+		result, err := cluster.S3Aws.ListObjects("bucket", listObjectsOptions{
+			marker:  marker,
+			maxKeys: 1,
+		})
 		if err != nil {
 			t.Fatal(err)
-		} else if len(result.Contents) != 1 {
-			t.Fatalf("unexpected number of objects, %d != 1", len(result.Contents))
-		} else if result.Contents[0].Key != expectedOrder[i] {
-			t.Errorf("unexpected object, %s != %s", result.Contents[0].Key, expectedOrder[i])
+		} else if len(result.contents) != 1 {
+			t.Fatalf("unexpected number of objects, %d != 1", len(result.contents))
+		} else if result.contents[0].key != expectedOrder[i] {
+			t.Errorf("unexpected object, %s != %s", result.contents[0].key, expectedOrder[i])
 		}
-		marker = result.NextContinuationToken
-		hasMore = result.IsTruncated
+		marker = result.nextMarker
+		hasMore = result.truncated
 	}
 }
 
@@ -536,12 +538,12 @@ func TestS3MultipartUploads(t *testing.T) {
 	tt.OKAll(core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "foo", minio.PutObjectOptions{}))
 
 	// List uploads
-	lmu, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
+	uploads, err := cluster.S3Aws.ListMultipartUploads("multipart")
 	tt.OK(err)
-	if len(lmu.Uploads) != 1 {
-		t.Fatal("expected 1 upload", len(lmu.Uploads))
-	} else if upload := lmu.Uploads[0]; upload.UploadID != uploadID || upload.Key != "foo" {
-		t.Fatal("unexpected upload:", upload.UploadID, upload.Key)
+	if len(uploads) != 1 {
+		t.Fatal("expected 1 upload", len(uploads))
+	} else if upload := uploads[0]; upload.uploadID != uploadID || upload.key != "foo" {
+		t.Fatal("unexpected upload:", upload.uploadID, upload.key)
 	}
 
 	// delete default bucket for the remainder of the test. This makes sure we
@@ -642,9 +644,9 @@ func TestS3MultipartUploads(t *testing.T) {
 	tt.OK(core.AbortMultipartUpload(context.Background(), "multipart", "bar", uploadID))
 
 	// List it.
-	res, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
+	uploads, err = cluster.S3Aws.ListMultipartUploads("multipart")
 	tt.OK(err)
-	if len(res.Uploads) != 0 {
+	if len(uploads) != 0 {
 		t.Fatal("expected 0 uploads")
 	}
 }
@@ -666,7 +668,6 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	defer cluster.Shutdown()
 
 	s3 := cluster.S3
-	core := cluster.S3Core
 	bucket := "multipart"
 	tt := cluster.tt
 
@@ -677,7 +678,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	tt.OK(s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{}))
 
 	// Start a new multipart upload.
-	uploadID, err := core.NewMultipartUpload(context.Background(), bucket, "foo", minio.PutObjectOptions{})
+	uploadID, err := cluster.S3Aws.NewMultipartUpload(bucket, "foo", putObjectOptions{})
 	tt.OK(err)
 	if uploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -685,7 +686,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 
 	// Add 1 part to the upload.
 	data := frand.Bytes(5)
-	tt.OKAll(core.PutObjectPart(context.Background(), bucket, "foo", uploadID, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{}))
+	tt.OKAll(cluster.S3Aws.PutObjectPart(bucket, "foo", uploadID, 1, bytes.NewReader(data), putObjectPartOptions{}))
 
 	// Upload 1 regular object. It will share the same packed slab, cause the
 	// packed slab to be complete and start a new one.
