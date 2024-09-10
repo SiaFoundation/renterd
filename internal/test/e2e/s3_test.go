@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	s3aws "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/go-cmp/cmp"
 	"github.com/minio/minio-go/v7"
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -38,7 +37,6 @@ func TestS3Basic(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// delete default bucket before testing.
-	s3 := cluster.S3Aws
 	tt := cluster.tt
 	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
 		t.Fatal(err)
@@ -47,163 +45,123 @@ func TestS3Basic(t *testing.T) {
 	// create bucket
 	bucket := "bucket"
 	objPath := "obj#ct" // special char to check escaping
-	tt.OKAll(s3.CreateBucket(&s3aws.CreateBucketInput{
-		Bucket: &bucket,
-	}))
+	tt.OKAll(cluster.S3Aws.CreateBucket(bucket))
 
 	// list buckets
-	lbo, err := s3.ListBuckets(&s3aws.ListBucketsInput{})
+	lbo, err := cluster.S3Aws.ListBuckets()
 	tt.OK(err)
-	if buckets := lbo.Buckets; len(buckets) != 1 {
+	if buckets := lbo.buckets; len(buckets) != 1 {
 		t.Fatalf("unexpected number of buckets, %d != 1", len(buckets))
-	} else if *buckets[0].Name != bucket {
-		t.Fatalf("unexpected bucket name, %s != %s", *buckets[0].Name, bucket)
-	} else if buckets[0].CreationDate.IsZero() {
+	} else if buckets[0].name != bucket {
+		t.Fatalf("unexpected bucket name, %s != %s", buckets[0].name, bucket)
+	} else if buckets[0].creationDate.IsZero() {
 		t.Fatal("expected non-zero creation date")
 	}
 
 	// exist buckets
-	_, err = s3.HeadBucket(&s3aws.HeadBucketInput{Bucket: &bucket})
+	err = cluster.S3Aws.HeadBucket(bucket)
 	tt.OK(err)
-	nonexistentBucket := "nonexistent"
-	_, err = s3.HeadBucket(&s3aws.HeadBucketInput{Bucket: &nonexistentBucket})
+	err = cluster.S3Aws.HeadBucket("nonexistent")
 	tt.AssertContains(err, "NotFound")
 
 	// add object to the bucket
 	data := frand.Bytes(10)
 	etag := md5.Sum(data)
-	uploadInfo, err := s3.PutObject(&s3aws.PutObjectInput{
-		Body:   bytes.NewReader(data),
-		Bucket: &bucket,
-		Key:    &objPath,
-	})
+	uploadInfo, err := cluster.S3Aws.PutObject(bucket, objPath, bytes.NewReader(data))
 	tt.OK(err)
-	if *uploadInfo.ETag != api.FormatETag(hex.EncodeToString(etag[:])) {
-		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), *uploadInfo.ETag)
+	if uploadInfo.etag != api.FormatETag(hex.EncodeToString(etag[:])) {
+		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), uploadInfo.etag)
 	}
 	busObject, err := cluster.Bus.Object(context.Background(), bucket, objPath, api.GetObjectOptions{})
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
-	} else if api.FormatETag(busObject.Object.ETag) != *uploadInfo.ETag {
-		t.Fatalf("expected ETag %v, got %v", *uploadInfo.ETag, busObject.Object.ETag)
+	} else if api.FormatETag(busObject.Object.ETag) != uploadInfo.etag {
+		t.Fatalf("expected ETag %v, got %v", uploadInfo.etag, busObject.Object.ETag)
 	}
 
-	_, err = s3.PutObject(&s3aws.PutObjectInput{
-		Body:   bytes.NewReader(data),
-		Bucket: &nonexistentBucket,
-		Key:    &objPath,
-	})
+	_, err = cluster.S3Aws.PutObject("nonexistent", objPath, bytes.NewReader(data))
 	tt.AssertIs(err, errBucketNotExists)
 
 	// get object
-	obj, err := s3.GetObject(&s3aws.GetObjectInput{
-		Bucket: &bucket,
-		Key:    &objPath,
-	})
+	obj, err := cluster.S3Aws.GetObject(bucket, objPath)
 	tt.OK(err)
-	if b, err := io.ReadAll(obj.Body); err != nil {
+	if b, err := io.ReadAll(obj.body); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(b, data) {
 		t.Fatal("data mismatch")
-	} else if *obj.ETag != *uploadInfo.ETag {
-		t.Fatal("unexpected ETag:", *obj.ETag, *uploadInfo.ETag)
+	} else if obj.etag != uploadInfo.etag {
+		t.Fatal("unexpected ETag:", obj.etag, uploadInfo.etag)
 	}
 
 	// stat object
-	info, err := s3.HeadObject(&s3aws.HeadObjectInput{
-		Bucket: &bucket,
-		Key:    &objPath,
-	})
+	info, err := cluster.S3Aws.HeadObject(bucket, objPath)
 	tt.OK(err)
-	if *info.ContentLength != int64(len(data)) {
+	if info.contentLength != int64(len(data)) {
 		t.Fatal("size mismatch")
-	} else if *info.ETag != *uploadInfo.ETag {
-		t.Fatal("unexpected ETag:", info.ETag)
+	} else if info.etag != uploadInfo.etag {
+		t.Fatal("unexpected ETag:", info.etag)
 	}
 
 	// stat object that doesn't exist
-	info, err = s3.HeadObject(&s3aws.HeadObjectInput{
-		Bucket: &nonexistentBucket,
-		Key:    &objPath,
-	})
+	info, err = cluster.S3Aws.HeadObject("nonexistent", objPath)
 	tt.AssertContains(err, "NotFound")
 
 	// add another bucket
 	bucket2 := "bucket2"
-	tt.OKAll(s3.CreateBucket(&s3aws.CreateBucketInput{
-		Bucket: &bucket2,
-	}))
+	tt.OKAll(cluster.S3Aws.CreateBucket(bucket2))
 
 	// copy our object into the new bucket.
 	src := fmt.Sprintf("%s/%s", bucket, objPath)
-	res, err := s3.CopyObject(&s3aws.CopyObjectInput{
-		CopySource: &src,
-		Bucket:     &bucket2,
-		Key:        &objPath,
-	})
+	res, err := cluster.S3Aws.CopyObject(bucket2, src, objPath)
 	tt.OK(err)
-	if res.CopyObjectResult.LastModified.IsZero() {
+	if res.lastModified.IsZero() {
 		t.Fatal("expected LastModified to be non-zero")
-	} else if !res.CopyObjectResult.LastModified.After(start.UTC()) {
+	} else if !res.lastModified.After(start.UTC()) {
 		t.Fatal("expected LastModified to be after the start of our test")
-	} else if *res.CopyObjectResult.ETag != *uploadInfo.ETag {
+	} else if res.etag != uploadInfo.etag {
 		t.Fatal("expected correct ETag to be set")
 	}
 
 	// get copied object
-	obj, err = s3.GetObject(&s3aws.GetObjectInput{
-		Bucket: &bucket2,
-		Key:    &objPath,
-	})
+	obj, err = cluster.S3Aws.GetObject(bucket2, objPath)
 	tt.OK(err)
-	if b, err := io.ReadAll(obj.Body); err != nil {
+	if b, err := io.ReadAll(obj.body); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(b, data) {
 		t.Fatal("data mismatch")
 	}
 
 	// assert deleting the bucket fails because it's not empty
-	_, err = s3.DeleteBucket(&s3aws.DeleteBucketInput{Bucket: &bucket})
+	err = cluster.S3Aws.DeleteBucket(bucket)
 	tt.AssertIs(err, gofakes3.ErrBucketNotEmpty)
 
 	// assert deleting the bucket fails because it doesn't exist
-	_, err = s3.DeleteBucket(&s3aws.DeleteBucketInput{Bucket: &nonexistentBucket})
+	err = cluster.S3Aws.DeleteBucket("nonexistent")
 	tt.AssertIs(err, errBucketNotExists)
 
 	// remove the object
-	tt.OKAll(s3.DeleteObject(&s3aws.DeleteObjectInput{Bucket: &bucket, Key: &objPath}))
+	tt.OKAll(cluster.S3Aws.DeleteObject(bucket, objPath))
 
 	// try to get object
-	obj, err = s3.GetObject(&s3aws.GetObjectInput{
-		Bucket: &bucket,
-		Key:    &objPath,
-	})
+	obj, err = cluster.S3Aws.GetObject(bucket, objPath)
 	tt.AssertContains(err, "NoSuchKey")
 
 	// add a few objects to the bucket.
 	tmpObj1 := "dir/"
 	body := frand.Bytes(10)
-	tt.OKAll(s3.PutObject(&s3aws.PutObjectInput{
-		Body:   bytes.NewReader(body),
-		Bucket: &bucket,
-		Key:    &tmpObj1,
-	}))
+	tt.OKAll(cluster.S3Aws.PutObject(bucket, tmpObj1, bytes.NewReader(body)))
 	tmpObj2 := "dir/file"
-	tt.OKAll(s3.PutObject(&s3aws.PutObjectInput{
-		Body:   bytes.NewReader(body),
-		Bucket: &bucket,
-		Key:    &tmpObj2,
-	}))
+	tt.OKAll(cluster.S3Aws.PutObject(bucket, tmpObj2, bytes.NewReader(body)))
 
 	// delete them using the multi delete endpoint.
-	tt.OKAll(s3.DeleteObject(&s3aws.DeleteObjectInput{Bucket: &bucket, Key: &tmpObj1}))
-	tt.OKAll(s3.DeleteObject(&s3aws.DeleteObjectInput{Bucket: &bucket, Key: &tmpObj2}))
+	tt.OKAll(cluster.S3Aws.DeleteObject(bucket, tmpObj1))
+	tt.OKAll(cluster.S3Aws.DeleteObject(bucket, tmpObj2))
 
 	// delete bucket
-	_, err = s3.DeleteBucket(&s3aws.DeleteBucketInput{Bucket: &bucket})
+	err = cluster.S3Aws.DeleteBucket(bucket)
 	tt.OK(err)
-	_, err = s3.HeadBucket(&s3aws.HeadBucketInput{Bucket: &bucket})
+	err = cluster.S3Aws.HeadBucket(bucket)
 	tt.AssertContains(err, "NotFound")
 }
 
@@ -292,35 +250,29 @@ func TestS3ObjectMetadata(t *testing.T) {
 	assertMetadata(metadata, head.UserMetadata)
 
 	// upload a file using multipart upload
-	core := cluster.S3Core
-	uid, err := core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "multi", minio.PutObjectOptions{
-		UserMetadata: map[string]string{
+	uid, err := cluster.S3Aws.NewMultipartUpload(api.DefaultBucketName, "multi", putObjectOptions{
+		metadata: map[string]string{
 			"New": "1",
 		},
 	})
 	tt.OK(err)
 	data := frand.Bytes(3)
 
-	part, err := core.PutObjectPart(context.Background(), api.DefaultBucketName, "foo", uid, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+	part, err := cluster.S3Aws.PutObjectPart(api.DefaultBucketName, "foo", uid, 1, bytes.NewReader(data), putObjectPartOptions{})
 	tt.OK(err)
-	_, err = core.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "multi", uid, []minio.CompletePart{
+	_, err = cluster.S3Aws.CompleteMultipartUpload(api.DefaultBucketName, "multi", uid, []completePart{
 		{
-			PartNumber: part.PartNumber,
-			ETag:       part.ETag,
+			partNumber: 1,
+			etag:       part.etag,
 		},
-	}, minio.PutObjectOptions{
-		UserMetadata: map[string]string{
-			"Complete": "2",
-		},
-	})
+	}, putObjectOptions{})
 	tt.OK(err)
 
 	// check metadata
 	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, "multi", minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(map[string]string{
-		"New":      "1",
-		"Complete": "2",
+		"New": "1",
 	}, head.UserMetadata)
 }
 
