@@ -3,12 +3,10 @@ package sql
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -223,153 +221,7 @@ var (
 			{
 				ID: "00018_settings",
 				Migrate: func(tx Tx) error {
-					log.Infof("performing %s migration '00018_settings'", dbIdentifier)
-
-					// fetch all settings
-					rows, err := tx.Query(ctx, "SELECT `key`, value FROM settings")
-					if err != nil {
-						return fmt.Errorf("failed to fetch settings: %v", err)
-					}
-					defer rows.Close()
-
-					settings := make(map[string]string)
-					for rows.Next() {
-						var k, v string
-						if err := rows.Scan(&k, &v); err != nil {
-							return fmt.Errorf("failed to scan setting: %v", err)
-						}
-						settings[k] = v
-					}
-
-					// migrate gouging settings
-					if v, ok := settings["gouging"]; ok {
-						var gs api.GougingSettings
-						err := json.Unmarshal([]byte(v), &gs)
-						if err == nil {
-							err = gs.Validate()
-						}
-						if err != nil {
-							log.Warnf("gouging settings are not being migrated, err: %v", err)
-							if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "gouging"); err != nil {
-								return fmt.Errorf("failed to delete gouging settings: %v", err)
-							}
-						}
-					} else {
-						log.Warn("no gouging settings found")
-					}
-
-					// migrate pinning settings
-					if v, ok := settings["pricepinning"]; ok {
-						var ps api.PinnedSettings
-						err := json.Unmarshal([]byte(v), &ps)
-						if err == nil {
-							err = ps.Validate()
-						}
-						if err == nil {
-							updated, _ := json.Marshal(ps)
-							if err := m.UpdateSetting(ctx, tx, "pinned", string(updated)); err != nil {
-								return fmt.Errorf("failed to insert pinned settings: %v", err)
-							}
-						} else {
-							log.Warnf("pricepinning settings are not being migrated, err: %v", err)
-						}
-
-						// always delete because it got renamed
-						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "pricepinning"); err != nil {
-							log.Warnf("failed to delete pricepinning settings: %v", err)
-						}
-					} else {
-						log.Warn("no pricepinning settings found")
-					}
-
-					// migrate S3 authentication settings
-					if v, ok := settings["s3authentication"]; ok {
-						var s3s api.S3Settings
-						err := json.Unmarshal([]byte(v), &s3s.Authentication)
-						if err == nil {
-							err = s3s.Validate()
-						}
-						if err == nil {
-							updated, _ := json.Marshal(s3s)
-							if err := m.UpdateSetting(ctx, tx, "s3", string(updated)); err != nil {
-								return fmt.Errorf("failed to insert s3 settings: %v", err)
-							}
-						} else {
-							log.Warnf("s3authentication settings are not being migrated, err: %v", err)
-						}
-
-						// always delete because it got renamed
-						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "s3authentication"); err != nil {
-							log.Warnf("failed to delete s3authentication settings: %v", err)
-						}
-					} else {
-						log.Warn("no s3authentication setting found")
-					}
-
-					// migrate upload settings
-					us := api.DefaultUploadSettings("mainnet")
-
-					if v, ok := settings["contractset"]; ok {
-						var css struct {
-							Default string `json:"default"`
-						}
-						if err := json.Unmarshal([]byte(v), &css); err != nil {
-							log.Warnf("contractset settings are not being migrated, err: %v", err)
-						} else {
-							us.DefaultContractSet = css.Default
-						}
-
-						// always delete because it got replaced
-						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "contractset"); err != nil {
-							return err
-						}
-					}
-
-					if v, ok := settings["uploadpacking"]; ok {
-						var ups api.UploadPackingSettings
-						if err := json.Unmarshal([]byte(v), &ups); err != nil {
-							log.Warnf("uploadpacking settings are not being migrated, err: %v", err)
-						} else {
-							us.Packing = ups
-						}
-
-						// always delete because it got replaced
-						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "uploadpacking"); err != nil {
-							return err
-						}
-					}
-
-					if v, ok := settings["redundancy"]; ok {
-						var rs api.RedundancySettings
-						err := json.Unmarshal([]byte(v), &rs)
-						if err == nil {
-							err = rs.Validate()
-						}
-						if err != nil {
-							log.Warnf("redundancy settings are not being migrated, err: %v", err)
-						} else {
-							us.Redundancy = rs
-						}
-
-						// always delete because it got replaced
-						if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", "redundancy"); err != nil {
-							return err
-						}
-					}
-
-					// update upload settings
-					if err := us.Validate(); err != nil {
-						log.Warnf("upload settings are not being migrated, err: %v", err)
-						return err // developer error
-					} else {
-						updated, _ := json.Marshal(us)
-						if err := m.UpdateSetting(ctx, tx, "upload", string(updated)); err != nil {
-							return fmt.Errorf("failed to insert upload settings: %v", err)
-						}
-					}
-
-					log.Info("migration '00018_settings' complete")
-					return nil
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_settings", log)
 				},
 			},
 		}
