@@ -1508,7 +1508,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
 
-	// we should have a contract with the host
+	// assert we have a contract
 	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 1 {
@@ -1516,10 +1516,10 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 	c := contracts[0]
 
-	// add a contract to the bus
+	// manually insert a contract
 	err = cluster.bs.InsertContract(context.Background(), api.ContractMetadata{
 		ID:                 types.FileContractID{1},
-		HostKey:            types.PublicKey{1},
+		HostKey:            c.HostKey,
 		StartHeight:        cs.BlockHeight,
 		State:              api.ContractStatePending,
 		WindowStart:        math.MaxUint32,
