@@ -65,9 +65,9 @@ type TestCluster struct {
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
 	Worker    *worker.Client
-	S3Aws     *s3aws.S3
 	S3        *minio.Client
 	S3Core    *minio.Core
+	S3Aws     *s3TestClient
 
 	workerShutdownFns    []func(context.Context) error
 	busShutdownFns       []func(context.Context) error
@@ -431,8 +431,8 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Bus:       busClient,
 		Worker:    workerClient,
 		S3:        s3Client,
-		S3Aws:     s3AWSClient,
 		S3Core:    s3Core,
+		S3Aws:     &s3TestClient{s3AWSClient},
 
 		workerShutdownFns:    workerShutdownFns,
 		busShutdownFns:       busShutdownFns,
