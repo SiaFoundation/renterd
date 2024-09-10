@@ -170,7 +170,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	}
 
 	// archive contract
-	res, err := tx.Exec(ctx, "UPDATE contracts SET archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
+	res, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
 	if err != nil {
 		return fmt.Errorf("failed to archive contract: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
