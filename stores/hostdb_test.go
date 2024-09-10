@@ -106,17 +106,6 @@ func TestSQLHostDB(t *testing.T) {
 	}
 }
 
-func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
-	return s.RecordHostScans(context.Background(), []api.HostScan{
-		{
-			HostKey:   hk,
-			Settings:  settings,
-			Success:   err == nil,
-			Timestamp: t,
-		},
-	})
-}
-
 // TestSQLHosts tests the Hosts method of the SQLHostDB type.
 func TestSQLHosts(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
@@ -1185,6 +1174,18 @@ func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 		}
 	}
 	return
+}
+
+// addTestScan adds a host scan to the database.
+func (s *SQLStore) addTestScan(hk types.PublicKey, t time.Time, err error, settings rhpv2.HostSettings) error {
+	return s.RecordHostScans(context.Background(), []api.HostScan{
+		{
+			HostKey:   hk,
+			Settings:  settings,
+			Success:   err == nil,
+			Timestamp: t,
+		},
+	})
 }
 
 // announceHost adds a host announcement to the database.

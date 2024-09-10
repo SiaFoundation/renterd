@@ -1517,26 +1517,16 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	c := contracts[0]
 
 	// add a contract to the bus
-	_, err = cluster.bs.AddContract(context.Background(), rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID: types.FileContractID{1},
-			UnlockConditions: types.UnlockConditions{
-				PublicKeys: []types.UnlockKey{
-					c.HostKey.UnlockKey(),
-					c.HostKey.UnlockKey(),
-				},
-			},
-			FileContract: types.FileContract{
-				Filesize:       0,
-				FileMerkleRoot: types.Hash256{},
-				WindowStart:    math.MaxUint32,
-				WindowEnd:      math.MaxUint32 + 10,
-				Payout:         types.ZeroCurrency,
-				UnlockHash:     types.Hash256{},
-				RevisionNumber: 0,
-			},
-		},
-	}, types.NewCurrency64(1), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	err = cluster.bs.AddContract(context.Background(), api.ContractMetadata{
+		ID:                 types.FileContractID{1},
+		HostKey:            types.PublicKey{1},
+		StartHeight:        cs.BlockHeight,
+		State:              api.ContractStatePending,
+		WindowStart:        math.MaxUint32,
+		WindowEnd:          math.MaxUint32 + 10,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
+	})
 	tt.OK(err)
 
 	// should have 2 contracts now

@@ -75,9 +75,10 @@ CREATE TABLE `contracts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `fcid` varbinary(32) NOT NULL,
-  `host_key` varbinary(32) NOT NULL,
+  `host_id` bigint unsigned DEFAULT NULL,
+  `host_key` varbinary(32),
 
-  `archival_reason` varchar(191) NOT NULL DEFAULT '',
+  `archival_reason` varchar(191) DEFAULT NULL,
   `proof_height` bigint unsigned DEFAULT '0',
   `renewed_from` varbinary(32) DEFAULT NULL,
   `renewed_to` varbinary(32) DEFAULT NULL,
@@ -100,6 +101,7 @@ CREATE TABLE `contracts` (
   UNIQUE KEY `fcid` (`fcid`),
   KEY `idx_contracts_archival_reason` (`archival_reason`),
   KEY `idx_contracts_fcid` (`fcid`),
+  KEY `idx_contracts_host_id` (`host_id`),
   KEY `idx_contracts_host_key` (`host_key`),
   KEY `idx_contracts_proof_height` (`proof_height`),
   KEY `idx_contracts_renewed_from` (`renewed_from`),
@@ -108,7 +110,8 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_start_height` (`start_height`),
   KEY `idx_contracts_state` (`state`),
   KEY `idx_contracts_window_start` (`window_start`),
-  KEY `idx_contracts_window_end` (`window_end`)
+  KEY `idx_contracts_window_end` (`window_end`),
+  CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbContractSet

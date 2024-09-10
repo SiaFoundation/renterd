@@ -44,7 +44,7 @@ func UpdateChainIndex(ctx context.Context, tx sql.Tx, index types.ChainIndex, l 
 	return nil
 }
 
-func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, revisionHeight, revisionNumber, size uint64, l *zap.SugaredLogger) error {
+func UpdateContractRevision(ctx context.Context, tx sql.Tx, fcid types.FileContractID, revisionHeight, revisionNumber, size uint64, l *zap.SugaredLogger) error {
 	// fetch current contract, in SQLite we could use a single query to
 	// perform the conditional update, however we have to compare the
 	// revision number which are stored as strings so we need to fetch the

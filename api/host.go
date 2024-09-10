@@ -13,6 +13,10 @@ import (
 )
 
 const (
+	ContractFilterModeAll      = "all"
+	ContractFilterModeActive   = "active"
+	ContractFilterModeArchived = "archived"
+
 	HostFilterModeAll     = "all"
 	HostFilterModeAllowed = "allowed"
 	HostFilterModeBlocked = "blocked"

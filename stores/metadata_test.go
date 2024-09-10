@@ -102,18 +102,6 @@ func (s *SQLStore) waitForPruneLoop(ts time.Time) error {
 	})
 }
 
-func randomMultisigUC() types.UnlockConditions {
-	uc := types.UnlockConditions{
-		PublicKeys:         make([]types.UnlockKey, 2),
-		SignaturesRequired: 1,
-	}
-	for i := range uc.PublicKeys {
-		uc.PublicKeys[i].Algorithm = types.SpecifierEd25519
-		uc.PublicKeys[i].Key = frand.Bytes(32)
-	}
-	return uc
-}
-
 func updateAllObjectsHealth(db *isql.DB) error {
 	_, err := db.Exec(context.Background(), `
 UPDATE objects
@@ -368,147 +356,94 @@ func TestSQLContractStore(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create a host for the contract.
+	// add test host
 	hk := types.GeneratePrivateKey().PublicKey()
 	err := ss.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Add an announcement.
+	// announce a custom address
 	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create random unlock conditions for the host.
-	uc := randomMultisigUC()
-	uc.PublicKeys[1].Key = hk[:]
-	uc.Timelock = 192837
-
-	// Create a contract and set all fields.
-	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				RevisionNumber: 200,
-				Filesize:       4096,
-				FileMerkleRoot: types.Hash256{222},
-				WindowStart:    400,
-				WindowEnd:      500,
-				ValidProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(121),
-						Address: types.Address{2, 1, 2},
-					},
-				},
-				MissedProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(323),
-						Address: types.Address{2, 3, 2},
-					},
-				},
-				UnlockHash: types.Hash256{6, 6, 6},
-			},
-		},
-		Signatures: [2]types.TransactionSignature{
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 0,
-				Timelock:       100000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature1"),
-			},
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 1,
-				Timelock:       200000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature2"),
-			},
-		},
-	}
-
-	// Look it up. Should fail.
-	ctx := context.Background()
-	_, err = ss.Contract(ctx, c.ID())
-	if !errors.Is(err, api.ErrContractNotFound) {
+	// assert api.ErrContractNotFound is returned
+	fcid := types.FileContractID{1}
+	if _, err := ss.Contract(context.Background(), fcid); !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := ss.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(contracts) != 0 {
-		t.Fatalf("should have 0 contracts but got %v", len(contracts))
-	}
 
-	// Insert it.
-	contractPrice := types.NewCurrency64(1)
-	initialRenterFunds := types.NewCurrency64(456)
-	startHeight := uint64(100)
-	returned, err := ss.AddContract(ctx, c, contractPrice, initialRenterFunds, startHeight, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := api.ContractMetadata{
-		ID:                 fcid,
-		HostIP:             "address",
-		HostKey:            hk,
-		StartHeight:        100,
-		State:              api.ContractStatePending,
-		WindowStart:        400,
-		WindowEnd:          500,
-		RenewedFrom:        types.FileContractID{},
-		Spending:           api.ContractSpending{},
+	// add the contract
+	c := api.ContractMetadata{
+		ID:      fcid,
+		HostKey: hk,
+
+		ProofHeight:    1,
+		RenewedFrom:    types.FileContractID{1},
+		RevisionHeight: 2,
+		RevisionNumber: 3,
+		Size:           4,
+		StartHeight:    5,
+		State:          api.ContractStateActive,
+		WindowStart:    6,
+		WindowEnd:      7,
+
 		ContractPrice:      types.NewCurrency64(1),
-		InitialRenterFunds: initialRenterFunds,
-		Size:               c.Revision.Filesize,
+		InitialRenterFunds: types.NewCurrency64(2),
+
+		Spending: api.ContractSpending{
+			Deletions:   types.NewCurrency64(3),
+			FundAccount: types.NewCurrency64(4),
+			SectorRoots: types.NewCurrency64(5),
+			Uploads:     types.NewCurrency64(6),
+		},
 	}
-	if !reflect.DeepEqual(returned, expected) {
-		t.Fatal("contract mismatch", cmp.Diff(returned, expected))
+	if err := ss.AddContract(context.Background(), c); err != nil {
+		t.Fatal(err)
 	}
 
-	// Look it up again.
-	fetched, err := ss.Contract(ctx, c.ID())
+	// decorate the host IP
+	c.HostIP = "address"
+
+	// fetch the contract
+	inserted, err := ss.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
+	} else if !reflect.DeepEqual(inserted, c) {
+		t.Fatal("contract mismatch", cmp.Diff(inserted, c))
 	}
-	if !reflect.DeepEqual(fetched, expected) {
-		t.Fatal("contract mismatch")
-	}
-	contracts, err = ss.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
+
+	// fetch all contracts
+	if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{}); err != nil {
 		t.Fatal(err)
-	}
-	if len(contracts) != 1 {
+	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
-	}
-	if !reflect.DeepEqual(contracts[0], expected) {
+	} else if !reflect.DeepEqual(contracts[0], c) {
 		t.Fatal("contract mismatch")
 	}
 
-	// Add a contract set with our contract and assert we can fetch it using the set name
-	if err := ss.UpdateContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}, nil); err != nil {
+	// add a contract set, assert we can fetch it and it holds our contract
+	if err := ss.UpdateContractSet(context.Background(), "foo", []types.FileContractID{fcid}, nil); err != nil {
 		t.Fatal(err)
-	}
-	if contracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "foo"}); err != nil {
+	} else if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: "foo"}); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
+
+	// assert api.ErrContractSetNotFound is returned
+	if _, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
-	// Add another contract set.
-	if err := ss.UpdateContractSet(ctx, "foo2", []types.FileContractID{contracts[0].ID}, nil); err != nil {
+	// add another contract set
+	if err := ss.UpdateContractSet(context.Background(), "foo2", []types.FileContractID{fcid}, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	// Fetch contract sets.
-	sets, err := ss.ContractSets(ctx)
+	// fetch all sets
+	sets, err := ss.ContractSets(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,17 +454,17 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal("wrong sets returned", sets)
 	}
 
-	// Archive the contract.
-	if err := ss.ArchiveContract(ctx, c.ID(), api.ContractArchivalReasonRemoved); err != nil {
+	// archive the contract
+	if err := ss.ArchiveContract(context.Background(), fcid, api.ContractArchivalReasonRemoved); err != nil {
 		t.Fatal(err)
 	}
 
-	// Look it up. Should fail.
-	_, err = ss.Contract(ctx, c.ID())
+	// assert archived contracts are not returned
+	_, err = ss.Contract(context.Background(), fcid)
 	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = ss.Contracts(ctx, api.ContractsOpts{})
+	contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +472,7 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatalf("should have 0 contracts but got %v", len(contracts))
 	}
 
-	// Make sure the sectors were removed
+	// assert sectors got removed
 	if count := ss.Count("contract_sectors"); count != 0 {
 		t.Fatalf("expected %v objects in contract_sectors but got %v", 0, count)
 	}
@@ -590,226 +525,14 @@ func TestContractRoots(t *testing.T) {
 	}
 }
 
-// TestRenewContract is a test for AddRenewedContract.
-func TestRenewedContract(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// create a host
-	hk := types.PublicKey{1}
-	err := ss.addTestHost(hk)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// announce the host so we can assert the net address
-	if err := ss.announceHost(hk, "address"); err != nil {
-		t.Fatal(err)
-	}
-
-	// create a contract
-	fcid := types.FileContractID{1}
-	c := newTestContract(fcid, hk)
-	added, err := ss.AddContract(context.Background(), c, types.NewCurrency64(1), types.NewCurrency64(2), 1, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// add it to a set
-	err = ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcid}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert the contract is returned
-	if added.RenewedFrom != (types.FileContractID{}) {
-		t.Fatal("unexpected")
-	}
-
-	// add an object
-	obj := newTestObject(1)
-	obj.Slabs[0].MinShards = 1
-	obj.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hk: {fcid}}
-	obj.Slabs[0].Shards[0].LatestHost = hk
-	obj.Slabs[0].Shards = obj.Slabs[0].Shards[:1]
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
-		t.Fatal(err)
-	}
-
-	// record contract spending
-	s := api.ContractSpending{
-		Uploads:     types.Siacoins(1),
-		FundAccount: types.Siacoins(2),
-		Deletions:   types.Siacoins(3),
-		SectorRoots: types.Siacoins(4),
-	}
-	if err := ss.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
-		{ContractID: fcid, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: s},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// no slabs should be unhealthy.
-	if err := ss.RefreshHealth(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(slabs) > 0 {
-		t.Fatal("shouldn't return any slabs", len(slabs), slabs[0].Health)
-	}
-
-	// assert there's no renewal
-	_, err = ss.RenewedContract(context.Background(), fcid)
-	if !errors.Is(err, api.ErrContractNotFound) {
-		t.Fatal("unexpected", err)
-	}
-
-	// renew it
-	fcidR := types.FileContractID{2}
-	rev := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcidR,
-			UnlockConditions: c.Revision.UnlockConditions,
-			FileContract: types.FileContract{
-				Filesize:           2 * rhpv2.SectorSize,
-				MissedProofOutputs: []types.SiacoinOutput{},
-				ValidProofOutputs:  []types.SiacoinOutput{},
-			},
-		},
-	}
-	if _, err := ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(3), types.NewCurrency64(4), 2, fcid, api.ContractStatePending); err != nil {
-		t.Fatal(err)
-	}
-
-	// assert there's a renewal
-	renewed, err := ss.RenewedContract(context.Background(), fcid)
-	if err != nil {
-		t.Fatal("unexpected", err)
-	} else if renewed.ID != fcidR {
-		t.Fatal("unexpected")
-	}
-
-	// make sure the contract set was updated.
-	contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("unexpected number of contracts", len(contracts))
-	} else if contracts[0].ID != fcidR {
-		t.Fatal("unexpected contract ID", contracts[0].ID)
-	}
-
-	// slab should still be in good shape.
-	if err := ss.RefreshHealth(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.99, "test", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(slabs) > 0 {
-		t.Fatal("shouldn't return any slabs", len(slabs))
-	}
-
-	// renewed contract should not be returned
-	_, err = ss.Contract(context.Background(), fcid)
-	if !errors.Is(err, api.ErrContractNotFound) {
-		t.Fatal(err)
-	}
-
-	// renewal should be returned
-	renewal, err := ss.Contract(context.Background(), fcidR)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := api.ContractMetadata{
-		ID:          fcidR,
-		HostIP:      "address",
-		HostKey:     hk,
-		StartHeight: 2,
-		RenewedFrom: fcid,
-		Size:        2 * rhpv2.SectorSize,
-		State:       api.ContractStatePending,
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
-		ContractPrice:      types.NewCurrency64(3),
-		ContractSets:       []string{"test"},
-		InitialRenterFunds: types.NewCurrency64(4),
-	}
-	if !reflect.DeepEqual(renewal, expected) {
-		t.Fatal("mismatch")
-	}
-
-	// ancestor should be returned
-	ancestors, err := ss.AncestorContracts(context.Background(), fcidR, 0)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(ancestors) != 1 {
-		t.Fatalf("expected 1 ancestor but got %v", len(ancestors))
-	}
-
-	expectedContract := api.ContractMetadata{
-		ID:        fcid,
-		HostIP:    "address",
-		HostKey:   c.HostKey(),
-		RenewedTo: fcidR,
-		Spending:  s,
-
-		ArchivalReason:     api.ContractArchivalReasonRenewed,
-		ContractPrice:      types.NewCurrency64(1),
-		ProofHeight:        0,
-		RenewedFrom:        types.FileContractID{},
-		RevisionHeight:     0,
-		RevisionNumber:     1,
-		Size:               rhpv2.SectorSize,
-		StartHeight:        1,
-		State:              api.ContractStatePending,
-		InitialRenterFunds: types.NewCurrency64(2),
-		WindowStart:        400,
-		WindowEnd:          500,
-	}
-	if !reflect.DeepEqual(ancestors[0], expectedContract) {
-		t.Fatal("mismatch", cmp.Diff(ancestors[0], expectedContract))
-	}
-
-	// renew it again
-	fcidRR := types.FileContractID{3}
-	rev = rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcidRR,
-			UnlockConditions: c.Revision.UnlockConditions,
-			FileContract: types.FileContract{
-				MissedProofOutputs: []types.SiacoinOutput{},
-				ValidProofOutputs:  []types.SiacoinOutput{},
-			},
-		},
-	}
-
-	// assert the renewed contract is returned
-	renewedContract, err := ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(5), types.NewCurrency64(6), 3, fcidR, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	} else if renewedContract.RenewedFrom != fcidR {
-		t.Fatal("unexpected")
-	}
-
-	// ancestor should be returned
-	ancestors, err = ss.AncestorContracts(context.Background(), fcidRR, 0)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(ancestors) != 2 {
-		t.Fatalf("expected 2 ancestor but got %v", len(ancestors))
-	}
-}
-
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	cfg := defaultTestSQLStoreConfig
+	cfg.persistent = true
+	cfg.dir = "/Users/peterjan/testing3"
+	os.RemoveAll(cfg.dir)
+	ss := newTestSQLStore(t, cfg)
 	defer ss.Close()
 
 	hk := types.PublicKey{1, 2, 3}
@@ -824,7 +547,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i < len(fcids); i++ {
-		if _, err := ss.addTestRenewedContract(fcids[i], fcids[i-1], hk, uint64(i)); err != nil {
+		if err := ss.renewTestContract(hk, fcids[i-1], fcids[i], uint64(i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -847,19 +570,13 @@ func TestAncestorsContracts(t *testing.T) {
 		if j := len(fcids) - 1 - i; j >= 0 {
 			renewedTo = fcids[j]
 		}
-		expected := api.ContractMetadata{
-			ArchivalReason: api.ContractArchivalReasonRenewed,
-			ID:             fcids[len(fcids)-2-i],
-			HostKey:        hk,
-			RenewedFrom:    renewedFrom,
-			RenewedTo:      renewedTo,
-			RevisionNumber: 200,
-			StartHeight:    uint64(len(fcids) - 2 - i),
-			Size:           4096,
-			State:          api.ContractStatePending,
-			WindowStart:    400,
-			WindowEnd:      500,
-		}
+
+		expected := newTestContract(fcids[len(fcids)-2-i], hk)
+		expected.RenewedFrom = renewedFrom
+		expected.RenewedTo = renewedTo
+		expected.ArchivalReason = api.ContractArchivalReasonRenewed
+		expected.StartHeight = uint64(len(fcids) - 2 - i)
+		expected.Spending = api.ContractSpending{}
 		if !reflect.DeepEqual(contracts[i], expected) {
 			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
@@ -937,51 +654,13 @@ func TestArchiveContracts(t *testing.T) {
 	}
 }
 
-func newTestContract(fcid types.FileContractID, hk types.PublicKey) rhpv2.ContractRevision {
-	uc := randomMultisigUC()
-	uc.PublicKeys[1].Key = hk[:]
-	uc.Timelock = 192837
-	return rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				RevisionNumber: 200,
-				Filesize:       4096,
-				FileMerkleRoot: types.Hash256{222},
-				WindowStart:    400,
-				WindowEnd:      500,
-				ValidProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(121),
-						Address: types.Address{2, 1, 2},
-					},
-				},
-				MissedProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(323),
-						Address: types.Address{2, 3, 2},
-					},
-				},
-				UnlockHash: types.Hash256{6, 6, 6},
-			},
-		},
-		Signatures: [2]types.TransactionSignature{
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 0,
-				Timelock:       100000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature1"),
-			},
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 1,
-				Timelock:       200000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature2"),
-			},
-		},
+func newTestContract(fcid types.FileContractID, hk types.PublicKey) api.ContractMetadata {
+	return api.ContractMetadata{
+		ID:                 fcid,
+		HostKey:            hk,
+		State:              api.ContractStatePending,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
 	}
 }
 
@@ -990,25 +669,21 @@ func TestSQLMetadataStore(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create 2 hosts
+	// add 2 hosts
 	hks, err := ss.addTestHosts(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hk1, hk2 := hks[0], hks[1]
 
-	// Create 2 contracts
-	fcids, contracts, err := ss.addTestContracts(hks)
+	// add 2 contracts
+	fcids, _, err := ss.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fcid1, fcid2 := fcids[0], fcids[1]
 
-	// Extract start height and total cost
-	startHeight1, initialRenterFunds1 := contracts[0].StartHeight, contracts[0].InitialRenterFunds
-	startHeight2, initialRenterFunds2 := contracts[1].StartHeight, contracts[1].InitialRenterFunds
-
-	// Create an object with 2 slabs pointing to 2 different sectors.
+	// create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{
@@ -1035,14 +710,14 @@ func TestSQLMetadataStore(t *testing.T) {
 		},
 	}
 
-	// Store it.
+	// add it
 	ctx := context.Background()
 	objID := "key1"
 	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
 
-	// Fetch it using get and verify every field.
+	// fetch it
 	obj, err := ss.Object(context.Background(), api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
@@ -1113,12 +788,12 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj, cmp.AllowUnexported(object.EncryptionKey{}), cmp.Comparer(api.CompareTimeRFC3339)))
 	}
 
-	// Try to store it again. Should work.
+	// try to add it again, should work
 	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
 
-	// Fetch it again and verify.
+	// fetch it again and verify
 	obj, err = ss.Object(context.Background(), api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
@@ -1130,12 +805,12 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	obj.ModTime = api.TimeRFC3339{}
 
-	// The expected object is the same.
+	// the expected object is the same
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj, cmp.AllowUnexported(object.EncryptionKey{}), cmp.Comparer(api.CompareTimeRFC3339)))
 	}
 
-	// Fetch it and verify again.
+	// fetch it and verify again
 	fullObj, err := ss.Object(ctx, api.DefaultBucketName, objID)
 	if err != nil {
 		t.Fatal(err)
@@ -1161,22 +836,10 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	expectedContract1 := api.ContractMetadata{
 		ID:                 fcid1,
-		HostIP:             "",
 		HostKey:            hk1,
-		SiamuxAddr:         "",
-		ProofHeight:        0,
-		RevisionHeight:     0,
-		RevisionNumber:     0,
-		Size:               4096,
-		StartHeight:        startHeight1,
 		State:              api.ContractStatePending,
-		WindowStart:        400,
-		WindowEnd:          500,
-		ContractPrice:      types.ZeroCurrency,
-		RenewedFrom:        types.FileContractID{},
-		Spending:           api.ContractSpending{},
-		InitialRenterFunds: initialRenterFunds1,
-		ContractSets:       nil,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
 	}
 
 	expectedObjSlab2 := object.Slab{
@@ -1196,25 +859,13 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	expectedContract2 := api.ContractMetadata{
 		ID:                 fcid2,
-		HostIP:             "",
 		HostKey:            hk2,
-		SiamuxAddr:         "",
-		ProofHeight:        0,
-		RevisionHeight:     0,
-		RevisionNumber:     0,
-		Size:               4096,
-		StartHeight:        startHeight2,
 		State:              api.ContractStatePending,
-		WindowStart:        400,
-		WindowEnd:          500,
-		ContractPrice:      types.ZeroCurrency,
-		RenewedFrom:        types.FileContractID{},
-		Spending:           api.ContractSpending{},
-		InitialRenterFunds: initialRenterFunds2,
-		ContractSets:       nil,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
 	}
 
-	// Compare slabs.
+	// compare slabs
 	slab1, err := ss.Slab(context.Background(), obj1Slab0Key)
 	if err != nil {
 		t.Fatal(err)
@@ -1244,7 +895,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("mismatch", cmp.Diff(contract2, expectedContract2))
 	}
 
-	// Remove the first slab of the object.
+	// remove the first slab of the object
 	obj1.Slabs = obj1.Slabs[1:]
 	fullObj, err = ss.addTestObject(objID, obj1)
 	if err != nil {
@@ -1253,7 +904,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch")
 	}
 
-	// Sanity check the db at the end of the test. We expect:
+	// sanity check the db at the end of the test. We expect:
 	// - 1 element in the object table since we only stored and overwrote a single object
 	// - 1 element in the slabs table since we updated the object to only have 1 slab
 	// - 1 element in the slices table for the same reason
@@ -1284,8 +935,8 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Delete the object. Due to the cascade this should delete everything
-	// but the sectors.
+	// delete the object, due to the cascade this should delete everything but
+	// the sectors
 	if err := ss.RemoveObjectBlocking(ctx, api.DefaultBucketName, objID); err != nil {
 		t.Fatal(err)
 	}
@@ -3517,18 +3168,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// renew the contract.
 	fcidRenewed := types.FileContractID{2, 2, 2, 2, 2}
-	uc := randomMultisigUC()
-	rev := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcidRenewed,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				MissedProofOutputs: []types.SiacoinOutput{},
-				ValidProofOutputs:  []types.SiacoinOutput{},
-			},
-		},
-	}
-	_, err = ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), types.NewCurrency64(1), 100, fcid, api.ContractStatePending)
+	err = ss.renewTestContract(hk, fcid, fcidRenewed, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

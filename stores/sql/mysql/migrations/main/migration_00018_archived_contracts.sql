@@ -1,91 +1,24 @@
-DROP TABLE IF EXISTS contracts_temp;
+ALTER TABLE contracts
+    RENAME COLUMN total_cost TO initial_renter_funds,
+    RENAME COLUMN list_spending TO sector_roots_spending;
 
-CREATE TABLE contracts_temp (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
+ALTER TABLE contracts
+    ADD COLUMN host_key varbinary(32) NOT NULL DEFAULT UNHEX('0000000000000000000000000000000000000000000000000000000000000000'),
+    ADD COLUMN archival_reason VARCHAR(191) DEFAULT NULL,
+    ADD COLUMN renewed_to VARBINARY(32) DEFAULT NULL;
 
-  `archival_reason` varchar(191) NOT NULL DEFAULT '',
-  `fcid` varbinary(32) NOT NULL,
-  `host_key` varbinary(32) NOT NULL,
-  `proof_height` bigint unsigned DEFAULT '0',
-  `renewed_from` varbinary(32) DEFAULT NULL,
-  `renewed_to` varbinary(32) DEFAULT NULL,
-  `revision_height` bigint unsigned DEFAULT '0',
-  `revision_number` varchar(191) NOT NULL DEFAULT '0',
-  `size` bigint unsigned DEFAULT NULL,
-  `start_height` bigint unsigned NOT NULL,
-  `state` tinyint unsigned NOT NULL DEFAULT '0',
-  `window_start` bigint unsigned NOT NULL DEFAULT '0',
-  `window_end` bigint unsigned NOT NULL DEFAULT '0',
+CREATE INDEX `idx_contracts_archival_reason` ON `contracts`(`archival_reason`);
+CREATE INDEX `idx_contracts_host_key` ON `contracts`(`host_key`);
+CREATE INDEX `idx_contracts_renewed_to` ON `contracts`(`renewed_to`);
 
-  `contract_price` longtext,
-  `initial_renter_funds` longtext,
-
-  `delete_spending` longtext,
-  `fund_account_spending` longtext,
-  `sector_roots_spending` longtext,
-  `upload_spending` longtext,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `fcid` (`fcid`),
-  KEY `idx_contracts_archival_reason` (`archival_reason`),
-  KEY `idx_contracts_fcid` (`fcid`),
-  KEY `idx_contracts_host_key` (`host_key`),
-  KEY `idx_contracts_proof_height` (`proof_height`),
-  KEY `idx_contracts_renewed_from` (`renewed_from`),
-  KEY `idx_contracts_renewed_to` (`renewed_to`),
-  KEY `idx_contracts_revision_height` (`revision_height`),
-  KEY `idx_contracts_start_height` (`start_height`),
-  KEY `idx_contracts_state` (`state`),
-  KEY `idx_contracts_window_start` (`window_start`),
-  KEY `idx_contracts_window_end` (`window_end`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-INSERT INTO contracts_temp (
-    id,
-    created_at,
-    fcid,
-    host_key,
-    proof_height,
-    renewed_from,
-    revision_height,
-    revision_number,
-    size,
-    start_height,
-    state,
-    window_start,
-    window_end,
-    contract_price,
-    initial_renter_funds,
-    delete_spending,
-    fund_account_spending,
-    sector_roots_spending,
-    upload_spending
-) SELECT
-    c.id,
-    c.created_at,
-    c.fcid,
-    h.public_key,
-    c.proof_height,
-    c.renewed_from,
-    c.revision_height,
-    c.revision_number,
-    c.size,
-    c.start_height,
-    c.state,
-    c.window_start,
-    c.window_end,
-    c.contract_price,
-    c.total_cost,
-    c.delete_spending,
-    c.fund_account_spending,
-    c.list_spending,
-    c.upload_spending
-FROM contracts c
-INNER JOIN hosts h ON c.host_id = h.id;
+UPDATE contracts c
+INNER JOIN hosts h ON c.host_id = h.id
+SET c.host_key = h.public_key;
 
 INSERT INTO contracts_temp (
     created_at,
     fcid,
+    host_id,
     host_key,
     archival_reason,
     proof_height,
@@ -107,6 +40,7 @@ INSERT INTO contracts_temp (
 ) SELECT
     ac.created_at,
     ac.fcid,
+    h.id,
     COALESCE(h.public_key, UNHEX('0000000000000000000000000000000000000000000000000000000000000000')),
     ac.reason,
     ac.proof_height,
@@ -128,12 +62,4 @@ INSERT INTO contracts_temp (
 FROM `archived_contracts` ac
 LEFT JOIN hosts h ON ac.host = h.public_key;
 
-ALTER TABLE contract_sectors DROP FOREIGN KEY fk_contract_sectors_db_contract;
-ALTER TABLE contract_set_contracts DROP FOREIGN KEY fk_contract_set_contracts_db_contract;
-
-DROP TABLE `contracts`;
 DROP TABLE `archived_contracts`;
-
-ALTER TABLE contracts_temp RENAME TO contracts;
-ALTER TABLE contract_sectors ADD CONSTRAINT fk_contract_sectors_db_contract FOREIGN KEY (db_contract_id) REFERENCES contracts(id) ON DELETE CASCADE;
-ALTER TABLE contract_set_contracts ADD CONSTRAINT fk_contract_set_contracts_db_contract FOREIGN KEY (db_contract_id) REFERENCES contracts(id) ON DELETE CASCADE;

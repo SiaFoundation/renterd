@@ -4,9 +4,10 @@ CREATE TABLE contracts_temp (
     `id` integer PRIMARY KEY AUTOINCREMENT,
     `created_at` datetime,
     `fcid` blob NOT NULL UNIQUE,
+    `host_id` integer,
     `host_key` blob NOT NULL,
 
-    `archival_reason` text NOT NULL DEFAULT "",
+    `archival_reason` text DEFAULT NULL,
     `proof_height` integer DEFAULT 0,
     `renewed_from` blob,
     `renewed_to` blob,
@@ -43,6 +44,7 @@ INSERT INTO contracts_temp (
     id,
     created_at,
     fcid,
+    host_id,
     host_key,
     proof_height,
     renewed_from,
@@ -63,6 +65,7 @@ INSERT INTO contracts_temp (
     c.id,
     c.created_at,
     c.fcid,
+    h.id,
     h.public_key,
     c.proof_height,
     c.renewed_from,
@@ -86,6 +89,7 @@ INSERT INTO contracts_temp (
     created_at,
     archival_reason,
     fcid,
+    host_id,
     host_key,
     proof_height,
     renewed_from,
@@ -107,6 +111,7 @@ INSERT INTO contracts_temp (
     ac.created_at,
     ac.reason,
     ac.fcid,
+    h.id,
     COALESCE(h.public_key, X'0000000000000000000000000000000000000000000000000000000000000000'),
     ac.proof_height,
     ac.renewed_from,
@@ -128,8 +133,6 @@ FROM `archived_contracts` ac
 LEFT JOIN hosts h ON ac.host = h.public_key;
 
 DROP TABLE `archived_contracts`;
-
-PRAGMA foreign_keys = OFF;
 DROP TABLE `contracts`;
+
 ALTER TABLE contracts_temp RENAME TO contracts;
-PRAGMA foreign_keys = ON;

@@ -5,7 +5,6 @@ import (
 	"io"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -21,9 +20,9 @@ type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		UpdateChainIndex(index types.ChainIndex) error
-		UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
-		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
 		UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error
+		UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
+		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
 		UpdateFailedContracts(blockHeight uint64) error
 		UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
 
@@ -158,23 +157,6 @@ type (
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
-		// InsertBufferedSlab inserts a buffered slab into the database. This
-		// includes the creation of a buffered slab as well as the corresponding
-		// regular slab it is linked to. It returns the ID of the buffered slab
-		// that was created.
-		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
-
-		// InsertContract inserts a new contract into the database.
-		InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
-
-		// InsertMultipartUpload creates a new multipart upload and returns a
-		// unique upload ID.
-		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
-
-		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
-		// are associated with any of the provided contracts.
-		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
-
 		// HostAllowlist returns the list of public keys of hosts on the
 		// allowlist.
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
@@ -182,8 +164,25 @@ type (
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
 
+		// InsertBufferedSlab inserts a buffered slab into the database. This
+		// includes the creation of a buffered slab as well as the corresponding
+		// regular slab it is linked to. It returns the ID of the buffered slab
+		// that was created.
+		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
+
+		// InsertContract creates a new contract with the given metadata.
+		InsertContract(ctx context.Context, c api.ContractMetadata) error
+
+		// InsertMultipartUpload creates a new multipart upload and returns a
+		// unique upload ID.
+		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
+
+		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
+		// are associated with any of the provided contracts.
+		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
 		// HostsForScanning returns a list of hosts to scan which haven't been
 		// scanned since at least maxLastScan.
@@ -294,12 +293,6 @@ type (
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
 
-		// RenewContract renews the contract in the database. That means the
-		// contract with the ID of 'renewedFrom' will be moved to the archived
-		// contracts and the new contract will overwrite the existing one,
-		// inheriting its sectors.
-		RenewContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
-
 		// RenewedContract returns the metadata of the contract that was renewed
 		// from the specified contract or ErrContractNotFound otherwise.
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
@@ -356,6 +349,9 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateContract sets the given metadata on the contract with given fcid.
+		UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error
 
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error

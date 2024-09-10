@@ -51,26 +51,31 @@ type (
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
 		ID      types.FileContractID `json:"id"`
-		HostIP  string               `json:"hostIP"`
 		HostKey types.PublicKey      `json:"hostKey"`
 
-		ContractPrice      types.Currency `json:"contractPrice"`
-		InitialRenterFunds types.Currency `json:"initialRenterFunds"`
-
-		ArchivalReason string               `json:"archivalReason,omitempty"`
-		ContractSets   []string             `json:"contractSets,omitempty"`
 		ProofHeight    uint64               `json:"proofHeight"`
 		RenewedFrom    types.FileContractID `json:"renewedFrom"`
-		RenewedTo      types.FileContractID `json:"renewedTo,omitempty"`
 		RevisionHeight uint64               `json:"revisionHeight"`
 		RevisionNumber uint64               `json:"revisionNumber"`
-		SiamuxAddr     string               `json:"siamuxAddr,omitempty"`
 		Size           uint64               `json:"size"`
-		Spending       ContractSpending     `json:"spending"`
 		StartHeight    uint64               `json:"startHeight"`
 		State          string               `json:"state"`
 		WindowStart    uint64               `json:"windowStart"`
 		WindowEnd      uint64               `json:"windowEnd"`
+
+		// costs & spending
+		ContractPrice      types.Currency   `json:"contractPrice"`
+		InitialRenterFunds types.Currency   `json:"initialRenterFunds"`
+		Spending           ContractSpending `json:"spending"`
+
+		// following fields are decorated
+		HostIP       string   `json:"hostIP"`
+		ContractSets []string `json:"contractSets,omitempty"`
+		SiamuxAddr   string   `json:"siamuxAddr,omitempty"`
+
+		// following fields are only set on archived contracts
+		ArchivalReason string               `json:"archivalReason,omitempty"`
+		RenewedTo      types.FileContractID `json:"renewedTo,omitempty"`
 	}
 
 	// ContractPrunableData wraps a contract's size information with its id.
@@ -114,7 +119,7 @@ type (
 
 	// ContractAddRequest is the request type for the /contract/:id endpoint.
 	ContractAddRequest struct {
-		Contract           rhpv2.ContractRevision `json:"contract"`
+		Revision           rhpv2.ContractRevision `json:"revision"`
 		ContractPrice      types.Currency         `json:"contractPrice"`
 		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
 		StartHeight        uint64                 `json:"startHeight"`
@@ -199,8 +204,8 @@ type (
 	}
 
 	ContractsOpts struct {
-		ContractSet     string `json:"contractset"`
-		IncludeArchived bool   `json:"includeArchived"`
+		ContractSet string `json:"contractset"`
+		FilterMode  string `json:"filterMode"`
 	}
 )
 

@@ -210,8 +210,7 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
+		AddContract(ctx context.Context, c api.ContractMetadata) error
 		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -221,6 +220,7 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
+		RenewContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 
@@ -429,7 +429,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
-		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
@@ -533,7 +532,20 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 }
 
 func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	c, err := b.ms.AddContract(ctx, rev, contractPrice, initialRenterFunds, startHeight, state)
+	if err := b.ms.AddContract(ctx, api.ContractMetadata{
+		ID:                 rev.ID(),
+		HostKey:            rev.HostKey(),
+		StartHeight:        startHeight,
+		State:              state,
+		WindowStart:        rev.Revision.WindowStart,
+		WindowEnd:          rev.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: initialRenterFunds,
+	}); err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	added, err := b.ms.Contract(ctx, rev.ID())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -542,29 +554,45 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 		Module: api.ModuleContract,
 		Event:  api.EventAdd,
 		Payload: api.EventContractAdd{
-			Added:     c,
+			Added:     added,
 			Timestamp: time.Now().UTC(),
 		},
 	})
-	return c, nil
+
+	return added, err
 }
 
-func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, initialRenterFunds, startHeight, renewedFrom, state)
+func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	if err := b.ms.RenewContract(ctx, api.ContractMetadata{
+		ID:                 rev.ID(),
+		HostKey:            rev.HostKey(),
+		RenewedFrom:        renewedFrom,
+		StartHeight:        startHeight,
+		State:              state,
+		WindowStart:        rev.Revision.WindowStart,
+		WindowEnd:          rev.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: initialRenterFunds,
+	}); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
+	}
+
+	renewal, err := b.ms.Contract(ctx, rev.ID())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
 
-	b.sectors.HandleRenewal(r.ID, r.RenewedFrom)
+	b.sectors.HandleRenewal(renewal.ID, renewal.RenewedFrom)
 	b.broadcastAction(webhooks.Event{
 		Module: api.ModuleContract,
 		Event:  api.EventRenew,
 		Payload: api.EventContractRenew{
-			Renewal:   r,
+			Renewal:   renewal,
 			Timestamp: time.Now().UTC(),
 		},
 	})
-	return r, nil
+
+	return renewal, err
 }
 
 func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
