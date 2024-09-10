@@ -23,10 +23,10 @@ type Sector struct {
 // be used for each Slab, and should not be the same key used for the parent
 // Object.
 type Slab struct {
-	Health    float64       `json:"health"`
-	Key       EncryptionKey `json:"key"`
-	MinShards uint8         `json:"minShards"`
-	Shards    []Sector      `json:"shards,omitempty"`
+	Health        float64       `json:"health"`
+	EncryptionKey EncryptionKey `json:"encryptionKey"`
+	MinShards     uint8         `json:"minShards"`
+	Shards        []Sector      `json:"shards,omitempty"`
 }
 
 func (s Slab) IsPartial() bool {
@@ -36,18 +36,18 @@ func (s Slab) IsPartial() bool {
 // NewSlab returns a new slab for the shards.
 func NewSlab(minShards uint8) Slab {
 	return Slab{
-		Key:       GenerateEncryptionKey(),
-		MinShards: minShards,
+		EncryptionKey: GenerateEncryptionKey(),
+		MinShards:     minShards,
 	}
 }
 
 // NewPartialSlab returns a new partial slab.
 func NewPartialSlab(ec EncryptionKey, minShards uint8) Slab {
 	return Slab{
-		Health:    1,
-		Key:       ec,
-		MinShards: minShards,
-		Shards:    nil,
+		Health:        1,
+		EncryptionKey: ec,
+		MinShards:     minShards,
+		Shards:        nil,
 	}
 }
 
@@ -98,7 +98,7 @@ func (s Slab) Encrypt(shards [][]byte) {
 		wg.Add(1)
 		go func(i int) {
 			nonce := [24]byte{1: byte(i)}
-			c, _ := chacha20.NewUnauthenticatedCipher(s.Key.entropy[:], nonce[:])
+			c, _ := chacha20.NewUnauthenticatedCipher(s.EncryptionKey.entropy[:], nonce[:])
 			c.XORKeyStream(shards[i], shards[i])
 			wg.Done()
 		}(i)
@@ -176,7 +176,7 @@ func (ss SlabSlice) Decrypt(shards [][]byte) {
 		wg.Add(1)
 		go func(i int) {
 			nonce := [24]byte{1: byte(i)}
-			c, _ := chacha20.NewUnauthenticatedCipher(ss.Key.entropy[:], nonce[:])
+			c, _ := chacha20.NewUnauthenticatedCipher(ss.EncryptionKey.entropy[:], nonce[:])
 			c.SetCounter(offset)
 			c.XORKeyStream(shards[i], shards[i])
 			wg.Done()

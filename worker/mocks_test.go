@@ -480,7 +480,7 @@ func (os *objectStoreMock) Slab(ctx context.Context, key object.EncryptionKey) (
 
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for _, s := range o.Slabs {
-			if s.Slab.Key.String() == key.String() {
+			if s.Slab.EncryptionKey.String() == key.String() {
 				slab = s.Slab
 				return
 			}
@@ -496,7 +496,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			if slab.Key.String() != s.Key.String() {
+			if slab.EncryptionKey.String() != s.EncryptionKey.String() {
 				continue
 			}
 			// update slab
@@ -566,7 +566,7 @@ func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	slabKeyToSlab := make(map[string]*object.Slab)
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][objKey].Slabs[i].Slab
+			slabKeyToSlab[slab.Slab.EncryptionKey.String()] = &os.objects[bucket][objKey].Slabs[i].Slab
 		}
 	})
 

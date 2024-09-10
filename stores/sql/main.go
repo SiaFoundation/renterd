@@ -1992,7 +1992,7 @@ func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
 	// fetch slab
 	var slabID int64
-	slab := object.Slab{Key: key}
+	slab := object.Slab{EncryptionKey: key}
 	err := tx.QueryRow(ctx, `
 		SELECT id, health, min_shards
 		FROM slabs sla
@@ -2579,7 +2579,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		var hk types.PublicKey
 		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
 			&objectIndex, &ss.Offset, &ss.Length, // slice info
-			&ss.Health, (*EncryptionKey)(&ss.Key), &ss.MinShards, // slab info
+			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
 			&slabIndex, (*Hash256)(&sector.Root), (*PublicKey)(&sector.LatestHost), // sector info
 			(*PublicKey)(&fcid), // contract info
 			(*PublicKey)(&hk),   // host info
