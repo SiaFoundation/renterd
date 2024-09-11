@@ -30,16 +30,16 @@ FROM (
 	UNION ALL
 
     -- pinning renames pricepinning and removes the 'enabled' and 'forexEndpointURL' fields
-	SELECT
-		"pinned" as k,
-		json_remove(
+    SELECT
+        "pinned" as k,
+        json_remove(
             json_remove(
                 (SELECT json_extract(value, "$") FROM settings WHERE key = "pricepinning"),
                 "$.enabled"
             ),
             "$.forexEndpointURL"
         ) as v
-	WHERE
+    WHERE
         json_extract(v, "$.currency") IS NOT NULL AND
         json_extract(v, "$.threshold") IS NOT NULL
 )
