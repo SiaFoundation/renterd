@@ -1732,7 +1732,7 @@ func TestUploadPacking(t *testing.T) {
 	// and file2 share the same slab.
 	res, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
 	tt.OK(err)
-	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].Key)
+	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].EncryptionKey)
 	tt.OK(err)
 	if len(objs) != 2 {
 		t.Fatal("expected 2 objects", len(objs))
