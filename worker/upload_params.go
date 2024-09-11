@@ -7,7 +7,7 @@ import (
 
 type uploadParameters struct {
 	bucket string
-	path   string
+	key    string
 
 	multipart  bool
 	uploadID   string
@@ -25,10 +25,10 @@ type uploadParameters struct {
 	metadata api.ObjectUserMetadata
 }
 
-func defaultParameters(bucket, path string, rs api.RedundancySettings) uploadParameters {
+func defaultParameters(bucket, key string, rs api.RedundancySettings) uploadParameters {
 	return uploadParameters{
 		bucket: bucket,
-		path:   path,
+		key:    key,
 
 		ec:               object.GenerateEncryptionKey(), // random key
 		encryptionOffset: 0,                              // from the beginning

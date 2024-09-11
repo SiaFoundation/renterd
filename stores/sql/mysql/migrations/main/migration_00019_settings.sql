@@ -79,5 +79,5 @@ FROM (
         ) IS NOT NULL
 ) as migration;
 
--- delete old settings (TODO: should we?)
+-- delete old settings
 DELETE FROM settings WHERE `key` IN ("uploadpacking", "redundancy", "contractset", "s3authentication", "pricepinning");
