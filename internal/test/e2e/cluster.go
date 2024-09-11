@@ -936,6 +936,20 @@ func (c *TestCluster) AddHostsBlocking(n int) []*Host {
 	return hosts
 }
 
+// MineTransactions tries to mine the transactions in the transaction pool until
+// it is empty.
+func (c *TestCluster) MineTransactions(ctx context.Context) error {
+	return test.Retry(100, 100*time.Millisecond, func() error {
+		txns, err := c.Bus.TransactionPool(ctx)
+		if err != nil {
+			return err
+		} else if len(txns) > 0 {
+			c.MineBlocks(1)
+		}
+		return nil
+	})
+}
+
 // Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown() {
 	c.tt.Helper()
