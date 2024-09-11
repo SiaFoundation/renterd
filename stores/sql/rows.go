@@ -1,8 +1,6 @@
 package sql
 
 import (
-	"time"
-
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -13,10 +11,9 @@ type Scanner interface {
 }
 
 type ContractRow struct {
-	CreatedAt time.Time
-	FCID      FileContractID
-	HostID    int64
-	HostKey   PublicKey
+	FCID    FileContractID
+	HostID  int64
+	HostKey PublicKey
 
 	// state fields
 	ArchivalReason NullableString
@@ -49,7 +46,7 @@ type ContractRow struct {
 
 func (r *ContractRow) Scan(s Scanner) error {
 	return s.Scan(
-		&r.CreatedAt, &r.FCID, &r.HostID, &r.HostKey,
+		&r.FCID, &r.HostID, &r.HostKey,
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
@@ -79,10 +76,9 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 	}
 
 	return api.ContractMetadata{
-		CreatedAt: r.CreatedAt,
-		ID:        types.FileContractID(r.FCID),
-		HostIP:    r.NetAddress,
-		HostKey:   types.PublicKey(r.HostKey),
+		ID:      types.FileContractID(r.FCID),
+		HostIP:  r.NetAddress,
+		HostKey: types.PublicKey(r.HostKey),
 
 		ContractPrice:      types.Currency(r.ContractPrice),
 		InitialRenterFunds: types.Currency(r.InitialRenterFunds),

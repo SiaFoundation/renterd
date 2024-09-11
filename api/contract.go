@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
@@ -51,9 +50,8 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		CreatedAt time.Time            `json:"createdAt"`
-		ID        types.FileContractID `json:"id"`
-		HostKey   types.PublicKey      `json:"hostKey"`
+		ID      types.FileContractID `json:"id"`
+		HostKey types.PublicKey      `json:"hostKey"`
 
 		ProofHeight    uint64               `json:"proofHeight"`
 		RenewedFrom    types.FileContractID `json:"renewedFrom"`

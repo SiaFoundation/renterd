@@ -410,7 +410,6 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// assert it's equal
-	c.CreatedAt = inserted.CreatedAt
 	c.HostIP = inserted.HostIP
 	if !reflect.DeepEqual(inserted, c) {
 		t.Fatal("contract mismatch", cmp.Diff(inserted, c))
@@ -574,7 +573,6 @@ func TestAncestorsContracts(t *testing.T) {
 		expected.RenewedTo = renewedTo
 		expected.ArchivalReason = api.ContractArchivalReasonRenewed
 		expected.StartHeight = uint64(len(fcids) - 2 - i)
-		expected.CreatedAt = contracts[i].CreatedAt
 		if !reflect.DeepEqual(contracts[i], expected) {
 			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
@@ -886,11 +884,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	if !reflect.DeepEqual(slab2, expectedObjSlab2) {
 		t.Fatal("mismatch", cmp.Diff(slab2, expectedObjSlab2))
 	}
-	expectedContract1.CreatedAt = contract1.CreatedAt
 	if !reflect.DeepEqual(contract1, expectedContract1) {
 		t.Fatal("mismatch", cmp.Diff(contract1, expectedContract1))
 	}
-	expectedContract2.CreatedAt = contract2.CreatedAt
 	if !reflect.DeepEqual(contract2, expectedContract2) {
 		t.Fatal("mismatch", cmp.Diff(contract2, expectedContract2))
 	}
@@ -4466,9 +4462,8 @@ func TestPutContract(t *testing.T) {
 	}
 
 	c := api.ContractMetadata{
-		CreatedAt: time.Now(),
-		ID:        types.FileContractID{1},
-		HostKey:   hk,
+		ID:      types.FileContractID{1},
+		HostKey: hk,
 
 		ProofHeight:    2,
 		RenewedFrom:    types.FileContractID{3},
@@ -4501,14 +4496,13 @@ func TestPutContract(t *testing.T) {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("expected 1 contract, instead got %d", len(contracts))
-	} else if contracts[0].CreatedAt = c.CreatedAt; !reflect.DeepEqual(contracts[0], c) {
+	} else if !reflect.DeepEqual(contracts[0], c) {
 		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], c))
 	}
 
 	u := api.ContractMetadata{
-		CreatedAt: time.Now(),
-		ID:        types.FileContractID{1},
-		HostKey:   hk,
+		ID:      types.FileContractID{1},
+		HostKey: hk,
 
 		ProofHeight:    17,
 		RenewedFrom:    types.FileContractID{18},
@@ -4541,7 +4535,7 @@ func TestPutContract(t *testing.T) {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("expected 1 contract, instead got %d", len(contracts))
-	} else if contracts[0].CreatedAt = u.CreatedAt; !reflect.DeepEqual(contracts[0], u) {
+	} else if !reflect.DeepEqual(contracts[0], u) {
 		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], u))
 	}
 }
