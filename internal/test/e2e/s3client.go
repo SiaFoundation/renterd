@@ -56,8 +56,10 @@ type (
 	}
 
 	getObjectResponse struct {
-		body io.ReadCloser
-		etag string
+		body         io.ReadCloser
+		etag         string
+		lastModified time.Time
+		metadata     map[string]string
 	}
 
 	headObjectResponse struct {
@@ -65,6 +67,7 @@ type (
 		etag          string
 		key           string
 		lastModified  time.Time
+		metadata      map[string]string
 	}
 
 	multipartUploadInfo struct {
@@ -132,11 +135,19 @@ func (c *s3TestClient) CompleteMultipartUpload(bucket, object, uploadID string, 
 	}, nil
 }
 
-func (c *s3TestClient) CopyObject(bucket, srcKey, dstKey string) (copyObjectResponse, error) {
+func (c *s3TestClient) CopyObject(bucket, srcKey, dstKey string, opts putObjectOptions) (copyObjectResponse, error) {
 	var input s3aws.CopyObjectInput
 	input.SetBucket(bucket)
 	input.SetCopySource(srcKey)
 	input.SetKey(dstKey)
+	if opts.metadata != nil {
+		md := make(map[string]*string)
+		for k := range opts.metadata {
+			v := opts.metadata[k] // copy to avoid reference to loop variable
+			md[k] = &v
+		}
+		input.SetMetadata(md)
+	}
 	resp, err := c.s3.CopyObject(&input)
 	if err != nil {
 		return copyObjectResponse{}, err
@@ -185,9 +196,17 @@ func (c *s3TestClient) GetObject(bucket, objKey string, opts getObjectOptions) (
 	if err != nil {
 		return getObjectResponse{}, err
 	}
+	md := make(map[string]string)
+	for k, v := range resp.Metadata {
+		if v != nil {
+			md[k] = *v
+		}
+	}
 	return getObjectResponse{
-		etag: *resp.ETag,
-		body: resp.Body,
+		etag:         *resp.ETag,
+		body:         resp.Body,
+		lastModified: *resp.LastModified,
+		metadata:     md,
 	}, nil
 }
 
@@ -209,11 +228,18 @@ func (c *s3TestClient) HeadObject(bucket, objKey string) (headObjectResponse, er
 	if err != nil {
 		return headObjectResponse{}, err
 	}
+	md := make(map[string]string)
+	for k, v := range resp.Metadata {
+		if v != nil {
+			md[k] = *v
+		}
+	}
 	return headObjectResponse{
 		etag:          *resp.ETag,
 		contentLength: *resp.ContentLength,
 		key:           objKey,
 		lastModified:  *resp.LastModified,
+		metadata:      md,
 	}, nil
 }
 
@@ -345,7 +371,7 @@ func (c *s3TestClient) NewMultipartUpload(bucket, objKey string, opts putObjectO
 	return *resp.UploadId, nil
 }
 
-func (c *s3TestClient) PutObject(bucket, objKey string, body io.ReadSeeker) (putObjectResponse, error) {
+func (c *s3TestClient) PutObject(bucket, objKey string, body io.ReadSeeker, opts putObjectOptions) (putObjectResponse, error) {
 	contentLength, err := body.Seek(0, io.SeekEnd)
 	if err != nil {
 		return putObjectResponse{}, err
@@ -357,6 +383,15 @@ func (c *s3TestClient) PutObject(bucket, objKey string, body io.ReadSeeker) (put
 	input.SetBody(body)
 	input.SetKey(objKey)
 	input.SetContentLength(contentLength)
+
+	if opts.metadata != nil {
+		md := make(map[string]*string)
+		for k := range opts.metadata {
+			v := opts.metadata[k] // copy to avoid reference to loop variable
+			md[k] = &v
+		}
+		input.SetMetadata(md)
+	}
 
 	resp, err := c.s3.PutObject(&input)
 	if err != nil {
