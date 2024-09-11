@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	s3aws "github.com/aws/aws-sdk-go/service/s3"
 )
 
@@ -98,6 +99,10 @@ type (
 		uploadID string
 	}
 )
+
+func (c *s3TestClient) Config() aws.Config {
+	return c.s3.Config
+}
 
 func (c *s3TestClient) AbortMultipartUpload(bucket, key string, uploadID string) error {
 	var input s3aws.AbortMultipartUploadInput
