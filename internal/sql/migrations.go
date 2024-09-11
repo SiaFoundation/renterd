@@ -245,9 +245,15 @@ var (
 				},
 			},
 			{
-				ID: "00003_contract_spending",
+				ID: "00003_unix_ms",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_contract_spending", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
+				},
+			},
+			{
+				ID: "00004_contract_spending",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_contract_spending", log)
 				},
 			},
 		}
