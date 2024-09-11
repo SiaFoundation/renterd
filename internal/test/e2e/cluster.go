@@ -66,7 +66,6 @@ type TestCluster struct {
 	Bus       *bus.Client
 	Worker    *worker.Client
 	S3        *minio.Client
-	S3Core    *minio.Core
 	S3Aws     *s3TestClient
 
 	workerShutdownFns    []func(context.Context) error
@@ -344,12 +343,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	})
 	tt.OK(err)
 
-	url := s3Client.EndpointURL()
-	s3Core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
-		Creds: test.S3Credentials,
-	})
-	tt.OK(err)
-
 	mySession := session.Must(session.NewSession())
 	s3AWSClient := s3aws.New(mySession, aws.NewConfig().
 		WithEndpoint(s3Client.EndpointURL().String()).
@@ -431,7 +424,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Bus:       busClient,
 		Worker:    workerClient,
 		S3:        s3Client,
-		S3Core:    s3Core,
 		S3Aws:     &s3TestClient{s3AWSClient},
 
 		workerShutdownFns:    workerShutdownFns,

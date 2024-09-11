@@ -67,7 +67,7 @@ func TestS3Basic(t *testing.T) {
 	// add object to the bucket
 	data := frand.Bytes(10)
 	etag := md5.Sum(data)
-	uploadInfo, err := cluster.S3Aws.PutObject(bucket, objPath, bytes.NewReader(data))
+	uploadInfo, err := cluster.S3Aws.PutObject(bucket, objPath, bytes.NewReader(data), putObjectOptions{})
 	tt.OK(err)
 	if uploadInfo.etag != api.FormatETag(hex.EncodeToString(etag[:])) {
 		t.Fatalf("expected ETag %v, got %v", hex.EncodeToString(etag[:]), uploadInfo.etag)
@@ -80,7 +80,7 @@ func TestS3Basic(t *testing.T) {
 		t.Fatalf("expected ETag %v, got %v", uploadInfo.etag, busObject.Object.ETag)
 	}
 
-	_, err = cluster.S3Aws.PutObject("nonexistent", objPath, bytes.NewReader(data))
+	_, err = cluster.S3Aws.PutObject("nonexistent", objPath, bytes.NewReader(data), putObjectOptions{})
 	tt.AssertIs(err, errBucketNotExists)
 
 	// get object
@@ -113,7 +113,7 @@ func TestS3Basic(t *testing.T) {
 
 	// copy our object into the new bucket.
 	src := fmt.Sprintf("%s/%s", bucket, objPath)
-	res, err := cluster.S3Aws.CopyObject(bucket2, src, objPath)
+	res, err := cluster.S3Aws.CopyObject(bucket2, src, objPath, putObjectOptions{})
 	tt.OK(err)
 	if res.lastModified.IsZero() {
 		t.Fatal("expected LastModified to be non-zero")
@@ -150,9 +150,9 @@ func TestS3Basic(t *testing.T) {
 	// add a few objects to the bucket.
 	tmpObj1 := "dir/"
 	body := frand.Bytes(10)
-	tt.OKAll(cluster.S3Aws.PutObject(bucket, tmpObj1, bytes.NewReader(body)))
+	tt.OKAll(cluster.S3Aws.PutObject(bucket, tmpObj1, bytes.NewReader(body), putObjectOptions{}))
 	tmpObj2 := "dir/file"
-	tt.OKAll(cluster.S3Aws.PutObject(bucket, tmpObj2, bytes.NewReader(body)))
+	tt.OKAll(cluster.S3Aws.PutObject(bucket, tmpObj2, bytes.NewReader(body), putObjectOptions{}))
 
 	// delete them using the multi delete endpoint.
 	tt.OKAll(cluster.S3Aws.DeleteObject(bucket, tmpObj1))
@@ -178,7 +178,6 @@ func TestS3ObjectMetadata(t *testing.T) {
 	defer cluster.Shutdown()
 
 	// convenience variables
-	s3 := cluster.S3
 	tt := cluster.tt
 
 	// create dummy metadata
@@ -188,7 +187,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// add object to the bucket
-	_, err := s3.PutObject(context.Background(), api.DefaultBucketName, t.Name(), bytes.NewReader([]byte(t.Name())), int64(len([]byte(t.Name()))), minio.PutObjectOptions{UserMetadata: metadata})
+	_, err := cluster.S3Aws.PutObject(api.DefaultBucketName, t.Name(), bytes.NewReader([]byte(t.Name())), putObjectOptions{metadata: metadata})
 	tt.OK(err)
 
 	// create helper to assert metadata is present
@@ -202,52 +201,57 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// perform GET request
-	obj, err := s3.GetObject(context.Background(), api.DefaultBucketName, t.Name(), minio.GetObjectOptions{})
+	obj, err := cluster.S3Aws.GetObject(api.DefaultBucketName, t.Name(), getObjectOptions{})
 	tt.OK(err)
+	assertMetadata(metadata, obj.metadata)
 
-	// assert metadata is set
-	get, err := obj.Stat()
+	// assert metadata is set on HEAD request
+	get, err := cluster.S3Aws.HeadObject(api.DefaultBucketName, t.Name())
 	tt.OK(err)
-	assertMetadata(metadata, get.UserMetadata)
+	assertMetadata(metadata, get.metadata)
 
 	// perform HEAD request
-	head, err := s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	head, err := cluster.S3Aws.HeadObject(api.DefaultBucketName, t.Name())
 	tt.OK(err)
-	assertMetadata(metadata, head.UserMetadata)
+	assertMetadata(metadata, head.metadata)
 
 	// perform metadata update (same src/dst copy)
 	metadata["Baz"] = "updated"
-	_, err = s3.CopyObject(
-		context.Background(),
-		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name(), UserMetadata: metadata, ReplaceMetadata: true},
-		minio.CopySrcOptions{Bucket: api.DefaultBucketName, Object: t.Name()},
+	_, err = cluster.S3Aws.CopyObject(
+		api.DefaultBucketName,
+		t.Name(),
+		t.Name(),
+		putObjectOptions{metadata: metadata},
 	)
 	tt.OK(err)
 
 	// perform HEAD request
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	head, err = cluster.S3Aws.HeadObject(api.DefaultBucketName, t.Name())
 	tt.OK(err)
-	assertMetadata(metadata, head.UserMetadata)
+	assertMetadata(metadata, head.metadata)
 
 	// perform copy
 	metadata["Baz"] = "copied"
-	_, err = s3.CopyObject(
-		context.Background(),
-		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name() + "copied", UserMetadata: metadata, ReplaceMetadata: true},
-		minio.CopySrcOptions{Bucket: api.DefaultBucketName, Object: t.Name()},
+	_, err = cluster.S3Aws.CopyObject(
+		api.DefaultBucketName,
+		t.Name(),
+		t.Name()+"copied",
+		putObjectOptions{
+			metadata: metadata,
+		},
 	)
 	tt.OK(err)
 
 	// perform HEAD request
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name()+"copied", minio.StatObjectOptions{})
+	head, err = cluster.S3Aws.HeadObject(api.DefaultBucketName, t.Name()+"copied")
 	tt.OK(err)
-	assertMetadata(metadata, head.UserMetadata)
+	assertMetadata(metadata, metadata)
 
 	// assert the original object's metadata is unchanged
 	metadata["Baz"] = "updated"
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	head, err = cluster.S3Aws.HeadObject(api.DefaultBucketName, t.Name())
 	tt.OK(err)
-	assertMetadata(metadata, head.UserMetadata)
+	assertMetadata(metadata, metadata)
 
 	// upload a file using multipart upload
 	uid, err := cluster.S3Aws.NewMultipartUpload(api.DefaultBucketName, "multi", putObjectOptions{
@@ -269,11 +273,11 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 
 	// check metadata
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, "multi", minio.StatObjectOptions{})
+	head, err = cluster.S3Aws.HeadObject(api.DefaultBucketName, "multi")
 	tt.OK(err)
 	assertMetadata(map[string]string{
 		"New": "1",
-	}, head.UserMetadata)
+	}, head.metadata)
 }
 
 func TestS3Authentication(t *testing.T) {
@@ -354,19 +358,18 @@ func TestS3List(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	s3 := cluster.S3
 	tt := cluster.tt
 
 	// create bucket
-	tt.OK(s3.MakeBucket(context.Background(), "bucket", minio.MakeBucketOptions{}))
+	tt.OK(cluster.S3Aws.CreateBucket("bucket"))
 
 	// manually create the 'a/' object as a directory. It should also be
 	// possible to call StatObject on it without errors.
-	tt.OKAll(s3.PutObject(context.Background(), "bucket", "a/", bytes.NewReader(nil), 0, minio.PutObjectOptions{}))
-	so, err := s3.StatObject(context.Background(), "bucket", "a/", minio.StatObjectOptions{})
+	tt.OKAll(cluster.S3Aws.PutObject("bucket", "a/", bytes.NewReader(nil), putObjectOptions{}))
+	so, err := cluster.S3Aws.HeadObject("bucket", "a/")
 	tt.OK(err)
-	if so.Key != "a/" {
-		t.Fatal("unexpected key:", so.Key)
+	if so.key != "a/" {
+		t.Fatal("unexpected key:", so.key)
 	}
 
 	objects := []string{
@@ -381,7 +384,7 @@ func TestS3List(t *testing.T) {
 	}
 	for _, object := range objects {
 		data := frand.Bytes(10)
-		tt.OKAll(s3.PutObject(context.Background(), "bucket", object, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{}))
+		tt.OKAll(cluster.S3Aws.PutObject("bucket", object, bytes.NewReader(data), putObjectOptions{}))
 	}
 
 	flatten := func(res listObjectsResponse) []string {
@@ -519,11 +522,10 @@ func TestS3MultipartUploads(t *testing.T) {
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
-	s3 := cluster.S3
 	tt := cluster.tt
 
 	// Create bucket.
-	tt.OK(s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{}))
+	tt.OK(cluster.S3Aws.CreateBucket("multipart"))
 
 	// Start a new multipart upload.
 	uploadID, err := cluster.S3Aws.NewMultipartUpload("multipart", "foo", putObjectOptions{})
@@ -664,7 +666,6 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
-	s3 := cluster.S3
 	bucket := "multipart"
 	tt := cluster.tt
 
@@ -672,7 +673,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
 
 	// Create bucket.
-	tt.OK(s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{}))
+	tt.OK(cluster.S3Aws.CreateBucket(bucket))
 
 	// Start a new multipart upload.
 	uploadID, err := cluster.S3Aws.NewMultipartUpload(bucket, "foo", putObjectOptions{})
@@ -688,7 +689,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	// Upload 1 regular object. It will share the same packed slab, cause the
 	// packed slab to be complete and start a new one.
 	data = frand.Bytes(test.RedundancySettings.MinShards*rhpv2.SectorSize - 1)
-	tt.OKAll(s3.PutObject(context.Background(), bucket, "bar", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{}))
+	tt.OKAll(cluster.S3Aws.PutObject(bucket, "bar", bytes.NewReader(data), putObjectOptions{}))
 
 	// Block until the buffer is uploaded.
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -703,7 +704,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	// Upload another object that overwrites the first one, triggering a call to
 	// 'pruneSlabs'.
 	data = frand.Bytes(5)
-	tt.OKAll(s3.PutObject(context.Background(), bucket, "bar", bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{}))
+	tt.OKAll(cluster.S3Aws.PutObject(bucket, "bar", bytes.NewReader(data), putObjectOptions{}))
 }
 
 func TestS3SpecialChars(t *testing.T) {
@@ -716,35 +717,36 @@ func TestS3SpecialChars(t *testing.T) {
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
-	s3 := cluster.S3
 	tt := cluster.tt
 
 	// manually create the 'a/' object as a directory. It should also be
 	// possible to call StatObject on it without errors.
 	objectKey := "foo/höst (1).log"
-	tt.OKAll(s3.PutObject(context.Background(), api.DefaultBucketName, objectKey, bytes.NewReader([]byte("bar")), 0, minio.PutObjectOptions{}))
-	so, err := s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	tt.OKAll(cluster.S3Aws.PutObject(api.DefaultBucketName, objectKey, bytes.NewReader([]byte("bar")), putObjectOptions{}))
+	so, err := cluster.S3Aws.HeadObject(api.DefaultBucketName, objectKey)
 	tt.OK(err)
-	if so.Key != objectKey {
-		t.Fatal("unexpected key:", so.Key)
+	if so.key != objectKey {
+		t.Fatal("unexpected key:", so.key)
 	}
-	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
-		tt.OK(res.Err)
-		if res.Key != objectKey {
-			t.Fatal("unexpected key:", res.Key)
+	lor, err := cluster.S3Aws.ListObjects(api.DefaultBucketName, listObjectsOptions{prefix: "foo/"})
+	tt.OK(err)
+	for _, res := range lor.contents {
+		if res.key != objectKey {
+			t.Fatal("unexpected key:", res.key)
 		}
 	}
 
 	// delete it and verify its gone.
-	tt.OK(s3.RemoveObject(context.Background(), api.DefaultBucketName, objectKey, minio.RemoveObjectOptions{}))
-	so, err = s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	tt.OK(cluster.S3Aws.DeleteObject(api.DefaultBucketName, objectKey))
+	so, err = cluster.S3Aws.HeadObject(api.DefaultBucketName, objectKey)
 	if err == nil {
 		t.Fatal("shouldn't exist", err)
 	}
-	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
-		tt.OK(res.Err)
-		if res.Key == objectKey {
-			t.Fatal("unexpected key:", res.Key)
+	lor, err = cluster.S3Aws.ListObjects(api.DefaultBucketName, listObjectsOptions{prefix: "foo/"})
+	for _, res := range lor.contents {
+		tt.OK(err)
+		if res.key == objectKey {
+			t.Fatal("unexpected key:", res.key)
 		}
 	}
 }
