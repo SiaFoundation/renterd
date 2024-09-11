@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	s3aws "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/go-cmp/cmp"
-	"github.com/minio/minio-go/v7"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/api"
@@ -192,7 +192,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 
 	// create helper to assert metadata is present
-	assertMetadata := func(want map[string]string, got minio.StringMap) {
+	assertMetadata := func(want map[string]string, got map[string]string) {
 		t.Helper()
 		for k, wantt := range want {
 			if gott, ok := got[k]; !ok || gott != wantt {
@@ -309,7 +309,13 @@ func TestS3Authentication(t *testing.T) {
 
 	// Create client that is not authenticated
 	cfg := cluster.S3.Config()
-	cfg.Credentials = nil
+	cfg.Credentials = credentials.NewCredentials(&credentials.StaticProvider{
+		Value: credentials.Value{
+			AccessKeyID:     "unknownkey",
+			SecretAccessKey: "somesecret",
+		},
+	})
+
 	mySession := session.Must(session.NewSession())
 	s3Unauthenticated := s3aws.New(mySession, &cfg)
 

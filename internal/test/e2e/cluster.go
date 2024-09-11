@@ -17,7 +17,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	s3aws "github.com/aws/aws-sdk-go/service/s3"
-	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -336,15 +335,10 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotClient := autopilot.NewClient(autopilotAddr, autopilotPassword)
 	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
-	s3Client, err := minio.New(s3Addr, &minio.Options{
-		Creds:  test.S3Credentials,
-		Secure: false,
-	})
-	tt.OK(err)
 
 	mySession := session.Must(session.NewSession())
 	s3AWSClient := s3aws.New(mySession, aws.NewConfig().
-		WithEndpoint(s3Client.EndpointURL().String()).
+		WithEndpoint(fmt.Sprintf("http://%s", s3Addr)).
 		WithRegion("dummy").
 		WithS3ForcePathStyle(true).
 		WithCredentials(credentials.NewCredentials(&credentials.StaticProvider{
