@@ -84,7 +84,7 @@ func TestS3Basic(t *testing.T) {
 	tt.AssertIs(err, errBucketNotExists)
 
 	// get object
-	obj, err := cluster.S3Aws.GetObject(bucket, objPath)
+	obj, err := cluster.S3Aws.GetObject(bucket, objPath, getObjectOptions{})
 	tt.OK(err)
 	if b, err := io.ReadAll(obj.body); err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestS3Basic(t *testing.T) {
 	}
 
 	// get copied object
-	obj, err = cluster.S3Aws.GetObject(bucket2, objPath)
+	obj, err = cluster.S3Aws.GetObject(bucket2, objPath, getObjectOptions{})
 	tt.OK(err)
 	if b, err := io.ReadAll(obj.body); err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestS3Basic(t *testing.T) {
 	tt.OKAll(cluster.S3Aws.DeleteObject(bucket, objPath))
 
 	// try to get object
-	obj, err = cluster.S3Aws.GetObject(bucket, objPath)
+	obj, err = cluster.S3Aws.GetObject(bucket, objPath, getObjectOptions{})
 	tt.AssertContains(err, "NoSuchKey")
 
 	// add a few objects to the bucket.
@@ -520,14 +520,13 @@ func TestS3MultipartUploads(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 	s3 := cluster.S3
-	core := cluster.S3Core
 	tt := cluster.tt
 
 	// Create bucket.
 	tt.OK(s3.MakeBucket(context.Background(), "multipart", minio.MakeBucketOptions{}))
 
 	// Start a new multipart upload.
-	uploadID, err := core.NewMultipartUpload(context.Background(), "multipart", "foo", minio.PutObjectOptions{})
+	uploadID, err := cluster.S3Aws.NewMultipartUpload("multipart", "foo", putObjectOptions{})
 	tt.OK(err)
 	if uploadID == "" {
 		t.Fatal("expected non-empty upload ID")
@@ -535,7 +534,7 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// Start another one in the default bucket. This should not show up when
 	// listing the uploads in the 'multipart' bucket.
-	tt.OKAll(core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "foo", minio.PutObjectOptions{}))
+	tt.OKAll(cluster.S3Aws.NewMultipartUpload(api.DefaultBucketName, "foo", putObjectOptions{}))
 
 	// List uploads
 	uploads, err := cluster.S3Aws.ListMultipartUploads("multipart")
@@ -552,96 +551,93 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// Add 3 parts out of order to make sure the object is reconstructed
 	// correctly.
-	putPart := func(partNum int, data []byte) string {
+	putPart := func(partNum int64, data []byte) string {
 		t.Helper()
-		part, err := core.PutObjectPart(context.Background(), "multipart", "foo", uploadID, partNum, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+		part, err := cluster.S3Aws.PutObjectPart("multipart", "foo", uploadID, partNum, bytes.NewReader(data), putObjectPartOptions{})
 		tt.OK(err)
-		if part.ETag == "" {
+		if part.etag == "" {
 			t.Fatal("expected non-empty ETag")
 		}
-		return part.ETag
+		return part.etag
 	}
 	etag2 := putPart(2, []byte("world"))
 	etag1 := putPart(1, []byte("hello"))
 	etag3 := putPart(3, []byte("!"))
 
 	// List parts
-	lop, err := core.ListObjectParts(context.Background(), "multipart", "foo", uploadID, 0, 0)
+	lop, err := cluster.S3Aws.ListObjectParts("multipart", "foo", uploadID)
 	tt.OK(err)
-	if lop.Bucket != "multipart" || lop.Key != "foo" || lop.UploadID != uploadID || len(lop.ObjectParts) != 3 {
+	if lop.bucket != "multipart" || lop.key != "foo" || lop.uploadId != uploadID || len(lop.objectParts) != 3 {
 		t.Fatal("unexpected response:", lop)
-	} else if part1 := lop.ObjectParts[0]; part1.PartNumber != 1 || part1.Size != 5 || part1.ETag == "" {
+	} else if part1 := lop.objectParts[0]; part1.partNumber != 1 || part1.size != 5 || part1.etag == "" {
 		t.Fatal("unexpected part:", part1)
-	} else if part2 := lop.ObjectParts[1]; part2.PartNumber != 2 || part2.Size != 5 || part2.ETag == "" {
+	} else if part2 := lop.objectParts[1]; part2.partNumber != 2 || part2.size != 5 || part2.etag == "" {
 		t.Fatal("unexpected part:", part2)
-	} else if part3 := lop.ObjectParts[2]; part3.PartNumber != 3 || part3.Size != 1 || part3.ETag == "" {
+	} else if part3 := lop.objectParts[2]; part3.partNumber != 3 || part3.size != 1 || part3.etag == "" {
 		t.Fatal("unexpected part:", part3)
 	}
 
 	// Complete upload
-	ui, err := core.CompleteMultipartUpload(context.Background(), "multipart", "foo", uploadID, []minio.CompletePart{
+	ui, err := cluster.S3Aws.CompleteMultipartUpload("multipart", "foo", uploadID, []completePart{
 		{
-			PartNumber: 1,
-			ETag:       etag1,
+			partNumber: 1,
+			etag:       etag1,
 		},
 		{
-			PartNumber: 2,
-			ETag:       etag2,
+			partNumber: 2,
+			etag:       etag2,
 		},
 		{
-			PartNumber: 3,
-			ETag:       etag3,
+			partNumber: 3,
+			etag:       etag3,
 		},
-	}, minio.PutObjectOptions{})
+	}, putObjectOptions{})
 	tt.OK(err)
-	if ui.Bucket != "multipart" || ui.Key != "foo" || ui.ETag == "" {
+	if ui.bucket != "multipart" || ui.key != "foo" || ui.etag == "" {
 		t.Fatal("unexpected response:", ui)
 	}
 
 	// Download object
 	expectedData := []byte("helloworld!")
-	downloadedObj, err := s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
+	downloadedObj, err := cluster.S3Aws.GetObject("multipart", "foo", getObjectOptions{})
 	tt.OK(err)
-	if data, err := io.ReadAll(downloadedObj); err != nil {
+	if data, err := io.ReadAll(downloadedObj.body); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", string(data))
-	} else if info, err := downloadedObj.Stat(); err != nil {
-		t.Fatal(err)
-	} else if info.ETag != ui.ETag {
-		t.Fatal("unexpected ETag:", info.ETag)
-	} else if info.Size != int64(len(expectedData)) {
-		t.Fatal("unexpected size:", info.Size)
+	} else if downloadedObj.etag != ui.etag {
+		t.Fatal("unexpected ETag:", downloadedObj.etag)
 	}
 
 	// Stat object
-	if info, err := s3.StatObject(context.Background(), "multipart", "foo", minio.StatObjectOptions{}); err != nil {
+	if info, err := cluster.S3Aws.HeadObject("multipart", "foo"); err != nil {
 		t.Fatal(err)
-	} else if info.ETag != ui.ETag {
-		t.Fatal("unexpected ETag:", info.ETag)
-	} else if info.Size != int64(len(expectedData)) {
-		t.Fatal("unexpected size:", info.Size)
+	} else if info.etag != ui.etag {
+		t.Fatal("unexpected ETag:", info.etag)
+	} else if info.contentLength != int64(len(expectedData)) {
+		t.Fatal("unexpected size:", info.contentLength)
 	}
 
 	// Download again with range request.
 	b := make([]byte, 5)
-	downloadedObj, err = s3.GetObject(context.Background(), "multipart", "foo", minio.GetObjectOptions{})
+	downloadedObj, err = cluster.S3Aws.GetObject("multipart", "foo", getObjectOptions{
+		offset: 0,
+		length: 5,
+	})
 	tt.OK(err)
-	if _, err = downloadedObj.ReadAt(b, 5); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(b, []byte("world")) {
+	if !bytes.Equal(b, []byte("world")) {
 		t.Fatal("unexpected data:", string(b))
 	}
 
 	// Start a second multipart upload.
-	uploadID, err = core.NewMultipartUpload(context.Background(), "multipart", "bar", minio.PutObjectOptions{})
+	uploadID, err = cluster.S3Aws.NewMultipartUpload("multipart", "bar", putObjectOptions{})
 	tt.OK(err)
 
 	// Add a part.
 	putPart(1, []byte("bar"))
 
 	// Abort upload
-	tt.OK(core.AbortMultipartUpload(context.Background(), "multipart", "bar", uploadID))
+	tt.OK(cluster.S3Aws.AbortMultipartUpload("multipart", "bar", uploadID))
 
 	// List it.
 	uploads, err = cluster.S3Aws.ListMultipartUploads("multipart")

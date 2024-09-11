@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
 	"time"
 
@@ -49,6 +50,11 @@ type (
 		etag       string
 	}
 
+	getObjectOptions struct {
+		offset int64
+		length int64
+	}
+
 	getObjectResponse struct {
 		body io.ReadCloser
 		etag string
@@ -59,6 +65,12 @@ type (
 		etag          string
 		key           string
 		lastModified  time.Time
+	}
+
+	multipartUploadInfo struct {
+		bucket   string
+		key      string
+		uploadID string
 	}
 
 	putObjectOptions struct {
@@ -77,10 +89,21 @@ type (
 	}
 
 	uploadInfo struct {
+		bucket   string
+		etag     string
 		key      string
 		uploadID string
 	}
 )
+
+func (c *s3TestClient) AbortMultipartUpload(bucket, key string, uploadID string) error {
+	var input s3aws.AbortMultipartUploadInput
+	input.SetBucket(bucket)
+	input.SetKey(key)
+	input.SetUploadId(uploadID)
+	_, err := c.s3.AbortMultipartUpload(&input)
+	return err
+}
 
 func (c *s3TestClient) CompleteMultipartUpload(bucket, object, uploadID string, parts []completePart, opts putObjectOptions) (uploadInfo, error) {
 	var input s3aws.CompleteMultipartUploadInput
@@ -97,12 +120,14 @@ func (c *s3TestClient) CompleteMultipartUpload(bucket, object, uploadID string, 
 	}
 	input.SetMultipartUpload(&upload)
 
-	_, err := c.s3.CompleteMultipartUpload(&input)
+	resp, err := c.s3.CompleteMultipartUpload(&input)
 	if err != nil {
 		return uploadInfo{}, err
 	}
 	return uploadInfo{
-		key:      object,
+		bucket:   *resp.Bucket,
+		etag:     *resp.ETag,
+		key:      *resp.Key,
 		uploadID: uploadID,
 	}, nil
 }
@@ -144,10 +169,13 @@ func (c *s3TestClient) DeleteObject(bucket, objKey string) error {
 	return err
 }
 
-func (c *s3TestClient) GetObject(bucket, objKey string) (getObjectResponse, error) {
+func (c *s3TestClient) GetObject(bucket, objKey string, opts getObjectOptions) (getObjectResponse, error) {
 	var input s3aws.GetObjectInput
 	input.SetBucket(bucket)
 	input.SetKey(objKey)
+	if opts.offset > 0 || opts.length > 0 {
+		input.SetRange(fmt.Sprintf("bytes=%d-%d", opts.offset, opts.offset+opts.length-1))
+	}
 	resp, err := c.s3.GetObject(&input)
 	if err != nil {
 		return getObjectResponse{}, err
@@ -198,21 +226,56 @@ func (c *s3TestClient) ListBuckets() (lbr listBucketResponse, err error) {
 	return lbr, nil
 }
 
-func (c *s3TestClient) ListMultipartUploads(bucket string) ([]uploadInfo, error) {
+func (c *s3TestClient) ListMultipartUploads(bucket string) ([]multipartUploadInfo, error) {
 	var input s3aws.ListMultipartUploadsInput
 	input.SetBucket(bucket)
 	resp, err := c.s3.ListMultipartUploads(&input)
 	if err != nil {
 		return nil, err
 	}
-	var uploads []uploadInfo
+	var uploads []multipartUploadInfo
 	for _, u := range resp.Uploads {
-		uploads = append(uploads, uploadInfo{
+		uploads = append(uploads, multipartUploadInfo{
+			bucket:   bucket,
 			key:      *u.Key,
 			uploadID: *u.UploadId,
 		})
 	}
 	return uploads, nil
+}
+
+type listObjectPartsResponse struct {
+	bucket      string
+	key         string
+	uploadId    string
+	objectParts []objectPart
+}
+
+type objectPart struct {
+	partNumber int64
+	size       int64
+	etag       string
+}
+
+func (c *s3TestClient) ListObjectParts(bucket, objKey, uploadID string) (lopr listObjectPartsResponse, err error) {
+	var input s3aws.ListPartsInput
+	input.SetBucket(bucket)
+	input.SetKey(objKey)
+	input.SetUploadId(uploadID)
+	resp, err := c.s3.ListParts(&input)
+	if err != nil {
+		return listObjectPartsResponse{}, err
+	}
+	lopr.bucket = *resp.Bucket
+	lopr.key = *resp.Key
+	lopr.uploadId = *resp.UploadId
+	for _, p := range resp.Parts {
+		lopr.objectParts = append(lopr.objectParts, objectPart{
+			partNumber: *p.PartNumber,
+		})
+	}
+
+	return listObjectPartsResponse{}, err
 }
 
 func (c *s3TestClient) ListObjects(bucket string, opts listObjectsOptions) (lor listObjectsResponse, err error) {
