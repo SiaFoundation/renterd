@@ -790,31 +790,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	}
 
 	var orderByExpr string
-	if opts.SortBy != "" {
-		switch opts.SortDir {
-		case "":
-			opts.SortDir = api.SortDirAsc
-		case api.SortDirAsc, api.SortDirDesc:
-		default:
-			return nil, fmt.Errorf("%w: %v", api.ErrInvalidHostSortDir, opts.SortDir)
-		}
-		if !api.IsValidHostSortBy(opts.SortBy) {
-			return nil, fmt.Errorf("%w: %s", api.ErrInvalidHostSortBy, opts.SortBy)
-		}
-
-		var fieldExpr string
-		if strings.HasPrefix(opts.SortBy, "settings.") {
-			field := strings.TrimPrefix(opts.SortBy, "settings.")
-			fieldExpr = fmt.Sprintf("h.settings ->> '$.%s'", field)
-		} else if strings.HasPrefix(opts.SortBy, "price_table.") {
-			field := strings.TrimPrefix(opts.SortBy, "price_table.")
-			fieldExpr = fmt.Sprintf("h.price_table ->> '$.%s'", field)
-		} else {
-			return nil, fmt.Errorf("invalid sortBy parameter: %v", opts.SortBy)
-		}
-		orderByExpr = fmt.Sprintf("ORDER BY CAST(%s AS DECIMAL(65, 0)) %s", fieldExpr, opts.SortDir)
-	}
-
 	var blockedExpr string
 	if len(blockedExprs) > 0 {
 		blockedExpr = strings.Join(blockedExprs, " OR ")
