@@ -619,14 +619,15 @@ func TestS3MultipartUploads(t *testing.T) {
 	}
 
 	// Download again with range request.
-	b := make([]byte, 5)
 	downloadedObj, err = cluster.S3Aws.GetObject("multipart", "foo", getObjectOptions{
-		offset: 0,
+		offset: 5,
 		length: 5,
 	})
 	tt.OK(err)
-	if !bytes.Equal(b, []byte("world")) {
-		t.Fatal("unexpected data:", string(b))
+	if data, err := io.ReadAll(downloadedObj.body); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(data, []byte("world")) {
+		t.Fatal("unexpected data:", string(data))
 	}
 
 	// Start a second multipart upload.
