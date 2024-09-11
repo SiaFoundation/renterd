@@ -173,8 +173,13 @@ func (c *s3TestClient) GetObject(bucket, objKey string, opts getObjectOptions) (
 	var input s3aws.GetObjectInput
 	input.SetBucket(bucket)
 	input.SetKey(objKey)
-	if opts.offset > 0 || opts.length > 0 {
-		input.SetRange(fmt.Sprintf("bytes=%d-%d", opts.offset, opts.offset+opts.length-1))
+	if hasOffset, hasLength := opts.offset > 0, opts.length > 0; hasOffset || hasLength {
+		if hasLength {
+			fmt.Println(opts.offset, opts.length)
+			input.SetRange(fmt.Sprintf("bytes=%d-%d", opts.offset, opts.offset+opts.length-1))
+		} else {
+			input.SetRange(fmt.Sprintf("bytes=%d-", opts.offset))
+		}
 	}
 	resp, err := c.s3.GetObject(&input)
 	if err != nil {
@@ -272,10 +277,11 @@ func (c *s3TestClient) ListObjectParts(bucket, objKey, uploadID string) (lopr li
 	for _, p := range resp.Parts {
 		lopr.objectParts = append(lopr.objectParts, objectPart{
 			partNumber: *p.PartNumber,
+			size:       *p.Size,
+			etag:       *p.ETag,
 		})
 	}
-
-	return listObjectPartsResponse{}, err
+	return lopr, err
 }
 
 func (c *s3TestClient) ListObjects(bucket string, opts listObjectsOptions) (lor listObjectsResponse, err error) {
