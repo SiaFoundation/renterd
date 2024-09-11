@@ -271,14 +271,15 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 		}
 	}
 
-	// ensure metadata is not nil
-	if res.Metadata == nil {
-		res.Metadata = make(map[string]string)
+	// set user metadata
+	metadata := make(map[string]string)
+	for k, v := range res.Metadata {
+		metadata[amazonMetadataPrefix+k] = v
 	}
 
 	// decorate metadata
-	res.Metadata["Content-Type"] = res.ContentType
-	res.Metadata["Last-Modified"] = res.LastModified.Std().Format(http.TimeFormat)
+	metadata["Content-Type"] = res.ContentType
+	metadata["Last-Modified"] = res.LastModified.Std().Format(http.TimeFormat)
 
 	// etag to bytes
 	etag, err := hex.DecodeString(res.Etag)
@@ -289,7 +290,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, objectName string, range
 	return &gofakes3.Object{
 		Hash:     etag,
 		Name:     gofakes3.URLEncode(objectName),
-		Metadata: res.Metadata,
+		Metadata: metadata,
 		Size:     res.Size,
 		Contents: res.Content,
 		Range:    objectRange,

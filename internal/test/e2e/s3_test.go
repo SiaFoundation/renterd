@@ -200,9 +200,9 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// perform GET request
-	//	obj, err := cluster.S3Aws.GetObject(api.DefaultBucketName, t.Name(), getObjectOptions{})
-	//	tt.OK(err)
-	//	assertMetadata(metadata, obj.metadata)
+	obj, err := cluster.S3Aws.GetObject(api.DefaultBucketName, t.Name(), getObjectOptions{})
+	tt.OK(err)
+	assertMetadata(metadata, obj.metadata)
 
 	// assert metadata is set on HEAD request
 	get, err := cluster.S3Aws.HeadObject(api.DefaultBucketName, t.Name())
