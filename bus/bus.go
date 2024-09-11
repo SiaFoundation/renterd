@@ -340,6 +340,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		masterKey: masterKey,
 
 		accounts: store,
+		explorer: ibus.NewExplorer(explorerURL),
 		s:        s,
 		cm:       cm,
 		w:        w,
@@ -366,15 +367,11 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
-	// create explorer
-	e := ibus.NewExplorer(explorerURL)
-	b.explorer = e
-
 	// create sectors cache
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, e, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)

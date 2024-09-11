@@ -40,8 +40,8 @@ var (
 	DefaultGougingSettings = GougingSettings{
 		MaxRPCPrice:                   types.Siacoins(1).Div64(1000),                    // 1mS per RPC
 		MaxContractPrice:              types.Siacoins(15),                               // 15 SC per contract
-		MaxDownloadPrice:              types.Siacoins(3000),                             // 3000 SC per 1 TB
-		MaxUploadPrice:                types.Siacoins(3000),                             // 3000 SC per 1 TB
+		MaxDownloadPrice:              types.Siacoins(3000).Div64(1e12),                 // 3000 SC per 1 TB
+		MaxUploadPrice:                types.Siacoins(3000).Div64(1e12),                 // 3000 SC per 1 TB
 		MaxStoragePrice:               types.Siacoins(3000).Div64(1e12).Div64(144 * 30), // 3000 SC per TB per month
 		HostBlockHeightLeeway:         6,                                                // 6 blocks
 		MinPriceTableValidity:         5 * time.Minute,                                  // 5 minutes
