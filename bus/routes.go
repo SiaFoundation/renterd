@@ -486,6 +486,20 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	// validate sorting params
+	if req.SortBy != "" {
+		if !api.IsValidHostSortBy(req.SortBy) {
+			jc.Error(fmt.Errorf("%w: %v", api.ErrInvalidHostSortBy, req.SortBy), http.StatusBadRequest)
+			return
+		}
+	}
+	switch req.SortDir {
+	case "", api.SortDirAsc, api.SortDirDesc:
+	default:
+		jc.Error(errors.New("invalid value for SortDir param, options are 'asc' and 'desc'"), http.StatusBadRequest)
+		return
+	}
+
 	// validate the offset and limit
 	if req.Offset < 0 {
 		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
@@ -506,6 +520,8 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		KeyIn:           req.KeyIn,
 		Offset:          req.Offset,
 		Limit:           req.Limit,
+		SortBy:          req.SortBy,
+		SortDir:         req.SortDir,
 	})
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return

@@ -22,10 +22,70 @@ const (
 	UsabilityFilterModeUnusable = "unusable"
 )
 
+var validHostSortBy = map[string]any{
+	// price table
+	"price_table.uid":                   nil,
+	"price_table.validity":              nil,
+	"price_table.hostblockheight":       nil,
+	"price_table.latestrevisioncost":    nil,
+	"price_table.initbasecost":          nil,
+	"price_table.downloadbandwidthcost": nil,
+	"price_table.uploadbandwidthcost":   nil,
+	"price_table.readbasecost":          nil,
+	"price_table.writebasecost":         nil,
+	"price_table.writestorecost":        nil,
+	"price_table.txnfeeminrecommended":  nil,
+	"price_table.txnfeemaxrecommended":  nil,
+	"price_table.contractprice":         nil,
+	"price_table.collateralcost":        nil,
+	"price_table.maxcollateral":         nil,
+	"price_table.maxduration":           nil,
+	"price_table.windowsize":            nil,
+
+	// settings
+	"settings.acceptingcontracts":         nil,
+	"settings.maxdownloadbatchsize":       nil,
+	"settings.maxduration":                nil,
+	"settings.maxrevisebatchsize":         nil,
+	"settings.netaddress":                 nil,
+	"settings.remainingstorage":           nil,
+	"settings.sectorsize":                 nil,
+	"settings.totalstorage":               nil,
+	"settings.unlockhash":                 nil,
+	"settings.windowsize":                 nil,
+	"settings.collateral":                 nil,
+	"settings.maxcollateral":              nil,
+	"settings.baserpcprice":               nil,
+	"settings.contractprice":              nil,
+	"settings.downloadbandwidthprice":     nil,
+	"settings.sectoraccessprice":          nil,
+	"settings.storageprice":               nil,
+	"settings.uploadbandwidthprice":       nil,
+	"settings.ephemeralaccountexpiry":     nil,
+	"settings.maxephemeralaccountbalance": nil,
+	"settings.revisionnumber":             nil,
+	"settings.version":                    nil,
+	"settings.release":                    nil,
+	"settings.siamuxport":                 nil,
+}
+
+func IsValidHostSortBy(sortBy string) bool {
+	_, ok := validHostSortBy[sortBy]
+	return ok
+}
+
 var (
 	// ErrHostNotFound is returned when a host can't be retrieved from the
 	// database.
 	ErrHostNotFound = errors.New("host doesn't exist in hostdb")
+
+	// ErrInvalidHostSortBy is returned when the SortBy parameter used
+	// when querying hosts is invalid.
+	ErrInvalidHostSortBy = errors.New("invalid SortBy parameter")
+
+	// ErrInvalidHostSortDir is returned when the SortDir parameter used
+	// when querying hosts is invalid.
+	ErrInvalidHostSortDir = errors.New("invalid SortDir parameter")
 )
 
 var (
@@ -66,6 +126,8 @@ type (
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
+		SortBy          string            `json:"sortBy"`
+		SortDir         string            `json:"sortDir"`
 	}
 
 	// HostResponse is the response type for the GET
@@ -117,6 +179,8 @@ type (
 		KeyIn           []types.PublicKey
 		Limit           int
 		Offset          int
+		SortBy          string
+		SortDir         string
 	}
 )
 
