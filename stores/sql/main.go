@@ -792,9 +792,11 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	var orderByExpr string
 	if opts.SortBy != "" {
 		switch opts.SortDir {
-		case "", api.SortDirAsc, api.SortDirDesc:
+		case "":
+			opts.SortDir = api.SortDirAsc
+		case api.SortDirAsc, api.SortDirDesc:
 		default:
-			return nil, fmt.Errorf("invalid sort order: %v", opts.SortDir)
+			return nil, fmt.Errorf("%w: %v", api.ErrInvalidHostSortDir, opts.SortDir)
 		}
 		if !api.IsValidHostSortBy(opts.SortBy) {
 			return nil, fmt.Errorf("%w: %s", api.ErrInvalidHostSortBy, opts.SortBy)
@@ -1524,167 +1526,6 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
-}
-
-func ObjectEntries(ctx context.Context, tx Tx, bucket, key, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	// sanity check we are passing a directory
-	if !strings.HasSuffix(key, "/") {
-		panic("path must end in /")
-	}
-
-	// sanity check we are passing sane paging parameters
-	usingMarker := marker != ""
-	usingOffset := offset > 0
-	if usingMarker && usingOffset {
-		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
-	}
-
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else if limit != math.MaxInt {
-		limit++
-	}
-
-	// establish sane defaults for sorting
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.SortDirAsc
-	}
-
-	// fetch directory id
-	dirID, err := dirID(ctx, tx, key)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return []api.ObjectMetadata{}, false, nil
-	} else if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch directory id: %w", err)
-	}
-
-	args := []any{
-		key,
-		dirID, bucket,
-	}
-
-	// apply prefix
-	var prefixExpr string
-	if prefix != "" {
-		prefixExpr = "AND SUBSTR(o.object_id, 1, ?) = ?"
-		args = append(args,
-			utf8.RuneCountInString(key+prefix), key+prefix,
-			utf8.RuneCountInString(key+prefix), key+prefix,
-		)
-	}
-
-	args = append(args,
-		bucket,
-		key+"%",
-		utf8.RuneCountInString(key), key,
-		dirID,
-	)
-
-	// apply marker
-	var whereExpr string
-	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
-		var groupFn string
-		switch col {
-		case "size":
-			groupFn = "SUM"
-		case "health":
-			groupFn = "MIN"
-		default:
-			return fmt.Errorf("unknown column: %v", col)
-		}
-		err := tx.QueryRow(ctx, fmt.Sprintf(`
-			SELECT o.%s
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-			UNION ALL
-			SELECT %s(o.%s)
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
-			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return api.ErrMarkerNotFound
-		} else {
-			return err
-		}
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to query marker: %w", err)
-	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
-	}
-	args = append(args, markerArgs...)
-
-	// apply sorting
-	orderByExprs, err := orderByObject(sortBy, sortDir)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to apply sorting: %w", err)
-	}
-
-	// apply offset and limit
-	args = append(args, limit, offset)
-
-	// objectsQuery consists of 2 parts
-	// 1. fetch all objects in requested directory
-	// 2. fetch all sub-directories
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
-			FROM objects o
-			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
-			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
-			FROM objects o
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
-			GROUP BY d.id
-		) AS o
-		%s
-		ORDER BY %s
-		LIMIT ? OFFSET ?
-	`,
-		tx.SelectObjectMetadataExpr(),
-		prefixExpr,
-		tx.CharLengthExpr(),
-		prefixExpr,
-		whereExpr,
-		strings.Join(orderByExprs, ", "),
-	), args...)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, false, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-
-	// trim last element if we have more
-	var hasMore bool
-	if len(objects) == limit {
-		hasMore = true
-		objects = objects[:len(objects)-1]
-	}
-
-	return objects, hasMore, nil
 }
 
 func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {

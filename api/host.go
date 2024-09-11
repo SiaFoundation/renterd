@@ -98,6 +98,10 @@ var (
 	// ErrInvalidHostSortBy is returned when the SortBy parameter used
 	// when querying hosts is invalid.
 	ErrInvalidHostSortBy = errors.New("invalid SortBy parameter")
+
+	// ErrInvalidHostSortDir is returned when the SortDir parameter used
+	// when querying hosts is invalid.
+	ErrInvalidHostSortDir = errors.New("invalid SortDir parameter")
 )
 
 var (

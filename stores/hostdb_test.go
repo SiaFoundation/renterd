@@ -142,10 +142,10 @@ func TestHosts(t *testing.T) {
 		{
 			HostKey: hk1,
 			PriceTable: rhpv3.HostPriceTable{
-				InitBaseCost: types.NewCurrency64(2),
+				InitBaseCost: types.NewCurrency64(230),
 			},
 			Settings: rhpv2.HostSettings{
-				BaseRPCPrice: types.NewCurrency64(2),
+				BaseRPCPrice: types.NewCurrency64(230),
 			},
 			Success:   true,
 			Timestamp: time.Now(),
@@ -160,10 +160,10 @@ func TestHosts(t *testing.T) {
 		{
 			HostKey: hk3,
 			PriceTable: rhpv3.HostPriceTable{
-				InitBaseCost: types.NewCurrency64(1),
+				InitBaseCost: types.NewCurrency64(15),
 			},
 			Settings: rhpv2.HostSettings{
-				BaseRPCPrice: types.NewCurrency64(1),
+				BaseRPCPrice: types.NewCurrency64(15),
 			},
 			Success:   true,
 			Timestamp: time.Now(),
