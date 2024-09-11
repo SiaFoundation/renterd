@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -247,7 +248,9 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 
 	// fetch gouging settings
 	gs, err := pm.s.GougingSettings(ctx)
-	if err != nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		gs = api.DefaultGougingSettings
+	} else if err != nil {
 		return err
 	}
 
@@ -323,9 +326,14 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 
 	// fetch pinned settings
 	settings, err := pm.s.PinnedSettings(ctx)
-	if err != nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		settings = api.DefaultPinnedSettings
+	} else if err != nil {
 		return fmt.Errorf("failed to fetch pinned settings: %w", err)
-	} else if !settings.Enabled() {
+	}
+
+	// check if pinning is enabled
+	if !settings.Enabled() {
 		pm.logger.Debug("no pinned settings, skipping price update")
 		return nil
 	}

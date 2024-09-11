@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -180,7 +179,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		LongQueryDuration:             100 * time.Millisecond,
 		LongTxDuration:                100 * time.Millisecond,
 		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
-	}, &consensus.Network{})
+	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}

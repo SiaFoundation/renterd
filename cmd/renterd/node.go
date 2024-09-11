@@ -264,7 +264,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	if err != nil {
 		return nil, nil, err
 	}
-	sqlStore, err := stores.NewSQLStore(storeCfg, network)
+	sqlStore, err := stores.NewSQLStore(storeCfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -386,7 +386,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, network, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}

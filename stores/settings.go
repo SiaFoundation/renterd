@@ -3,7 +3,6 @@ package stores
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"go.sia.tech/renterd/api"
@@ -60,10 +59,7 @@ func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}
 	// fetch setting from cache
 	value, ok := s.settings[key]
 	if ok {
-		if err := json.Unmarshal([]byte(value), &out); err != nil {
-			s.logger.Warnf("failed to unmarshal %s setting '%s': %v, using default", key, value, err)
-			return json.Unmarshal([]byte(s.defaultSetting(key)), &out)
-		}
+		_ = json.Unmarshal([]byte(value), &out) // cached values are always valid json
 		return nil
 	}
 
@@ -72,16 +68,13 @@ func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}
 	if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		value, err = tx.Setting(ctx, key)
 		return err
-	}); err != nil && !errors.Is(err, sql.ErrSettingNotFound) {
-		return fmt.Errorf("failed to fetch setting from db: %w", err)
-	} else if err != nil {
-		value = s.defaultSetting(key)
+	}); err != nil {
+		return err
 	}
 
 	// unmarshal setting
 	if err := json.Unmarshal([]byte(value), &out); err != nil {
-		s.logger.Warnf("failed to unmarshal %s setting '%s': %v, using default", key, value, err)
-		return json.Unmarshal([]byte(s.defaultSetting(key)), &out)
+		return fmt.Errorf("failed to unmarshal setting '%s', err: %v", key, err)
 	}
 
 	// update cache
@@ -111,23 +104,4 @@ func (s *SQLStore) updateSetting(ctx context.Context, key string, value any) err
 	// update cache second
 	s.settings[key] = string(b)
 	return nil
-}
-
-func (s *SQLStore) defaultSetting(key string) string {
-	switch key {
-	case SettingGouging:
-		b, _ := json.Marshal(api.DefaultGougingSettings)
-		return string(b)
-	case SettingPinned:
-		b, _ := json.Marshal(api.DefaultPinnedSettings)
-		return string(b)
-	case SettingS3:
-		b, _ := json.Marshal(api.DefaultS3Settings)
-		return string(b)
-	case SettingUpload:
-		b, _ := json.Marshal(api.DefaultUploadSettings(s.network.Name))
-		return string(b)
-	default:
-		panic("unknown setting") // developer error
-	}
 }

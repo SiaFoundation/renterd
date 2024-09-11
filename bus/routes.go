@@ -16,6 +16,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/gouging"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
@@ -1341,7 +1342,11 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
 	gs, err := b.ss.GougingSettings(jc.Request.Context())
-	if jc.Check("failed to get gouging settings", err) == nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		b.logger.Warn("gouging settings not found, returning defaults")
+		jc.Encode(api.DefaultGougingSettings)
+		return
+	} else if jc.Check("failed to get gouging settings", err) == nil {
 		jc.Encode(gs)
 	}
 }
@@ -1368,7 +1373,11 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 	ps, err := b.ss.PinnedSettings(jc.Request.Context())
-	if jc.Check("failed to get pinned settings", err) == nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		b.logger.Warn("pinned settings not found, returning defaults")
+		jc.Encode(api.DefaultPinnedSettings)
+		return
+	} else if jc.Check("failed to get pinned settings", err) == nil {
 		// populate the Autopilots map with the current autopilots
 		aps, err := b.as.Autopilots(jc.Request.Context())
 		if jc.Check("failed to fetch autopilots", err) != nil {
@@ -1413,7 +1422,11 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 	us, err := b.ss.UploadSettings(jc.Request.Context())
-	if jc.Check("failed to get upload settings", err) == nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		b.logger.Warn("upload settings not found, returning defaults")
+		jc.Encode(api.DefaultUploadSettings(b.network.Name))
+		return
+	} else if jc.Check("failed to get upload settings", err) == nil {
 		jc.Encode(us)
 	}
 }
@@ -1439,7 +1452,11 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
 	s3s, err := b.ss.S3Settings(jc.Request.Context())
-	if jc.Check("failed to get S3 settings", err) == nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		b.logger.Warn("S3 settings not found, returning defaults")
+		jc.Encode(api.DefaultS3Settings)
+		return
+	} else if jc.Check("failed to get S3 settings", err) == nil {
 		jc.Encode(s3s)
 	}
 }
@@ -1686,12 +1703,16 @@ func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 
 func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	gs, err := b.ss.GougingSettings(ctx)
-	if err != nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		gs = api.DefaultGougingSettings
+	} else if err != nil {
 		return api.GougingParams{}, err
 	}
 
 	us, err := b.ss.UploadSettings(ctx)
-	if err != nil {
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		us = api.DefaultUploadSettings(b.network.Name)
+	} else if err != nil {
 		return api.GougingParams{}, err
 	}
 
