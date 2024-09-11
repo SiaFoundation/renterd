@@ -238,6 +238,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00002_idx_wallet_metrics_immature", log)
 				},
 			},
+			{
+				ID: "00003_unix_ms",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
+				},
+			},
 		}
 	}
 )
