@@ -10,8 +10,8 @@ SET value = (
 		FROM (
 			-- SELECT previous settings
 			SELECT
-				JSON_UNQUOTE(JSON_EXTRACT(value, '$.maxDownloadPrice')) AS maxDownloadPrice,
-				JSON_UNQUOTE(JSON_EXTRACT(value, '$.maxUploadPrice')) AS maxUploadPrice
+				JSON_EXTRACT(value, '$.maxDownloadPrice') AS maxDownloadPrice,
+				JSON_EXTRACT(value, '$.maxUploadPrice') AS maxUploadPrice
 		) AS _
 	) AS _
 )
