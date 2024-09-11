@@ -812,7 +812,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		} else {
 			return nil, fmt.Errorf("invalid sortBy parameter: %v", opts.SortBy)
 		}
-		orderByExpr = fmt.Sprintf("ORDER BY %s %s", fieldExpr, opts.SortDir)
+		orderByExpr = fmt.Sprintf("ORDER BY CAST(%s AS DECIMAL(65, 0)) %s", fieldExpr, opts.SortDir)
 	}
 
 	var blockedExpr string
