@@ -135,15 +135,15 @@ func (c *s3TestClient) CompleteMultipartUpload(bucket, object, uploadID string, 
 	}, nil
 }
 
-func (c *s3TestClient) CopyObject(bucket, srcKey, dstKey string, opts putObjectOptions) (copyObjectResponse, error) {
+func (c *s3TestClient) CopyObject(srcBucket, dstBucket, srcKey, dstKey string, opts putObjectOptions) (copyObjectResponse, error) {
 	var input s3aws.CopyObjectInput
-	input.SetBucket(bucket)
-	input.SetCopySource(srcKey)
+	input.SetCopySource(fmt.Sprintf("%s/%s", srcBucket, srcKey))
+	input.SetBucket(dstBucket)
 	input.SetKey(dstKey)
 	if opts.metadata != nil {
 		md := make(map[string]*string)
 		for k := range opts.metadata {
-			v := opts.metadata[k] // copy to avoid reference to loop variable
+			v := opts.metadata[k]
 			md[k] = &v
 		}
 		input.SetMetadata(md)
@@ -186,7 +186,6 @@ func (c *s3TestClient) GetObject(bucket, objKey string, opts getObjectOptions) (
 	input.SetKey(objKey)
 	if hasOffset, hasLength := opts.offset > 0, opts.length > 0; hasOffset || hasLength {
 		if hasLength {
-			fmt.Println(opts.offset, opts.length)
 			input.SetRange(fmt.Sprintf("bytes=%d-%d", opts.offset, opts.offset+opts.length-1))
 		} else {
 			input.SetRange(fmt.Sprintf("bytes=%d-", opts.offset))
