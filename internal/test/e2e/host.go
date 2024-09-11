@@ -150,6 +150,9 @@ var defaultHostSettings = settings.Settings{
 
 // Close shutsdown the host
 func (h *Host) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
 	h.rhpv2.Close()
 	h.rhpv3.Close()
 	h.settings.Close()
@@ -159,7 +162,7 @@ func (h *Host) Close() error {
 	h.storage.Close()
 	h.store.Close()
 	h.syncerCancel()
-	h.s.Close()
+	h.s.Shutdown(ctx)
 	h.chainDB.Close()
 	return nil
 }

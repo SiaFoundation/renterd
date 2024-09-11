@@ -638,7 +638,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
-			s.Close(),
+			s.Shutdown(ctx),
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),

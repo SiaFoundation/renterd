@@ -14,7 +14,7 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.4.6
-	go.sia.tech/coreutils v0.3.2
+	go.sia.tech/coreutils v0.3.3-0.20240911140040-2c7ca17f5292
 	go.sia.tech/gofakes3 v0.0.4
 	go.sia.tech/hostd v1.1.3-0.20240903081107-6e044db95238
 	go.sia.tech/jape v0.12.1

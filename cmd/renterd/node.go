@@ -389,7 +389,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 
 	return b, func(ctx context.Context) error {
 		return errors.Join(
-			s.Close(),
+			s.Shutdown(ctx),
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
