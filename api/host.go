@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -224,6 +225,17 @@ type (
 		NotCompletingScan     bool `json:"notCompletingScan"`
 	}
 )
+
+func (hc HostCheck) MarshalJSON() ([]byte, error) {
+	type check HostCheck
+	return json.Marshal(struct {
+		check
+		Score float64 `json:"score"`
+	}{
+		check: check(hc),
+		Score: hc.Score.Score(),
+	})
+}
 
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {
