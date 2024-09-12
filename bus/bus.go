@@ -195,7 +195,6 @@ type (
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
-		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
@@ -441,7 +440,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
 		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
-		"GET    /hosts/scanning":                 b.hostsScanningHandlerGET,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
 

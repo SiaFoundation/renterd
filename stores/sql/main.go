@@ -758,6 +758,12 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		}
 	}
 
+	// filter max last scan
+	if !opts.MaxLastScan.IsZero() {
+		whereExprs = append(whereExprs, "last_scan < ?")
+		args = append(args, UnixTimeMS(opts.MaxLastScan))
+	}
+
 	// offset + limit
 	if opts.Limit == -1 {
 		opts.Limit = math.MaxInt64
@@ -895,31 +901,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	// fill in hosts
 	for i := range hosts {
 		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
-	}
-	return hosts, nil
-}
-
-func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
-	if offset < 0 {
-		return nil, ErrNegativeOffset
-	} else if limit == -1 {
-		limit = math.MaxInt64
-	}
-
-	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
-		UnixTimeMS(maxLastScan), limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
-	}
-	defer rows.Close()
-
-	var hosts []api.HostAddress
-	for rows.Next() {
-		var ha api.HostAddress
-		if err := rows.Scan((*PublicKey)(&ha.PublicKey), &ha.NetAddress); err != nil {
-			return nil, fmt.Errorf("failed to scan host row: %w", err)
-		}
-		hosts = append(hosts, ha)
 	}
 	return hosts, nil
 }

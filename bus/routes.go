@@ -507,6 +507,7 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		KeyIn:           req.KeyIn,
 		Offset:          req.Offset,
 		Limit:           req.Limit,
+		MaxLastScan:     req.MaxLastScan,
 	})
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
@@ -532,20 +533,6 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(removed)
-}
-
-func (b *Bus) hostsScanningHandlerGET(jc jape.Context) {
-	offset := 0
-	limit := -1
-	maxLastScan := time.Now()
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
-		return
-	}
-	hosts, err := b.hs.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
-	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
-		return
-	}
-	jc.Encode(hosts)
 }
 
 func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {

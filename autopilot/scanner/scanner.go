@@ -19,7 +19,7 @@ const (
 
 type (
 	HostStore interface {
-		HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
 
@@ -164,7 +164,7 @@ func (s *scanner) fetchHosts(ctx context.Context, cutoff time.Time) chan scanJob
 
 		var exhausted bool
 		for offset := 0; !exhausted; offset += s.scanBatchSize {
-			hosts, err := s.hs.HostsForScanning(ctx, api.HostsForScanningOptions{
+			hosts, err := s.hs.Hosts(ctx, api.HostOptions{
 				MaxLastScan: api.TimeRFC3339(cutoff),
 				Offset:      offset,
 				Limit:       s.scanBatchSize,

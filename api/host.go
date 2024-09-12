@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -51,7 +50,7 @@ type (
 		PriceTableUpdates []HostPriceTableUpdate `json:"priceTableUpdates"`
 	}
 
-	// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
+	// HostsRemoveRequest is the request type for the delete /hosts endpoint.
 	HostsRemoveRequest struct {
 		MaxDowntimeHours           DurationH `json:"maxDowntimeHours"`
 		MaxConsecutiveScanFailures uint64    `json:"maxConsecutiveScanFailures"`
@@ -66,6 +65,7 @@ type (
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
+		MaxLastScan     TimeRFC3339       `json:"maxLastScan"`
 	}
 )
 
@@ -87,12 +87,6 @@ type (
 
 // Option types.
 type (
-	HostsForScanningOptions struct {
-		MaxLastScan TimeRFC3339
-		Limit       int
-		Offset      int
-	}
-
 	HostOptions struct {
 		AutopilotID     string
 		AddressContains string
@@ -100,21 +94,10 @@ type (
 		UsabilityMode   string
 		KeyIn           []types.PublicKey
 		Limit           int
+		MaxLastScan     TimeRFC3339
 		Offset          int
 	}
 )
-
-func (opts HostsForScanningOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if !opts.MaxLastScan.IsZero() {
-		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
-	}
-}
 
 type (
 	Host struct {
@@ -131,11 +114,6 @@ type (
 		StoredData        uint64               `json:"storedData"`
 		ResolvedAddresses []string             `json:"resolvedAddresses"`
 		Subnets           []string             `json:"subnets"`
-	}
-
-	HostAddress struct {
-		PublicKey  types.PublicKey `json:"publicKey"`
-		NetAddress string          `json:"netAddress"`
 	}
 
 	HostInteractions struct {
