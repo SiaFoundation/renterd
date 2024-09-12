@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
@@ -28,9 +28,13 @@ type (
 
 	Store interface {
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Setting(ctx context.Context, key string) (string, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
-		UpdateSetting(ctx context.Context, key, value string) error
+
+		GougingSettings(ctx context.Context) (api.GougingSettings, error)
+		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
+
+		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
 	}
 )
 
@@ -44,7 +48,7 @@ type (
 		updateInterval time.Duration
 		rateWindow     time.Duration
 
-		triggerChan chan struct{}
+		triggerChan chan bool
 		closedChan  chan struct{}
 		wg          sync.WaitGroup
 
@@ -71,7 +75,7 @@ func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, e Ex
 		updateInterval: updateInterval,
 		rateWindow:     rateWindow,
 
-		triggerChan: make(chan struct{}, 1),
+		triggerChan: make(chan bool, 1),
 		closedChan:  make(chan struct{}),
 	}
 
@@ -106,7 +110,7 @@ func (pm *pinManager) Shutdown(ctx context.Context) error {
 
 func (pm *pinManager) TriggerUpdate() {
 	select {
-	case pm.triggerChan <- struct{}{}:
+	case pm.triggerChan <- true:
 	default:
 	}
 }
@@ -117,16 +121,6 @@ func (pm *pinManager) averageRate() decimal.Decimal {
 
 	median, _ := stats.Median(pm.rates)
 	return decimal.NewFromFloat(median)
-}
-
-func (pm *pinManager) pinnedSettings(ctx context.Context) (api.PricePinSettings, error) {
-	var ps api.PricePinSettings
-	if pss, err := pm.s.Setting(ctx, api.SettingPricePinning); err != nil {
-		return api.PricePinSettings{}, err
-	} else if err := json.Unmarshal([]byte(pss), &ps); err != nil {
-		pm.logger.Panicf("failed to unmarshal pinned settings '%s': %v", pss, err)
-	}
-	return ps, nil
 }
 
 func (pm *pinManager) rateExceedsThreshold(threshold float64) bool {
@@ -181,8 +175,7 @@ func (pm *pinManager) run() {
 		select {
 		case <-pm.closedChan:
 			return
-		case <-pm.triggerChan:
-			forced = true
+		case forced = <-pm.triggerChan:
 		case <-t.C:
 		}
 	}
@@ -254,11 +247,10 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	var updated bool
 
 	// fetch gouging settings
-	var gs api.GougingSettings
-	if gss, err := pm.s.Setting(ctx, api.SettingGouging); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		pm.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
+	gs, err := pm.s.GougingSettings(ctx)
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		gs = api.DefaultGougingSettings
+	} else if err != nil {
 		return err
 	}
 
@@ -305,15 +297,14 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	}
 
 	// validate settings
-	err := gs.Validate()
+	err = gs.Validate()
 	if err != nil {
 		pm.logger.Warnw("failed to update gouging setting, new settings make the setting invalid", zap.Error(err))
 		return err
 	}
 
 	// update settings
-	bytes, _ := json.Marshal(gs)
-	err = pm.s.UpdateSetting(ctx, api.SettingGouging, string(bytes))
+	err = pm.s.UpdateGougingSettings(ctx, gs)
 
 	// broadcast event
 	if err == nil {
@@ -321,9 +312,8 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 			Module: api.ModuleSetting,
 			Event:  api.EventUpdate,
 			Payload: api.EventSettingUpdate{
-				Key:       api.SettingGouging,
-				Update:    string(bytes),
-				Timestamp: time.Now().UTC(),
+				GougingSettings: &gs,
+				Timestamp:       time.Now().UTC(),
 			},
 		})
 	}
@@ -335,13 +325,15 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	pm.logger.Debugw("updating prices", zap.Bool("forced", forced))
 
 	// fetch pinned settings
-	settings, err := pm.pinnedSettings(ctx)
-	if errors.Is(err, api.ErrSettingNotFound) {
-		pm.logger.Debug("price pinning not configured, skipping price update")
-		return nil
+	settings, err := pm.s.PinnedSettings(ctx)
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		settings = api.DefaultPinnedSettings
 	} else if err != nil {
 		return fmt.Errorf("failed to fetch pinned settings: %w", err)
-	} else if !settings.Enabled() {
+	}
+
+	// check if pinning is enabled
+	if !settings.Enabled() {
 		pm.logger.Debug("no pinned settings, skipping price update")
 		return nil
 	}

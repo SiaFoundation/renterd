@@ -73,9 +73,8 @@ type Bus interface {
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
 	// settings
-	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
-	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
+	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
 
 	// syncer
 	SyncerPeers(ctx context.Context) (resp []string, err error)
@@ -810,10 +809,10 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
 	}
 
-	// fetch redundancy settings
-	rs, err := ap.bus.RedundancySettings(ctx)
+	// fetch upload settings
+	us, err := ap.bus.UploadSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch redundancy settings, err: %v", err)
+		return nil, fmt.Errorf("could not fetch upload settings, err: %v", err)
 	}
 
 	// fetch gouging settings
@@ -863,7 +862,7 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 
 	return &contractor.MaintenanceState{
 		GS: gs,
-		RS: rs,
+		RS: us.Redundancy,
 		AP: autopilot,
 
 		Address:                address,

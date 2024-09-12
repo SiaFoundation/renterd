@@ -652,8 +652,8 @@ func (*s3Mock) MultipartUploadParts(ctx context.Context, bucket, object string, 
 	return api.MultipartListPartsResponse{}, nil
 }
 
-func (*s3Mock) S3AuthenticationSettings(context.Context) (as api.S3AuthenticationSettings, err error) {
-	return api.S3AuthenticationSettings{}, nil
+func (*s3Mock) S3Settings(context.Context) (as api.S3Settings, err error) {
+	return api.S3Settings{}, nil
 }
 
 func (*s3Mock) UpdateSetting(context.Context, string, interface{}) error {

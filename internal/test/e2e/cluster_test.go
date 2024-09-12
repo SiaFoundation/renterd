@@ -178,25 +178,25 @@ func TestNewTestCluster(t *testing.T) {
 	tt := cluster.tt
 
 	// Upload packing should be disabled by default.
-	ups, err := b.UploadPackingSettings(context.Background())
+	us, err := b.UploadSettings(context.Background())
 	tt.OK(err)
-	if ups.Enabled {
-		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
+	if us.Packing.Enabled {
+		t.Fatalf("expected upload packing to be disabled by default, got %v", us.Packing.Enabled)
 	}
 
-	// PricePinningSettings should have default values
-	pps, err := b.PricePinningSettings(context.Background())
+	// PinnedSettings should have default values
+	ps, err := b.PinnedSettings(context.Background())
 	tt.OK(err)
-	if pps.Currency == "" {
+	if ps.Currency == "" {
 		t.Fatal("expected default value for Currency")
-	} else if pps.Threshold == 0 {
+	} else if ps.Threshold == 0 {
 		t.Fatal("expected default value for Threshold")
 	}
 
 	// Autopilot shouldn't have its prices pinned
-	if len(pps.Autopilots) != 1 {
-		t.Fatalf("expected 1 autopilot, got %v", len(pps.Autopilots))
-	} else if pin, exists := pps.Autopilots[api.DefaultAutopilotID]; !exists {
+	if len(ps.Autopilots) != 1 {
+		t.Fatalf("expected 1 autopilot, got %v", len(ps.Autopilots))
+	} else if pin, exists := ps.Autopilots[api.DefaultAutopilotID]; !exists {
 		t.Fatalf("expected autopilot %v to exist", api.DefaultAutopilotID)
 	} else if pin.Allowance != (api.Pin{}) {
 		t.Fatalf("expected autopilot %v to have no pinned allowance, got %v", api.DefaultAutopilotID, pin.Allowance)
@@ -1313,6 +1313,11 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatalf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
 	}
 	acc := accounts[0]
+
+	// stop autopilot and mine transactions, this prevents an NDF where we
+	// double spend outputs after restarting the bus
+	cluster.ShutdownAutopilot(context.Background())
+	tt.OK(cluster.MineTransactions(context.Background()))
 
 	// stop the cluster
 	host := cluster.hosts[0]

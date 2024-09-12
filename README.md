@@ -554,65 +554,6 @@ formed.
 }
 ```
 
-### Contract Set
-
-The contract set settings on the bus allow specifying a default contract set.
-This contract set will be returned by the `bus` through the upload parameters,
-and decides what contracts data is upload or migrated to by default. This
-setting does not have a default value, it can be updated using the settings API:
-
-- `GET /api/bus/setting/contractset`
-- `PUT /api/bus/setting/contractset`
-
-```json
-{
-        "default": "autopilot"
-}
-```
-
-In most cases the default set should match the set from your autopilot
-configuration in order for migrations to work properly. The contract set can be
-overridden by passing it as a query string parameter to the worker's upload and
-migrate endpoints.
-
-- `PUT /api/worker/objects/foo?contractset=foo`
-
-### Redundancy
-
-The default redundancy on mainnet is 30-10, on testnet it is 6-2. The redundancy
-can be updated using the settings API:
-
-- `GET /api/bus/setting/redundancy`
-- `PUT /api/bus/setting/redundancy`
-
-The redundancy can also be passed through query string parameters on the upload
-endpoint in the worker API:
-
-- `PUT /api/worker/objects/foo?minshards=2&totalshards=5`
-
-### Gouging
-
-The default gouging settings are listed below. The gouging settings can be
-updated using the settings API:
-
-- `GET /api/bus/setting/gouging`
-- `PUT /api/bus/setting/gouging`
-
-```json
-{
-	"hostBlockHeightLeeway": 6,                                   // 6 blocks
-	"maxContractPrice": "15000000000000000000000000",             // 15 SC per contract
-	"maxDownloadPrice": "3000000000000000000000000000",           // 3000 SC per 1 TB
-	"maxRPCPrice": "1000000000000000000000",                      // 1mS per RPC
-	"maxStoragePrice": "631593542824",                            // 3000 SC per TB per month
-	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TB
-	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
-	"minAccountExpiry": 86400000000000,                           // 1 day
-	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
-	"minPriceTableValidity": 300000000000                         // 5 minutes
-}
-```
-
 ### Blocklist
 
 Unfortunately the Sia blockchain is subject to hosts that announced themselves
