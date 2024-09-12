@@ -1373,7 +1373,7 @@ func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 	us, err := b.ss.UploadSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
 		b.logger.Warn("upload settings not found, returning defaults")
-		jc.Encode(api.DefaultUploadSettings(b.network.Name))
+		jc.Encode(api.DefaultUploadSettings(b.cm.TipState().Network.Name))
 		return
 	} else if jc.Check("failed to get upload settings", err) == nil {
 		jc.Encode(us)
@@ -1660,7 +1660,7 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 
 	us, err := b.ss.UploadSettings(ctx)
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		us = api.DefaultUploadSettings(b.network.Name)
+		us = api.DefaultUploadSettings(b.cm.TipState().Network.Name)
 	} else if err != nil {
 		return api.GougingParams{}, err
 	}

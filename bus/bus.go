@@ -307,7 +307,6 @@ type (
 type Bus struct {
 	startTime time.Time
 	masterKey utils.MasterKey
-	network   *consensus.Network
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -337,13 +336,12 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, network *consensus.Network, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 
 	b := &Bus{
 		startTime: time.Now(),
 		masterKey: masterKey,
-		network:   network,
 
 		accounts: store,
 		explorer: ibus.NewExplorer(explorerURL),
