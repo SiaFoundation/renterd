@@ -85,6 +85,8 @@ type TestCluster struct {
 	tt           test.TT
 	wk           types.PrivateKey
 	wg           sync.WaitGroup
+
+	tCancel context.CancelFunc
 }
 
 type dbConfig struct {
@@ -414,6 +416,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
+	tCtx, tCancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-time.After(5 * time.Minute):
+			tt.Fatal("test is taking too long")
+		case <-tCtx.Done():
+			return
+		}
+	}()
+
 	network, genesis := testNetwork()
 	cluster := &TestCluster{
 		apID:         apCfg.ID,
@@ -438,6 +450,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		busShutdownFns:       busShutdownFns,
 		autopilotShutdownFns: autopilotShutdownFns,
 		s3ShutdownFns:        s3ShutdownFns,
+		tCancel:              tCancel,
 	}
 
 	// Spin up the servers.
@@ -953,6 +966,7 @@ func (c *TestCluster) MineTransactions(ctx context.Context) error {
 // Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown() {
 	c.tt.Helper()
+	c.tCancel()
 	ctx := context.Background()
 	c.ShutdownAutopilot(ctx)
 	c.ShutdownS3(ctx)
