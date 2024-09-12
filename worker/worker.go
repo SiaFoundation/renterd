@@ -34,7 +34,6 @@ import (
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.sia.tech/renterd/worker/client"
-	"go.sia.tech/renterd/worker/s3"
 	"go.uber.org/zap"
 )
 
@@ -66,8 +65,6 @@ func NewClient(address, password string) *Client {
 
 type (
 	Bus interface {
-		s3.Bus
-
 		alerts.Alerter
 		gouging.ConsensusState
 		webhooks.Broadcaster
@@ -83,7 +80,6 @@ type (
 		WebhookStore
 
 		Syncer
-		Wallet
 	}
 
 	AccountFunder interface {
@@ -113,8 +109,8 @@ type (
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
 		// NOTE: used for upload
-		AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error
-		AddMultipartPart(ctx context.Context, bucket, path, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) error
+		AddMultipartPart(ctx context.Context, bucket, key, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
@@ -124,8 +120,8 @@ type (
 
 		// NOTE: used by worker
 		Bucket(_ context.Context, bucket string) (api.Bucket, error)
-		Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error)
-		DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error
+		Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (api.Object, error)
+		DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) error
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
 	}
@@ -138,12 +134,6 @@ type (
 	Syncer interface {
 		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 		SyncerPeers(ctx context.Context) (resp []string, err error)
-	}
-
-	Wallet interface {
-		WalletDiscard(ctx context.Context, txn types.Transaction) error
-		WalletFund(ctx context.Context, txn *types.Transaction, amount types.Currency, useUnconfirmedTxns bool) ([]types.Hash256, []types.Transaction, error)
-		WalletSign(ctx context.Context, txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields) error
 	}
 
 	WebhookStore interface {
@@ -493,17 +483,9 @@ func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
-		return
-	}
 
-	// parse path
-	path := jc.PathParam("path")
-	if !ignoreDelim && (path == "" || strings.HasSuffix(path, "/")) {
-		jc.Error(errors.New("HEAD requests can only be performed on objects, not directories"), http.StatusBadRequest)
-		return
-	}
+	// parse key
+	path := jc.PathParam("key")
 
 	var off int
 	if jc.DecodeForm("offset", &off) != nil {
@@ -528,8 +510,7 @@ func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 
 	// fetch object metadata
 	hor, err := w.HeadObject(jc.Request.Context(), bucket, path, api.HeadObjectOptions{
-		IgnoreDelim: ignoreDelim,
-		Range:       &dr,
+		Range: &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -584,27 +565,9 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	opts := api.GetObjectOptions{
-		Prefix:      prefix,
-		Marker:      marker,
-		Offset:      off,
-		Limit:       limit,
-		IgnoreDelim: ignoreDelim,
-		SortBy:      sortBy,
-		SortDir:     sortDir,
-	}
-
-	path := jc.PathParam("path")
-	if path == "" || strings.HasSuffix(path, "/") {
-		// list directory
-		res, err := w.bus.Object(ctx, bucket, path, opts)
-		if utils.IsErr(err, api.ErrObjectNotFound) {
-			jc.Error(err, http.StatusNotFound)
-			return
-		} else if jc.Check("couldn't get object or entries", err) != nil {
-			return
-		}
-		jc.Encode(res.Entries)
+	key := jc.PathParam("key")
+	if key == "" {
+		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
 		return
 	}
 
@@ -620,9 +583,8 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	gor, err := w.GetObject(ctx, bucket, path, api.DownloadObjectOptions{
-		GetObjectOptions: opts,
-		Range:            &dr,
+	gor, err := w.GetObject(ctx, bucket, key, api.DownloadObjectOptions{
+		Range: &dr,
 	})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -636,7 +598,7 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 	defer gor.Content.Close()
 
 	// serve the content
-	serveContent(jc.ResponseWriter, jc.Request, path, gor.Content, gor.HeadObjectResponse)
+	serveContent(jc.ResponseWriter, jc.Request, key, gor.Content, gor.HeadObjectResponse)
 }
 
 func (w *Worker) objectsHandlerPUT(jc jape.Context) {
@@ -644,7 +606,7 @@ func (w *Worker) objectsHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// grab the path
-	path := jc.PathParam("path")
+	path := jc.PathParam("key")
 
 	// decode the contract set from the query string
 	var contractset string
@@ -715,7 +677,7 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// grab the path
-	path := jc.PathParam("path")
+	path := jc.PathParam("key")
 
 	// decode the contract set from the query string
 	var contractset string
@@ -807,7 +769,7 @@ func (w *Worker) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("path"), api.DeleteObjectOptions{Batch: batch})
+	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("key"), api.DeleteObjectOptions{Batch: batch})
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -842,7 +804,6 @@ func (w *Worker) rhpContractsHandlerGET(jc jape.Context) {
 	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
 	resp := api.ContractsResponse{Contracts: contracts}
 	if errs != nil {
-		resp.Error = errs.Error()
 		resp.Errors = make(map[types.PublicKey]string)
 		for pk, err := range errs {
 			resp.Errors[pk] = err.Error()
@@ -996,12 +957,12 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
-		"HEAD   /objects/*path": w.objectsHandlerHEAD,
-		"GET    /objects/*path": w.objectsHandlerGET,
-		"PUT    /objects/*path": w.objectsHandlerPUT,
-		"DELETE /objects/*path": w.objectsHandlerDELETE,
+		"HEAD   /objects/*key": w.objectsHandlerHEAD,
+		"GET    /objects/*key": w.objectsHandlerGET,
+		"PUT    /objects/*key": w.objectsHandlerPUT,
+		"DELETE /objects/*key": w.objectsHandlerDELETE,
 
-		"PUT    /multipart/*path": w.multipartUploadHandlerPUT,
+		"PUT    /multipart/*key": w.multipartUploadHandlerPUT,
 
 		"GET    /state": w.stateHandlerGET,
 	})
@@ -1147,16 +1108,15 @@ func isErrHostUnreachable(err error) bool {
 		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
-func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.ObjectsResponse, error) {
+func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.Object, error) {
 	// fetch object
-	res, err := w.bus.Object(ctx, bucket, path, api.GetObjectOptions{
-		IgnoreDelim:  opts.IgnoreDelim,
+	res, err := w.bus.Object(ctx, bucket, key, api.GetObjectOptions{
 		OnlyMetadata: onlyMetadata,
 	})
 	if err != nil {
-		return nil, api.ObjectsResponse{}, fmt.Errorf("couldn't fetch object: %w", err)
+		return nil, api.Object{}, fmt.Errorf("couldn't fetch object: %w", err)
 	} else if res.Object == nil {
-		return nil, api.ObjectsResponse{}, errors.New("object is a directory")
+		return nil, api.Object{}, errors.New("object is a directory")
 	}
 
 	// adjust length
@@ -1164,21 +1124,21 @@ func (w *Worker) headObject(ctx context.Context, bucket, path string, onlyMetada
 		opts.Range = &api.DownloadRange{Offset: 0, Length: -1}
 	}
 	if opts.Range.Length == -1 {
-		opts.Range.Length = res.Object.Size - opts.Range.Offset
+		opts.Range.Length = res.Size - opts.Range.Offset
 	}
 
 	// check size of object against range
-	if opts.Range.Offset+opts.Range.Length > res.Object.Size {
-		return nil, api.ObjectsResponse{}, http_range.ErrInvalid
+	if opts.Range.Offset+opts.Range.Length > res.Size {
+		return nil, api.Object{}, http_range.ErrInvalid
 	}
 
 	return &api.HeadObjectResponse{
-		ContentType:  res.Object.MimeType,
-		Etag:         res.Object.ETag,
-		LastModified: res.Object.ModTime,
-		Range:        opts.Range.ContentRange(res.Object.Size),
-		Size:         res.Object.Size,
-		Metadata:     res.Object.Metadata,
+		ContentType:  res.MimeType,
+		Etag:         res.ETag,
+		LastModified: res.ModTime,
+		Range:        opts.Range.ContentRange(res.Size),
+		Size:         res.Size,
+		Metadata:     res.Metadata,
 	}, res, nil
 }
 
@@ -1211,16 +1171,15 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 	})
 }
 
-func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
+func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	// head object
-	hor, res, err := w.headObject(ctx, bucket, path, false, api.HeadObjectOptions{
-		IgnoreDelim: opts.IgnoreDelim,
-		Range:       opts.Range,
+	hor, res, err := w.headObject(ctx, bucket, key, false, api.HeadObjectOptions{
+		Range: opts.Range,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch object: %w", err)
 	}
-	obj := *res.Object.Object
+	obj := *res.Object
 
 	// adjust range
 	if opts.Range == nil {
@@ -1257,7 +1216,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, path, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(contracts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -1277,8 +1236,8 @@ func (w *Worker) GetObject(ctx context.Context, bucket, path string, opts api.Do
 	}, nil
 }
 
-func (w *Worker) HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
-	res, _, err := w.headObject(ctx, bucket, path, true, opts)
+func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
+	res, _, err := w.headObject(ctx, bucket, key, true, opts)
 	return res, err
 }
 
@@ -1301,7 +1260,7 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 	return nil
 }
 
-func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
+func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
 	// prepare upload params
 	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
 	if err != nil {
@@ -1318,7 +1277,7 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	}
 
 	// upload
-	eTag, err := w.upload(ctx, bucket, path, up.RedundancySettings, r, contracts,
+	eTag, err := w.upload(ctx, bucket, key, up.RedundancySettings, r, contracts,
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithMimeType(opts.MimeType),
@@ -1326,9 +1285,9 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 		WithObjectUserMetadata(opts.Metadata),
 	)
 	if err != nil {
-		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
+		w.logger.With(zap.Error(err)).With("key", key).With("bucket", bucket).Error("failed to upload object")
 		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
-			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+			w.registerAlert(newUploadFailedAlert(bucket, key, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return nil, fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -1358,13 +1317,13 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		WithBlockHeight(up.CurrentHeight),
 		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
-		WithCustomKey(upload.Key),
+		WithCustomKey(upload.EncryptionKey),
 		WithPartNumber(partNumber),
 		WithUploadID(uploadID),
 	}
 
 	// make sure only one of the following is set
-	if encryptionEnabled := !upload.Key.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
+	if encryptionEnabled := !upload.EncryptionKey.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
 		return nil, fmt.Errorf("%w: if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set", api.ErrInvalidMultipartEncryptionSettings)
 	} else if opts.EncryptionOffset != nil && *opts.EncryptionOffset < 0 {
 		return nil, fmt.Errorf("%w: encryption offset must be positive", api.ErrInvalidMultipartEncryptionSettings)

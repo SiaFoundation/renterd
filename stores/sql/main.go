@@ -28,7 +28,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var ErrNegativeOffset = errors.New("offset can not be negative")
+var (
+	ErrNegativeOffset  = errors.New("offset can not be negative")
+	ErrSettingNotFound = errors.New("setting not found")
+)
 
 // helper types
 type (
@@ -392,7 +395,7 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	// helper to fetch metadata
 	fetchMetadata := func(objID int64) (om api.ObjectMetadata, err error) {
 		err = tx.QueryRow(ctx, "SELECT etag, health, created_at, object_id, size, mime_type FROM objects WHERE id = ?", objID).
-			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Name, &om.Size, &om.MimeType)
+			Scan(&om.ETag, &om.Health, (*time.Time)(&om.ModTime), &om.Key, &om.Size, &om.MimeType)
 		if err != nil {
 			return api.ObjectMetadata{}, fmt.Errorf("failed to fetch new object: %w", err)
 		}
@@ -548,7 +551,7 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 	return err
 }
 
-func DeleteSettings(ctx context.Context, tx sql.Tx, key string) error {
+func DeleteSetting(ctx context.Context, tx sql.Tx, key string) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
 		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
 	}
@@ -660,6 +663,232 @@ func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
 		blocklist = append(blocklist, entry)
 	}
 	return blocklist, nil
+}
+
+func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	}
+
+	var hasAllowlist, hasBlocklist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
+		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
+	} else if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
+		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
+	}
+
+	// validate filterMode
+	switch filterMode {
+	case api.HostFilterModeAllowed:
+	case api.HostFilterModeBlocked:
+	case api.HostFilterModeAll:
+	default:
+		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
+	}
+
+	var whereExprs []string
+	var args []any
+
+	// fetch autopilot id
+	var autopilotID int64
+	if autopilot != "" {
+		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", autopilot).
+			Scan(&autopilotID); errors.Is(err, dsql.ErrNoRows) {
+			return nil, api.ErrAutopilotNotFound
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
+		}
+	}
+
+	// filter allowlist/blocklist
+	switch filterMode {
+	case api.HostFilterModeAllowed:
+		if hasAllowlist {
+			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+		if hasBlocklist {
+			whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+	case api.HostFilterModeBlocked:
+		if hasAllowlist {
+			whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+		if hasBlocklist {
+			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+		}
+		if !hasAllowlist && !hasBlocklist {
+			// if neither an allowlist nor a blocklist exist, all hosts are
+			// allowed which means we return none
+			return []api.Host{}, nil
+		}
+	}
+
+	// filter address
+	if addressContains != "" {
+		whereExprs = append(whereExprs, "h.net_address LIKE ?")
+		args = append(args, "%"+addressContains+"%")
+	}
+
+	// filter public key
+	if len(keyIn) > 0 {
+		pubKeys := make([]any, len(keyIn))
+		for i, pk := range keyIn {
+			pubKeys[i] = PublicKey(pk)
+		}
+		placeholders := strings.Repeat("?, ", len(keyIn)-1) + "?"
+		whereExprs = append(whereExprs, fmt.Sprintf("h.public_key IN (%s)", placeholders))
+		args = append(args, pubKeys...)
+	}
+
+	// filter usability
+	whereApExpr := ""
+	if autopilot != "" {
+		whereApExpr = "AND hc.db_autopilot_id = ?"
+	}
+	switch usabilityMode {
+	case api.UsabilityFilterModeUsable:
+		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
+		args = append(args, autopilotID)
+	case api.UsabilityFilterModeUnusable:
+		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
+		args = append(args, autopilotID)
+	}
+
+	// offset + limit
+	if limit == -1 {
+		limit = math.MaxInt64
+	}
+	offsetLimitStr := fmt.Sprintf("LIMIT %d OFFSET %d", limit, offset)
+
+	// fetch stored data for each host
+	rows, err := tx.Query(ctx, "SELECT host_id, SUM(size) FROM contracts GROUP BY host_id")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stored data: %w", err)
+	}
+	defer rows.Close()
+
+	storedDataMap := make(map[int64]uint64)
+	for rows.Next() {
+		var hostID int64
+		var storedData uint64
+		if err := rows.Scan(&hostID, &storedData); err != nil {
+			return nil, fmt.Errorf("failed to scan stored data: %w", err)
+		}
+		storedDataMap[hostID] = storedData
+	}
+
+	// query hosts
+	var blockedExprs []string
+	if hasAllowlist {
+		blockedExprs = append(blockedExprs, "NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+	if hasBlocklist {
+		blockedExprs = append(blockedExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+	var blockedExpr string
+	if len(blockedExprs) > 0 {
+		blockedExpr = strings.Join(blockedExprs, " OR ")
+	} else {
+		blockedExpr = "FALSE"
+	}
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
+	}
+	rows, err = tx.Query(ctx, fmt.Sprintf(`
+		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
+			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
+			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
+			h.scanned, h.resolved_addresses, %s
+		FROM hosts h
+		%s
+		%s
+	`, blockedExpr, whereExpr, offsetLimitStr), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.Host
+	for rows.Next() {
+		var h api.Host
+		var hostID int64
+		var pte dsql.NullTime
+		var resolvedAddresses string
+		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
+			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
+			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
+			&h.Scanned, &resolvedAddresses, &h.Blocked,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+
+		if resolvedAddresses != "" {
+			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
+			h.Subnets, err = utils.AddressesToSubnets(h.ResolvedAddresses)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert addresses to subnets: %w", err)
+			}
+		}
+		h.PriceTable.Expiry = pte.Time
+		h.StoredData = storedDataMap[hostID]
+		hosts = append(hosts, h)
+	}
+
+	// query host checks
+	var apExpr string
+	if autopilot != "" {
+		apExpr = "WHERE ap.identifier = ?"
+		args = append(args, autopilot)
+	}
+	rows, err = tx.Query(ctx, fmt.Sprintf(`
+		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
+			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
+			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
+			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
+			hc.gouging_prune_err, hc.gouging_upload_err
+		FROM (
+			SELECT h.id, h.public_key
+			FROM hosts h
+			%s
+			%s
+		) AS h
+		INNER JOIN host_checks hc ON hc.db_host_id = h.id
+		INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id
+		%s
+	`, whereExpr, offsetLimitStr, apExpr), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch host checks: %w", err)
+	}
+	defer rows.Close()
+
+	hostChecks := make(map[types.PublicKey]map[string]api.HostCheck)
+	for rows.Next() {
+		var ap string
+		var pk PublicKey
+		var hc api.HostCheck
+		err := rows.Scan(&pk, &ap, &hc.Usability.Blocked, &hc.Usability.Offline, &hc.Usability.LowScore, &hc.Usability.RedundantIP,
+			&hc.Usability.Gouging, &hc.Usability.NotAcceptingContracts, &hc.Usability.NotAnnounced, &hc.Usability.NotCompletingScan,
+			&hc.Score.Age, &hc.Score.Collateral, &hc.Score.Interactions, &hc.Score.StorageRemaining, &hc.Score.Uptime,
+			&hc.Score.Version, &hc.Score.Prices, &hc.Gouging.ContractErr, &hc.Gouging.DownloadErr, &hc.Gouging.GougingErr,
+			&hc.Gouging.PruneErr, &hc.Gouging.UploadErr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		if _, ok := hostChecks[types.PublicKey(pk)]; !ok {
+			hostChecks[types.PublicKey(pk)] = make(map[string]api.HostCheck)
+		}
+		hostChecks[types.PublicKey(pk)][ap] = hc
+	}
+
+	// fill in hosts
+	for i := range hosts {
+		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
+	}
+	return hosts, nil
 }
 
 func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
@@ -1013,102 +1242,16 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	return orderByExprs, nil
 }
 
-func ListObjects(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else if limit != math.MaxInt {
-		limit++
+func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+	switch delim {
+	case "":
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
+	case "/":
+		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+	default:
+		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
 	}
-
-	// establish sane defaults for sorting
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
-	}
-
-	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
-	whereArgs := []any{bucket}
-
-	// apply prefix
-	if prefix != "" {
-		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
-		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
-	}
-
-	// apply sorting
-	orderByExprs, err := orderByObject(sortBy, sortDir)
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
-	}
-
-	// apply marker
-	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
-		err := tx.QueryRow(ctx, fmt.Sprintf(`
-			SELECT o.%s
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-		`, col), bucket, marker).Scan(dst)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return api.ErrMarkerNotFound
-		} else {
-			return err
-		}
-	})
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to get marker exprs: %w", err)
-	}
-	whereExprs = append(whereExprs, markerExprs...)
-	whereArgs = append(whereArgs, markerArgs...)
-
-	// apply limit
-	whereArgs = append(whereArgs, limit)
-
-	// run query
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?
-	`,
-		tx.SelectObjectMetadataExpr(),
-		strings.Join(whereExprs, " AND "),
-		strings.Join(orderByExprs, ", ")),
-		whereArgs...)
-	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-
-	var hasMore bool
-	var nextMarker string
-	if len(objects) == limit {
-		objects = objects[:len(objects)-1]
-		if len(objects) > 0 {
-			hasMore = true
-			nextMarker = objects[len(objects)-1].Name
-		}
-	}
-
-	return api.ObjectsListResponse{
-		HasMore:    hasMore,
-		NextMarker: nextMarker,
-		Objects:    objects,
-	}, nil
+	return
 }
 
 func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.MultipartUpload, error) {
@@ -1220,7 +1363,7 @@ func MultipartUploads(ctx context.Context, tx sql.Tx, bucket, prefix, keyMarker,
 	if limitUsed && len(uploads) > int(limit) {
 		hasMore = true
 		uploads = uploads[:len(uploads)-1]
-		nextPathMarker = uploads[len(uploads)-1].Path
+		nextPathMarker = uploads[len(uploads)-1].Key
 		nextUploadIDMarker = uploads[len(uploads)-1].UploadID
 	}
 
@@ -1351,167 +1494,6 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
-}
-
-func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	// sanity check we are passing a directory
-	if !strings.HasSuffix(path, "/") {
-		panic("path must end in /")
-	}
-
-	// sanity check we are passing sane paging parameters
-	usingMarker := marker != ""
-	usingOffset := offset > 0
-	if usingMarker && usingOffset {
-		return nil, false, errors.New("fetching entries using a marker and an offset is not supported at the same time")
-	}
-
-	// fetch one more to see if there are more entries
-	if limit <= -1 {
-		limit = math.MaxInt
-	} else if limit != math.MaxInt {
-		limit++
-	}
-
-	// establish sane defaults for sorting
-	if sortBy == "" {
-		sortBy = api.ObjectSortByName
-	}
-	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
-	}
-
-	// fetch directory id
-	dirID, err := dirID(ctx, tx, path)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return []api.ObjectMetadata{}, false, nil
-	} else if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch directory id: %w", err)
-	}
-
-	args := []any{
-		path,
-		dirID, bucket,
-	}
-
-	// apply prefix
-	var prefixExpr string
-	if prefix != "" {
-		prefixExpr = "AND SUBSTR(o.object_id, 1, ?) = ?"
-		args = append(args,
-			utf8.RuneCountInString(path+prefix), path+prefix,
-			utf8.RuneCountInString(path+prefix), path+prefix,
-		)
-	}
-
-	args = append(args,
-		bucket,
-		path+"%",
-		utf8.RuneCountInString(path), path,
-		dirID,
-	)
-
-	// apply marker
-	var whereExpr string
-	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
-		var groupFn string
-		switch col {
-		case "size":
-			groupFn = "SUM"
-		case "health":
-			groupFn = "MIN"
-		default:
-			return fmt.Errorf("unknown column: %v", col)
-		}
-		err := tx.QueryRow(ctx, fmt.Sprintf(`
-			SELECT o.%s
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-			UNION ALL
-			SELECT %s(o.%s)
-			FROM objects o
-			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
-			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return api.ErrMarkerNotFound
-		} else {
-			return err
-		}
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to query marker: %w", err)
-	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
-	}
-	args = append(args, markerArgs...)
-
-	// apply sorting
-	orderByExprs, err := orderByObject(sortBy, sortDir)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to apply sorting: %w", err)
-	}
-
-	// apply offset and limit
-	args = append(args, limit, offset)
-
-	// objectsQuery consists of 2 parts
-	// 1. fetch all objects in requested directory
-	// 2. fetch all sub-directories
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
-			FROM objects o
-			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
-			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
-			FROM objects o
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
-			GROUP BY d.id
-		) AS o
-		%s
-		ORDER BY %s
-		LIMIT ? OFFSET ?
-	`,
-		tx.SelectObjectMetadataExpr(),
-		prefixExpr,
-		tx.CharLengthExpr(),
-		prefixExpr,
-		whereExpr,
-		strings.Join(orderByExprs, ", "),
-	), args...)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, false, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-
-	// trim last element if we have more
-	var hasMore bool
-	if len(objects) == limit {
-		hasMore = true
-		objects = objects[:len(objects)-1]
-	}
-
-	return objects, hasMore, nil
 }
 
 func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {
@@ -1982,264 +1964,21 @@ func ResetLostSectors(ctx context.Context, tx sql.Tx, hk types.PublicKey) error 
 	return nil
 }
 
-func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	if offset < 0 {
-		return nil, ErrNegativeOffset
-	}
-
-	var hasAllowlist, hasBlocklist bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
-		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
-	} else if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
-		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
-	}
-
-	// validate filterMode
-	switch filterMode {
-	case api.HostFilterModeAllowed:
-	case api.HostFilterModeBlocked:
-	case api.HostFilterModeAll:
-	default:
-		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
-	}
-
-	var whereExprs []string
-	var args []any
-
-	// fetch autopilot id
-	var autopilotID int64
-	if autopilot != "" {
-		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", autopilot).
-			Scan(&autopilotID); errors.Is(err, dsql.ErrNoRows) {
-			return nil, api.ErrAutopilotNotFound
-		} else if err != nil {
-			return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
-		}
-	}
-
-	// filter allowlist/blocklist
-	switch filterMode {
-	case api.HostFilterModeAllowed:
-		if hasAllowlist {
-			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
-		}
-		if hasBlocklist {
-			whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
-		}
-	case api.HostFilterModeBlocked:
-		if hasAllowlist {
-			whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
-		}
-		if hasBlocklist {
-			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
-		}
-		if !hasAllowlist && !hasBlocklist {
-			// if neither an allowlist nor a blocklist exist, all hosts are
-			// allowed which means we return none
-			return []api.Host{}, nil
-		}
-	}
-
-	// filter address
-	if addressContains != "" {
-		whereExprs = append(whereExprs, "h.net_address LIKE ?")
-		args = append(args, "%"+addressContains+"%")
-	}
-
-	// filter public key
-	if len(keyIn) > 0 {
-		pubKeys := make([]any, len(keyIn))
-		for i, pk := range keyIn {
-			pubKeys[i] = PublicKey(pk)
-		}
-		placeholders := strings.Repeat("?, ", len(keyIn)-1) + "?"
-		whereExprs = append(whereExprs, fmt.Sprintf("h.public_key IN (%s)", placeholders))
-		args = append(args, pubKeys...)
-	}
-
-	// filter usability
-	whereApExpr := ""
-	if autopilot != "" {
-		whereApExpr = "AND hc.db_autopilot_id = ?"
-	}
-	switch usabilityMode {
-	case api.UsabilityFilterModeUsable:
-		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
-		args = append(args, autopilotID)
-	case api.UsabilityFilterModeUnusable:
-		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
-		args = append(args, autopilotID)
-	}
-
-	// offset + limit
-	if limit == -1 {
-		limit = math.MaxInt64
-	}
-	offsetLimitStr := fmt.Sprintf("LIMIT %d OFFSET %d", limit, offset)
-
-	// fetch stored data for each host
-	rows, err := tx.Query(ctx, "SELECT host_id, SUM(size) FROM contracts GROUP BY host_id")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch stored data: %w", err)
-	}
-	defer rows.Close()
-
-	storedDataMap := make(map[int64]uint64)
-	for rows.Next() {
-		var hostID int64
-		var storedData uint64
-		if err := rows.Scan(&hostID, &storedData); err != nil {
-			return nil, fmt.Errorf("failed to scan stored data: %w", err)
-		}
-		storedDataMap[hostID] = storedData
-	}
-
-	// query hosts
-	var blockedExprs []string
-	if hasAllowlist {
-		blockedExprs = append(blockedExprs, "NOT EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
-	}
-	if hasBlocklist {
-		blockedExprs = append(blockedExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
-	}
-	var blockedExpr string
-	if len(blockedExprs) > 0 {
-		blockedExpr = strings.Join(blockedExprs, " OR ")
-	} else {
-		blockedExpr = "FALSE"
-	}
-	var whereExpr string
-	if len(whereExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
-	}
-	rows, err = tx.Query(ctx, fmt.Sprintf(`
-		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
-			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
-			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
-			h.scanned, h.resolved_addresses, %s
-		FROM hosts h
-		%s
-		%s
-	`, blockedExpr, whereExpr, offsetLimitStr), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
-	}
-	defer rows.Close()
-
-	var hosts []api.Host
-	for rows.Next() {
-		var h api.Host
-		var hostID int64
-		var pte dsql.NullTime
-		var resolvedAddresses string
-		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
-			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
-			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
-			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &resolvedAddresses, &h.Blocked,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan host: %w", err)
-		}
-
-		if resolvedAddresses != "" {
-			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
-			h.Subnets, err = utils.AddressesToSubnets(h.ResolvedAddresses)
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert addresses to subnets: %w", err)
-			}
-		}
-		h.PriceTable.Expiry = pte.Time
-		h.StoredData = storedDataMap[hostID]
-		hosts = append(hosts, h)
-	}
-
-	// query host checks
-	var apExpr string
-	if autopilot != "" {
-		apExpr = "WHERE ap.identifier = ?"
-		args = append(args, autopilot)
-	}
-	rows, err = tx.Query(ctx, fmt.Sprintf(`
-		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
-			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
-			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
-			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
-			hc.gouging_prune_err, hc.gouging_upload_err
-		FROM (
-			SELECT h.id, h.public_key
-			FROM hosts h
-			%s
-			%s
-		) AS h
-		INNER JOIN host_checks hc ON hc.db_host_id = h.id
-		INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id
-		%s
-	`, whereExpr, offsetLimitStr, apExpr), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch host checks: %w", err)
-	}
-	defer rows.Close()
-
-	hostChecks := make(map[types.PublicKey]map[string]api.HostCheck)
-	for rows.Next() {
-		var ap string
-		var pk PublicKey
-		var hc api.HostCheck
-		err := rows.Scan(&pk, &ap, &hc.Usability.Blocked, &hc.Usability.Offline, &hc.Usability.LowScore, &hc.Usability.RedundantIP,
-			&hc.Usability.Gouging, &hc.Usability.NotAcceptingContracts, &hc.Usability.NotAnnounced, &hc.Usability.NotCompletingScan,
-			&hc.Score.Age, &hc.Score.Collateral, &hc.Score.Interactions, &hc.Score.StorageRemaining, &hc.Score.Uptime,
-			&hc.Score.Version, &hc.Score.Prices, &hc.Gouging.ContractErr, &hc.Gouging.DownloadErr, &hc.Gouging.GougingErr,
-			&hc.Gouging.PruneErr, &hc.Gouging.UploadErr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan host: %w", err)
-		}
-		if _, ok := hostChecks[types.PublicKey(pk)]; !ok {
-			hostChecks[types.PublicKey(pk)] = make(map[string]api.HostCheck)
-		}
-		hostChecks[types.PublicKey(pk)][ap] = hc
-	}
-
-	// fill in hosts
-	for i := range hosts {
-		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
-	}
-	return hosts, nil
-}
-
 func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
 	var value string
 	err := tx.QueryRow(ctx, "SELECT value FROM settings WHERE `key` = ?", key).Scan((*BusSetting)(&value))
 	if errors.Is(err, dsql.ErrNoRows) {
-		return "", api.ErrSettingNotFound
+		return "", ErrSettingNotFound
 	} else if err != nil {
 		return "", fmt.Errorf("failed to fetch setting '%s': %w", key, err)
 	}
 	return value, nil
 }
 
-func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
-	rows, err := tx.Query(ctx, "SELECT `key` FROM settings")
-	if err != nil {
-		return nil, fmt.Errorf("failed to query settings: %w", err)
-	}
-	defer rows.Close()
-	var settings []string
-	for rows.Next() {
-		var setting string
-		if err := rows.Scan(&setting); err != nil {
-			return nil, fmt.Errorf("failed to scan setting key")
-		}
-		settings = append(settings, setting)
-	}
-	return settings, nil
-}
-
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
 	// fetch slab
 	var slabID int64
-	slab := object.Slab{Key: key}
+	slab := object.Slab{EncryptionKey: key}
 	err := tx.QueryRow(ctx, `
 		SELECT id, health, min_shards
 		FROM slabs sla
@@ -2371,7 +2110,7 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 	var slabs []api.UnhealthySlab
 	for rows.Next() {
 		var slab api.UnhealthySlab
-		if err := rows.Scan((*EncryptionKey)(&slab.Key), &slab.Health); err != nil {
+		if err := rows.Scan((*EncryptionKey)(&slab.EncryptionKey), &slab.Health); err != nil {
 			return nil, fmt.Errorf("failed to scan unhealthy slab: %w", err)
 		}
 		slabs = append(slabs, slab)
@@ -2532,7 +2271,7 @@ func scanBucket(s Scanner) (api.Bucket, error) {
 }
 
 func scanMultipartUpload(s Scanner) (resp api.MultipartUpload, _ error) {
-	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.Key), &resp.Path, &resp.UploadID, &resp.CreatedAt)
+	err := s.Scan(&resp.Bucket, (*EncryptionKey)(&resp.EncryptionKey), &resp.Key, &resp.UploadID, &resp.CreatedAt)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.MultipartUpload{}, api.ErrMultipartUploadNotFound
 	} else if err != nil {
@@ -2615,35 +2354,6 @@ func scanStateElement(s Scanner) (types.StateElement, error) {
 		LeafIndex:   leafIndex,
 		MerkleProof: merkleProof.Hashes,
 	}, nil
-}
-
-func SearchObjects(ctx context.Context, tx Tx, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	if limit <= -1 {
-		limit = math.MaxInt
-	}
-
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON o.db_bucket_id = b.id
-		WHERE INSTR(o.object_id, ?) > 0 AND b.name = ?
-		ORDER BY o.object_id ASC
-		LIMIT ? OFFSET ?
-	`, tx.SelectObjectMetadataExpr()), substring, bucket, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-	return objects, nil
 }
 
 func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
@@ -2855,7 +2565,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		var hk types.PublicKey
 		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
 			&objectIndex, &ss.Offset, &ss.Length, // slice info
-			&ss.Health, (*EncryptionKey)(&ss.Key), &ss.MinShards, // slab info
+			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
 			&slabIndex, (*Hash256)(&sector.Root), (*PublicKey)(&sector.LatestHost), // sector info
 			(*PublicKey)(&fcid), // contract info
 			(*PublicKey)(&hk),   // host info
@@ -2912,5 +2622,276 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 			Key:   ec,
 			Slabs: slabSlices,
 		},
+	}, nil
+}
+
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else if limit != math.MaxInt {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// filter by bucket
+	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
+	whereArgs := []any{bucket}
+
+	// apply prefix
+	if prefix != "" {
+		whereExprs = append(whereExprs, "o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ?")
+		whereArgs = append(whereArgs, prefix+"%", utf8.RuneCountInString(prefix), prefix)
+	}
+
+	// apply substring
+	if substring != "" {
+		whereExprs = append(whereExprs, "INSTR(o.object_id, ?) > 0")
+		whereArgs = append(whereArgs, substring)
+	}
+
+	// apply sorting
+	orderByExprs, err := orderByObject(sortBy, sortDir)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
+	}
+
+	// apply marker
+	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+		`, col), bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	})
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to get marker exprs: %w", err)
+	}
+	whereExprs = append(whereExprs, markerExprs...)
+	whereArgs = append(whereArgs, markerArgs...)
+
+	// apply limit
+	whereArgs = append(whereArgs, limit)
+
+	// run query
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM objects o
+		WHERE %s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		tx.SelectObjectMetadataExpr(),
+		strings.Join(whereExprs, " AND "),
+		strings.Join(orderByExprs, ", ")),
+		whereArgs...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := tx.ScanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Key
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
+	}, nil
+}
+
+func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	// split prefix into path and object prefix
+	path := "/" // root of bucket
+	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
+		path = prefix[:idx+1]
+		prefix = prefix[idx+1:]
+	}
+	if !strings.HasSuffix(path, "/") {
+		panic("path must end with /")
+	}
+
+	// fetch one more to see if there are more entries
+	if limit <= -1 {
+		limit = math.MaxInt
+	} else if limit != math.MaxInt {
+		limit++
+	}
+
+	// establish sane defaults for sorting
+	if sortBy == "" {
+		sortBy = api.ObjectSortByName
+	}
+	if sortDir == "" {
+		sortDir = api.ObjectSortDirAsc
+	}
+
+	// fetch directory id
+	dirID, err := dirID(ctx, tx, path)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ObjectsListResponse{}, nil
+	} else if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch directory id: %w", err)
+	}
+
+	args := []any{
+		path,
+		dirID, bucket,
+	}
+
+	// apply prefix
+	var prefixExpr string
+	if prefix != "" {
+		prefixExpr = "AND SUBSTR(o.object_id, 1, ?) = ?"
+		args = append(args,
+			utf8.RuneCountInString(path+prefix), path+prefix,
+			utf8.RuneCountInString(path+prefix), path+prefix,
+		)
+	}
+
+	args = append(args,
+		bucket,
+		path+"%",
+		utf8.RuneCountInString(path), path,
+		dirID,
+	)
+
+	// apply marker
+	var whereExpr string
+	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		var groupFn string
+		switch col {
+		case "size":
+			groupFn = "SUM"
+		case "health":
+			groupFn = "MIN"
+		default:
+			return fmt.Errorf("unknown column: %v", col)
+		}
+		err := tx.QueryRow(ctx, fmt.Sprintf(`
+			SELECT o.%s
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			WHERE b.name = ? AND o.object_id = ?
+			UNION ALL
+			SELECT %s(o.%s)
+			FROM objects o
+			INNER JOIN buckets b ON o.db_bucket_id = b.id
+			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
+			WHERE b.name = ? AND d.name = ?
+			GROUP BY d.id
+		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return api.ErrMarkerNotFound
+		} else {
+			return err
+		}
+	})
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to query marker: %w", err)
+	} else if len(markerExprs) > 0 {
+		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
+	}
+	args = append(args, markerArgs...)
+
+	// apply sorting
+	orderByExprs, err := orderByObject(sortBy, sortDir)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
+	}
+
+	// apply offset and limit
+	args = append(args, limit)
+
+	// objectsQuery consists of 2 parts
+	// 1. fetch all objects in requested directory
+	// 2. fetch all sub-directories
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM (
+			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+			FROM objects o
+			LEFT JOIN directories d ON d.name = o.object_id
+			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
+				AND d.id IS NULL
+			UNION ALL
+			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+			FROM objects o
+			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
+			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
+			AND o.object_id LIKE ?
+			AND SUBSTR(o.object_id, 1, ?) = ?
+			AND d.db_parent_id = ?
+			GROUP BY d.id
+		) AS o
+		%s
+		ORDER BY %s
+		LIMIT ?
+	`,
+		tx.SelectObjectMetadataExpr(),
+		prefixExpr,
+		tx.CharLengthExpr(),
+		prefixExpr,
+		whereExpr,
+		strings.Join(orderByExprs, ", "),
+	), args...)
+	if err != nil {
+		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+	}
+	defer rows.Close()
+
+	var objects []api.ObjectMetadata
+	for rows.Next() {
+		om, err := tx.ScanObjectMetadata(rows)
+		if err != nil {
+			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+		}
+		objects = append(objects, om)
+	}
+
+	// trim last element if we have more
+	var hasMore bool
+	var nextMarker string
+	if len(objects) == limit {
+		objects = objects[:len(objects)-1]
+		if len(objects) > 0 {
+			hasMore = true
+			nextMarker = objects[len(objects)-1].Key
+		}
+	}
+
+	return api.ObjectsListResponse{
+		HasMore:    hasMore,
+		NextMarker: nextMarker,
+		Objects:    objects,
 	}, nil
 }

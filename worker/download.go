@@ -173,7 +173,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		if !slabs[i].PartialSlab {
 			continue
 		}
-		data, slab, err := mgr.fetchPartialSlab(ctx, slabs[i].SlabSlice.Key, slabs[i].SlabSlice.Offset, slabs[i].SlabSlice.Length)
+		data, slab, err := mgr.fetchPartialSlab(ctx, slabs[i].SlabSlice.EncryptionKey, slabs[i].SlabSlice.Offset, slabs[i].SlabSlice.Length)
 		if err != nil {
 			return fmt.Errorf("failed to fetch partial slab data: %w", err)
 		}

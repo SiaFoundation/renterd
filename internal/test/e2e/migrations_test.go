@@ -41,8 +41,8 @@ func TestMigrations(t *testing.T) {
 	tt := cluster.tt
 
 	// create a helper to fetch used hosts
-	usedHosts := func(path string) map[types.PublicKey]struct{} {
-		res, _ := b.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+	usedHosts := func(key string) map[types.PublicKey]struct{} {
+		res, _ := b.Object(context.Background(), api.DefaultBucketName, key, api.GetObjectOptions{})
 		if res.Object == nil {
 			t.Fatal("object not found")
 		}

@@ -85,8 +85,8 @@ func TestS3Basic(t *testing.T) {
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
-	} else if api.FormatETag(busObject.Object.ETag) != *uploadInfo.ETag {
-		t.Fatalf("expected ETag %v, got %v", *uploadInfo.ETag, busObject.Object.ETag)
+	} else if api.FormatETag(busObject.ETag) != *uploadInfo.ETag {
+		t.Fatalf("expected ETag %v, got %v", uploadInfo.ETag, busObject.ETag)
 	}
 
 	_, err = s3.PutObject(&s3aws.PutObjectInput{
@@ -845,9 +845,11 @@ func TestS3SettingsValidate(t *testing.T) {
 		},
 	}
 	for i, test := range tests {
-		err := cluster.Bus.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
-			V4Keypairs: map[string]string{
-				test.id: test.key,
+		err := cluster.Bus.UpdateS3Settings(context.Background(), api.S3Settings{
+			Authentication: api.S3AuthenticationSettings{
+				V4Keypairs: map[string]string{
+					test.id: test.key,
+				},
 			},
 		})
 		if err != nil && !test.shouldFail {

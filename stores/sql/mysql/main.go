@@ -87,6 +87,11 @@ func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.Database
 	})
 }
 
+func (b *MainDatabase) UpdateSetting(ctx context.Context, tx sql.Tx, key, value string) error {
+	mtx := b.wrapTxn(tx)
+	return mtx.UpdateSetting(ctx, key, value)
+}
+
 func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 	return version(ctx, b.db)
 }
@@ -95,8 +100,8 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
-func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, key, uploadID)
 }
 
 func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Account, error) {
@@ -344,8 +349,8 @@ func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
-func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
-	return ssql.DeleteSettings(ctx, tx, key)
+func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
+	return ssql.DeleteSetting(ctx, tx, key)
 }
 
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
@@ -405,6 +410,10 @@ func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey,
 
 func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 	return ssql.HostBlocklist(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) Hosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+	return ssql.Hosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
 }
 
 func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
@@ -474,8 +483,8 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 	return ssql.ListBuckets(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
@@ -534,12 +543,8 @@ func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.O
 	return ssql.Object(ctx, tx, bucket, key)
 }
 
-func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	return ssql.ObjectEntries(ctx, tx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-}
-
-func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
-	return ssql.ObjectMetadata(ctx, tx, bucket, path)
+func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {
+	return ssql.ObjectMetadata(ctx, tx, bucket, key)
 }
 
 func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
@@ -808,20 +813,12 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 }
 
 func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
-	dst := []any{&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag}
+	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag}
 	dst = append(dst, others...)
 	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
 	}
 	return md, nil
-}
-
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
-}
-
-func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	return ssql.SearchObjects(ctx, tx, bucket, substring, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
@@ -830,10 +827,6 @@ func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
-}
-
-func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
-	return ssql.Settings(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
@@ -1091,7 +1084,7 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		health_valid_until = ?,
 		health = ?
 		WHERE `+"`key`"+` = ?
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.Key))
+	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.EncryptionKey))
 	if err != nil {
 		return err
 	} else if n, err := res.RowsAffected(); err != nil {
@@ -1102,7 +1095,7 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 	// fetch slab id and total shards
 	var slabID, totalShards int64
-	err = tx.QueryRow(ctx, "SELECT id, total_shards FROM slabs WHERE `key` = ?", ssql.EncryptionKey(s.Key)).
+	err = tx.QueryRow(ctx, "SELECT id, total_shards FROM slabs WHERE `key` = ?", ssql.EncryptionKey(s.EncryptionKey)).
 		Scan(&slabID, &totalShards)
 	if err != nil {
 		return err
@@ -1271,7 +1264,7 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		res, err := insertSlabStmt.Exec(ctx,
 			time.Now(),
 			contractSetID,
-			ssql.EncryptionKey(slices[i].Key),
+			ssql.EncryptionKey(slices[i].EncryptionKey),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
 		)

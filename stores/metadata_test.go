@@ -42,10 +42,10 @@ func (s *testSQLStore) InsertSlab(slab object.Slab) {
 	}
 }
 
-func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string) error {
+func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, key string) error {
 	ts := time.Now()
 	time.Sleep(time.Millisecond)
-	if err := s.RemoveObject(ctx, bucket, path); err != nil {
+	if err := s.RemoveObject(ctx, bucket, key); err != nil {
 		return err
 	}
 	return s.waitForPruneLoop(ts)
@@ -148,9 +148,9 @@ func TestPrunableContractRoots(t *testing.T) {
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
-						Shards:    newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
+						EncryptionKey: object.GenerateEncryptionKey(),
+						MinShards:     1,
+						Shards:        newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
 					},
 				},
 			},
@@ -228,20 +228,20 @@ func TestObjectBasic(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -310,20 +310,20 @@ func TestObjectMetadata(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -575,9 +575,9 @@ func TestContractRoots(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hks[0], fcids[0], types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hks[0], fcids[0], types.Hash256{1}),
 				},
 			},
 		},
@@ -672,9 +672,9 @@ func TestRenewedContract(t *testing.T) {
 			// good slab
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    append(newTestShards(hk, fcid1, types.Hash256{1}), newTestShards(hk2, fcid2, types.Hash256{2})...),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        append(newTestShards(hk, fcid1, types.Hash256{1}), newTestShards(hk2, fcid2, types.Hash256{2})...),
 				},
 			},
 		},
@@ -1079,20 +1079,20 @@ func TestSQLMetadataStore(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -1119,15 +1119,15 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	obj.ModTime = api.TimeRFC3339{}
 
-	obj1Slab0Key := obj1.Slabs[0].Key
-	obj1Slab1Key := obj1.Slabs[1].Key
+	obj1Slab0Key := obj1.Slabs[0].EncryptionKey
+	obj1Slab1Key := obj1.Slabs[1].EncryptionKey
 
 	expectedObj := api.Object{
 		ObjectMetadata: api.ObjectMetadata{
 			ETag:     testETag,
 			Health:   1,
 			ModTime:  api.TimeRFC3339{},
-			Name:     objID,
+			Key:      objID,
 			Size:     obj1.TotalSize(),
 			MimeType: testMimeType,
 		},
@@ -1139,9 +1139,9 @@ func TestSQLMetadataStore(t *testing.T) {
 					Offset: 10,
 					Length: 100,
 					Slab: object.Slab{
-						Health:    1,
-						Key:       obj1Slab0Key,
-						MinShards: 1,
+						Health:        1,
+						EncryptionKey: obj1Slab0Key,
+						MinShards:     1,
 						Shards: []object.Sector{
 							{
 								LatestHost: hk1,
@@ -1157,9 +1157,9 @@ func TestSQLMetadataStore(t *testing.T) {
 					Offset: 20,
 					Length: 200,
 					Slab: object.Slab{
-						Health:    1,
-						Key:       obj1Slab1Key,
-						MinShards: 2,
+						Health:        1,
+						EncryptionKey: obj1Slab1Key,
+						MinShards:     2,
 						Shards: []object.Sector{
 							{
 								LatestHost: hk2,
@@ -1210,9 +1210,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab1 := object.Slab{
-		Health:    1,
-		Key:       obj1Slab0Key,
-		MinShards: 1,
+		Health:        1,
+		EncryptionKey: obj1Slab0Key,
+		MinShards:     1,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -1249,9 +1249,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab2 := object.Slab{
-		Health:    1,
-		Key:       obj1Slab1Key,
-		MinShards: 2,
+		Health:        1,
+		EncryptionKey: obj1Slab1Key,
+		MinShards:     2,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -1395,8 +1395,8 @@ func TestObjectHealth(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[0], fcids[0], types.Hash256{1}),
 						newTestShard(hks[1], fcids[1], types.Hash256{2}),
@@ -1407,8 +1407,8 @@ func TestObjectHealth(t *testing.T) {
 			},
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[1], fcids[1], types.Hash256{5}),
 						newTestShard(hks[2], fcids[2], types.Hash256{6}),
@@ -1455,7 +1455,8 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	entries, _, err := ss.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", "", "", "", 0, -1)
+	resp, err := ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "", "", "", "", "", -1)
+	entries := resp.Objects
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1465,10 +1466,10 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	entries, err = ss.SearchObjects(context.Background(), api.DefaultBucketName, "foo", 0, -1)
+	resp, err = ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "foo", "", "", "", "", -1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("wrong number of entries", len(entries))
 	} else if entries[0].Health != expectedHealth {
 		t.Fatal("wrong health", entries[0].Health)
@@ -1506,13 +1507,14 @@ func TestObjectHealth(t *testing.T) {
 	}
 }
 
-// TestObjectEntries is a test for the ObjectEntries method.
-func TestObjectEntries(t *testing.T) {
+// TestListObjectsWithDelimiterSlash is a test for the
+// TestListObjects method with '/' as the prefix.
+func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/foo/bar", 1},
@@ -1532,7 +1534,7 @@ func TestObjectEntries(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		_, err := ss.addTestObject(o.path, obj)
+		_, err := ss.addTestObject(o.key, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1544,13 +1546,13 @@ func TestObjectEntries(t *testing.T) {
 		t.Helper()
 		for i := range entries {
 			// assert mod time
-			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+			if !strings.HasSuffix(entries[i].Key, "/") && entries[i].ModTime.IsZero() {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			isDir := strings.HasSuffix(entries[i].Name, "/")
+			isDir := strings.HasSuffix(entries[i].Key, "/")
 			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType != testMimeType) {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
@@ -1584,43 +1586,47 @@ func TestObjectEntries(t *testing.T) {
 		sortDir string
 		want    []api.ObjectMetadata
 	}{
-		{"/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/foo/", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: .5}}},
-		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/gab/", "", "", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/fileś/", "", "", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/foo/", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/", Size: 7, Health: .5}}},
+		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/gab/", "", "", "", []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", "", "", []api.ObjectMetadata{{Key: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", "", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
-		{"/", "F", "", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}}},
+		{"/", "f", "", "", []api.ObjectMetadata{{Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
+		{"/", "F", "", "", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}}},
 		{"/foo/", "fo", "", "", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: .75}}},
+		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: .75}}},
 		{"/gab/", "/guub", "", "", []api.ObjectMetadata{}},
 
-		{"/", "", "name", "ASC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "name", "DESC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}}},
+		{"/", "", "name", "ASC", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "name", "DESC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}}},
 
-		{"/", "", "health", "ASC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "health", "DESC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
+		{"/", "", "health", "ASC", []api.ObjectMetadata{{Key: "/foo/", Size: 10, Health: .5}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "health", "DESC", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
 
-		{"/", "", "size", "DESC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
+		{"/", "", "size", "DESC", []api.ObjectMetadata{{Key: "/foo/", Size: 10, Health: .5}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "size", "ASC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
 	}
 	for _, test := range tests {
-		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
+		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
+		got := resp.Objects
 		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			got, hasMore, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", offset, 1)
+			resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
+			marker = resp.NextMarker
+			got := resp.Objects
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset] {
@@ -1628,8 +1634,8 @@ func TestObjectEntries(t *testing.T) {
 			}
 
 			moreRemaining := len(test.want)-offset-1 > 0
-			if hasMore != moreRemaining {
-				t.Fatalf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
+			if resp.HasMore != moreRemaining {
+				t.Fatalf("invalid value for hasMore (%t) at offset (%d) test (%+v)", resp.HasMore, offset, test)
 			}
 
 			// make sure we stay within bounds
@@ -1637,30 +1643,31 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			got, hasMore, err = ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, 0, 1)
+			resp, err = ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Key, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
+			got = resp.Objects
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset+1] {
-				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", offset+1, test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
+				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", offset+1, test.path, test.prefix, test.want[offset].Key, got, test.want[offset+1])
 			}
 
 			moreRemaining = len(test.want)-offset-2 > 0
-			if hasMore != moreRemaining {
-				t.Fatalf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
+			if resp.HasMore != moreRemaining {
+				t.Fatalf("invalid value for hasMore (%t) at marker (%s) test (%+v)", resp.HasMore, test.want[offset].Key, test)
 			}
 		}
 	}
 }
 
-func TestObjectEntriesExplicitDir(t *testing.T) {
+func TestListObjectsExplicitDir(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/dir/", 0},     // empty dir - created first
@@ -1673,7 +1680,7 @@ func TestObjectEntriesExplicitDir(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		_, err := ss.addTestObject(o.path, obj)
+		_, err := ss.addTestObject(o.key, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1697,31 +1704,32 @@ func TestObjectEntriesExplicitDir(t *testing.T) {
 		want    []api.ObjectMetadata
 	}{
 		{"/", "", "", "", []api.ObjectMetadata{
-			{Name: "/dir/", Size: 1, Health: 0.5},
-			{ETag: "d34db33f", Name: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
+			{Key: "/dir/", Size: 1, Health: 0.5},
+			{ETag: "d34db33f", Key: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
 		}},
-		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Name: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
+		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
 	for _, test := range tests {
-		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
+		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i := range got {
-			got[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
+		for i := range got.Objects {
+			got.Objects[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
 		}
-		if !reflect.DeepEqual(got, test.want) {
+		if !reflect.DeepEqual(got.Objects, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 	}
 }
 
-// TestSearchObjects is a test for the SearchObjects method.
-func TestSearchObjects(t *testing.T) {
+// TestListObjectsSubstring is a test for the ListObjects fuzzy
+// search via the "substring" argument.
+func TestListObjectsSubstring(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/foo/bar", 1},
@@ -1736,14 +1744,14 @@ func TestSearchObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if _, err := ss.addTestObject(o.path, obj); err != nil {
+		if _, err := ss.addTestObject(o.key, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	metadataEquals := func(got api.ObjectMetadata, want api.ObjectMetadata) bool {
 		t.Helper()
-		return got.Name == want.Name &&
+		return got.Key == want.Key &&
 			got.Size == want.Size &&
 			got.Health == want.Health
 	}
@@ -1761,27 +1769,31 @@ func TestSearchObjects(t *testing.T) {
 	}
 
 	tests := []struct {
-		path string
+		key  string
 		want []api.ObjectMetadata
 	}{
-		{"/", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"o/baz/quu", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"uu", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, 0, -1)
+		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", test.key, "", "", "", "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
+		got := resp.Objects
 		assertEqual(got, test.want)
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			if got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, offset, 1); err != nil {
+			if resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", test.key, "", "", "", marker, 1); err != nil {
 				t.Fatal(err)
-			} else if len(got) != 1 {
-				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.path, len(got))
+			} else if got := resp.Objects; len(got) != 1 {
+				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.key, len(got))
 			} else if !metadataEquals(got[0], test.want[offset]) {
-				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want[offset])
+				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.key, got, test.want[offset])
+			} else {
+				marker = resp.NextMarker
 			}
 		}
 	}
@@ -1820,8 +1832,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// good slab
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -1832,8 +1844,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (1/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{4}),
 						newTestShard(hk2, fcid2, types.Hash256{5}),
@@ -1844,8 +1856,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (2/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{7}),
 						newTestShard(hk4, fcid4, types.Hash256{8}),
@@ -1856,8 +1868,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk5 is deleted (1/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{10}),
 						newTestShard(hk2, fcid2, types.Hash256{11}),
@@ -1868,8 +1880,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - h1 is reused
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{13}),
 						newTestShard(hk1, fcid4, types.Hash256{14}),
@@ -1880,8 +1892,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// lost slab - no good pieces (0/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{16}),
 						newTestShard(hk2, fcid2, types.Hash256{17}),
@@ -1914,10 +1926,10 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	expected := []api.UnhealthySlab{
-		{Key: obj.Slabs[2].Key, Health: 0},
-		{Key: obj.Slabs[4].Key, Health: 0},
-		{Key: obj.Slabs[1].Key, Health: 0.5},
-		{Key: obj.Slabs[3].Key, Health: 0.5},
+		{EncryptionKey: obj.Slabs[2].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[4].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[1].EncryptionKey, Health: 0.5},
+		{EncryptionKey: obj.Slabs[3].EncryptionKey, Health: 0.5},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -1935,8 +1947,8 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	expected = []api.UnhealthySlab{
-		{Key: obj.Slabs[2].Key, Health: 0},
-		{Key: obj.Slabs[4].Key, Health: 0},
+		{EncryptionKey: obj.Slabs[2].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[4].EncryptionKey, Health: 0},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order", slabs, expected)
@@ -1985,8 +1997,8 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk1, fcid1, types.Hash256{2}),
@@ -2044,9 +2056,9 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 		},
@@ -2125,16 +2137,16 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 			// hk1 is good so this slab should have full health.
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 			// hk4 is bad so this slab should have no health.
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk2, fcid2, types.Hash256{2}),
 						newTestShard(hk3, fcid3, types.Hash256{4}),
@@ -2160,7 +2172,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	expected := []api.UnhealthySlab{
-		{Key: obj.Slabs[1].Slab.Key, Health: -1},
+		{EncryptionKey: obj.Slabs[1].Slab.EncryptionKey, Health: -1},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -2193,8 +2205,8 @@ func TestContractSectors(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						sectorGood,
 					},
@@ -2266,8 +2278,8 @@ func TestUpdateSlab(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -2282,7 +2294,7 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// extract the slab key
-	key, err := obj.Slabs[0].Key.MarshalBinary()
+	key, err := obj.Slabs[0].EncryptionKey.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2290,7 +2302,7 @@ func TestUpdateSlab(t *testing.T) {
 	// helper to fetch a slab from the database
 	fetchSlab := func() (slab object.Slab) {
 		t.Helper()
-		if slab, err = ss.Slab(ctx, obj.Slabs[0].Key); err != nil {
+		if slab, err = ss.Slab(ctx, obj.Slabs[0].EncryptionKey); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -2404,8 +2416,8 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
-	} else if obj.Slabs[0].Key.String() != updated.Key.String() {
-		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].Key, updated.Key)
+	} else if obj.Slabs[0].EncryptionKey.String() != updated.EncryptionKey.String() {
+		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].EncryptionKey, updated.EncryptionKey)
 	}
 
 	// update the slab to change its contract set.
@@ -2436,9 +2448,9 @@ func newTestObject(slabs int) object.Object {
 		length := offset + uint32(frand.Uint64n(1<<22))
 		obj.Slabs[i] = object.SlabSlice{
 			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: n,
-				Shards:    make([]object.Sector, n*2),
+				EncryptionKey: object.GenerateEncryptionKey(),
+				MinShards:     n,
+				Shards:        make([]object.Sector, n*2),
 			},
 			Offset: offset,
 			Length: length,
@@ -2619,18 +2631,18 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	objs, err := ss.SearchObjects(ctx, api.DefaultBucketName, "/", 0, 100)
+	resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", "/", "", "", "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(objs) != len(objectsAfter) {
-		t.Fatal("unexpected number of objects", len(objs), len(objectsAfter))
+	if len(resp.Objects) != len(objectsAfter) {
+		t.Fatal("unexpected number of objects", len(resp.Objects), len(objectsAfter))
 	}
 
 	// Assert paths are correct.
-	for _, obj := range objs {
-		if _, exists := objectsAfterMap[obj.Name]; !exists {
-			t.Fatal("unexpected path", obj.Name)
+	for _, obj := range resp.Objects {
+		if _, exists := objectsAfterMap[obj.Key]; !exists {
+			t.Fatal("unexpected path", obj.Key)
 		}
 	}
 
@@ -2873,7 +2885,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	data, err := ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	data, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, slab1Data) {
@@ -2898,7 +2910,7 @@ func TestPartialSlab(t *testing.T) {
 		return
 	}
 
-	buffer := fetchBuffer(slabs[0].Key)
+	buffer := fetchBuffer(slabs[0].EncryptionKey)
 	if buffer.Filename == "" {
 		t.Fatal("empty filename")
 	}
@@ -2912,9 +2924,9 @@ func TestPartialSlab(t *testing.T) {
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Health:    1.0,
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
+						Health:        1.0,
+						EncryptionKey: object.GenerateEncryptionKey(),
+						MinShards:     1,
 						Shards: []object.Sector{
 							newTestShard(hk1, fcid1, frand.Entropy256()),
 							newTestShard(hk2, fcid2, frand.Entropy256()),
@@ -2950,7 +2962,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	data, err = ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	data, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, slab2Data) {
@@ -2985,16 +2997,16 @@ func TestPartialSlab(t *testing.T) {
 	if bufferSize != 2*rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
+	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length); err != nil {
 		t.Fatal(err)
-	} else if data2, err := ss.FetchPartialSlab(ctx, slabs[1].Key, slabs[1].Offset, slabs[1].Length); err != nil {
+	} else if data2, err := ss.FetchPartialSlab(ctx, slabs[1].EncryptionKey, slabs[1].Offset, slabs[1].Length); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
 		t.Fatal("wrong data")
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
 
-	buffer = fetchBuffer(slabs[1].Key)
+	buffer = fetchBuffer(slabs[1].EncryptionKey)
 	buffer2Name := buffer.Filename
 	assertBuffer(buffer2Name, 1, false, false)
 
@@ -3019,7 +3031,7 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
-	buffer = fetchBuffer(packedSlabs[0].Key)
+	buffer = fetchBuffer(packedSlabs[0].EncryptionKey)
 	if buffer.ID != packedSlabs[0].BufferID {
 		t.Fatalf("wrong buffer id, %v != %v", buffer.ID, packedSlabs[0].BufferID)
 	}
@@ -3038,13 +3050,13 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	buffer = fetchBuffer(packedSlabs[0].Key)
+	buffer = fetchBuffer(packedSlabs[0].EncryptionKey)
 	if buffer != (bufferedSlab{}) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
 	assertBuffer(buffer2Name, 1, false, false)
 
-	_, err = ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	_, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal("expected ErrObjectNotFound", err)
 	}
@@ -3160,9 +3172,9 @@ func TestContractSizes(t *testing.T) {
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
-						Shards:    newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
+						EncryptionKey: object.GenerateEncryptionKey(),
+						MinShards:     1,
+						Shards:        newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
 					},
 				},
 			},
@@ -3263,10 +3275,10 @@ func TestObjectsBySlabKey(t *testing.T) {
 
 	// create a slab.
 	slab := object.Slab{
-		Health:    1.0,
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: 1,
-		Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+		Health:        1.0,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		MinShards:     1,
+		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 	}
 
 	// Add 3 objects that all reference the slab.
@@ -3288,13 +3300,13 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 
 	// Fetch the objects by slab.
-	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.Key)
+	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i, name := range []string{"obj1", "obj2", "obj3"} {
-		if objs[i].Name != name {
-			t.Fatal("unexpected object name", objs[i].Name, name)
+		if objs[i].Key != name {
+			t.Fatal("unexpected object name", objs[i].Key, name)
 		}
 		if objs[i].Size != int64(i)+1 {
 			t.Fatal("unexpected object size", objs[i].Size, i+1)
@@ -3396,30 +3408,30 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// List the objects in the buckets.
-	if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 2 {
 		t.Fatal("unexpected size", entries[0].Size)
 	}
 
 	// Search the objects in the buckets.
-	if objects, err := ss.SearchObjects(context.Background(), b1, "", 0, -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b1, "", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 2 {
+	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 3 || objects[1].Size != 1 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
-	} else if objects, err := ss.SearchObjects(context.Background(), b2, "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 2 {
+	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 4 || objects[1].Size != 2 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
@@ -3428,35 +3440,35 @@ func TestBucketObjects(t *testing.T) {
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
 	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/baz" {
-		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if entries[0].Key != "/foo/baz" {
+		t.Fatal("unexpected name", entries[0].Key)
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/bar" {
-		t.Fatal("unexpected name", entries[0].Name)
+	} else if entries[0].Key != "/foo/bar" {
+		t.Fatal("unexpected name", entries[0].Key)
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
 	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/baz" {
-		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if entries[0].Key != "/foo/baz" {
+		t.Fatal("unexpected name", entries[0].Key)
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/bam" {
-		t.Fatal("unexpected name", entries[0].Name)
+	} else if entries[0].Key != "/foo/bam" {
+		t.Fatal("unexpected name", entries[0].Key)
 	}
 
 	// Delete foo/baz in bucket 1 but first try bucket 2 since that should fail.
@@ -3464,30 +3476,30 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.RemoveObjectBlocking(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) > 0 {
+	} else if entries := resp.Objects; len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 2 {
+	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if err := ss.RemoveObjectsBlocking(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 0 {
+	} else if entries := resp.Objects; len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
@@ -3503,11 +3515,11 @@ func TestBucketObjects(t *testing.T) {
 	// See if we can fetch the object by slab.
 	if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].Key); err != nil {
+	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 1 {
 		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].Key); err != nil {
+	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
@@ -3536,12 +3548,12 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if om, err := ss.CopyObject(ctx, "src", "src", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(ctx, "src", "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(ctx, "src", "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 2 {
+	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/bar" || entries[1].Name != "/foo" {
-		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	} else if entries[0].Key != "/bar" || entries[1].Key != "/foo" {
+		t.Fatal("unexpected names", entries[0].Key, entries[1].Key)
 	} else if om.ModTime.IsZero() {
 		t.Fatal("expected mod time to be set")
 	}
@@ -3549,12 +3561,12 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if om, err := ss.CopyObject(ctx, "src", "dst", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(ctx, "dst", "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.ListObjects(ctx, "dst", "/", "", "", "", "", "", -1); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
-	} else if entries[0].Name != "/bar" {
-		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	} else if entries[0].Key != "/bar" {
+		t.Fatal("unexpected names", entries[0].Key, entries[1].Key)
 	} else if om.ModTime.IsZero() {
 		t.Fatal("expected mod time to be set")
 	}
@@ -3635,11 +3647,11 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 }
 
-func TestListObjects(t *testing.T) {
+func TestListObjectsNoDelimiter(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/foo/bar", 1},
@@ -3653,7 +3665,7 @@ func TestListObjects(t *testing.T) {
 	// assert mod time & clear it afterwards so we can compare
 	assertModTime := func(entries []api.ObjectMetadata) {
 		for i := range entries {
-			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+			if !strings.HasSuffix(entries[i].Key, "/") && entries[i].ModTime.IsZero() {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = api.TimeRFC3339{}
@@ -3665,7 +3677,7 @@ func TestListObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if _, err := ss.addTestObject(o.path, obj); err != nil {
+		if _, err := ss.addTestObject(o.key, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3690,16 +3702,16 @@ func TestListObjects(t *testing.T) {
 		marker  string
 		want    []api.ObjectMetadata
 	}{
-		{"/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", "ASC", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", "DESC", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/FOO/bar", Size: 6, Health: 1}}},
-		{"/", "health", "ASC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "health", "DESC", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/foo/b", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", "ASC", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", "DESC", "", []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/FOO/bar", Size: 6, Health: 1}}},
+		{"/", "health", "ASC", "", []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "health", "DESC", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo/b", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"o/baz/quu", "", "", "", []api.ObjectMetadata{}},
-		{"/foo", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
+		{"/foo", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}}},
 	}
 	// set common fields
 	for i := range tests {
@@ -3709,7 +3721,7 @@ func TestListObjects(t *testing.T) {
 		}
 	}
 	for _, test := range tests {
-		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
+		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", "", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3724,7 +3736,7 @@ func TestListObjects(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, marker, 1)
+				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -3735,8 +3747,8 @@ func TestListObjects(t *testing.T) {
 				got := res.Objects
 				if len(got) != 1 {
 					t.Fatalf("expected 1 object, got %v", len(got))
-				} else if got[0].Name != test.want[offset].Name {
-					t.Fatalf("expected %v, got %v, offset %v, marker %v", test.want[offset].Name, got[0].Name, offset, marker)
+				} else if got[0].Key != test.want[offset].Key {
+					t.Fatalf("expected %v, got %v, offset %v, marker %v", test.want[offset].Key, got[0].Key, offset, marker)
 				}
 				marker = res.NextMarker
 			}
@@ -3764,8 +3776,8 @@ func TestDeleteHostSector(t *testing.T) {
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	root := types.Hash256{1, 2, 3}
 	ss.InsertSlab(object.Slab{
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: 1,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		MinShards:     1,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -3931,9 +3943,9 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		shards = append(shards, newTestShard(hks[i], contracts[i].ID, types.Hash256{byte(i + 1)}))
 	}
 	slab := object.Slab{
-		Key:    object.GenerateEncryptionKey(),
-		Shards: shards,
-		Health: 1,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		Shards:        shards,
+		Health:        1,
 	}
 
 	// set slab.
@@ -3946,7 +3958,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	}
 
 	// verify slab.
-	rSlab, err := ss.Slab(context.Background(), slab.Key)
+	rSlab, err := ss.Slab(context.Background(), slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, rSlab) {
@@ -3955,8 +3967,8 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 
 	// change the length to fail the update.
 	if err := ss.UpdateSlab(context.Background(), object.Slab{
-		Key:    slab.Key,
-		Shards: shards[:len(shards)-1],
+		EncryptionKey: slab.EncryptionKey,
+		Shards:        shards[:len(shards)-1],
 	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
 		t.Fatal(err)
 	}
@@ -3968,8 +3980,8 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		reversedShards[i], reversedShards[j] = reversedShards[j], reversedShards[i]
 	}
 	reversedSlab := object.Slab{
-		Key:    slab.Key,
-		Shards: reversedShards,
+		EncryptionKey: slab.EncryptionKey,
+		Shards:        reversedShards,
 	}
 	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
 		t.Fatal(err)
@@ -4023,7 +4035,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	_, err = ss.addTestObject("o1", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s1,
+			EncryptionKey: s1,
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -4039,7 +4051,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s2,
+			EncryptionKey: s2,
 			Shards: []object.Sector{
 				newTestShard(hks[2], fcids[2], types.Hash256{2}),
 				newTestShard(hks[3], fcids[3], types.Hash256{3}),
@@ -4169,8 +4181,8 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o1, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			MinShards: 2,
-			Key:       object.GenerateEncryptionKey(),
+			MinShards:     2,
+			EncryptionKey: object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -4188,8 +4200,8 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o2, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			MinShards: 2,
-			Key:       object.GenerateEncryptionKey(),
+			MinShards:     2,
+			EncryptionKey: object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[4], fcids[4], types.Hash256{4}),
 				newTestShard(hks[5], fcids[5], types.Hash256{5}),
@@ -4397,8 +4409,8 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			Offset: 0,
 			Length: uint32(minShards) * rhpv2.SectorSize,
 			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: uint8(minShards),
+				EncryptionKey: object.GenerateEncryptionKey(),
+				MinShards:     uint8(minShards),
 			},
 		})
 	}
@@ -4549,7 +4561,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			t.Fatal("invalid minShards", slab.MinShards)
 		} else if slab.TotalShards != uint8(totalShards) {
 			t.Fatal("invalid totalShards", slab.TotalShards)
-		} else if slab.Key.String() != obj.Slabs[i].Key.String() {
+		} else if slab.Key.String() != obj.Slabs[i].EncryptionKey.String() {
 			t.Fatal("wrong key")
 		}
 
@@ -4579,8 +4591,8 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		Offset: 0,
 		Length: uint32(minShards) * rhpv2.SectorSize,
 		Slab: object.Slab{
-			Key:       object.GenerateEncryptionKey(),
-			MinShards: uint8(minShards),
+			EncryptionKey: object.GenerateEncryptionKey(),
+			MinShards:     uint8(minShards),
 		},
 	})
 	// 30 shards each
@@ -4652,7 +4664,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal("invalid minShards", slab2.MinShards)
 	} else if slab2.TotalShards != uint8(totalShards) {
 		t.Fatal("invalid totalShards", slab2.TotalShards)
-	} else if slab2.Key.String() != obj2.Slabs[0].Key.String() {
+	} else if slab2.Key.String() != obj2.Slabs[0].EncryptionKey.String() {
 		t.Fatal("wrong key")
 	}
 
@@ -4754,20 +4766,20 @@ func TestUpdateObjectParallel(t *testing.T) {
 				Slabs: []object.SlabSlice{
 					{
 						Slab: object.Slab{
-							Health:    1.0,
-							Key:       object.GenerateEncryptionKey(),
-							MinShards: 1,
-							Shards:    newTestShards(hk1, fcid1, frand.Entropy256()),
+							Health:        1.0,
+							EncryptionKey: object.GenerateEncryptionKey(),
+							MinShards:     1,
+							Shards:        newTestShards(hk1, fcid1, frand.Entropy256()),
 						},
 						Offset: 10,
 						Length: 100,
 					},
 					{
 						Slab: object.Slab{
-							Health:    1.0,
-							Key:       object.GenerateEncryptionKey(),
-							MinShards: 2,
-							Shards:    newTestShards(hk2, fcid2, frand.Entropy256()),
+							Health:        1.0,
+							EncryptionKey: object.GenerateEncryptionKey(),
+							MinShards:     2,
+							Shards:        newTestShards(hk2, fcid2, frand.Entropy256()),
 						},
 						Offset: 20,
 						Length: 200,
