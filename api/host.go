@@ -191,9 +191,9 @@ type (
 	}
 
 	HostCheck struct {
-		Gouging   HostGougingBreakdown   `json:"gouging"`
-		Score     HostScoreBreakdown     `json:"score"`
-		Usability HostUsabilityBreakdown `json:"usability"`
+		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
+		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
+		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
 	}
 
 	HostGougingBreakdown struct {
@@ -230,10 +230,12 @@ func (hc HostCheck) MarshalJSON() ([]byte, error) {
 	type check HostCheck
 	return json.Marshal(struct {
 		check
-		Score float64 `json:"score"`
+		Score  float64 `json:"score"`
+		Usable bool    `json:"usable"`
 	}{
-		check: check(hc),
-		Score: hc.Score.Score(),
+		check:  check(hc),
+		Score:  hc.ScoreBreakdown.Score(),
+		Usable: hc.UsabilityBreakdown.IsUsable(),
 	})
 }
 

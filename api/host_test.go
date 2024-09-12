@@ -8,7 +8,7 @@ import (
 
 func TestMarshalHostScoreBreakdownJSON(t *testing.T) {
 	hc := HostCheck{
-		Score: HostScoreBreakdown{
+		ScoreBreakdown: HostScoreBreakdown{
 			Age:              1.1,
 			Collateral:       1.1,
 			Interactions:     1.1,

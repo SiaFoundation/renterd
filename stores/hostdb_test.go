@@ -204,19 +204,19 @@ func TestHosts(t *testing.T) {
 
 	// add host checks, h1 gets ap1 and h2 gets both
 	h1c := newTestHostCheck()
-	h1c.Score.Age = .1
+	h1c.ScoreBreakdown.Age = .1
 	err = ss.UpdateHostCheck(context.Background(), ap1, hk1, h1c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h2c1 := newTestHostCheck()
-	h2c1.Score.Age = .21
+	h2c1.ScoreBreakdown.Age = .21
 	err = ss.UpdateHostCheck(context.Background(), ap1, hk2, h2c1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	h2c2 := newTestHostCheck()
-	h2c2.Score.Age = .22
+	h2c2.ScoreBreakdown.Age = .22
 	err = ss.UpdateHostCheck(context.Background(), ap2, hk2, h2c2)
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert usability filter is taken into account
-	h2c1.Usability.RedundantIP = true
+	h2c1.UsabilityBreakdown.RedundantIP = true
 	err = ss.UpdateHostCheck(context.Background(), ap1, hk2, h2c1)
 	if err != nil {
 		t.Fatal(err)
@@ -1039,14 +1039,14 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 func newTestHostCheck() api.HostCheck {
 	return api.HostCheck{
 
-		Gouging: api.HostGougingBreakdown{
+		GougingBreakdown: api.HostGougingBreakdown{
 			ContractErr: "foo",
 			DownloadErr: "bar",
 			GougingErr:  "baz",
 			PruneErr:    "qux",
 			UploadErr:   "quuz",
 		},
-		Score: api.HostScoreBreakdown{
+		ScoreBreakdown: api.HostScoreBreakdown{
 			Age:              .1,
 			Collateral:       .2,
 			Interactions:     .3,
@@ -1055,7 +1055,7 @@ func newTestHostCheck() api.HostCheck {
 			Version:          .6,
 			Prices:           .7,
 		},
-		Usability: api.HostUsabilityBreakdown{
+		UsabilityBreakdown: api.HostUsabilityBreakdown{
 			Blocked:               false,
 			Offline:               false,
 			LowScore:              false,

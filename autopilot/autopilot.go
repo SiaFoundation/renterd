@@ -709,12 +709,12 @@ func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
 		jc.Encode(api.HostResponse{
 			Host: hi,
 			Checks: &api.HostChecks{
-				Gouging:          check.Gouging.Gouging(),
-				GougingBreakdown: check.Gouging,
-				Score:            check.Score.Score(),
-				ScoreBreakdown:   check.Score,
-				Usable:           check.Usability.IsUsable(),
-				UnusableReasons:  check.Usability.UnusableReasons(),
+				Gouging:          check.GougingBreakdown.Gouging(),
+				GougingBreakdown: check.GougingBreakdown,
+				Score:            check.ScoreBreakdown.Score(),
+				ScoreBreakdown:   check.ScoreBreakdown,
+				Usable:           check.UsabilityBreakdown.IsUsable(),
+				UnusableReasons:  check.UsabilityBreakdown.UnusableReasons(),
 			},
 		})
 		return
@@ -750,12 +750,12 @@ func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
 			resps[i] = api.HostResponse{
 				Host: host,
 				Checks: &api.HostChecks{
-					Gouging:          check.Gouging.Gouging(),
-					GougingBreakdown: check.Gouging,
-					Score:            check.Score.Score(),
-					ScoreBreakdown:   check.Score,
-					Usable:           check.Usability.IsUsable(),
-					UnusableReasons:  check.Usability.UnusableReasons(),
+					Gouging:          check.GougingBreakdown.Gouging(),
+					GougingBreakdown: check.GougingBreakdown,
+					Score:            check.ScoreBreakdown.Score(),
+					ScoreBreakdown:   check.ScoreBreakdown,
+					Usable:           check.UsabilityBreakdown.IsUsable(),
+					UnusableReasons:  check.UsabilityBreakdown.UnusableReasons(),
 				},
 			}
 		} else {

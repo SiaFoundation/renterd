@@ -867,11 +867,11 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 		var ap string
 		var pk PublicKey
 		var hc api.HostCheck
-		err := rows.Scan(&pk, &ap, &hc.Usability.Blocked, &hc.Usability.Offline, &hc.Usability.LowScore, &hc.Usability.RedundantIP,
-			&hc.Usability.Gouging, &hc.Usability.NotAcceptingContracts, &hc.Usability.NotAnnounced, &hc.Usability.NotCompletingScan,
-			&hc.Score.Age, &hc.Score.Collateral, &hc.Score.Interactions, &hc.Score.StorageRemaining, &hc.Score.Uptime,
-			&hc.Score.Version, &hc.Score.Prices, &hc.Gouging.ContractErr, &hc.Gouging.DownloadErr, &hc.Gouging.GougingErr,
-			&hc.Gouging.PruneErr, &hc.Gouging.UploadErr)
+		err := rows.Scan(&pk, &ap, &hc.UsabilityBreakdown.Blocked, &hc.UsabilityBreakdown.Offline, &hc.UsabilityBreakdown.LowScore, &hc.UsabilityBreakdown.RedundantIP,
+			&hc.UsabilityBreakdown.Gouging, &hc.UsabilityBreakdown.NotAcceptingContracts, &hc.UsabilityBreakdown.NotAnnounced, &hc.UsabilityBreakdown.NotCompletingScan,
+			&hc.ScoreBreakdown.Age, &hc.ScoreBreakdown.Collateral, &hc.ScoreBreakdown.Interactions, &hc.ScoreBreakdown.StorageRemaining, &hc.ScoreBreakdown.Uptime,
+			&hc.ScoreBreakdown.Version, &hc.ScoreBreakdown.Prices, &hc.GougingBreakdown.ContractErr, &hc.GougingBreakdown.DownloadErr, &hc.GougingBreakdown.GougingErr,
+			&hc.GougingBreakdown.PruneErr, &hc.GougingBreakdown.UploadErr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
