@@ -29,8 +29,9 @@ import (
 )
 
 var (
-	ErrNegativeOffset  = errors.New("offset can not be negative")
-	ErrSettingNotFound = errors.New("setting not found")
+	ErrNegativeOffset     = errors.New("offset can not be negative")
+	ErrMissingAutopilotID = errors.New("missing autopilot id")
+	ErrSettingNotFound    = errors.New("setting not found")
 )
 
 // helper types
@@ -665,9 +666,11 @@ func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
 	return blocklist, nil
 }
 
-func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	if offset < 0 {
+func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, error) {
+	if opts.Offset < 0 {
 		return nil, ErrNegativeOffset
+	} else if opts.AutopilotID == "" && opts.UsabilityMode != "" && opts.UsabilityMode != api.UsabilityFilterModeAll {
+		return nil, fmt.Errorf("%w: have to specify autopilot id when filter mode isn't 'all'", ErrMissingAutopilotID)
 	}
 
 	var hasAllowlist, hasBlocklist bool
@@ -678,12 +681,12 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 	}
 
 	// validate filterMode
-	switch filterMode {
+	switch opts.FilterMode {
 	case api.HostFilterModeAllowed:
 	case api.HostFilterModeBlocked:
 	case api.HostFilterModeAll:
 	default:
-		return nil, fmt.Errorf("invalid filter mode: %v", filterMode)
+		return nil, fmt.Errorf("invalid filter mode: %v", opts.FilterMode)
 	}
 
 	var whereExprs []string
@@ -691,8 +694,8 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 
 	// fetch autopilot id
 	var autopilotID int64
-	if autopilot != "" {
-		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", autopilot).
+	if opts.AutopilotID != "" {
+		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", opts.AutopilotID).
 			Scan(&autopilotID); errors.Is(err, dsql.ErrNoRows) {
 			return nil, api.ErrAutopilotNotFound
 		} else if err != nil {
@@ -701,7 +704,7 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 	}
 
 	// filter allowlist/blocklist
-	switch filterMode {
+	switch opts.FilterMode {
 	case api.HostFilterModeAllowed:
 		if hasAllowlist {
 			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
@@ -724,41 +727,42 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 	}
 
 	// filter address
-	if addressContains != "" {
+	if opts.AddressContains != "" {
 		whereExprs = append(whereExprs, "h.net_address LIKE ?")
-		args = append(args, "%"+addressContains+"%")
+		args = append(args, "%"+opts.AddressContains+"%")
 	}
 
 	// filter public key
-	if len(keyIn) > 0 {
-		pubKeys := make([]any, len(keyIn))
-		for i, pk := range keyIn {
+	if len(opts.KeyIn) > 0 {
+		pubKeys := make([]any, len(opts.KeyIn))
+		for i, pk := range opts.KeyIn {
 			pubKeys[i] = PublicKey(pk)
 		}
-		placeholders := strings.Repeat("?, ", len(keyIn)-1) + "?"
+		placeholders := strings.Repeat("?, ", len(opts.KeyIn)-1) + "?"
 		whereExprs = append(whereExprs, fmt.Sprintf("h.public_key IN (%s)", placeholders))
 		args = append(args, pubKeys...)
 	}
 
 	// filter usability
 	whereApExpr := ""
-	if autopilot != "" {
+	if opts.AutopilotID != "" {
 		whereApExpr = "AND hc.db_autopilot_id = ?"
-	}
-	switch usabilityMode {
-	case api.UsabilityFilterModeUsable:
-		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
-		args = append(args, autopilotID)
-	case api.UsabilityFilterModeUnusable:
-		whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
-		args = append(args, autopilotID)
+
+		switch opts.UsabilityMode {
+		case api.UsabilityFilterModeUsable:
+			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
+			args = append(args, autopilotID)
+		case api.UsabilityFilterModeUnusable:
+			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
+			args = append(args, autopilotID)
+		}
 	}
 
 	// offset + limit
-	if limit == -1 {
-		limit = math.MaxInt64
+	if opts.Limit == -1 {
+		opts.Limit = math.MaxInt64
 	}
-	offsetLimitStr := fmt.Sprintf("LIMIT %d OFFSET %d", limit, offset)
+	offsetLimitStr := fmt.Sprintf("LIMIT %d OFFSET %d", opts.Limit, opts.Offset)
 
 	// fetch stored data for each host
 	rows, err := tx.Query(ctx, "SELECT host_id, SUM(size) FROM contracts GROUP BY host_id")
@@ -785,6 +789,8 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 	if hasBlocklist {
 		blockedExprs = append(blockedExprs, "EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
 	}
+
+	var orderByExpr string
 	var blockedExpr string
 	if len(blockedExprs) > 0 {
 		blockedExpr = strings.Join(blockedExprs, " OR ")
@@ -795,6 +801,7 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 	if len(whereExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
 	}
+
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
@@ -803,7 +810,8 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 		FROM hosts h
 		%s
 		%s
-	`, blockedExpr, whereExpr, offsetLimitStr), args...)
+		%s
+	`, blockedExpr, whereExpr, orderByExpr, offsetLimitStr), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -840,9 +848,9 @@ func Hosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilityMode,
 
 	// query host checks
 	var apExpr string
-	if autopilot != "" {
+	if opts.AutopilotID != "" {
 		apExpr = "WHERE ap.identifier = ?"
-		args = append(args, autopilot)
+		args = append(args, opts.AutopilotID)
 	}
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
@@ -1175,7 +1183,7 @@ func whereObjectMarker(marker, sortBy, sortDir string, queryMarker func(dst any,
 		return nil, nil, fmt.Errorf("sortBy and sortDir must be set")
 	}
 
-	desc := strings.ToLower(sortDir) == api.ObjectSortDirDesc
+	desc := strings.ToLower(sortDir) == api.SortDirDesc
 	switch strings.ToLower(sortBy) {
 	case api.ObjectSortByName:
 		if desc {
@@ -1218,8 +1226,8 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	}
 
 	dir2SQL := map[string]string{
-		api.ObjectSortDirAsc:  "ASC",
-		api.ObjectSortDirDesc: "DESC",
+		api.SortDirAsc:  "ASC",
+		api.SortDirDesc: "DESC",
 	}
 	if _, ok := dir2SQL[strings.ToLower(sortDir)]; !ok {
 		return nil, fmt.Errorf("invalid sortDir: %v", sortDir)
@@ -2638,7 +2646,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		sortBy = api.ObjectSortByName
 	}
 	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
+		sortDir = api.SortDirAsc
 	}
 
 	// filter by bucket
@@ -2752,7 +2760,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		sortBy = api.ObjectSortByName
 	}
 	if sortDir == "" {
-		sortDir = api.ObjectSortDirAsc
+		sortDir = api.SortDirAsc
 	}
 
 	// fetch directory id

@@ -23,8 +23,8 @@ const (
 	ObjectSortByName   = "name"
 	ObjectSortBySize   = "size"
 
-	ObjectSortDirAsc  = "asc"
-	ObjectSortDirDesc = "desc"
+	SortDirAsc  = "asc"
+	SortDirDesc = "desc"
 )
 
 var (
