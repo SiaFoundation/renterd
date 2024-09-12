@@ -2643,7 +2643,7 @@ func TestHostScan(t *testing.T) {
 	// fetch hosts for scanning with maxLastScan set to now which should return
 	// all hosts
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+		toScan, err := b.Hosts(context.Background(), api.HostOptions{
 			MaxLastScan: api.TimeRFC3339(time.Now()),
 		})
 		tt.OK(err)
@@ -2655,7 +2655,7 @@ func TestHostScan(t *testing.T) {
 
 	// fetch hosts again with the unix epoch timestamp which should only return
 	// 1 host since that one hasn't been scanned yet
-	toScan, err := b.HostsForScanning(context.Background(), api.HostsForScanningOptions{
+	toScan, err := b.Hosts(context.Background(), api.HostOptions{
 		MaxLastScan: api.TimeRFC3339(time.UnixMilli(1)),
 	})
 	tt.OK(err)
