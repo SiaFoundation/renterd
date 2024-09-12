@@ -129,22 +129,6 @@ type (
 		SortBy          string            `json:"sortBy"`
 		SortDir         string            `json:"sortDir"`
 	}
-
-	// HostResponse is the response type for the GET
-	// /api/autopilot/host/:hostkey endpoint.
-	HostResponse struct {
-		Host   Host        `json:"host"`
-		Checks *HostChecks `json:"checks,omitempty"`
-	}
-
-	HostChecks struct {
-		Gouging          bool                 `json:"gouging"`
-		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
-		Score            float64              `json:"score"`
-		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
-		Usable           bool                 `json:"usable"`
-		UnusableReasons  []string             `json:"unusableReasons,omitempty"`
-	}
 )
 
 type (
