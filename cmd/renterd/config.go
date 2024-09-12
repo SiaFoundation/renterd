@@ -167,7 +167,7 @@ func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.
 
 	// check explorer
 	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
-		err = fmt.Errorf("explorer is disabled but no URL is set")
+		err = fmt.Errorf("explorer is enabled but no URL is set")
 		return
 	}
 

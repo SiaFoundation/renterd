@@ -480,7 +480,7 @@ func (os *objectStoreMock) Slab(ctx context.Context, key object.EncryptionKey) (
 
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for _, s := range o.Slabs {
-			if s.Slab.Key.String() == key.String() {
+			if s.Slab.EncryptionKey.String() == key.String() {
 				slab = s.Slab
 				return
 			}
@@ -496,7 +496,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			if slab.Key.String() != s.Key.String() {
+			if slab.EncryptionKey.String() != s.EncryptionKey.String() {
 				continue
 			}
 			// update slab
@@ -566,7 +566,7 @@ func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	slabKeyToSlab := make(map[string]*object.Slab)
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][objKey].Slabs[i].Slab
+			slabKeyToSlab[slab.Slab.EncryptionKey.String()] = &os.objects[bucket][objKey].Slabs[i].Slab
 		}
 	})
 
@@ -652,8 +652,8 @@ func (*s3Mock) MultipartUploadParts(ctx context.Context, bucket, object string, 
 	return api.MultipartListPartsResponse{}, nil
 }
 
-func (*s3Mock) S3AuthenticationSettings(context.Context) (as api.S3AuthenticationSettings, err error) {
-	return api.S3AuthenticationSettings{}, nil
+func (*s3Mock) S3Settings(context.Context) (as api.S3Settings, err error) {
+	return api.S3Settings{}, nil
 }
 
 func (*s3Mock) UpdateSetting(context.Context, string, interface{}) error {

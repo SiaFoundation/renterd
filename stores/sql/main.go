@@ -31,6 +31,7 @@ import (
 var (
 	ErrNegativeOffset     = errors.New("offset can not be negative")
 	ErrMissingAutopilotID = errors.New("missing autopilot id")
+	ErrSettingNotFound    = errors.New("setting not found")
 )
 
 // helper types
@@ -551,7 +552,7 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 	return err
 }
 
-func DeleteSettings(ctx context.Context, tx sql.Tx, key string) error {
+func DeleteSetting(ctx context.Context, tx sql.Tx, key string) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
 		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
 	}
@@ -2000,34 +2001,17 @@ func Setting(ctx context.Context, tx sql.Tx, key string) (string, error) {
 	var value string
 	err := tx.QueryRow(ctx, "SELECT value FROM settings WHERE `key` = ?", key).Scan((*BusSetting)(&value))
 	if errors.Is(err, dsql.ErrNoRows) {
-		return "", api.ErrSettingNotFound
+		return "", ErrSettingNotFound
 	} else if err != nil {
 		return "", fmt.Errorf("failed to fetch setting '%s': %w", key, err)
 	}
 	return value, nil
 }
 
-func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
-	rows, err := tx.Query(ctx, "SELECT `key` FROM settings")
-	if err != nil {
-		return nil, fmt.Errorf("failed to query settings: %w", err)
-	}
-	defer rows.Close()
-	var settings []string
-	for rows.Next() {
-		var setting string
-		if err := rows.Scan(&setting); err != nil {
-			return nil, fmt.Errorf("failed to scan setting key")
-		}
-		settings = append(settings, setting)
-	}
-	return settings, nil
-}
-
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
 	// fetch slab
 	var slabID int64
-	slab := object.Slab{Key: key}
+	slab := object.Slab{EncryptionKey: key}
 	err := tx.QueryRow(ctx, `
 		SELECT id, health, min_shards
 		FROM slabs sla
@@ -2614,7 +2598,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		var hk types.PublicKey
 		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
 			&objectIndex, &ss.Offset, &ss.Length, // slice info
-			&ss.Health, (*EncryptionKey)(&ss.Key), &ss.MinShards, // slab info
+			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
 			&slabIndex, (*Hash256)(&sector.Root), (*PublicKey)(&sector.LatestHost), // sector info
 			(*PublicKey)(&fcid), // contract info
 			(*PublicKey)(&hk),   // host info

@@ -87,6 +87,11 @@ func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.Database
 	})
 }
 
+func (b *MainDatabase) UpdateSetting(ctx context.Context, tx sql.Tx, key, value string) error {
+	mtx := b.wrapTxn(tx)
+	return mtx.UpdateSetting(ctx, key, value)
+}
+
 func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 	return version(ctx, b.db)
 }
@@ -344,8 +349,8 @@ func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
-func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
-	return ssql.DeleteSettings(ctx, tx, key)
+func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
+	return ssql.DeleteSetting(ctx, tx, key)
 }
 
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
@@ -824,10 +829,6 @@ func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, erro
 	return ssql.Setting(ctx, tx, key)
 }
 
-func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
-	return ssql.Settings(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
 	return ssql.Slab(ctx, tx, key)
 }
@@ -1083,7 +1084,7 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		health_valid_until = ?,
 		health = ?
 		WHERE `+"`key`"+` = ?
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.Key))
+	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.EncryptionKey))
 	if err != nil {
 		return err
 	} else if n, err := res.RowsAffected(); err != nil {
@@ -1094,7 +1095,7 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 
 	// fetch slab id and total shards
 	var slabID, totalShards int64
-	err = tx.QueryRow(ctx, "SELECT id, total_shards FROM slabs WHERE `key` = ?", ssql.EncryptionKey(s.Key)).
+	err = tx.QueryRow(ctx, "SELECT id, total_shards FROM slabs WHERE `key` = ?", ssql.EncryptionKey(s.EncryptionKey)).
 		Scan(&slabID, &totalShards)
 	if err != nil {
 		return err
@@ -1263,7 +1264,7 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		res, err := insertSlabStmt.Exec(ctx,
 			time.Now(),
 			contractSetID,
-			ssql.EncryptionKey(slices[i].Key),
+			ssql.EncryptionKey(slices[i].EncryptionKey),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
 		)

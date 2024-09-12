@@ -5,13 +5,11 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -36,7 +34,6 @@ import (
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -289,10 +286,17 @@ type (
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		DeleteSetting(ctx context.Context, key string) error
-		Setting(ctx context.Context, key string) (string, error)
-		Settings(ctx context.Context) ([]string, error)
-		UpdateSetting(ctx context.Context, key, value string) error
+		GougingSettings(ctx context.Context) (api.GougingSettings, error)
+		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
+
+		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
+
+		UploadSettings(ctx context.Context) (api.UploadSettings, error)
+		UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error
+
+		S3Settings(ctx context.Context) (api.S3Settings, error)
+		UpdateS3Settings(ctx context.Context, s3as api.S3Settings) error
 	}
 
 	WalletMetricsRecorder interface {
@@ -340,6 +344,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		masterKey: masterKey,
 
 		accounts: store,
+		explorer: ibus.NewExplorer(explorerURL),
 		s:        s,
 		cm:       cm,
 		w:        w,
@@ -358,23 +363,14 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
 	}
 
-	// init settings
-	if err := b.initSettings(ctx); err != nil {
-		return nil, err
-	}
-
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
-
-	// create explorer
-	e := ibus.NewExplorer(explorerURL)
-	b.explorer = e
 
 	// create sectors cache
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, e, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, wm, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
@@ -477,10 +473,14 @@ func (b *Bus) Handler() http.Handler {
 
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
-		"GET    /settings":     b.settingsHandlerGET,
-		"GET    /setting/:key": b.settingKeyHandlerGET,
-		"PUT    /setting/:key": b.settingKeyHandlerPUT,
-		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
+		"GET    /settings/gouging": b.settingsGougingHandlerGET,
+		"PUT    /settings/gouging": b.settingsGougingHandlerPUT,
+		"GET    /settings/pinned":  b.settingsPinnedHandlerGET,
+		"PUT    /settings/pinned":  b.settingsPinnedHandlerPUT,
+		"GET    /settings/s3":      b.settingsS3HandlerGET,
+		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
+		"GET    /settings/upload":  b.settingsUploadHandlerGET,
+		"PUT    /settings/upload":  b.settingsUploadHandlerPUT,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
@@ -581,9 +581,11 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
 
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+
 	// fetch revision
-	rk := b.deriveRenterKey(c.HostKey)
-	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -624,7 +626,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
 	// derive the renter key
-	renterKey := b.deriveRenterKey(hostKey)
+	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
 	// prepare the transaction
 	cs := b.cm.TipState()
@@ -665,138 +667,9 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	return contract, nil
 }
 
-// initSettings loads the default settings if the setting is not already set and
-// ensures the settings are valid
-func (b *Bus) initSettings(ctx context.Context) error {
-	// testnets have different redundancy settings
-	defaultRedundancySettings := api.DefaultRedundancySettings
-	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
-		defaultRedundancySettings = api.DefaultRedundancySettingsTestnet
-	}
-
-	// load default settings if the setting is not already set
-	for key, value := range map[string]interface{}{
-		api.SettingGouging:       api.DefaultGougingSettings,
-		api.SettingPricePinning:  api.DefaultPricePinSettings,
-		api.SettingRedundancy:    defaultRedundancySettings,
-		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
-	} {
-		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
-			if bytes, err := json.Marshal(value); err != nil {
-				panic("failed to marshal default settings") // should never happen
-			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
-				return err
-			}
-		}
-	}
-
-	// check redundancy settings for validity
-	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		return err
-	} else if err := rs.Validate(); err != nil {
-		b.logger.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(defaultRedundancySettings)
-		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
-			return err
-		}
-	}
-
-	// check gouging settings for validity
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		return err
-	} else if err := gs.Validate(); err != nil {
-		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
-		if err := gs.Validate(); err == nil {
-			b.logger.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
-			bytes, _ := json.Marshal(gs)
-			if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-				return err
-			}
-		} else {
-			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
-			if err := gs.Validate(); err == nil {
-				b.logger.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
-				bytes, _ := json.Marshal(gs)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return err
-				}
-			} else {
-				b.logger.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(api.DefaultGougingSettings)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	// compat: default price pin settings
-	var pps api.PricePinSettings
-	if pss, err := b.ss.Setting(ctx, api.SettingPricePinning); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(pss), &pps); err != nil {
-		return err
-	} else if err := pps.Validate(); err != nil {
-		// overwrite values with defaults
-		var updates []string
-		if pps.Currency == "" {
-			pps.Currency = api.DefaultPricePinSettings.Currency
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.Currency to %v", pps.Currency))
-		}
-		if pps.Threshold == 0 {
-			pps.Threshold = api.DefaultPricePinSettings.Threshold
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.Threshold to %v", pps.Threshold))
-		}
-
-		var updated []byte
-		if err := pps.Validate(); err == nil {
-			b.logger.Info(fmt.Sprintf("updating price pinning settings with default values: %v", strings.Join(updates, ", ")))
-			updated, _ = json.Marshal(pps)
-		} else {
-			b.logger.Warn(fmt.Sprintf("updated price pinning settings are invalid (%v), they have been overwritten with the default settings", err))
-			updated, _ = json.Marshal(api.DefaultPricePinSettings)
-		}
-		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
-			return fmt.Errorf("failed to update setting '%v': %w", api.SettingPricePinning, err)
-		}
-	} else if pps.Enabled() && !b.explorer.Enabled() {
-		return fmt.Errorf("price pinning can not be enabled, %w", api.ErrExplorerDisabled)
-	}
-
-	return nil
-}
-
 func (b *Bus) isPassedV2AllowHeight() bool {
 	cs := b.cm.TipState()
 	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
-}
-
-func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
-func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
 }
 
 func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
@@ -847,6 +720,9 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 }
 
 func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
 	if err != nil {
@@ -866,7 +742,6 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
-	renterKey := b.deriveRenterKey(c.HostKey)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, maxFundAmount, endHeight, expectedNewStorage)
 	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {

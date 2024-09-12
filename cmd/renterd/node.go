@@ -378,11 +378,13 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	// to ensure contracts formed by the bus can be renewed by the autopilot
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
-	// create bus
+	// get explorer URL
 	var explorerURL string
 	if !cfg.Explorer.Disable {
 		explorerURL = cfg.Explorer.URL
 	}
+
+	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
 	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, logger)
 	if err != nil {

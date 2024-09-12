@@ -148,9 +148,9 @@ func TestPrunableContractRoots(t *testing.T) {
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
-						Shards:    newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
+						EncryptionKey: object.GenerateEncryptionKey(),
+						MinShards:     1,
+						Shards:        newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
 					},
 				},
 			},
@@ -228,20 +228,20 @@ func TestObjectBasic(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -310,20 +310,20 @@ func TestObjectMetadata(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -575,9 +575,9 @@ func TestContractRoots(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hks[0], fcids[0], types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hks[0], fcids[0], types.Hash256{1}),
 				},
 			},
 		},
@@ -672,9 +672,9 @@ func TestRenewedContract(t *testing.T) {
 			// good slab
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    append(newTestShards(hk, fcid1, types.Hash256{1}), newTestShards(hk2, fcid2, types.Hash256{2})...),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        append(newTestShards(hk, fcid1, types.Hash256{1}), newTestShards(hk2, fcid2, types.Hash256{2})...),
 				},
 			},
 		},
@@ -1079,20 +1079,20 @@ func TestSQLMetadataStore(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -1119,8 +1119,8 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	obj.ModTime = api.TimeRFC3339{}
 
-	obj1Slab0Key := obj1.Slabs[0].Key
-	obj1Slab1Key := obj1.Slabs[1].Key
+	obj1Slab0Key := obj1.Slabs[0].EncryptionKey
+	obj1Slab1Key := obj1.Slabs[1].EncryptionKey
 
 	expectedObj := api.Object{
 		ObjectMetadata: api.ObjectMetadata{
@@ -1139,9 +1139,9 @@ func TestSQLMetadataStore(t *testing.T) {
 					Offset: 10,
 					Length: 100,
 					Slab: object.Slab{
-						Health:    1,
-						Key:       obj1Slab0Key,
-						MinShards: 1,
+						Health:        1,
+						EncryptionKey: obj1Slab0Key,
+						MinShards:     1,
 						Shards: []object.Sector{
 							{
 								LatestHost: hk1,
@@ -1157,9 +1157,9 @@ func TestSQLMetadataStore(t *testing.T) {
 					Offset: 20,
 					Length: 200,
 					Slab: object.Slab{
-						Health:    1,
-						Key:       obj1Slab1Key,
-						MinShards: 2,
+						Health:        1,
+						EncryptionKey: obj1Slab1Key,
+						MinShards:     2,
 						Shards: []object.Sector{
 							{
 								LatestHost: hk2,
@@ -1210,9 +1210,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab1 := object.Slab{
-		Health:    1,
-		Key:       obj1Slab0Key,
-		MinShards: 1,
+		Health:        1,
+		EncryptionKey: obj1Slab0Key,
+		MinShards:     1,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -1249,9 +1249,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab2 := object.Slab{
-		Health:    1,
-		Key:       obj1Slab1Key,
-		MinShards: 2,
+		Health:        1,
+		EncryptionKey: obj1Slab1Key,
+		MinShards:     2,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -1395,8 +1395,8 @@ func TestObjectHealth(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[0], fcids[0], types.Hash256{1}),
 						newTestShard(hks[1], fcids[1], types.Hash256{2}),
@@ -1407,8 +1407,8 @@ func TestObjectHealth(t *testing.T) {
 			},
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[1], fcids[1], types.Hash256{5}),
 						newTestShard(hks[2], fcids[2], types.Hash256{6}),
@@ -1832,8 +1832,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// good slab
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -1844,8 +1844,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (1/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{4}),
 						newTestShard(hk2, fcid2, types.Hash256{5}),
@@ -1856,8 +1856,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (2/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{7}),
 						newTestShard(hk4, fcid4, types.Hash256{8}),
@@ -1868,8 +1868,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk5 is deleted (1/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{10}),
 						newTestShard(hk2, fcid2, types.Hash256{11}),
@@ -1880,8 +1880,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - h1 is reused
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{13}),
 						newTestShard(hk1, fcid4, types.Hash256{14}),
@@ -1892,8 +1892,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// lost slab - no good pieces (0/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{16}),
 						newTestShard(hk2, fcid2, types.Hash256{17}),
@@ -1926,10 +1926,10 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	expected := []api.UnhealthySlab{
-		{EncryptionKey: obj.Slabs[2].Key, Health: 0},
-		{EncryptionKey: obj.Slabs[4].Key, Health: 0},
-		{EncryptionKey: obj.Slabs[1].Key, Health: 0.5},
-		{EncryptionKey: obj.Slabs[3].Key, Health: 0.5},
+		{EncryptionKey: obj.Slabs[2].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[4].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[1].EncryptionKey, Health: 0.5},
+		{EncryptionKey: obj.Slabs[3].EncryptionKey, Health: 0.5},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -1947,8 +1947,8 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	expected = []api.UnhealthySlab{
-		{EncryptionKey: obj.Slabs[2].Key, Health: 0},
-		{EncryptionKey: obj.Slabs[4].Key, Health: 0},
+		{EncryptionKey: obj.Slabs[2].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[4].EncryptionKey, Health: 0},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order", slabs, expected)
@@ -1997,8 +1997,8 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk1, fcid1, types.Hash256{2}),
@@ -2056,9 +2056,9 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 		},
@@ -2137,16 +2137,16 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 			// hk1 is good so this slab should have full health.
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 			// hk4 is bad so this slab should have no health.
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk2, fcid2, types.Hash256{2}),
 						newTestShard(hk3, fcid3, types.Hash256{4}),
@@ -2172,7 +2172,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	expected := []api.UnhealthySlab{
-		{EncryptionKey: obj.Slabs[1].Slab.Key, Health: -1},
+		{EncryptionKey: obj.Slabs[1].Slab.EncryptionKey, Health: -1},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -2205,8 +2205,8 @@ func TestContractSectors(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						sectorGood,
 					},
@@ -2278,8 +2278,8 @@ func TestUpdateSlab(t *testing.T) {
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -2294,7 +2294,7 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// extract the slab key
-	key, err := obj.Slabs[0].Key.MarshalBinary()
+	key, err := obj.Slabs[0].EncryptionKey.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2302,7 +2302,7 @@ func TestUpdateSlab(t *testing.T) {
 	// helper to fetch a slab from the database
 	fetchSlab := func() (slab object.Slab) {
 		t.Helper()
-		if slab, err = ss.Slab(ctx, obj.Slabs[0].Key); err != nil {
+		if slab, err = ss.Slab(ctx, obj.Slabs[0].EncryptionKey); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -2416,8 +2416,8 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
-	} else if obj.Slabs[0].Key.String() != updated.Key.String() {
-		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].Key, updated.Key)
+	} else if obj.Slabs[0].EncryptionKey.String() != updated.EncryptionKey.String() {
+		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].EncryptionKey, updated.EncryptionKey)
 	}
 
 	// update the slab to change its contract set.
@@ -2448,9 +2448,9 @@ func newTestObject(slabs int) object.Object {
 		length := offset + uint32(frand.Uint64n(1<<22))
 		obj.Slabs[i] = object.SlabSlice{
 			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: n,
-				Shards:    make([]object.Sector, n*2),
+				EncryptionKey: object.GenerateEncryptionKey(),
+				MinShards:     n,
+				Shards:        make([]object.Sector, n*2),
 			},
 			Offset: offset,
 			Length: length,
@@ -2885,7 +2885,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	data, err := ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	data, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, slab1Data) {
@@ -2910,7 +2910,7 @@ func TestPartialSlab(t *testing.T) {
 		return
 	}
 
-	buffer := fetchBuffer(slabs[0].Key)
+	buffer := fetchBuffer(slabs[0].EncryptionKey)
 	if buffer.Filename == "" {
 		t.Fatal("empty filename")
 	}
@@ -2924,9 +2924,9 @@ func TestPartialSlab(t *testing.T) {
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Health:    1.0,
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
+						Health:        1.0,
+						EncryptionKey: object.GenerateEncryptionKey(),
+						MinShards:     1,
 						Shards: []object.Sector{
 							newTestShard(hk1, fcid1, frand.Entropy256()),
 							newTestShard(hk2, fcid2, frand.Entropy256()),
@@ -2962,7 +2962,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	data, err = ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	data, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, slab2Data) {
@@ -2997,16 +2997,16 @@ func TestPartialSlab(t *testing.T) {
 	if bufferSize != 2*rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
+	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length); err != nil {
 		t.Fatal(err)
-	} else if data2, err := ss.FetchPartialSlab(ctx, slabs[1].Key, slabs[1].Offset, slabs[1].Length); err != nil {
+	} else if data2, err := ss.FetchPartialSlab(ctx, slabs[1].EncryptionKey, slabs[1].Offset, slabs[1].Length); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
 		t.Fatal("wrong data")
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
 
-	buffer = fetchBuffer(slabs[1].Key)
+	buffer = fetchBuffer(slabs[1].EncryptionKey)
 	buffer2Name := buffer.Filename
 	assertBuffer(buffer2Name, 1, false, false)
 
@@ -3056,7 +3056,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	assertBuffer(buffer2Name, 1, false, false)
 
-	_, err = ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	_, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal("expected ErrObjectNotFound", err)
 	}
@@ -3172,9 +3172,9 @@ func TestContractSizes(t *testing.T) {
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
-						Shards:    newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
+						EncryptionKey: object.GenerateEncryptionKey(),
+						MinShards:     1,
+						Shards:        newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
 					},
 				},
 			},
@@ -3275,10 +3275,10 @@ func TestObjectsBySlabKey(t *testing.T) {
 
 	// create a slab.
 	slab := object.Slab{
-		Health:    1.0,
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: 1,
-		Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+		Health:        1.0,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		MinShards:     1,
+		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 	}
 
 	// Add 3 objects that all reference the slab.
@@ -3300,7 +3300,7 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 
 	// Fetch the objects by slab.
-	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.Key)
+	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3515,11 +3515,11 @@ func TestBucketObjects(t *testing.T) {
 	// See if we can fetch the object by slab.
 	if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].Key); err != nil {
+	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 1 {
 		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].Key); err != nil {
+	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
@@ -3776,8 +3776,8 @@ func TestDeleteHostSector(t *testing.T) {
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	root := types.Hash256{1, 2, 3}
 	ss.InsertSlab(object.Slab{
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: 1,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		MinShards:     1,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -3943,9 +3943,9 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		shards = append(shards, newTestShard(hks[i], contracts[i].ID, types.Hash256{byte(i + 1)}))
 	}
 	slab := object.Slab{
-		Key:    object.GenerateEncryptionKey(),
-		Shards: shards,
-		Health: 1,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		Shards:        shards,
+		Health:        1,
 	}
 
 	// set slab.
@@ -3958,7 +3958,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	}
 
 	// verify slab.
-	rSlab, err := ss.Slab(context.Background(), slab.Key)
+	rSlab, err := ss.Slab(context.Background(), slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, rSlab) {
@@ -3967,8 +3967,8 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 
 	// change the length to fail the update.
 	if err := ss.UpdateSlab(context.Background(), object.Slab{
-		Key:    slab.Key,
-		Shards: shards[:len(shards)-1],
+		EncryptionKey: slab.EncryptionKey,
+		Shards:        shards[:len(shards)-1],
 	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
 		t.Fatal(err)
 	}
@@ -3980,8 +3980,8 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		reversedShards[i], reversedShards[j] = reversedShards[j], reversedShards[i]
 	}
 	reversedSlab := object.Slab{
-		Key:    slab.Key,
-		Shards: reversedShards,
+		EncryptionKey: slab.EncryptionKey,
+		Shards:        reversedShards,
 	}
 	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
 		t.Fatal(err)
@@ -4035,7 +4035,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	_, err = ss.addTestObject("o1", object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s1,
+			EncryptionKey: s1,
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -4051,7 +4051,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s2,
+			EncryptionKey: s2,
 			Shards: []object.Sector{
 				newTestShard(hks[2], fcids[2], types.Hash256{2}),
 				newTestShard(hks[3], fcids[3], types.Hash256{3}),
@@ -4181,8 +4181,8 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o1, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			MinShards: 2,
-			Key:       object.GenerateEncryptionKey(),
+			MinShards:     2,
+			EncryptionKey: object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -4200,8 +4200,8 @@ func TestRefreshHealth(t *testing.T) {
 	if added, err := ss.addTestObject(o2, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			MinShards: 2,
-			Key:       object.GenerateEncryptionKey(),
+			MinShards:     2,
+			EncryptionKey: object.GenerateEncryptionKey(),
 			Shards: []object.Sector{
 				newTestShard(hks[4], fcids[4], types.Hash256{4}),
 				newTestShard(hks[5], fcids[5], types.Hash256{5}),
@@ -4409,8 +4409,8 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			Offset: 0,
 			Length: uint32(minShards) * rhpv2.SectorSize,
 			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: uint8(minShards),
+				EncryptionKey: object.GenerateEncryptionKey(),
+				MinShards:     uint8(minShards),
 			},
 		})
 	}
@@ -4561,7 +4561,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			t.Fatal("invalid minShards", slab.MinShards)
 		} else if slab.TotalShards != uint8(totalShards) {
 			t.Fatal("invalid totalShards", slab.TotalShards)
-		} else if slab.Key.String() != obj.Slabs[i].Key.String() {
+		} else if slab.Key.String() != obj.Slabs[i].EncryptionKey.String() {
 			t.Fatal("wrong key")
 		}
 
@@ -4591,8 +4591,8 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		Offset: 0,
 		Length: uint32(minShards) * rhpv2.SectorSize,
 		Slab: object.Slab{
-			Key:       object.GenerateEncryptionKey(),
-			MinShards: uint8(minShards),
+			EncryptionKey: object.GenerateEncryptionKey(),
+			MinShards:     uint8(minShards),
 		},
 	})
 	// 30 shards each
@@ -4664,7 +4664,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal("invalid minShards", slab2.MinShards)
 	} else if slab2.TotalShards != uint8(totalShards) {
 		t.Fatal("invalid totalShards", slab2.TotalShards)
-	} else if slab2.Key.String() != obj2.Slabs[0].Key.String() {
+	} else if slab2.Key.String() != obj2.Slabs[0].EncryptionKey.String() {
 		t.Fatal("wrong key")
 	}
 
@@ -4766,20 +4766,20 @@ func TestUpdateObjectParallel(t *testing.T) {
 				Slabs: []object.SlabSlice{
 					{
 						Slab: object.Slab{
-							Health:    1.0,
-							Key:       object.GenerateEncryptionKey(),
-							MinShards: 1,
-							Shards:    newTestShards(hk1, fcid1, frand.Entropy256()),
+							Health:        1.0,
+							EncryptionKey: object.GenerateEncryptionKey(),
+							MinShards:     1,
+							Shards:        newTestShards(hk1, fcid1, frand.Entropy256()),
 						},
 						Offset: 10,
 						Length: 100,
 					},
 					{
 						Slab: object.Slab{
-							Health:    1.0,
-							Key:       object.GenerateEncryptionKey(),
-							MinShards: 2,
-							Shards:    newTestShards(hk2, fcid2, frand.Entropy256()),
+							Health:        1.0,
+							EncryptionKey: object.GenerateEncryptionKey(),
+							MinShards:     2,
+							Shards:        newTestShards(hk2, fcid2, frand.Entropy256()),
 						},
 						Offset: 20,
 						Length: 200,

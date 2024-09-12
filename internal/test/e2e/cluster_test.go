@@ -178,25 +178,25 @@ func TestNewTestCluster(t *testing.T) {
 	tt := cluster.tt
 
 	// Upload packing should be disabled by default.
-	ups, err := b.UploadPackingSettings(context.Background())
+	us, err := b.UploadSettings(context.Background())
 	tt.OK(err)
-	if ups.Enabled {
-		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
+	if us.Packing.Enabled {
+		t.Fatalf("expected upload packing to be disabled by default, got %v", us.Packing.Enabled)
 	}
 
-	// PricePinningSettings should have default values
-	pps, err := b.PricePinningSettings(context.Background())
+	// PinnedSettings should have default values
+	ps, err := b.PinnedSettings(context.Background())
 	tt.OK(err)
-	if pps.Currency == "" {
+	if ps.Currency == "" {
 		t.Fatal("expected default value for Currency")
-	} else if pps.Threshold == 0 {
+	} else if ps.Threshold == 0 {
 		t.Fatal("expected default value for Threshold")
 	}
 
 	// Autopilot shouldn't have its prices pinned
-	if len(pps.Autopilots) != 1 {
-		t.Fatalf("expected 1 autopilot, got %v", len(pps.Autopilots))
-	} else if pin, exists := pps.Autopilots[api.DefaultAutopilotID]; !exists {
+	if len(ps.Autopilots) != 1 {
+		t.Fatalf("expected 1 autopilot, got %v", len(ps.Autopilots))
+	} else if pin, exists := ps.Autopilots[api.DefaultAutopilotID]; !exists {
 		t.Fatalf("expected autopilot %v to exist", api.DefaultAutopilotID)
 	} else if pin.Allowance != (api.Pin{}) {
 		t.Fatalf("expected autopilot %v to have no pinned allowance, got %v", api.DefaultAutopilotID, pin.Allowance)
@@ -1315,6 +1315,11 @@ func TestEphemeralAccountSync(t *testing.T) {
 	}
 	acc := accounts[0]
 
+	// stop autopilot and mine transactions, this prevents an NDF where we
+	// double spend outputs after restarting the bus
+	cluster.ShutdownAutopilot(context.Background())
+	tt.OK(cluster.MineTransactions(context.Background()))
+
 	// stop the cluster
 	host := cluster.hosts[0]
 	cluster.hosts = nil // exclude hosts from shutdown
@@ -1573,6 +1578,15 @@ func TestWalletEvents(t *testing.T) {
 	if len(txns) != 5 {
 		t.Fatalf("expected exactly 5 events, got %v", len(txns))
 	}
+
+	// Events should have 'Relevant' field set.
+	resp, err := b.Wallet(context.Background())
+	tt.OK(err)
+	for _, txn := range txns {
+		if len(txn.Relevant) != 1 || txn.Relevant[0] != resp.Address {
+			t.Fatal("invalid 'Relevant' field in wallet event", txn.Relevant, resp.Address)
+		}
+	}
 }
 
 func TestUploadPacking(t *testing.T) {
@@ -1733,7 +1747,7 @@ func TestUploadPacking(t *testing.T) {
 	// and file2 share the same slab.
 	res, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
 	tt.OK(err)
-	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].Key)
+	objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].EncryptionKey)
 	tt.OK(err)
 	if len(objs) != 2 {
 		t.Fatal("expected 2 objects", len(objs))

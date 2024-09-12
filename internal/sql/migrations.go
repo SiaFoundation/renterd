@@ -28,6 +28,7 @@ type (
 	MainMigrator interface {
 		Migrator
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
 
@@ -217,6 +218,18 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
 				},
 			},
+			{
+				ID: "00018_gouging_units",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_gouging_units", log)
+				},
+			},
+			{
+				ID: "00019_settings",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_settings", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
@@ -236,6 +249,12 @@ var (
 				ID: "00002_idx_wallet_metrics_immature",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00002_idx_wallet_metrics_immature", log)
+				},
+			},
+			{
+				ID: "00003_unix_ms",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
 				},
 			},
 		}
