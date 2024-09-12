@@ -30,8 +30,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ windows-latest ]
-        go-version: [ '1.22' ]
+        os: [ ubuntu-latest , macos-latest, windows-latest ]
+        go-version: [ '1.22', '1.23' ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,7 +67,7 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=2h;-count=200;-run=TestSlabBufferStats"
+          args: "-failfast;-race;-timeout=2h"
       # - name: Test Integration - MySQL
       #   if: matrix.os == 'ubuntu-latest'
       #   uses: n8maninger/action-golang-test@v1
