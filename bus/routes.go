@@ -271,8 +271,9 @@ func (b *Bus) walletHandler(jc jape.Context) {
 	}
 
 	jc.Encode(api.WalletResponse{
-		Balance: balance,
-		Address: address,
+		Balance:    balance,
+		Address:    address,
+		ScanHeight: b.w.Tip().Height,
 	})
 }
 

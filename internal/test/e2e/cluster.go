@@ -745,6 +745,13 @@ func (c *TestCluster) sync() {
 			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
 		}
 
+		wallet, err := c.Bus.Wallet(context.Background())
+		if err != nil {
+			return err
+		} else if wallet.ScanHeight < tip.Height {
+			return fmt.Errorf("wallet hasn't caught up, %d < %d", wallet.ScanHeight, tip.Height)
+		}
+
 		for _, h := range c.hosts {
 			if hh := h.cm.Tip().Height; hh < tip.Height {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
