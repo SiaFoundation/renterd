@@ -75,14 +75,6 @@ func (c *Client) Objects(ctx context.Context, bucket string, prefix string, opts
 	return
 }
 
-// ObjectsBySlabKey returns all objects that reference a given slab.
-func (c *Client) ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%v/objects?"+values.Encode(), key), &objects)
-	return
-}
-
 // ObjectsStats returns information about the number of objects and their size.
 func (c *Client) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (osr api.ObjectsStatsResponse, err error) {
 	values := url.Values{}

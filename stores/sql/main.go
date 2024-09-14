@@ -2365,35 +2365,6 @@ func scanStateElement(s Scanner) (types.StateElement, error) {
 	}, nil
 }
 
-func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON o.db_bucket_id = b.id
-		WHERE b.name = ? AND EXISTS (
-			SELECT 1
-			FROM objects o2
-			INNER JOIN slices sli ON sli.db_object_id = o2.id
-			INNER JOIN slabs sla ON sla.id = sli.db_slab_id
-			WHERE o2.id = o.id AND sla.key = ?
-		)
-	`, tx.SelectObjectMetadataExpr()), bucket, EncryptionKey(slabKey))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-	return objects, nil
-}
-
 func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedSlab) (string, error) {
 	// fetch relevant slab info
 	var slabID, bufferedSlabID int64

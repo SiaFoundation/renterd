@@ -3269,67 +3269,68 @@ func TestContractSizes(t *testing.T) {
 	}
 }
 
-func TestObjectsBySlabKey(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
+// TODO PJ: use this as a list test
+// func TestObjectsBySlabKey(t *testing.T) {
+// 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+// 	defer ss.Close()
 
-	// create a host
-	hks, err := ss.addTestHosts(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hk1 := hks[0]
+// 	// create a host
+// 	hks, err := ss.addTestHosts(1)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	hk1 := hks[0]
 
-	// create a contract
-	fcids, _, err := ss.addTestContracts(hks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fcid1 := fcids[0]
+// 	// create a contract
+// 	fcids, _, err := ss.addTestContracts(hks)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	fcid1 := fcids[0]
 
-	// create a slab.
-	slab := object.Slab{
-		Health:        1.0,
-		EncryptionKey: object.GenerateEncryptionKey(),
-		MinShards:     1,
-		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
-	}
+// 	// create a slab.
+// 	slab := object.Slab{
+// 		Health:        1.0,
+// 		EncryptionKey: object.GenerateEncryptionKey(),
+// 		MinShards:     1,
+// 		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
+// 	}
 
-	// Add 3 objects that all reference the slab.
-	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab:   slab,
-				Offset: 1,
-				Length: 0, // incremented later
-			},
-		},
-	}
-	for _, name := range []string{"obj1", "obj2", "obj3"} {
-		obj.Slabs[0].Length++
-		if _, err := ss.addTestObject(name, obj); err != nil {
-			t.Fatal(err)
-		}
-	}
+// 	// Add 3 objects that all reference the slab.
+// 	obj := object.Object{
+// 		Key: object.GenerateEncryptionKey(),
+// 		Slabs: []object.SlabSlice{
+// 			{
+// 				Slab:   slab,
+// 				Offset: 1,
+// 				Length: 0, // incremented later
+// 			},
+// 		},
+// 	}
+// 	for _, name := range []string{"obj1", "obj2", "obj3"} {
+// 		obj.Slabs[0].Length++
+// 		if _, err := ss.addTestObject(name, obj); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 	}
 
-	// Fetch the objects by slab.
-	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.EncryptionKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, name := range []string{"obj1", "obj2", "obj3"} {
-		if objs[i].Key != name {
-			t.Fatal("unexpected object name", objs[i].Key, name)
-		}
-		if objs[i].Size != int64(i)+1 {
-			t.Fatal("unexpected object size", objs[i].Size, i+1)
-		}
-		if objs[i].Health != 1.0 {
-			t.Fatal("unexpected object health", objs[i].Health)
-		}
-	}
-}
+// 	// Fetch the objects by slab.
+// 	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.EncryptionKey)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	for i, name := range []string{"obj1", "obj2", "obj3"} {
+// 		if objs[i].Key != name {
+// 			t.Fatal("unexpected object name", objs[i].Key, name)
+// 		}
+// 		if objs[i].Size != int64(i)+1 {
+// 			t.Fatal("unexpected object size", objs[i].Size, i+1)
+// 		}
+// 		if objs[i].Health != 1.0 {
+// 			t.Fatal("unexpected object health", objs[i].Health)
+// 		}
+// 	}
+// }
 
 func TestBuckets(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
@@ -3526,18 +3527,20 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// TODO PJ: use Objects
+	//
 	// See if we can fetch the object by slab.
-	if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
-		t.Fatal(err)
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].EncryptionKey); err != nil {
-		t.Fatal(err)
-	} else if len(objects) != 1 {
-		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].EncryptionKey); err != nil {
-		t.Fatal(err)
-	} else if len(objects) != 0 {
-		t.Fatal("expected 0 objects", len(objects))
-	}
+	// if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
+	// 	t.Fatal(err)
+	// } else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].EncryptionKey); err != nil {
+	// 	t.Fatal(err)
+	// } else if len(objects) != 1 {
+	// 	t.Fatal("expected 1 object", len(objects))
+	// } else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].EncryptionKey); err != nil {
+	// 	t.Fatal(err)
+	// } else if len(objects) != 0 {
+	// 	t.Fatal("expected 0 objects", len(objects))
+	// }
 }
 
 func TestCopyObject(t *testing.T) {

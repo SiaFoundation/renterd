@@ -1468,22 +1468,6 @@ func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *Bus) slabObjectsHandlerGET(jc jape.Context) {
-	var key object.EncryptionKey
-	if jc.DecodeParam("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), bucket, key)
-	if jc.Check("failed to retrieve objects by slab", err) != nil {
-		return
-	}
-	jc.Encode(objects)
-}
-
 func (b *Bus) slabHandlerGET(jc jape.Context) {
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {

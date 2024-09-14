@@ -649,14 +649,6 @@ func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration tim
 	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, set, limit)
 }
 
-func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		metadata, err = tx.ObjectsBySlabKey(ctx, bucket, slabKey)
-		return err
-	})
-	return
-}
-
 func (s *SQLStore) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		indices, err = tx.PrunableContractRoots(ctx, fcid, roots)
