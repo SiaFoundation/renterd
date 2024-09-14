@@ -342,9 +342,10 @@ func TestObjectMetadata(t *testing.T) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
-	}
-	if !reflect.DeepEqual(got.Metadata, testMetadata) {
+	} else if !reflect.DeepEqual(got.Metadata, testMetadata) {
 		t.Fatal("meta mismatch", cmp.Diff(got.Metadata, testMetadata))
+	} else if got.Bucket != api.DefaultBucketName {
+		t.Fatal("unexpected bucket", got.Bucket)
 	}
 
 	// assert metadata CASCADE on object delete
@@ -1124,6 +1125,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	expectedObj := api.Object{
 		ObjectMetadata: api.ObjectMetadata{
+			Bucket:   api.DefaultBucketName,
 			ETag:     testETag,
 			Health:   1,
 			ModTime:  api.TimeRFC3339{},
@@ -1607,6 +1609,12 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 		{"/", "", "size", "DESC", []api.ObjectMetadata{{Key: "/foo/", Size: 10, Health: .5}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
 		{"/", "", "size", "ASC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
 	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].Bucket = api.DefaultBucketName
+		}
+	}
 	for _, test := range tests {
 		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
@@ -1708,6 +1716,12 @@ func TestListObjectsExplicitDir(t *testing.T) {
 			{ETag: "d34db33f", Key: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
 		}},
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
+	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].Bucket = api.DefaultBucketName
+		}
 	}
 	for _, test := range tests {
 		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
@@ -3716,6 +3730,7 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 	// set common fields
 	for i := range tests {
 		for j := range tests[i].want {
+			tests[i].want[j].Bucket = api.DefaultBucketName
 			tests[i].want[j].ETag = testETag
 			tests[i].want[j].MimeType = testMimeType
 		}

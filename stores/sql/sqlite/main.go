@@ -825,7 +825,7 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 
 func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
 	var createdAt string
-	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag}
+	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag, &md.Bucket}
 	dst = append(dst, others...)
 	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
@@ -836,7 +836,7 @@ func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md 
 }
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
-	return "o.object_id, o.size, o.health, o.mime_type, DATETIME(o.created_at), o.etag"
+	return "o.object_id, o.size, o.health, o.mime_type, DATETIME(o.created_at), o.etag, b.name"
 }
 
 func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {

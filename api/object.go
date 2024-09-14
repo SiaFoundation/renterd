@@ -63,6 +63,7 @@ type (
 
 	// ObjectMetadata contains various metadata about an object.
 	ObjectMetadata struct {
+		Bucket   string      `json:"bucket"`
 		ETag     string      `json:"eTag,omitempty"`
 		Health   float64     `json:"health"`
 		ModTime  TimeRFC3339 `json:"modTime"`

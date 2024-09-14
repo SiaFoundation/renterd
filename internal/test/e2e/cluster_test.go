@@ -44,6 +44,12 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 	start := time.Now()
 	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
+			// assert bucket
+			if entries[i].Bucket != api.DefaultBucketName {
+				t.Fatal("unexpected bucket", entries[i].Bucket)
+			}
+			entries[i].Bucket = ""
+
 			// assert mod time
 			if !strings.HasSuffix(entries[i].Key, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
 				t.Fatal("mod time should be set")
@@ -145,7 +151,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				// assert mod time & clear it afterwards so we can compare
+				// assert metadata & clear it afterwards so we can compare
 				assertMetadata(res.Objects)
 
 				got := res.Objects
@@ -389,6 +395,12 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	start := time.Now()
 	assertMetadata := func(entries []api.ObjectMetadata) {
 		for i := range entries {
+			// assert bucket
+			if entries[i].Bucket != api.DefaultBucketName {
+				t.Fatal("unexpected bucket", entries[i].Bucket)
+			}
+			entries[i].Bucket = ""
+
 			// assert mod time
 			if !strings.HasSuffix(entries[i].Key, "/") && !entries[i].ModTime.Std().After(start.UTC()) {
 				t.Fatal("mod time should be set")

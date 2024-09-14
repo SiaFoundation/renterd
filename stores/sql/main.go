@@ -1522,6 +1522,7 @@ func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object,
 	om, err := tx.ScanObjectMetadata(tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		WHERE o.id = ?
 	`, tx.SelectObjectMetadataExpr()), objID))
 	if err != nil {
@@ -2698,6 +2699,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		WHERE %s
 		ORDER BY %s
 		LIMIT ?
@@ -2846,13 +2848,13 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+			SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
 			LEFT JOIN directories d ON d.name = o.object_id
 			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
 				AND d.id IS NULL
 			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+			SELECT o.db_bucket_id, d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
 			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
@@ -2861,6 +2863,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 			AND d.db_parent_id = ?
 			GROUP BY d.id
 		) AS o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		%s
 		ORDER BY %s
 		LIMIT ?
