@@ -1171,8 +1171,12 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("substring", &substring) != nil {
 		return
 	}
+	var slabEncryptionKey object.EncryptionKey
+	if jc.DecodeForm("slabEncryptionKey", &slabEncryptionKey) != nil {
+		return
+	}
 
-	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
+	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	if errors.Is(err, api.ErrUnsupportedDelimiter) {
 		jc.Error(err, http.StatusBadRequest)
 		return

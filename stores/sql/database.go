@@ -196,7 +196,7 @@ type (
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 		// ListObjects returns a list of objects from the given bucket.
-		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
+		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (resp api.ObjectsListResponse, err error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)

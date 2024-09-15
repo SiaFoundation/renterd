@@ -1764,24 +1764,23 @@ func TestUploadPacking(t *testing.T) {
 		return nil
 	})
 
-	// TODO PJ: use Objects
-	// ObjectsBySlabKey should return 2 objects for the slab of file1 since file1
-	// and file2 share the same slab.
-	// res, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
-	// tt.OK(err)
-	// objs, err := b.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, res.Object.Slabs[0].EncryptionKey)
-	// tt.OK(err)
-	// if len(objs) != 2 {
-	// 	t.Fatal("expected 2 objects", len(objs))
-	// }
-	// sort.Slice(objs, func(i, j int) bool {
-	// 	return objs[i].Key < objs[j].Key // make result deterministic
-	// })
-	// if objs[0].Key != "/file1" {
-	// 	t.Fatal("expected file1", objs[0].Key)
-	// } else if objs[1].Key != "/file2" {
-	// 	t.Fatal("expected file2", objs[1].Key)
-	// }
+	// ListObjects should return 2 objects for the slab of file1 since file1 and
+	// file2 share the same slab.
+	o, err := b.Object(context.Background(), api.DefaultBucketName, "file1", api.GetObjectOptions{})
+	tt.OK(err)
+	res, err := b.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: api.DefaultBucketName, SlabEncryptionKey: o.Object.Slabs[0].EncryptionKey})
+	tt.OK(err)
+	if len(res.Objects) != 2 {
+		t.Fatal("expected 2 objects", len(res.Objects))
+	}
+	sort.Slice(res.Objects, func(i, j int) bool {
+		return res.Objects[i].Key < res.Objects[j].Key // make result deterministic
+	})
+	if res.Objects[0].Key != "/file1" {
+		t.Fatal("expected file1", res.Objects[0].Key)
+	} else if res.Objects[1].Key != "/file2" {
+		t.Fatal("expected file2", res.Objects[1].Key)
+	}
 }
 
 func TestWallet(t *testing.T) {

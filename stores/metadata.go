@@ -782,9 +782,9 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 	}
 }
 
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (resp api.ObjectsListResponse, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		resp, err = tx.ListObjects(ctx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
+		resp, err = tx.ListObjects(ctx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 		return err
 	})
 	return

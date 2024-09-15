@@ -1250,12 +1250,12 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	return orderByExprs, nil
 }
 
-func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (resp api.ObjectsListResponse, err error) {
 	switch delim {
 	case "":
-		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	case "/":
-		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	default:
 		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
 	}
@@ -2605,7 +2605,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 	}, nil
 }
 
-func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -2676,6 +2676,12 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	whereExprs = append(whereExprs, markerExprs...)
 	whereArgs = append(whereArgs, markerArgs...)
 
+	// apply slab key
+	if slabEncryptionKey != (object.EncryptionKey{}) {
+		whereExprs = append(whereExprs, "EXISTS(SELECT 1 FROM objects o2 INNER JOIN slices sli ON sli.db_object_id = o2.id INNER JOIN slabs sla ON sla.id = sli.db_slab_id WHERE o2.id = o.id AND sla.key = ?)")
+		whereArgs = append(whereArgs, EncryptionKey(slabEncryptionKey))
+	}
+
 	// apply limit
 	whereArgs = append(whereArgs, limit)
 
@@ -2729,7 +2735,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	}, nil
 }
 
-func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error) {
 	// split prefix into path and object prefix
 	path := "/" // root of bucket
 	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
@@ -2776,6 +2782,13 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 			utf8.RuneCountInString(path+prefix), path+prefix,
 			utf8.RuneCountInString(path+prefix), path+prefix,
 		)
+	}
+
+	// apply slab key
+	var slabKeyExpr string
+	if slabEncryptionKey != (object.EncryptionKey{}) {
+		slabKeyExpr = "AND EXISTS(SELECT 1 FROM objects o2 INNER JOIN slices sli ON sli.db_object_id = o2.id INNER JOIN slabs sla ON sla.id = sli.db_slab_id WHERE o2.id = o.id AND sla.key = ?)"
+		args = append(args, EncryptionKey(slabEncryptionKey))
 	}
 
 	args = append(args,
@@ -2867,7 +2880,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 			SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
 			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND d.id IS NULL %s
+			WHERE o.object_id != ? AND o.db_directory_id = ? AND d.id IS NULL %s %s
 			UNION ALL
 			SELECT o.db_bucket_id, d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
@@ -2882,6 +2895,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	`,
 		tx.SelectObjectMetadataExpr(),
 		prefixExpr,
+		slabKeyExpr,
 		tx.CharLengthExpr(),
 		prefixExpr,
 		whereExpr,

@@ -207,13 +207,14 @@ type (
 	}
 
 	ListObjectOptions struct {
-		Bucket    string
-		Delimiter string
-		Limit     int
-		Marker    string
-		SortBy    string
-		SortDir   string
-		Substring string
+		Bucket            string
+		Delimiter         string
+		Limit             int
+		Marker            string
+		SortBy            string
+		SortDir           string
+		Substring         string
+		SlabEncryptionKey object.EncryptionKey
 	}
 
 	SearchObjectOptions struct {
@@ -332,6 +333,9 @@ func (opts ListObjectOptions) Apply(values url.Values) {
 	}
 	if opts.Substring != "" {
 		values.Set("substring", opts.Substring)
+	}
+	if opts.SlabEncryptionKey != (object.EncryptionKey{}) {
+		values.Set("slabEncryptionKey", opts.SlabEncryptionKey.String())
 	}
 }
 

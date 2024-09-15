@@ -327,22 +327,18 @@ func (m *migrator) objectIDsForSlabKey(ctx context.Context, key object.Encryptio
 	// fetch all objects per bucket
 	idsPerBucket := make(map[string][]string)
 	for _, bucket := range buckets {
-		_ = bucket
-		_ = key
-		// TODO PJ: fetch objects by slab key
-		//
-		// objects, err := m.ap.bus.ObjectsBySlabKey(ctx, bucket.Name, key)
-		// if err != nil {
-		// 	m.logger.Errorf("failed to fetch objects for slab key in bucket %v; %w", bucket, err)
-		// 	continue
-		// } else if len(objects) == 0 {
-		// 	continue
-		// }
+		res, err := m.ap.bus.ListObjects(ctx, "", api.ListObjectOptions{Bucket: bucket.Name, SlabEncryptionKey: key})
+		if err != nil {
+			m.logger.Errorf("failed to fetch objects for slab key in bucket %v; %w", bucket, err)
+			continue
+		} else if len(res.Objects) == 0 {
+			continue
+		}
 
-		// idsPerBucket[bucket.Name] = make([]string, len(objects))
-		// for i, object := range objects {
-		// 	idsPerBucket[bucket.Name][i] = object.Key
-		// }
+		idsPerBucket[bucket.Name] = make([]string, len(res.Objects))
+		for i, object := range res.Objects {
+			idsPerBucket[bucket.Name][i] = object.Key
+		}
 	}
 
 	return idsPerBucket, nil
