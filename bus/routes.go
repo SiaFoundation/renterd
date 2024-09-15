@@ -1148,8 +1148,7 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var marker, delim, sortBy, sortDir, substring string
-	bucket := api.DefaultBucketName
+	var bucket, marker, delim, sortBy, sortDir, substring string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}

@@ -207,6 +207,7 @@ type (
 	}
 
 	ListObjectOptions struct {
+		Bucket    string
 		Delimiter string
 		Limit     int
 		Marker    string
@@ -311,6 +312,9 @@ func (opts GetObjectOptions) Apply(values url.Values) {
 }
 
 func (opts ListObjectOptions) Apply(values url.Values) {
+	if opts.Bucket != "" {
+		values.Set("bucket", opts.Bucket)
+	}
 	if opts.Delimiter != "" {
 		values.Set("delimiter", opts.Delimiter)
 	}

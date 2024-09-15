@@ -2621,9 +2621,14 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		sortDir = api.SortDirAsc
 	}
 
-	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
-	whereArgs := []any{bucket}
+	var whereExprs []string
+	var whereArgs []any
+
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		whereArgs = append(whereArgs, bucket)
+	}
 
 	// apply prefix
 	if prefix != "" {
@@ -2645,12 +2650,20 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 
 	// apply marker
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		markerExprs := []string{"o.object_id = ?"}
+		markerArgs := []any{marker}
+
+		if bucket != "" {
+			markerExprs = append(markerExprs, "b.name = ?")
+			markerArgs = append(markerArgs, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-		`, col), bucket, marker).Scan(dst)
+			WHERE %s
+		`, col, strings.Join(markerExprs, " AND ")), markerArgs...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -2666,17 +2679,23 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	// apply limit
 	whereArgs = append(whereArgs, limit)
 
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
+
 	// run query
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON b.id = o.db_bucket_id
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?
-	`,
+	SELECT %s
+	FROM objects o
+	INNER JOIN buckets b ON b.id = o.db_bucket_id
+	%s
+	ORDER BY %s
+	LIMIT ?
+`,
 		tx.SelectObjectMetadataExpr(),
-		strings.Join(whereExprs, " AND "),
+		whereExpr,
 		strings.Join(orderByExprs, ", ")),
 		whereArgs...)
 	if err != nil {
@@ -2746,7 +2765,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 
 	args := []any{
 		path,
-		dirID, bucket,
+		dirID,
 	}
 
 	// apply prefix
@@ -2760,14 +2779,13 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	}
 
 	args = append(args,
-		bucket,
 		path+"%",
 		utf8.RuneCountInString(path), path,
 		dirID,
 	)
 
 	// apply marker
-	var whereExpr string
+	var whereExprs []string
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
 		var groupFn string
 		switch col {
@@ -2778,19 +2796,34 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		default:
 			return fmt.Errorf("unknown column: %v", col)
 		}
+
+		markerExprsObj := []string{"o.object_id = ?"}
+		markerArgsObj := []any{marker}
+		if bucket != "" {
+			markerExprsObj = append(markerExprsObj, "b.name = ?")
+			markerArgsObj = append(markerArgsObj, bucket)
+		}
+
+		markerExprsDir := []string{"d.name = ?"}
+		markerArgsDir := []any{marker}
+		if bucket != "" {
+			markerExprsDir = append(markerExprsDir, "b.name = ?")
+			markerArgsDir = append(markerArgsDir, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
+			WHERE %s
 			UNION ALL
 			SELECT %s(o.%s)
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
+			WHERE %s
 			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
+		`, col, strings.Join(markerExprsObj, " AND "), groupFn, col, tx.CharLengthExpr(), strings.Join(markerExprsDir, " AND ")), append(markerArgsObj, markerArgsDir...)...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -2800,7 +2833,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	if err != nil {
 		return api.ObjectsListResponse{}, fmt.Errorf("failed to query marker: %w", err)
 	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
+		whereExprs = append(whereExprs, markerExprs...)
 	}
 	args = append(args, markerArgs...)
 
@@ -2810,8 +2843,20 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
 	}
 
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		args = append(args, bucket)
+	}
+
 	// apply offset and limit
 	args = append(args, limit)
+
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
 
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
@@ -2822,16 +2867,12 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 			SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
 			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
+			WHERE o.object_id != ? AND o.db_directory_id = ? AND d.id IS NULL %s
 			UNION ALL
 			SELECT o.db_bucket_id, d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
+			WHERE o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND d.db_parent_id = ?
 			GROUP BY d.id
 		) AS o
 		INNER JOIN buckets b ON b.id = o.db_bucket_id

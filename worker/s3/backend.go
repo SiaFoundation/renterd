@@ -91,7 +91,8 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		page.Marker = "/" + page.Marker
 	}
 
-	resp, err := s.b.Objects(ctx, bucketName, prefix.Prefix, api.ListObjectOptions{
+	resp, err := s.b.ListObjects(ctx, prefix.Prefix, api.ListObjectOptions{
+		Bucket:    bucketName,
 		Delimiter: prefix.Delimiter,
 		Limit:     int(page.MaxKeys),
 		Marker:    page.Marker,

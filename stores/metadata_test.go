@@ -3269,7 +3269,7 @@ func TestContractSizes(t *testing.T) {
 	}
 }
 
-// TODO PJ: use this as a list test
+//  : use this as a list test
 // func TestObjectsBySlabKey(t *testing.T) {
 // 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 // 	defer ss.Close()
@@ -3435,6 +3435,10 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 2 {
 		t.Fatal("unexpected size", entries[0].Size)
+	} else if resp, err := ss.ListObjects(context.Background(), "", "/foo/", "", "", "", "", "", -1); err != nil {
+		t.Fatal(err)
+	} else if entries := resp.Objects; len(entries) != 2 {
+		t.Fatal("expected 2 entries", len(entries))
 	}
 
 	// Search the objects in the buckets.
@@ -3450,6 +3454,10 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 4 || objects[1].Size != 2 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
+	} else if resp, err := ss.ListObjects(context.Background(), "", "", "", "", "", "", "", -1); err != nil {
+		t.Fatal(err)
+	} else if objects := resp.Objects; len(objects) != 4 {
+		t.Fatal("expected 4 objects", len(objects))
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
