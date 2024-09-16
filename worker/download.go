@@ -81,11 +81,10 @@ type (
 	}
 
 	slabDownloadResponse struct {
-		mem              Memory
-		surchargeApplied bool
-		shards           [][]byte
-		index            int
-		err              error
+		mem    Memory
+		shards [][]byte
+		index  int
+		err    error
 	}
 
 	sectorDownloadReq struct {
@@ -264,14 +263,13 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 			wg.Add(1)
 			go func(index int) {
 				defer wg.Done()
-				shards, surchargeApplied, err := mgr.downloadSlab(ctx, next.SlabSlice, false)
+				shards, err := mgr.downloadSlab(ctx, next.SlabSlice, false)
 				select {
 				case responseChan <- &slabDownloadResponse{
-					mem:              mem,
-					surchargeApplied: surchargeApplied,
-					shards:           shards,
-					index:            index,
-					err:              err,
+					mem:    mem,
+					shards: shards,
+					index:  index,
+					err:    err,
 				}:
 				case <-ctx.Done():
 					mem.Release() // relase memory if we're interrupted
@@ -302,10 +300,11 @@ outer:
 			}
 
 			if resp.err != nil {
-				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
+				mgr.logger.Errorw("slab download failed",
+					zap.Int("index", resp.index),
+					zap.Error(err),
+				)
 				return resp.err
-			} else if resp.surchargeApplied {
-				mgr.logger.Warnf("download for slab %v had to overpay to succeed", resp.index)
 			}
 
 			responses[resp.index] = resp
@@ -353,7 +352,7 @@ outer:
 	return nil
 }
 
-func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, bool, error) {
+func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, error) {
 	// refresh the downloaders
 	mgr.refreshDownloaders(contracts)
 
@@ -373,7 +372,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 
 	// check if we have enough shards
 	if availableShards < slab.MinShards {
-		return nil, false, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
+		return nil, fmt.Errorf("not enough hosts available to download the slab: %v/%v", availableShards, slab.MinShards)
 	}
 
 	// NOTE: we don't acquire memory here since DownloadSlab is only used for
@@ -385,19 +384,19 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 		Offset: 0,
 		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
 	}
-	shards, surchargeApplied, err := mgr.downloadSlab(ctx, slice, true)
+	shards, err := mgr.downloadSlab(ctx, slice, true)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	// decrypt and recover
 	slice.Decrypt(shards)
 	err = slice.Reconstruct(shards)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
-	return shards, surchargeApplied, err
+	return shards, err
 }
 
 func (mgr *downloadManager) Stats() downloadManagerStats {
@@ -526,7 +525,7 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bo
 	}
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice, migration bool) ([][]byte, bool, error) {
+func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice, migration bool) ([][]byte, error) {
 	// prepare new download
 	slab := mgr.newSlabDownload(slice, migration)
 
@@ -694,7 +693,7 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	}
 }
 
-func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
+func (s *slabDownload) download(ctx context.Context) ([][]byte, error) {
 	// cancel any sector downloads once the download is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -712,7 +711,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 	for i := 0; i < int(s.minShards); {
 		req := s.nextRequest(ctx, resps, false)
 		if req == nil {
-			return nil, false, fmt.Errorf("no host available for shard %d", i)
+			return nil, fmt.Errorf("no host available for shard %d", i)
 		}
 		s.launch(req)
 		i++
@@ -728,9 +727,9 @@ loop:
 	for s.inflight() > 0 && !done {
 		select {
 		case <-s.mgr.shutdownCtx.Done():
-			return nil, false, errors.New("download stopped")
+			return nil, errors.New("download stopped")
 		case <-ctx.Done():
-			return nil, false, context.Cause(ctx)
+			return nil, context.Cause(ctx)
 		case <-resps.c:
 			resetOverdrive()
 		}
@@ -808,13 +807,13 @@ func (s *slabDownload) downloadSpeed() int64 {
 	return int64(bytes) / ms
 }
 
-func (s *slabDownload) finish() ([][]byte, bool, error) {
+func (s *slabDownload) finish() ([][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
-		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), len(s.unusedHostSectors), len(s.errs), s.errs)
+		return nil, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d unused=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), len(s.unusedHostSectors), len(s.errs), s.errs)
 	}
-	return s.sectors, s.numOverpaid > 0, nil
+	return s.sectors, nil
 }
 
 func (s *slabDownload) missing() int {

@@ -114,6 +114,7 @@ type (
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
+		ListObjects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
@@ -405,21 +406,21 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 		}
 	}
 
-	// migrate the slab
-	numShardsMigrated, surchargeApplied, err := w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
-	if err != nil {
-		jc.Encode(api.MigrateSlabResponse{
-			NumShardsMigrated: numShardsMigrated,
-			SurchargeApplied:  surchargeApplied,
-			Error:             err.Error(),
-		})
-		return
+	// migrate the slab and handle alerts
+	err = w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
+	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
+		var objects []api.ObjectMetadata
+		if res, err := w.bus.ListObjects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
+			w.logger.Errorf("failed to list objects for slab key; %w", err)
+		} else {
+			objects = res.Objects
+		}
+		w.alerts.RegisterAlert(ctx, newMigrationFailedAlert(slab.EncryptionKey, slab.Health, objects, err))
+	} else if err == nil {
+		w.alerts.DismissAlerts(jc.Request.Context(), alerts.IDForSlab(alertMigrationID, slab.EncryptionKey))
 	}
 
-	jc.Encode(api.MigrateSlabResponse{
-		NumShardsMigrated: numShardsMigrated,
-		SurchargeApplied:  surchargeApplied,
-	})
+	jc.Check("failed to migrate slab", err)
 }
 
 func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
