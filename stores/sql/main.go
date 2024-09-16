@@ -2835,7 +2835,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
 			WHERE %s
-			GROUP BY d.id
+			GROUP BY d.id, o.db_bucket_id
 		`, col, strings.Join(markerExprsObj, " AND "), groupFn, col, tx.CharLengthExpr(), strings.Join(markerExprsDir, " AND ")), append(markerArgsObj, markerArgsDir...)...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
@@ -2886,7 +2886,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 			FROM objects o
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
 			WHERE o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND d.db_parent_id = ?
-			GROUP BY d.id
+			GROUP BY d.id, o.db_bucket_id
 		) AS o
 		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		%s
