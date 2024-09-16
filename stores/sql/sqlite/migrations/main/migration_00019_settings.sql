@@ -42,7 +42,7 @@ FROM (
     WHERE
         json_extract(v, "$.currency") IS NOT NULL AND
         json_extract(v, "$.threshold") IS NOT NULL
-)
+);
 
 -- delete old settings
 DELETE FROM settings WHERE `key` IN ("uploadpacking", "redundancy", "contractset", "s3authentication", "pricepinning");
