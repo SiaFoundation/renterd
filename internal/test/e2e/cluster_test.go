@@ -105,15 +105,15 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 		want    []api.ObjectMetadata
 	}{
 		{"/", "", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", api.ObjectSortDirAsc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", api.ObjectSortDirDesc, []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/FOO/bar", Size: 6, Health: 1}}},
-		{"/", api.ObjectSortByHealth, api.ObjectSortDirAsc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", api.ObjectSortByHealth, api.ObjectSortDirDesc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", api.SortDirAsc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", api.SortDirDesc, []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/FOO/bar", Size: 6, Health: 1}}},
+		{"/", api.ObjectSortByHealth, api.SortDirAsc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", api.ObjectSortByHealth, api.SortDirDesc, []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
 		{"/foo/b", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
 		{"o/baz/quu", "", "", []api.ObjectMetadata{}},
 		{"/foo", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/foo", api.ObjectSortBySize, api.ObjectSortDirAsc, []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"/foo", api.ObjectSortBySize, api.ObjectSortDirDesc, []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}}},
+		{"/foo", api.ObjectSortBySize, api.SortDirAsc, []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"/foo", api.ObjectSortBySize, api.SortDirDesc, []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}}},
 	}
 	for _, test := range tests {
 		// use the bus client
@@ -178,25 +178,25 @@ func TestNewTestCluster(t *testing.T) {
 	tt := cluster.tt
 
 	// Upload packing should be disabled by default.
-	ups, err := b.UploadPackingSettings(context.Background())
+	us, err := b.UploadSettings(context.Background())
 	tt.OK(err)
-	if ups.Enabled {
-		t.Fatalf("expected upload packing to be disabled by default, got %v", ups.Enabled)
+	if us.Packing.Enabled {
+		t.Fatalf("expected upload packing to be disabled by default, got %v", us.Packing.Enabled)
 	}
 
-	// PricePinningSettings should have default values
-	pps, err := b.PricePinningSettings(context.Background())
+	// PinnedSettings should have default values
+	ps, err := b.PinnedSettings(context.Background())
 	tt.OK(err)
-	if pps.Currency == "" {
+	if ps.Currency == "" {
 		t.Fatal("expected default value for Currency")
-	} else if pps.Threshold == 0 {
+	} else if ps.Threshold == 0 {
 		t.Fatal("expected default value for Threshold")
 	}
 
 	// Autopilot shouldn't have its prices pinned
-	if len(pps.Autopilots) != 1 {
-		t.Fatalf("expected 1 autopilot, got %v", len(pps.Autopilots))
-	} else if pin, exists := pps.Autopilots[api.DefaultAutopilotID]; !exists {
+	if len(ps.Autopilots) != 1 {
+		t.Fatalf("expected 1 autopilot, got %v", len(ps.Autopilots))
+	} else if pin, exists := ps.Autopilots[api.DefaultAutopilotID]; !exists {
 		t.Fatalf("expected autopilot %v to exist", api.DefaultAutopilotID)
 	} else if pin.Allowance != (api.Pin{}) {
 		t.Fatalf("expected autopilot %v to have no pinned allowance, got %v", api.DefaultAutopilotID, pin.Allowance)
@@ -291,64 +291,65 @@ func TestNewTestCluster(t *testing.T) {
 	hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	for _, host := range hosts {
-		hi, err := cluster.Autopilot.HostInfo(host.PublicKey)
+		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		}
-		if hi.Checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
+		} else if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+			t.Fatal("host check not found")
+		} else if checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		}
-		if hi.Checks.Score == 0 {
-			t.Fatal("score shouldn't be 0")
-		}
-		if !hi.Checks.Usable {
+		} else if !checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		}
-		if len(hi.Checks.UnusableReasons) != 0 {
+		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
-		}
-		if reflect.DeepEqual(hi.Host, api.Host{}) {
+		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		}
-		if hi.Host.Settings.Release == "" {
+		} else if hi.Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
 	}
-	hostInfos, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	hostInfos, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		FilterMode:    api.HostFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeAll,
+	})
 	tt.OK(err)
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if hi.Checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
+		if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+			t.Fatal("host check not found")
+		} else if checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		}
-		if hi.Checks.Score == 0 {
-			t.Fatal("score shouldn't be 0")
-		}
-		if !hi.Checks.Usable {
+		} else if !checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		}
-		if len(hi.Checks.UnusableReasons) != 0 {
+		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
-		}
-		if reflect.DeepEqual(hi.Host, api.Host{}) {
+		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
 		}
-		allHosts[hi.Host.PublicKey] = struct{}{}
+		allHosts[hi.PublicKey] = struct{}{}
 	}
 
-	hostInfosUnusable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
+	hostInfosUnusable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:   testApCfg().ID,
+		FilterMode:    api.UsabilityFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeUnusable,
+	})
 	tt.OK(err)
 	if len(hostInfosUnusable) != 0 {
 		t.Fatal("there should be no unusable hosts", len(hostInfosUnusable))
 	}
 
-	hostInfosUsable, err := cluster.Autopilot.HostInfos(context.Background(), api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	hostInfosUsable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:   testApCfg().ID,
+		FilterMode:    api.UsabilityFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeUsable,
+	})
 	tt.OK(err)
 	for _, hI := range hostInfosUsable {
-		delete(allHosts, hI.Host.PublicKey)
+		delete(allHosts, hI.PublicKey)
 	}
 	if len(hostInfosUsable) != len(hostInfos) || len(allHosts) != 0 {
 		t.Fatalf("result for 'usable' should match the result for 'all', \n\nall: %+v \n\nusable: %+v", hostInfos, hostInfosUsable)
@@ -357,19 +358,17 @@ func TestNewTestCluster(t *testing.T) {
 	// Fetch the autopilot state
 	state, err := cluster.Autopilot.State()
 	tt.OK(err)
-	if time.Time(state.StartTime).IsZero() {
+	if state.ID != api.DefaultAutopilotID {
+		t.Fatal("autopilot should have default id", state.ID)
+	} else if time.Time(state.StartTime).IsZero() {
 		t.Fatal("autopilot should have start time")
-	}
-	if time.Time(state.MigratingLastStart).IsZero() {
+	} else if time.Time(state.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
-	}
-	if time.Time(state.ScanningLastStart).IsZero() {
+	} else if time.Time(state.ScanningLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a scan")
-	}
-	if state.UptimeMS == 0 {
+	} else if state.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
-	}
-	if !state.Configured {
+	} else if !state.Configured {
 		t.Fatal("autopilot should be configured")
 	}
 }
@@ -1313,6 +1312,11 @@ func TestEphemeralAccountSync(t *testing.T) {
 		t.Fatalf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
 	}
 	acc := accounts[0]
+
+	// stop autopilot and mine transactions, this prevents an NDF where we
+	// double spend outputs after restarting the bus
+	cluster.ShutdownAutopilot(context.Background())
+	tt.OK(cluster.MineTransactions(context.Background()))
 
 	// stop the cluster
 	host := cluster.hosts[0]

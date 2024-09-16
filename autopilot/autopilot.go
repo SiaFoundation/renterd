@@ -73,9 +73,8 @@ type Bus interface {
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
 	// settings
-	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
-	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
+	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
 
 	// syncer
 	SyncerPeers(ctx context.Context) (resp []string, err error)
@@ -157,13 +156,11 @@ func (ap *Autopilot) Config(ctx context.Context) (api.Autopilot, error) {
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /config":        ap.configHandlerGET,
-		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /config":        ap.configHandlerPOST,
-		"POST   /hosts":         ap.hostsHandlerPOST,
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /state":         ap.stateHandlerGET,
-		"POST   /trigger":       ap.triggerHandlerPOST,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+		"POST   /config":  ap.configHandlerPOST,
+		"GET    /state":   ap.stateHandlerGET,
+		"POST   /trigger": ap.triggerHandlerPOST,
 	})
 }
 
@@ -693,78 +690,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostKey", &hk) != nil {
-		return
-	}
-
-	hi, err := ap.bus.Host(jc.Request.Context(), hk)
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-
-	check, ok := hi.Checks[ap.id]
-	if ok {
-		jc.Encode(api.HostResponse{
-			Host: hi,
-			Checks: &api.HostChecks{
-				Gouging:          check.GougingBreakdown.Gouging(),
-				GougingBreakdown: check.GougingBreakdown,
-				Score:            check.ScoreBreakdown.Score(),
-				ScoreBreakdown:   check.ScoreBreakdown,
-				Usable:           check.UsabilityBreakdown.IsUsable(),
-				UnusableReasons:  check.UsabilityBreakdown.UnusableReasons(),
-			},
-		})
-		return
-	}
-
-	jc.Encode(api.HostResponse{Host: hi})
-}
-
-func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.HostsRequest
-	if jc.Decode(&req) != nil {
-		return
-	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
-		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
-		return
-	}
-
-	hosts, err := ap.bus.Hosts(jc.Request.Context(), api.HostOptions{
-		AutopilotID:     ap.id,
-		Offset:          req.Offset,
-		Limit:           req.Limit,
-		FilterMode:      req.FilterMode,
-		UsabilityMode:   req.UsabilityMode,
-		AddressContains: req.AddressContains,
-		KeyIn:           req.KeyIn,
-	})
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-	resps := make([]api.HostResponse, len(hosts))
-	for i, host := range hosts {
-		if check, ok := host.Checks[ap.id]; ok {
-			resps[i] = api.HostResponse{
-				Host: host,
-				Checks: &api.HostChecks{
-					Gouging:          check.GougingBreakdown.Gouging(),
-					GougingBreakdown: check.GougingBreakdown,
-					Score:            check.ScoreBreakdown.Score(),
-					ScoreBreakdown:   check.ScoreBreakdown,
-					Usable:           check.UsabilityBreakdown.IsUsable(),
-					UnusableReasons:  check.UsabilityBreakdown.UnusableReasons(),
-				},
-			}
-		} else {
-			resps[i] = api.HostResponse{Host: host}
-		}
-	}
-	jc.Encode(resps)
-}
-
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	ap.mu.Lock()
 	pruning, pLastStart := ap.pruning, ap.pruningLastStart // TODO: move to a 'pruner' type
@@ -778,6 +703,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.AutopilotStateResponse{
+		ID:                 ap.id,
 		Configured:         err == nil,
 		Migrating:          migrating,
 		MigratingLastStart: api.TimeRFC3339(mLastStart),
@@ -810,10 +736,10 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
 	}
 
-	// fetch redundancy settings
-	rs, err := ap.bus.RedundancySettings(ctx)
+	// fetch upload settings
+	us, err := ap.bus.UploadSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch redundancy settings, err: %v", err)
+		return nil, fmt.Errorf("could not fetch upload settings, err: %v", err)
 	}
 
 	// fetch gouging settings
@@ -863,7 +789,7 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 
 	return &contractor.MaintenanceState{
 		GS: gs,
-		RS: rs,
+		RS: us.Redundancy,
 		AP: autopilot,
 
 		Address:                address,

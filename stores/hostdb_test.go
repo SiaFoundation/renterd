@@ -38,7 +38,15 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Assert it's returned
-	allHosts, err := ss.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	allHosts, err := ss.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +71,15 @@ func TestSQLHostDB(t *testing.T) {
 	}
 
 	// Same thing again but with hosts.
-	hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	hosts, err := ss.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +139,15 @@ func TestHosts(t *testing.T) {
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
 	// search all hosts
-	his, err := ss.Hosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	his, err := ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 3 {
@@ -131,19 +155,43 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert offset & limit are taken into account
-	his, err = ss.Hosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, 1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
 		t.Fatal("unexpected")
 	}
-	his, err = ss.Hosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 1, 2)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          1,
+		Limit:           2,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 2 {
 		t.Fatal("unexpected")
 	}
-	his, err = ss.Hosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 3, 1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          3,
+		Limit:           1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 0 {
@@ -151,16 +199,48 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert address and key filters are taken into account
-	if hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "com:1001", nil, 0, -1); err != nil || len(hosts) != 1 {
+	if hosts, err := ss.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "com:1001",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	}); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 2 {
+	if hosts, err := ss.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           []types.PublicKey{hk2, hk3},
+		Offset:          0,
+		Limit:           -1,
+	}); err != nil || len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "com:1002", []types.PublicKey{hk2, hk3}, 0, -1); err != nil || len(hosts) != 1 {
+	if hosts, err := ss.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "com:1002",
+		KeyIn:           []types.PublicKey{hk2, hk3},
+		Offset:          0,
+		Limit:           -1,
+	}); err != nil || len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
-	if hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "com:1002", []types.PublicKey{hk1}, 0, -1); err != nil || len(hosts) != 0 {
+	if hosts, err := ss.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "com:1002",
+		KeyIn:           []types.PublicKey{hk1},
+		Offset:          0,
+		Limit:           -1,
+	}); err != nil || len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts), err)
 	}
 
@@ -169,7 +249,15 @@ func TestHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	his, err = ss.Hosts(context.Background(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAllowed,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 2 {
@@ -177,7 +265,15 @@ func TestHosts(t *testing.T) {
 	} else if his[0].PublicKey != (types.PublicKey{2}) || his[1].PublicKey != (types.PublicKey{3}) {
 		t.Fatal("unexpected", his[0].PublicKey, his[1].PublicKey)
 	}
-	his, err = ss.Hosts(context.Background(), "", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeBlocked,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
@@ -232,7 +328,15 @@ func TestHosts(t *testing.T) {
 	}
 
 	// fetch all hosts
-	his, err = ss.Hosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 3 {
@@ -249,7 +353,15 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert autopilot filter is taken into account
-	his, err = ss.Hosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     ap1,
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 3 {
@@ -258,7 +370,7 @@ func TestHosts(t *testing.T) {
 
 	// assert h1 and h2 have the expected checks
 	if c1, ok := his[0].Checks[ap1]; !ok || c1 != h1c {
-		t.Fatal("unexpected", c1, ok)
+		t.Fatal("unexpected", c1, ok, his[0])
 	} else if c2, ok := his[1].Checks[ap1]; !ok || c2 != h2c1 {
 		t.Fatal("unexpected", c2, ok)
 	} else if _, ok := his[1].Checks[ap2]; ok {
@@ -271,7 +383,15 @@ func TestHosts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	his, err = ss.Hosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUsable, "", nil, 0, -1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     ap1,
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeUsable,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
@@ -283,7 +403,15 @@ func TestHosts(t *testing.T) {
 		t.Fatal("unexpected", c1, ok)
 	}
 
-	his, err = ss.Hosts(context.Background(), ap1, api.HostFilterModeAll, api.UsabilityFilterModeUnusable, "", nil, 0, -1)
+	his, err = ss.Hosts(context.Background(), api.HostOptions{
+		AutopilotID:     ap1,
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeUnusable,
+		AddressContains: "",
+		KeyIn:           nil,
+		Offset:          0,
+		Limit:           -1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(his) != 1 {
@@ -599,7 +727,15 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	numHosts := func() int {
 		t.Helper()
-		hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
+		hosts, err := ss.Hosts(ctx, api.HostOptions{
+			AutopilotID:     "",
+			FilterMode:      api.HostFilterModeAllowed,
+			UsabilityMode:   api.UsabilityFilterModeAll,
+			AddressContains: "",
+			KeyIn:           nil,
+			Offset:          0,
+			Limit:           -1,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -679,21 +815,45 @@ func TestSQLHostAllowlist(t *testing.T) {
 
 	assertHosts := func(total, allowed, blocked int) error {
 		t.Helper()
-		hosts, err := ss.Hosts(context.Background(), "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", nil, 0, -1)
+		hosts, err := ss.Hosts(context.Background(), api.HostOptions{
+			AutopilotID:     "",
+			FilterMode:      api.HostFilterModeAll,
+			UsabilityMode:   api.UsabilityFilterModeAll,
+			AddressContains: "",
+			KeyIn:           nil,
+			Offset:          0,
+			Limit:           -1,
+		})
 		if err != nil {
 			return err
 		}
 		if len(hosts) != total {
 			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
 		}
-		hosts, err = ss.Hosts(context.Background(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
+		hosts, err = ss.Hosts(context.Background(), api.HostOptions{
+			AutopilotID:     "",
+			FilterMode:      api.HostFilterModeAllowed,
+			UsabilityMode:   api.UsabilityFilterModeAll,
+			AddressContains: "",
+			KeyIn:           nil,
+			Offset:          0,
+			Limit:           -1,
+		})
 		if err != nil {
 			return err
 		}
 		if len(hosts) != allowed {
 			return fmt.Errorf("invalid number of hosts: %v", len(hosts))
 		}
-		hosts, err = ss.Hosts(context.Background(), "", api.HostFilterModeBlocked, api.UsabilityFilterModeAll, "", nil, 0, -1)
+		hosts, err = ss.Hosts(context.Background(), api.HostOptions{
+			AutopilotID:     "",
+			FilterMode:      api.HostFilterModeBlocked,
+			UsabilityMode:   api.UsabilityFilterModeAll,
+			AddressContains: "",
+			KeyIn:           nil,
+			Offset:          0,
+			Limit:           -1,
+		})
 		if err != nil {
 			return err
 		}
@@ -767,7 +927,15 @@ func TestSQLHostBlocklist(t *testing.T) {
 
 	numHosts := func() int {
 		t.Helper()
-		hosts, err := ss.Hosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, 0, -1)
+		hosts, err := ss.Hosts(ctx, api.HostOptions{
+			AutopilotID:     "",
+			FilterMode:      api.HostFilterModeAllowed,
+			UsabilityMode:   api.UsabilityFilterModeAll,
+			AddressContains: "",
+			KeyIn:           nil,
+			Offset:          0,
+			Limit:           -1,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

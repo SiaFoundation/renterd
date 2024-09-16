@@ -55,7 +55,8 @@ type (
 	WalletResponse struct {
 		wallet.Balance
 
-		Address types.Address `json:"address"`
+		Address    types.Address `json:"address"`
+		ScanHeight uint64        `json:"scanHeight"`
 	}
 
 	WalletSendRequest struct {

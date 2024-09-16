@@ -107,21 +107,17 @@ func (e *mockExplorer) setUnreachable(unreachable bool) {
 
 type mockPinStore struct {
 	mu         sync.Mutex
-	settings   map[string]string
+	gs         api.GougingSettings
+	ps         api.PinnedSettings
 	autopilots map[string]api.Autopilot
 }
 
 func newTestStore() *mockPinStore {
 	s := &mockPinStore{
 		autopilots: make(map[string]api.Autopilot),
-		settings:   make(map[string]string),
+		gs:         api.DefaultGougingSettings,
+		ps:         api.DefaultPinnedSettings,
 	}
-
-	// add default price pin - and gouging settings
-	b, _ := json.Marshal(api.DefaultPricePinSettings)
-	s.settings[api.SettingPricePinning] = string(b)
-	b, _ = json.Marshal(api.DefaultGougingSettings)
-	s.settings[api.SettingGouging] = string(b)
 
 	// add default autopilot
 	s.autopilots[testAutopilotID] = api.Autopilot{
@@ -136,37 +132,38 @@ func newTestStore() *mockPinStore {
 	return s
 }
 
-func (ms *mockPinStore) gougingSettings() api.GougingSettings {
-	val, err := ms.Setting(context.Background(), api.SettingGouging)
-	if err != nil {
-		panic(err)
-	}
-	var gs api.GougingSettings
-	if err := json.Unmarshal([]byte(val), &gs); err != nil {
-		panic(err)
-	}
-	return gs
-}
-
-func (ms *mockPinStore) updatPinnedSettings(pps api.PricePinSettings) {
-	b, _ := json.Marshal(pps)
-	err := ms.UpdateSetting(context.Background(), api.SettingPricePinning, string(b))
-	if err != nil {
-		panic(err)
-	}
-	time.Sleep(10 * testUpdateInterval)
-}
-
-func (ms *mockPinStore) Setting(ctx context.Context, key string) (string, error) {
+func (ms *mockPinStore) GougingSettings(ctx context.Context) (api.GougingSettings, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	return ms.settings[key], nil
+	return ms.gs, nil
 }
 
-func (ms *mockPinStore) UpdateSetting(ctx context.Context, key, value string) error {
+func (ms *mockPinStore) UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	ms.settings[key] = value
+	ms.gs = gs
+	return nil
+}
+
+func (ms *mockPinStore) PinnedSettings(ctx context.Context) (api.PinnedSettings, error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	return ms.ps, nil
+}
+
+func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	b, err := json.Marshal(ps)
+	if err != nil {
+		return err
+	}
+	var cloned api.PinnedSettings
+	if err := json.Unmarshal(b, &cloned); err != nil {
+		return err
+	}
+	ms.ps = cloned
 	return nil
 }
 
@@ -198,67 +195,63 @@ func TestPinManager(t *testing.T) {
 		}
 	}()
 
-	// define a small helper to fetch the price manager's rates
-	rates := func() []float64 {
+	// waitForUpdate waits for the price manager to update
+	waitForUpdate := func() {
 		t.Helper()
-		pm.mu.Lock()
-		defer pm.mu.Unlock()
-		return pm.rates
-	}
-
-	// assert price manager is disabled by default
-	if cnt := len(rates()); cnt != 0 {
-		t.Fatalf("expected no rates, got %d", cnt)
+		pm.triggerChan <- false
+		time.Sleep(testUpdateInterval)
 	}
 
 	// enable price pinning
-	pps := api.DefaultPricePinSettings
-	pps.Currency = "usd"
-	pps.Threshold = 0.5
-	s.updatPinnedSettings(pps)
+	ps := api.DefaultPinnedSettings
+	ps.Currency = "usd"
+	ps.Threshold = 0.5
+	s.UpdatePinnedSettings(context.Background(), ps)
 
-	// update exchange rate and fetch current gouging settings
-	gs := s.gougingSettings()
+	// fetch current gouging settings
+	gs, _ := s.GougingSettings(context.Background())
 
 	// configure all pins but disable them for now
-	pps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
-	pps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
-	s.updatPinnedSettings(pps)
+	ps.GougingSettingsPins.MaxDownload = api.Pin{Value: 3, Pinned: false}
+	ps.GougingSettingsPins.MaxStorage = api.Pin{Value: 3, Pinned: false}
+	ps.GougingSettingsPins.MaxUpload = api.Pin{Value: 3, Pinned: false}
+	s.UpdatePinnedSettings(context.Background(), ps)
 
 	// assert gouging settings are unchanged
-	if gss := s.gougingSettings(); !reflect.DeepEqual(gs, gss) {
+	if gss, _ := s.GougingSettings(context.Background()); !reflect.DeepEqual(gs, gss) {
 		t.Fatalf("expected gouging settings to be the same, got %v", gss)
 	}
 
 	// enable the max download pin
-	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	s.updatPinnedSettings(pps)
+	ps.GougingSettingsPins.MaxDownload.Pinned = true
+	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
-	// adjust the rate
-	e.setRate(1.5)
-	time.Sleep(2 * testUpdateInterval)
-
-	// at threshold of .5 the prices should not be updated
-	if gss := s.gougingSettings(); !reflect.DeepEqual(gs, gss) {
-		t.Fatalf("expected gouging settings to be the same, got %v", gss)
+	// assert prices are not updated
+	if gss, _ := s.GougingSettings(context.Background()); !reflect.DeepEqual(gs, gss) {
+		t.Fatalf("expected gouging settings to be the same, got %v expected %v", gss, gs)
 	}
 
-	// lower the threshold, gouging settings should be updated
-	pps.Threshold = 0.05
-	s.updatPinnedSettings(pps)
-	if gss := s.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) {
+	// adjust and lower the threshold
+	e.setRate(1.5)
+	ps.Threshold = 0.05
+	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
+
+	// assert prices are updated
+	if gss, _ := s.GougingSettings(context.Background()); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss.MaxDownloadPrice, gs.MaxDownloadPrice)
 	}
 
 	// enable the rest of the pins
-	pps.GougingSettingsPins.MaxDownload.Pinned = true
-	pps.GougingSettingsPins.MaxStorage.Pinned = true
-	pps.GougingSettingsPins.MaxUpload.Pinned = true
-	s.updatPinnedSettings(pps)
+	ps.GougingSettingsPins.MaxDownload.Pinned = true
+	ps.GougingSettingsPins.MaxStorage.Pinned = true
+	ps.GougingSettingsPins.MaxUpload.Pinned = true
+	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
 	// assert they're all updated
-	if gss := s.gougingSettings(); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
+	if gss, _ := s.GougingSettings(context.Background()); gss.MaxDownloadPrice.Equals(gs.MaxDownloadPrice) ||
 		gss.MaxStoragePrice.Equals(gs.MaxStoragePrice) ||
 		gss.MaxUploadPrice.Equals(gs.MaxUploadPrice) {
 		t.Fatalf("expected gouging settings to be updated, got %v = %v", gss, gs)
@@ -277,8 +270,9 @@ func TestPinManager(t *testing.T) {
 			Value:  2,
 		},
 	}
-	pps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
-	s.updatPinnedSettings(pps)
+	ps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
+	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
 	// assert autopilot was not updated
 	if app, _ := s.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -287,8 +281,9 @@ func TestPinManager(t *testing.T) {
 
 	// enable the pin
 	pins.Allowance.Pinned = true
-	pps.Autopilots[testAutopilotID] = pins
-	s.updatPinnedSettings(pps)
+	ps.Autopilots[testAutopilotID] = pins
+	s.UpdatePinnedSettings(context.Background(), ps)
+	waitForUpdate()
 
 	// assert autopilot was updated
 	if app, _ := s.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
@@ -297,9 +292,9 @@ func TestPinManager(t *testing.T) {
 
 	// make explorer return an error
 	e.setUnreachable(true)
+	waitForUpdate()
 
 	// assert alert was registered
-	s.updatPinnedSettings(pps)
 	res, _ := a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) == 0 {
 		t.Fatalf("expected 1 alert, got %d", len(a.alerts))
@@ -307,9 +302,9 @@ func TestPinManager(t *testing.T) {
 
 	// make explorer return a valid response
 	e.setUnreachable(false)
+	waitForUpdate()
 
 	// assert alert was dismissed
-	s.updatPinnedSettings(pps)
 	res, _ = a.Alerts(context.Background(), alerts.AlertsOpts{})
 	if len(res.Alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(a.alerts))

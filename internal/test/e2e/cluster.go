@@ -93,11 +93,6 @@ type dbConfig struct {
 	RetryTxIntervals []time.Duration
 }
 
-type explorerConfig struct {
-	URL     string
-	Disable bool
-}
-
 func (tc *TestCluster) Accounts() []api.Account {
 	tc.tt.Helper()
 	accounts, err := tc.Worker.Accounts(context.Background())
@@ -269,7 +264,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
-	busCfg, workerCfg, apCfg, dbCfg, explorerCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg(), testExplorerCfg()
+	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
 	}
@@ -369,7 +364,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, explorerCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -491,18 +486,25 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}))
 	}
 
-	// Update the bus settings.
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, test.GougingSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, test.ContractSetSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingPricePinning, test.PricePinSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
-		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
-	}))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
+	// Build upload settings.
+	us := test.UploadSettings
+	us.Packing = api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
-		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
-	}))
+		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB,
+	}
+
+	// Build S3 settings.
+	s3 := api.S3Settings{
+		Authentication: api.S3AuthenticationSettings{
+			V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
+		},
+	}
+
+	// Update the bus settings.
+	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
+	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
+	tt.OK(busClient.UpdateUploadSettings(ctx, us))
+	tt.OK(busClient.UpdateS3Settings(ctx, s3))
 
 	// Fund the bus.
 	if funding {
@@ -542,14 +544,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, cfgExplorer explorerConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
-	// create store
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+	// create store config
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
+	// create store
 	sqlStore, err := stores.NewSQLStore(storeCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -636,11 +639,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	var explorerURL string
-	if cfgExplorer.URL != "" {
-		explorerURL = cfgExplorer.URL
-	}
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, explorerURL, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -743,6 +742,13 @@ func (c *TestCluster) sync() {
 			return errors.New("bus is not synced")
 		} else if cs.BlockHeight < tip.Height {
 			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
+		}
+
+		wallet, err := c.Bus.Wallet(context.Background())
+		if err != nil {
+			return err
+		} else if wallet.ScanHeight < tip.Height {
+			return fmt.Errorf("wallet hasn't caught up, %d < %d", wallet.ScanHeight, tip.Height)
 		}
 
 		for _, h := range c.hosts {
@@ -945,6 +951,20 @@ func (c *TestCluster) AddHostsBlocking(n int) []*Host {
 	return hosts
 }
 
+// MineTransactions tries to mine the transactions in the transaction pool until
+// it is empty.
+func (c *TestCluster) MineTransactions(ctx context.Context) error {
+	return test.Retry(100, 100*time.Millisecond, func() error {
+		txns, err := c.Bus.TransactionPool(ctx)
+		if err != nil {
+			return err
+		} else if len(txns) > 0 {
+			c.MineBlocks(1)
+		}
+		return nil
+	})
+}
+
 // Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown() {
 	c.tt.Helper()
@@ -1090,12 +1110,6 @@ func testDBCfg() dbConfig {
 			time.Second,
 			5 * time.Second,
 		},
-	}
-}
-
-func testExplorerCfg() explorerConfig {
-	return explorerConfig{
-		Disable: true,
 	}
 }
 

@@ -31,6 +31,10 @@ type (
 		LongTxDuration                time.Duration
 	}
 
+	Explorer interface {
+		Enabled() bool
+	}
+
 	// SQLStore is a helper type for interacting with a SQL-based backend.
 	SQLStore struct {
 		alerts    alerts.Alerter
