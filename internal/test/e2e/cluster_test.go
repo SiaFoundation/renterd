@@ -358,19 +358,17 @@ func TestNewTestCluster(t *testing.T) {
 	// Fetch the autopilot state
 	state, err := cluster.Autopilot.State()
 	tt.OK(err)
-	if time.Time(state.StartTime).IsZero() {
+	if state.ID != api.DefaultAutopilotID {
+		t.Fatal("autopilot should have default id", state.ID)
+	} else if time.Time(state.StartTime).IsZero() {
 		t.Fatal("autopilot should have start time")
-	}
-	if time.Time(state.MigratingLastStart).IsZero() {
+	} else if time.Time(state.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
-	}
-	if time.Time(state.ScanningLastStart).IsZero() {
+	} else if time.Time(state.ScanningLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a scan")
-	}
-	if state.UptimeMS == 0 {
+	} else if state.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
-	}
-	if !state.Configured {
+	} else if !state.Configured {
 		t.Fatal("autopilot should be configured")
 	}
 }
