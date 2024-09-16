@@ -132,7 +132,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 		// delete removed outputs
 		for _, e := range removed {
 			c.l.Debugw(fmt.Sprintf("remove output %v", e.ID), "height", index.Height, "block_id", index.ID)
-			if res, err := deleteRemovedStmt.Exec(c.ctx, e.ID); err != nil {
+			if res, err := deleteRemovedStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete removed output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
