@@ -8,14 +8,14 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
-	github.com/klauspost/reedsolomon v1.12.3
+	github.com/klauspost/reedsolomon v1.12.4
 	github.com/mattn/go-sqlite3 v1.14.23
 	github.com/minio/minio-go/v7 v7.0.76
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.4.6
 	go.sia.tech/coreutils v0.3.2
-	go.sia.tech/gofakes3 v0.0.4
+	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20240903081107-6e044db95238
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.2.0
@@ -52,6 +52,6 @@ require (
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
-	golang.org/x/tools v0.22.0 // indirect
+	golang.org/x/tools v0.23.0 // indirect
 	nhooyr.io/websocket v1.8.17 // indirect
 )
