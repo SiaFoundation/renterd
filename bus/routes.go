@@ -1347,25 +1347,26 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 	ps, err := b.ss.PinnedSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("pinned settings not found, returning defaults")
-		jc.Encode(api.DefaultPinnedSettings)
+		b.logger.Warn("pinned settings not found, using defaults")
+		ps = api.DefaultPinnedSettings
+	} else if jc.Check("failed to get pinned settings", err) != nil {
 		return
-	} else if jc.Check("failed to get pinned settings", err) == nil {
-		// populate the Autopilots map with the current autopilots
-		aps, err := b.as.Autopilots(jc.Request.Context())
-		if jc.Check("failed to fetch autopilots", err) != nil {
-			return
-		}
-		if ps.Autopilots == nil {
-			ps.Autopilots = make(map[string]api.AutopilotPins)
-		}
-		for _, ap := range aps {
-			if _, exists := ps.Autopilots[ap.ID]; !exists {
-				ps.Autopilots[ap.ID] = api.AutopilotPins{}
-			}
-		}
-		jc.Encode(ps)
 	}
+
+	// populate the Autopilots map with the current autopilots
+	aps, err := b.as.Autopilots(jc.Request.Context())
+	if jc.Check("failed to fetch autopilots", err) != nil {
+		return
+	}
+	if ps.Autopilots == nil {
+		ps.Autopilots = make(map[string]api.AutopilotPins)
+	}
+	for _, ap := range aps {
+		if _, exists := ps.Autopilots[ap.ID]; !exists {
+			ps.Autopilots[ap.ID] = api.AutopilotPins{}
+		}
+	}
+	jc.Encode(ps)
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
