@@ -703,6 +703,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.AutopilotStateResponse{
+		ID:                 ap.id,
 		Configured:         err == nil,
 		Migrating:          migrating,
 		MigratingLastStart: api.TimeRFC3339(mLastStart),
