@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -174,9 +175,9 @@ type (
 	}
 
 	HostCheck struct {
-		Gouging   HostGougingBreakdown   `json:"gouging"`
-		Score     HostScoreBreakdown     `json:"score"`
-		Usability HostUsabilityBreakdown `json:"usability"`
+		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
+		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
+		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
 	}
 
 	HostGougingBreakdown struct {
@@ -208,6 +209,19 @@ type (
 		NotCompletingScan     bool `json:"notCompletingScan"`
 	}
 )
+
+func (hc HostCheck) MarshalJSON() ([]byte, error) {
+	type check HostCheck
+	return json.Marshal(struct {
+		check
+		Score  float64 `json:"score"`
+		Usable bool    `json:"usable"`
+	}{
+		check:  check(hc),
+		Score:  hc.ScoreBreakdown.Score(),
+		Usable: hc.UsabilityBreakdown.IsUsable(),
+	})
+}
 
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {

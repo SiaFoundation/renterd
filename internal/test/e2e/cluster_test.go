@@ -296,12 +296,12 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal(err)
 		} else if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
 			t.Fatal("host check not found")
-		} else if checks.Score.Score() == 0 {
-			js, _ := json.MarshalIndent(checks.Score, "", "  ")
+		} else if checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !checks.Usability.IsUsable() {
+		} else if !checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(checks.Usability.UnusableReasons()) != 0 {
+		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
@@ -319,12 +319,12 @@ func TestNewTestCluster(t *testing.T) {
 	for _, hi := range hostInfos {
 		if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
 			t.Fatal("host check not found")
-		} else if checks.Score.Score() == 0 {
-			js, _ := json.MarshalIndent(checks.Score, "", "  ")
+		} else if checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !checks.Usability.IsUsable() {
+		} else if !checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(checks.Usability.UnusableReasons()) != 0 {
+		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")

@@ -964,8 +964,8 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		}
 
 		// check usability
-		if !check.Usability.IsUsable() {
-			reasons := strings.Join(check.Usability.UnusableReasons(), ",")
+		if !check.UsabilityBreakdown.IsUsable() {
+			reasons := strings.Join(check.UsabilityBreakdown.UnusableReasons(), ",")
 			logger.With("reasons", reasons).Info("unusable host")
 			churnReasons[c.ID] = reasons
 			continue
@@ -1112,11 +1112,11 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		} else if _, used := usedHosts[host.PublicKey]; used {
 			logger.Debug("host already used")
 			continue
-		} else if score := hc.Score.Score(); score == 0 {
+		} else if score := hc.ScoreBreakdown.Score(); score == 0 {
 			logger.Error("host has a score of 0")
 			continue
 		}
-		candidates = append(candidates, newScoredHost(host, hc.Score))
+		candidates = append(candidates, newScoredHost(host, hc.ScoreBreakdown))
 	}
 	logger = logger.With("candidates", len(candidates))
 
@@ -1225,11 +1225,11 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 		if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
 			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
 		}
-		usabilityBreakdown.track(hc.Usability)
+		usabilityBreakdown.track(hc.UsabilityBreakdown)
 
-		if !hc.Usability.IsUsable() {
+		if !hc.UsabilityBreakdown.IsUsable() {
 			logger.With("hostKey", h.host.PublicKey).
-				With("reasons", strings.Join(hc.Usability.UnusableReasons(), ",")).
+				With("reasons", strings.Join(hc.UsabilityBreakdown.UnusableReasons(), ",")).
 				Debug("host is not usable")
 		}
 	}
