@@ -1315,7 +1315,6 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
 	gs, err := b.ss.GougingSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("gouging settings not found, returning defaults")
 		jc.Encode(api.DefaultGougingSettings)
 		return
 	} else if jc.Check("failed to get gouging settings", err) == nil {
@@ -1346,7 +1345,6 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 	ps, err := b.ss.PinnedSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("pinned settings not found, using defaults")
 		ps = api.DefaultPinnedSettings
 	} else if jc.Check("failed to get pinned settings", err) != nil {
 		return
@@ -1396,7 +1394,6 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 	us, err := b.ss.UploadSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("upload settings not found, returning defaults")
 		jc.Encode(api.DefaultUploadSettings(b.cm.TipState().Network.Name))
 		return
 	} else if jc.Check("failed to get upload settings", err) == nil {
@@ -1426,7 +1423,6 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
 	s3s, err := b.ss.S3Settings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("S3 settings not found, returning defaults")
 		jc.Encode(api.DefaultS3Settings)
 		return
 	} else if jc.Check("failed to get S3 settings", err) == nil {
