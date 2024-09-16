@@ -150,13 +150,20 @@ type (
 		// prefix and returns 'true' if any object was deleted.
 		DeleteObjects(ctx context.Context, bucket, prefix string, limit int64) (bool, error)
 
-		// DeleteSettings deletes the settings with the given key.
-		DeleteSettings(ctx context.Context, key string) error
+		// DeleteSetting deletes the setting with the given key.
+		DeleteSetting(ctx context.Context, key string) error
 
 		// DeleteWebhook deletes the webhook with the matching module, event and
 		// URL of the provided webhook. If the webhook doesn't exist,
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
+
+		// Hosts returns a list of hosts that match the provided filters
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
+
+		// HostsForScanning returns a list of hosts to scan which haven't been
+		// scanned since at least maxLastScan.
+		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 
 		// HostAllowlist returns the list of public keys of hosts on the
 		// allowlist.
@@ -171,12 +178,9 @@ type (
 		// that was created.
 		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
-		// InsertContract creates a new contract with the given metadata.
-		InsertContract(ctx context.Context, c api.ContractMetadata) error
-
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
-		InsertMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
 
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
@@ -185,15 +189,11 @@ type (
 		// are associated with any of the provided contracts.
 		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
-		// HostsForScanning returns a list of hosts to scan which haven't been
-		// scanned since at least maxLastScan.
-		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
-
 		// ListBuckets returns a list of all buckets in the database.
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 		// ListObjects returns a list of objects from the given bucket.
-		ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -216,9 +216,6 @@ type (
 
 		// Object returns an object from the database.
 		Object(ctx context.Context, bucket, key string) (api.Object, error)
-
-		// ObjectEntries queries the database for objects in a given dir.
-		ObjectEntries(ctx context.Context, bucket, key, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
@@ -312,23 +309,8 @@ type (
 		// existing ones.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
-		// SearchHosts returns a list of hosts that match the provided filters
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
-
-		// SearchObjects returns a list of objects that contain the provided
-		// substring.
-		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-
-		// UpdateContractSet adds/removes the provided contract ids to/from
-		// the contract set. The contract set is created in the process if
-		// it doesn't exist already.
-		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
-
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
-
-		// Settings returns all available settings from the database.
-		Settings(ctx context.Context) ([]string, error)
 
 		// Slab returns the slab with the given ID or api.ErrSlabNotFound.
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
@@ -357,6 +339,11 @@ type (
 
 		// UpdateContract sets the given metadata on the contract with given fcid.
 		UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error
+
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't exist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error

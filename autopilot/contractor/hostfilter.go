@@ -258,9 +258,9 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostChe
 	}
 
 	return &api.HostCheck{
-		Usability: ub,
-		Gouging:   gb,
-		Score:     sh.sb,
+		UsabilityBreakdown: ub,
+		GougingBreakdown:   gb,
+		ScoreBreakdown:     sh.sb,
 	}
 }
 

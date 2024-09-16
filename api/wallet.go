@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 )
 
 type (
@@ -52,12 +53,10 @@ type (
 
 	// WalletResponse is the response type for the /wallet endpoint.
 	WalletResponse struct {
-		ScanHeight  uint64         `json:"scanHeight"`
-		Address     types.Address  `json:"address"`
-		Spendable   types.Currency `json:"spendable"`
-		Confirmed   types.Currency `json:"confirmed"`
-		Unconfirmed types.Currency `json:"unconfirmed"`
-		Immature    types.Currency `json:"immature"`
+		wallet.Balance
+
+		Address    types.Address `json:"address"`
+		ScanHeight uint64        `json:"scanHeight"`
 	}
 
 	WalletSendRequest struct {
@@ -77,18 +76,6 @@ type (
 
 // WalletTransactionsOption is an option for the WalletTransactions method.
 type WalletTransactionsOption func(url.Values)
-
-func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("before", before.Format(time.RFC3339))
-	}
-}
-
-func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("since", since.Format(time.RFC3339))
-	}
-}
 
 func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
 	return func(q url.Values) {

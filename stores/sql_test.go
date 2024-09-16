@@ -282,10 +282,10 @@ func (s *testSQLStore) Retry(tries int, durationBetweenAttempts time.Duration, f
 	}
 }
 
-func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, error) {
-	if err := s.UpdateObjectBlocking(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
+func (s *testSQLStore) addTestObject(key string, o object.Object) (api.Object, error) {
+	if err := s.UpdateObjectBlocking(context.Background(), api.DefaultBucketName, key, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err
-	} else if obj, err := s.Object(context.Background(), api.DefaultBucketName, path); err != nil {
+	} else if obj, err := s.Object(context.Background(), api.DefaultBucketName, key); err != nil {
 		return api.Object{}, err
 	} else {
 		return obj, nil
@@ -314,7 +314,7 @@ func (s *testSQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.F
 }
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
-	if err := s.InsertContract(context.Background(), newTestContract(fcid, hk)); err != nil {
+	if err := s.PutContract(context.Background(), newTestContract(fcid, hk)); err != nil {
 		return api.ContractMetadata{}, err
 	}
 	return s.Contract(context.Background(), fcid)

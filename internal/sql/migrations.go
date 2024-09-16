@@ -28,6 +28,7 @@ type (
 	MainMigrator interface {
 		Migrator
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
 
@@ -218,9 +219,27 @@ var (
 				},
 			},
 			{
-				ID: "00018_archived_contracts",
+				ID: "00018_gouging_units",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_archived_contracts", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_gouging_units", log)
+				},
+			},
+			{
+				ID: "00019_settings",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_settings", log)
+				},
+			},
+			{
+				ID: "00020_idx_db_directory",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_idx_db_directory", log)
+				},
+			},
+			{
+				ID: "00021_archived_contracts",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00021_archived_contracts", log)
 				},
 			},
 		}

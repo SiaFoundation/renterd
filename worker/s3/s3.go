@@ -30,28 +30,26 @@ type Bus interface {
 	DeleteBucket(ctx context.Context, bucketName string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error)
-	CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
-	DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error)
-	ListObjects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
-	Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.ObjectsResponse, err error)
+	AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) (err error)
+	CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
+	DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) (err error)
+	Objects(ctx context.Context, bucket, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
 
-	AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) (err error)
-	CompleteMultipartUpload(ctx context.Context, bucket, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
-	CreateMultipartUpload(ctx context.Context, bucket, path string, opts api.CreateMultipartOptions) (api.MultipartCreateResponse, error)
+	AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) (err error)
+	CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
+	CreateMultipartUpload(ctx context.Context, bucket, key string, opts api.CreateMultipartOptions) (api.MultipartCreateResponse, error)
 	MultipartUploads(ctx context.Context, bucket, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 	MultipartUploadParts(ctx context.Context, bucket, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
-	S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error)
-	UpdateSetting(ctx context.Context, key string, value interface{}) error
+	S3Settings(ctx context.Context) (as api.S3Settings, err error)
 	UploadParams(ctx context.Context) (api.UploadParams, error)
 }
 
 type Worker interface {
-	GetObject(ctx context.Context, bucket, path string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error)
-	HeadObject(ctx context.Context, bucket, path string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error)
-	UploadObject(ctx context.Context, r io.Reader, bucket, path string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error)
-	UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error)
+	GetObject(ctx context.Context, bucket, key string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error)
+	HeadObject(ctx context.Context, bucket, key string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error)
+	UploadObject(ctx context.Context, r io.Reader, bucket, key string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error)
+	UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, key, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error)
 }
 
 func (l *gofakes3Logger) Print(level gofakes3.LogLevel, v ...interface{}) {

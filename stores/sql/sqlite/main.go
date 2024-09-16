@@ -85,6 +85,11 @@ func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.Database
 	})
 }
 
+func (b *MainDatabase) UpdateSetting(ctx context.Context, tx sql.Tx, key, value string) error {
+	mtx := b.wrapTxn(tx)
+	return mtx.UpdateSetting(ctx, key, value)
+}
+
 func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 	return version(ctx, b.db)
 }
@@ -97,8 +102,8 @@ func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Acc
 	return ssql.Accounts(ctx, tx, owner)
 }
 
-func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, key, uploadID)
 }
 
 func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
@@ -335,8 +340,8 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
 }
 
-func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
-	return ssql.DeleteSettings(ctx, tx, key)
+func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
+	return ssql.DeleteSetting(ctx, tx, key)
 }
 
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
@@ -391,12 +396,12 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 	return ssql.HostBlocklist(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
-	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
+func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
+	return ssql.Hosts(ctx, tx, opts)
 }
 
-func (tx *MainDatabaseTx) InsertContract(ctx context.Context, c api.ContractMetadata) error {
-	return ssql.InsertContract(ctx, tx, c)
+func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
+	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
 
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
@@ -459,8 +464,8 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 	return ssql.ListBuckets(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
@@ -529,12 +534,8 @@ func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.O
 	return ssql.Object(ctx, tx, bucket, key)
 }
 
-func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	return ssql.ObjectEntries(ctx, tx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-}
-
-func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
-	return ssql.ObjectMetadata(ctx, tx, bucket, path)
+func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {
+	return ssql.ObjectMetadata(ctx, tx, bucket, key)
 }
 
 func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
@@ -857,7 +858,7 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 
 func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
 	var createdAt string
-	dst := []any{&md.Name, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag}
+	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag}
 	dst = append(dst, others...)
 	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
@@ -865,14 +866,6 @@ func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md 
 		return api.ObjectMetadata{}, fmt.Errorf("failed to parse created at time: %w", err)
 	}
 	return md, nil
-}
-
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
-}
-
-func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	return ssql.SearchObjects(ctx, tx, bucket, substring, offset, limit)
 }
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
@@ -935,10 +928,6 @@ func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, to
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
-}
-
-func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
-	return ssql.Settings(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
@@ -1105,10 +1094,10 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	        score_storage_remaining = EXCLUDED.score_storage_remaining, score_uptime = EXCLUDED.score_uptime, score_version = EXCLUDED.score_version,
 	        score_prices = EXCLUDED.score_prices, gouging_contract_err = EXCLUDED.gouging_contract_err, gouging_download_err = EXCLUDED.gouging_download_err,
 	        gouging_gouging_err = EXCLUDED.gouging_gouging_err, gouging_prune_err = EXCLUDED.gouging_prune_err, gouging_upload_err = EXCLUDED.gouging_upload_err
-	    `, time.Now(), autopilot, ssql.PublicKey(hk), hc.Usability.Blocked, hc.Usability.Offline, hc.Usability.LowScore,
-		hc.Usability.RedundantIP, hc.Usability.Gouging, hc.Usability.NotAcceptingContracts, hc.Usability.NotAnnounced, hc.Usability.NotCompletingScan,
-		hc.Score.Age, hc.Score.Collateral, hc.Score.Interactions, hc.Score.StorageRemaining, hc.Score.Uptime, hc.Score.Version, hc.Score.Prices,
-		hc.Gouging.ContractErr, hc.Gouging.DownloadErr, hc.Gouging.GougingErr, hc.Gouging.PruneErr, hc.Gouging.UploadErr,
+	    `, time.Now(), autopilot, ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
+		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
+		hc.ScoreBreakdown.Age, hc.ScoreBreakdown.Collateral, hc.ScoreBreakdown.Interactions, hc.ScoreBreakdown.StorageRemaining, hc.ScoreBreakdown.Uptime, hc.ScoreBreakdown.Version, hc.ScoreBreakdown.Prices,
+		hc.GougingBreakdown.ContractErr, hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)
@@ -1145,7 +1134,7 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		health = ?
 		WHERE key = ?
 		RETURNING id, total_shards
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.Key)).
+	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.EncryptionKey)).
 		Scan(&slabID, &totalShards)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.ErrSlabNotFound
@@ -1312,12 +1301,12 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		err = insertSlabStmt.QueryRow(ctx,
 			time.Now(),
 			contractSetID,
-			ssql.EncryptionKey(slices[i].Key),
+			ssql.EncryptionKey(slices[i].EncryptionKey),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
 		).Scan(&slabIDs[i])
 		if errors.Is(err, dsql.ErrNoRows) {
-			if err := querySlabIDStmt.QueryRow(ctx, ssql.EncryptionKey(slices[i].Key)).Scan(&slabIDs[i]); err != nil {
+			if err := querySlabIDStmt.QueryRow(ctx, ssql.EncryptionKey(slices[i].EncryptionKey)).Scan(&slabIDs[i]); err != nil {
 				return fmt.Errorf("failed to fetch slab id: %w", err)
 			}
 		} else if err != nil {

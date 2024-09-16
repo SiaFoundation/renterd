@@ -17,7 +17,15 @@ var (
 
 // Host returns information about a host.
 func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
-	hosts, err := s.SearchHosts(ctx, "", api.HostFilterModeAll, api.UsabilityFilterModeAll, "", []types.PublicKey{hostKey}, 0, 1)
+	hosts, err := s.Hosts(ctx, api.HostOptions{
+		AutopilotID:     "",
+		AddressContains: "",
+		FilterMode:      api.HostFilterModeAll,
+		UsabilityMode:   api.UsabilityFilterModeAll,
+		KeyIn:           []types.PublicKey{hostKey},
+		Offset:          0,
+		Limit:           1,
+	})
 	if err != nil {
 		return api.Host{}, err
 	} else if len(hosts) == 0 {
@@ -48,18 +56,13 @@ func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) err
 	})
 }
 
-func (s *SQLStore) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
+func (s *SQLStore) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	var hosts []api.Host
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		hosts, err = tx.SearchHosts(ctx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
+		hosts, err = tx.Hosts(ctx, opts)
 		return
 	})
 	return hosts, err
-}
-
-// Hosts returns non-blocked hosts at given offset and limit.
-func (s *SQLStore) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
-	return s.SearchHosts(ctx, "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
 }
 
 func (s *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {

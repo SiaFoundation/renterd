@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -61,9 +62,8 @@ type (
 		MaxConsecutiveScanFailures uint64    `json:"maxConsecutiveScanFailures"`
 	}
 
-	// SearchHostsRequest is the request type for the /api/bus/search/hosts
-	// endpoint.
-	SearchHostsRequest struct {
+	// HostsRequest is the request type for the /api/bus/hosts endpoint.
+	HostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
 		AutopilotID     string            `json:"autopilotID"`
@@ -71,22 +71,6 @@ type (
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
-	}
-
-	// HostResponse is the response type for the GET
-	// /api/autopilot/host/:hostkey endpoint.
-	HostResponse struct {
-		Host   Host        `json:"host"`
-		Checks *HostChecks `json:"checks,omitempty"`
-	}
-
-	HostChecks struct {
-		Gouging          bool                 `json:"gouging"`
-		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
-		Score            float64              `json:"score"`
-		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
-		Usable           bool                 `json:"usable"`
-		UnusableReasons  []string             `json:"unusableReasons,omitempty"`
 	}
 )
 
@@ -108,17 +92,13 @@ type (
 
 // Option types.
 type (
-	GetHostsOptions struct {
-		Offset int
-		Limit  int
-	}
 	HostsForScanningOptions struct {
 		MaxLastScan TimeRFC3339
 		Limit       int
 		Offset      int
 	}
 
-	SearchHostOptions struct {
+	HostOptions struct {
 		AutopilotID     string
 		AddressContains string
 		FilterMode      string
@@ -128,15 +108,6 @@ type (
 		Offset          int
 	}
 )
-
-func (opts GetHostsOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-}
 
 func (opts HostsForScanningOptions) Apply(values url.Values) {
 	if opts.Offset != 0 {
@@ -208,9 +179,9 @@ type (
 	}
 
 	HostCheck struct {
-		Gouging   HostGougingBreakdown   `json:"gouging"`
-		Score     HostScoreBreakdown     `json:"score"`
-		Usability HostUsabilityBreakdown `json:"usability"`
+		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
+		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
+		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
 	}
 
 	HostGougingBreakdown struct {
@@ -242,6 +213,19 @@ type (
 		NotCompletingScan     bool `json:"notCompletingScan"`
 	}
 )
+
+func (hc HostCheck) MarshalJSON() ([]byte, error) {
+	type check HostCheck
+	return json.Marshal(struct {
+		check
+		Score  float64 `json:"score"`
+		Usable bool    `json:"usable"`
+	}{
+		check:  check(hc),
+		Score:  hc.ScoreBreakdown.Score(),
+		Usable: hc.UsabilityBreakdown.IsUsable(),
+	})
+}
 
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {

@@ -334,9 +334,9 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 			return nil, err
 		}
 		slabs = append(slabs, api.PackedSlab{
-			BufferID: buffer.dbID,
-			Data:     data,
-			Key:      buffer.slabKey,
+			BufferID:      buffer.dbID,
+			Data:          data,
+			EncryptionKey: buffer.slabKey,
 		})
 		if len(slabs) == limit {
 			break

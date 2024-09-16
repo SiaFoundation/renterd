@@ -72,7 +72,7 @@ func TestReedSolomon(t *testing.T) {
 
 func BenchmarkReedSolomon(b *testing.B) {
 	makeSlab := func(m, n uint8) (Slab, []byte, [][]byte) {
-		return Slab{Key: GenerateEncryptionKey(), MinShards: m, Shards: make([]Sector, n)},
+		return Slab{EncryptionKey: GenerateEncryptionKey(), MinShards: m, Shards: make([]Sector, n)},
 			frand.Bytes(rhpv2.SectorSize * int(m)),
 			make([][]byte, n)
 	}

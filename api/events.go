@@ -19,7 +19,6 @@ const (
 
 	EventAdd     = "add"
 	EventUpdate  = "update"
-	EventDelete  = "delete"
 	EventArchive = "archive"
 	EventRenew   = "renew"
 )
@@ -51,12 +50,6 @@ type (
 		Timestamp time.Time        `json:"timestamp"`
 	}
 
-	EventHostUpdate struct {
-		HostKey   types.PublicKey `json:"hostKey"`
-		NetAddr   string          `json:"netAddr"`
-		Timestamp time.Time       `json:"timestamp"`
-	}
-
 	EventContractSetUpdate struct {
 		Name      string                 `json:"name"`
 		ToAdd     []types.FileContractID `json:"toAdd"`
@@ -64,15 +57,18 @@ type (
 		Timestamp time.Time              `json:"timestamp"`
 	}
 
-	EventSettingUpdate struct {
-		Key       string      `json:"key"`
-		Update    interface{} `json:"update"`
-		Timestamp time.Time   `json:"timestamp"`
+	EventHostUpdate struct {
+		HostKey   types.PublicKey `json:"hostKey"`
+		NetAddr   string          `json:"netAddr"`
+		Timestamp time.Time       `json:"timestamp"`
 	}
 
-	EventSettingDelete struct {
-		Key       string    `json:"key"`
-		Timestamp time.Time `json:"timestamp"`
+	EventSettingUpdate struct {
+		GougingSettings *GougingSettings `json:"gougingSettings,omitempty"`
+		PinnedSettings  *PinnedSettings  `json:"pinnedSettings,omitempty"`
+		S3Settings      *S3Settings      `json:"s3Settings,omitempty"`
+		UploadSettings  *UploadSettings  `json:"uploadSettings,omitempty"`
+		Timestamp       time.Time        `json:"timestamp"`
 	}
 )
 
@@ -139,15 +135,6 @@ var (
 			URL:     url,
 		}
 	}
-
-	WebhookSettingDelete = func(url string, headers map[string]string) webhooks.Webhook {
-		return webhooks.Webhook{
-			Event:   EventDelete,
-			Headers: headers,
-			Module:  ModuleSetting,
-			URL:     url,
-		}
-	}
 )
 
 func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
@@ -202,15 +189,8 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		}
 	case ModuleSetting:
-		switch event.Event {
-		case EventUpdate:
+		if event.Event == EventUpdate {
 			var e EventSettingUpdate
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		case EventDelete:
-			var e EventSettingDelete
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}

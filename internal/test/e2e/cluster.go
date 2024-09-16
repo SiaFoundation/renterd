@@ -486,18 +486,25 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}))
 	}
 
-	// Update the bus settings.
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, test.GougingSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, test.ContractSetSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingPricePinning, test.PricePinSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
-		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
-	}))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
+	// Build upload settings.
+	us := test.UploadSettings
+	us.Packing = api.UploadPackingSettings{
 		Enabled:               enableUploadPacking,
-		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
-	}))
+		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB,
+	}
+
+	// Build S3 settings.
+	s3 := api.S3Settings{
+		Authentication: api.S3AuthenticationSettings{
+			V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
+		},
+	}
+
+	// Update the bus settings.
+	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
+	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
+	tt.OK(busClient.UpdateUploadSettings(ctx, us))
+	tt.OK(busClient.UpdateS3Settings(ctx, s3))
 
 	// Fund the bus.
 	if funding {
@@ -538,13 +545,14 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 }
 
 func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
-	// create store
+	// create store config
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
+	// create store
 	sqlStore, err := stores.NewSQLStore(storeCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -631,7 +639,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -736,6 +744,13 @@ func (c *TestCluster) sync() {
 			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
 		}
 
+		wallet, err := c.Bus.Wallet(context.Background())
+		if err != nil {
+			return err
+		} else if wallet.ScanHeight < tip.Height {
+			return fmt.Errorf("wallet hasn't caught up, %d < %d", wallet.ScanHeight, tip.Height)
+		}
+
 		for _, h := range c.hosts {
 			if hh := h.cm.Tip().Height; hh < tip.Height {
 				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
@@ -778,8 +793,8 @@ func (c *TestCluster) WaitForContracts() []api.Contract {
 	// fetch all contracts
 	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
 	c.tt.OK(err)
-	if resp.Error != "" {
-		c.tt.Fatal(resp.Error)
+	if len(resp.Errors) > 0 {
+		c.tt.Fatal(resp.Errors)
 	}
 	return resp.Contracts
 }

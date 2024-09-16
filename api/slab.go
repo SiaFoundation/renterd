@@ -7,9 +7,9 @@ import (
 
 type (
 	PackedSlab struct {
-		BufferID uint                 `json:"bufferID"`
-		Data     []byte               `json:"data"`
-		Key      object.EncryptionKey `json:"key"`
+		BufferID      uint                 `json:"bufferID"`
+		Data          []byte               `json:"data"`
+		EncryptionKey object.EncryptionKey `json:"encryptionKey"`
 	}
 
 	SlabBuffer struct {
@@ -22,8 +22,8 @@ type (
 	}
 
 	UnhealthySlab struct {
-		Key    object.EncryptionKey `json:"key"`
-		Health float64              `json:"health"`
+		EncryptionKey object.EncryptionKey `json:"encryptionKey"`
+		Health        float64              `json:"health"`
 	}
 
 	UploadedPackedSlab struct {
