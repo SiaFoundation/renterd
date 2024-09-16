@@ -314,7 +314,7 @@ func TestMigrateLostSector(t *testing.T) {
 	}
 
 	// download the slab
-	shards, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// download the slab
-	shards, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
 	if err != nil {
 		t.Fatal(err)
 	}

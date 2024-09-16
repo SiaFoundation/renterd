@@ -8,6 +8,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
+	"go.uber.org/zap"
 )
 
 func (w *Worker) migrate(ctx context.Context, s object.Slab, contractSet string, dlContracts, ulContracts []api.ContractMetadata, bh uint64) error {
@@ -86,8 +87,14 @@ SHARDS:
 	defer mem.Release()
 
 	// download the slab
-	shards, err := w.downloadManager.DownloadSlab(ctx, s, dlContracts)
+	shards, surchargeApplied, err := w.downloadManager.DownloadSlab(ctx, s, dlContracts)
 	if err != nil {
+		w.logger.Debugw("slab migration failed",
+			zap.Error(err),
+			zap.Stringer("slab", s.EncryptionKey),
+			zap.Int("numShardsMigrated", len(shards)),
+			zap.Bool("surchargeApplied", surchargeApplied),
+		)
 		return fmt.Errorf("failed to download slab for migration: %w", err)
 	}
 	s.Encrypt(shards)
@@ -110,8 +117,21 @@ SHARDS:
 	// migrate the shards
 	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, lockingPriorityUpload, mem)
 	if err != nil {
+		w.logger.Debugw("slab migration failed",
+			zap.Error(err),
+			zap.Stringer("slab", s.EncryptionKey),
+			zap.Int("numShardsMigrated", len(shards)),
+			zap.Bool("surchargeApplied", surchargeApplied),
+		)
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
+
+	// debug log migration result
+	w.logger.Debugw("slab migration succeeded",
+		zap.Stringer("slab", s.EncryptionKey),
+		zap.Int("numShardsMigrated", len(shards)),
+		zap.Bool("surchargeApplied", surchargeApplied),
+	)
 
 	return nil
 }
