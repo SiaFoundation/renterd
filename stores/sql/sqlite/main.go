@@ -216,6 +216,10 @@ func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket
 	return ssql.Bucket(ctx, tx, bucket)
 }
 
+func (tx *MainDatabaseTx) Buckets(ctx context.Context) ([]api.Bucket, error) {
+	return ssql.Buckets(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) CharLengthExpr() string {
 	return "LENGTH"
 }
@@ -465,14 +469,6 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
-	return ssql.ListBuckets(ctx, tx)
-}
-
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
-}
-
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
@@ -537,6 +533,10 @@ func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, 
 
 func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.Object, error) {
 	return ssql.Object(ctx, tx, bucket, key)
+}
+
+func (tx *MainDatabaseTx) Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsResponse, error) {
+	return ssql.Objects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 }
 
 func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {

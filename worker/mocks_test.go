@@ -632,8 +632,8 @@ func (*s3Mock) CopyObject(context.Context, string, string, string, string, api.C
 	return api.ObjectMetadata{}, nil
 }
 
-func (*s3Mock) ListObjects(context.Context, string, api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
-	return api.ObjectsListResponse{}, nil
+func (*s3Mock) ListObjects(context.Context, string, api.ListObjectOptions) (resp api.ObjectsResponse, err error) {
+	return api.ObjectsResponse{}, nil
 }
 
 func (*s3Mock) AbortMultipartUpload(context.Context, string, string, string) (err error) {

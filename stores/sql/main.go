@@ -221,6 +221,24 @@ func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
 	return b, nil
 }
 
+func Buckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
+	rows, err := tx.Query(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch buckets: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []api.Bucket
+	for rows.Next() {
+		bucket, err := scanBucket(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan bucket: %w", err)
+		}
+		buckets = append(buckets, bucket)
+	}
+	return buckets, nil
+}
+
 func Contract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractMetadata, error) {
 	contracts, err := QueryContracts(ctx, tx, []string{"c.fcid = ?"}, []any{FileContractID(fcid)})
 	if err != nil {
@@ -1158,24 +1176,6 @@ func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Tim
 	return err
 }
 
-func ListBuckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
-	rows, err := tx.Query(ctx, "SELECT created_at, name, COALESCE(policy, '{}') FROM buckets")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch buckets: %w", err)
-	}
-	defer rows.Close()
-
-	var buckets []api.Bucket
-	for rows.Next() {
-		bucket, err := scanBucket(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan bucket: %w", err)
-		}
-		buckets = append(buckets, bucket)
-	}
-	return buckets, nil
-}
-
 func whereObjectMarker(marker, sortBy, sortDir string, queryMarker func(dst any, marker, col string) error) (whereExprs []string, whereArgs []any, _ error) {
 	if marker == "" {
 		return nil, nil, nil
@@ -1248,18 +1248,6 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 		orderByExprs = append(orderByExprs, "o.object_id ASC")
 	}
 	return orderByExprs, nil
-}
-
-func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
-	switch delim {
-	case "":
-		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
-	case "/":
-		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
-	default:
-		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
-	}
-	return
 }
 
 func MultipartUpload(ctx context.Context, tx sql.Tx, uploadID string) (api.MultipartUpload, error) {
@@ -1502,6 +1490,18 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
+}
+
+func Objects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsResponse, err error) {
+	switch delim {
+	case "":
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
+	case "/":
+		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+	default:
+		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
+	}
+	return
 }
 
 func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) {
@@ -2633,7 +2633,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 	}, nil
 }
 
-func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -2668,7 +2668,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	// apply sorting
 	orderByExprs, err := orderByObject(sortBy, sortDir)
 	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
 	}
 
 	// apply marker
@@ -2686,7 +2686,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		}
 	})
 	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to get marker exprs: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to get marker exprs: %w", err)
 	}
 	whereExprs = append(whereExprs, markerExprs...)
 	whereArgs = append(whereArgs, markerArgs...)
@@ -2707,7 +2707,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		strings.Join(orderByExprs, ", ")),
 		whereArgs...)
 	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
 	}
 	defer rows.Close()
 
@@ -2715,7 +2715,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	for rows.Next() {
 		om, err := tx.ScanObjectMetadata(rows)
 		if err != nil {
-			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+			return api.ObjectsResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
 		}
 		objects = append(objects, om)
 	}
@@ -2730,14 +2730,14 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		}
 	}
 
-	return api.ObjectsListResponse{
+	return api.ObjectsResponse{
 		HasMore:    hasMore,
 		NextMarker: nextMarker,
 		Objects:    objects,
 	}, nil
 }
 
-func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsResponse, error) {
 	// split prefix into path and object prefix
 	path := "/" // root of bucket
 	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
@@ -2766,9 +2766,9 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	// fetch directory id
 	dirID, err := dirID(ctx, tx, path)
 	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ObjectsListResponse{}, nil
+		return api.ObjectsResponse{}, nil
 	} else if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch directory id: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to fetch directory id: %w", err)
 	}
 
 	args := []any{
@@ -2825,7 +2825,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		}
 	})
 	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to query marker: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to query marker: %w", err)
 	} else if len(markerExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
 	}
@@ -2834,7 +2834,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	// apply sorting
 	orderByExprs, err := orderByObject(sortBy, sortDir)
 	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
 	}
 
 	// apply offset and limit
@@ -2873,7 +2873,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		strings.Join(orderByExprs, ", "),
 	), args...)
 	if err != nil {
-		return api.ObjectsListResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
+		return api.ObjectsResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
 	}
 	defer rows.Close()
 
@@ -2881,7 +2881,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	for rows.Next() {
 		om, err := tx.ScanObjectMetadata(rows)
 		if err != nil {
-			return api.ObjectsListResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
+			return api.ObjectsResponse{}, fmt.Errorf("failed to scan object metadata: %w", err)
 		}
 		objects = append(objects, om)
 	}
@@ -2897,7 +2897,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		}
 	}
 
-	return api.ObjectsListResponse{
+	return api.ObjectsResponse{
 		HasMore:    hasMore,
 		NextMarker: nextMarker,
 		Objects:    objects,

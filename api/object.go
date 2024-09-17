@@ -96,8 +96,8 @@ type (
 		Metadata     ObjectUserMetadata
 	}
 
-	// ObjectsListResponse is the response type for the /bus/objects/list endpoint.
-	ObjectsListResponse struct {
+	// ObjectsResponse is the response type for the /bus/objects endpoint.
+	ObjectsResponse struct {
 		HasMore    bool             `json:"hasMore"`
 		NextMarker string           `json:"nextMarker"`
 		Objects    []ObjectMetadata `json:"objects"`

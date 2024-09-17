@@ -53,6 +53,14 @@ func (s *SQLStore) Bucket(ctx context.Context, bucket string) (b api.Bucket, err
 	return
 }
 
+func (s *SQLStore) Buckets(ctx context.Context) (buckets []api.Bucket, err error) {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		buckets, err = tx.Buckets(ctx)
+		return
+	})
+	return
+}
+
 func (s *SQLStore) CreateBucket(ctx context.Context, bucket string, policy api.BucketPolicy) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.CreateBucket(ctx, bucket, policy)
@@ -69,14 +77,6 @@ func (s *SQLStore) DeleteBucket(ctx context.Context, bucket string) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.DeleteBucket(ctx, bucket)
 	})
-}
-
-func (s *SQLStore) ListBuckets(ctx context.Context) (buckets []api.Bucket, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		buckets, err = tx.ListBuckets(ctx)
-		return
-	})
-	return
 }
 
 // ObjectsStats returns some info related to the objects stored in the store. To
@@ -790,9 +790,9 @@ func (s *SQLStore) invalidateSlabHealthByFCID(ctx context.Context, fcids []types
 	}
 }
 
-func (s *SQLStore) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func (s *SQLStore) Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsResponse, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		resp, err = tx.ListObjects(ctx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
+		resp, err = tx.Objects(ctx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
 		return err
 	})
 	return

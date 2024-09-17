@@ -194,7 +194,7 @@ func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 }
 
 func (b *Bus) bucketsHandlerGET(jc jape.Context) {
-	resp, err := b.ms.ListBuckets(jc.Request.Context())
+	resp, err := b.ms.Buckets(jc.Request.Context())
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
 	}
@@ -1173,7 +1173,7 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
+	resp, err := b.ms.Objects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
 	if errors.Is(err, api.ErrUnsupportedDelimiter) {
 		jc.Error(err, http.StatusBadRequest)
 		return

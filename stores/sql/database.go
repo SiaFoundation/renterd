@@ -88,6 +88,9 @@ type (
 		// exist, it returns api.ErrBucketNotFound.
 		Bucket(ctx context.Context, bucket string) (api.Bucket, error)
 
+		// Buckets returns a list of all buckets in the database.
+		Buckets(ctx context.Context) ([]api.Bucket, error)
+
 		// CompleteMultipartUpload completes a multipart upload by combining the
 		// provided parts into an object in bucket 'bucket' with key 'key'. The
 		// parts need to be provided in ascending partNumber order without
@@ -192,12 +195,6 @@ type (
 		// scanned since at least maxLastScan.
 		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
 
-		// ListBuckets returns a list of all buckets in the database.
-		ListBuckets(ctx context.Context) ([]api.Bucket, error)
-
-		// ListObjects returns a list of objects from the given bucket.
-		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
-
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
 
@@ -219,6 +216,9 @@ type (
 
 		// Object returns an object from the database.
 		Object(ctx context.Context, bucket, key string) (api.Object, error)
+
+		// Objects returns a list of objects from the given bucket.
+		Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsResponse, err error)
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
