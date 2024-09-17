@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -138,18 +139,17 @@ func TestMigrations(t *testing.T) {
 		tt.OK(err)
 		for _, alert := range ress.Alerts {
 			// skip if not a migration alert
-			data, ok := alert.Data["objectIDs"].(map[string]interface{})
+			_, ok := alert.Data["objects"]
 			if !ok {
 				continue
 			}
 
 			// collect all object ids per bucket
-			for bucket, ids := range data {
-				if objectIDs, ok := ids.([]interface{}); ok {
-					for _, id := range objectIDs {
-						got[bucket] = append(got[bucket], id.(string))
-					}
-				}
+			var objects []api.ObjectMetadata
+			b, _ := json.Marshal(alert.Data["objects"])
+			_ = json.Unmarshal(b, &objects)
+			for _, object := range objects {
+				got[object.Bucket] = append(got[object.Bucket], object.Key)
 			}
 		}
 		if len(got) != 2 {
