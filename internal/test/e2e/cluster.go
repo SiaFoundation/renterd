@@ -527,6 +527,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		})
 	}
 
+	// Add test bucket
+	err = cluster.Bus.CreateBucket(ctx, testBucket, api.CreateBucketOptions{})
+	if err != nil && !utils.IsErr(err, api.ErrBucketExists) {
+		tt.Fatalf("failed to create bucket: %v", err)
+	}
+
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForPeers()
