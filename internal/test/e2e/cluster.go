@@ -49,6 +49,7 @@ import (
 )
 
 const (
+	testBucket           = "testbucket"
 	testBusFlushInterval = 100 * time.Millisecond
 )
 
