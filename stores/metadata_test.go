@@ -1737,6 +1737,68 @@ func TestListObjectsExplicitDir(t *testing.T) {
 	}
 }
 
+func TestListObjectsSlabEncryptionKey(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create a host
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// create a contract
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+
+	// create a slab.
+	slab := object.Slab{
+		Health:        1.0,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		MinShards:     1,
+		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
+	}
+
+	// add 3 objects that all reference the slab
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab:   slab,
+				Offset: 1,
+				Length: 0, // incremented later
+			},
+		},
+	}
+	for _, name := range []string{"obj1", "obj2", "obj3"} {
+		obj.Slabs[0].Length++
+		if _, err := ss.addTestObject(name, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the objects by slab.
+	res, err := ss.ListObjects(context.Background(), "", "", "", "", "", "", "", -1, slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"obj1", "obj2", "obj3"} {
+		if res.Objects[i].Key != name {
+			t.Fatal("unexpected object name", res.Objects[i].Key, name)
+		}
+		if res.Objects[i].Size != int64(i)+1 {
+			t.Fatal("unexpected object size", res.Objects[i].Size, i+1)
+		}
+		if res.Objects[i].Health != 1.0 {
+			t.Fatal("unexpected object health", res.Objects[i].Health)
+		}
+	}
+}
+
 // TestListObjectsSubstring is a test for the ListObjects fuzzy
 // search via the "substring" argument.
 func TestListObjectsSubstring(t *testing.T) {
@@ -3269,69 +3331,6 @@ func TestContractSizes(t *testing.T) {
 	}
 }
 
-//  : use this as a list test
-// func TestObjectsBySlabKey(t *testing.T) {
-// 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-// 	defer ss.Close()
-
-// 	// create a host
-// 	hks, err := ss.addTestHosts(1)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	hk1 := hks[0]
-
-// 	// create a contract
-// 	fcids, _, err := ss.addTestContracts(hks)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fcid1 := fcids[0]
-
-// 	// create a slab.
-// 	slab := object.Slab{
-// 		Health:        1.0,
-// 		EncryptionKey: object.GenerateEncryptionKey(),
-// 		MinShards:     1,
-// 		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
-// 	}
-
-// 	// Add 3 objects that all reference the slab.
-// 	obj := object.Object{
-// 		Key: object.GenerateEncryptionKey(),
-// 		Slabs: []object.SlabSlice{
-// 			{
-// 				Slab:   slab,
-// 				Offset: 1,
-// 				Length: 0, // incremented later
-// 			},
-// 		},
-// 	}
-// 	for _, name := range []string{"obj1", "obj2", "obj3"} {
-// 		obj.Slabs[0].Length++
-// 		if _, err := ss.addTestObject(name, obj); err != nil {
-// 			t.Fatal(err)
-// 		}
-// 	}
-
-// 	// Fetch the objects by slab.
-// 	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.EncryptionKey)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	for i, name := range []string{"obj1", "obj2", "obj3"} {
-// 		if objs[i].Key != name {
-// 			t.Fatal("unexpected object name", objs[i].Key, name)
-// 		}
-// 		if objs[i].Size != int64(i)+1 {
-// 			t.Fatal("unexpected object size", objs[i].Size, i+1)
-// 		}
-// 		if objs[i].Health != 1.0 {
-// 			t.Fatal("unexpected object health", objs[i].Health)
-// 		}
-// 	}
-// }
-
 func TestBuckets(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -3547,6 +3546,9 @@ func TestBucketObjects(t *testing.T) {
 	} else if len(res.Objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
 	}
+
+	// Check if we can fetch both objects by not specifying the bucket
+
 }
 
 func TestCopyObject(t *testing.T) {
