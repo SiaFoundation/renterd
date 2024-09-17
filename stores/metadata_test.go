@@ -3695,6 +3695,155 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 }
 
+func TestRenewedContract(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add test host
+	hk := types.PublicKey{1}
+	if err := ss.addTestHost(hk); err != nil {
+		t.Fatal(err)
+	}
+
+	// add test contract
+	fcid := types.FileContractID{1}
+	c, err := ss.addTestContract(fcid, hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's a freshly formed contract
+	if c.RenewedFrom != (types.FileContractID{}) {
+		t.Fatal("unexpected")
+	}
+
+	// assert we can't fetch the renewed contract
+	_, err = ss.RenewedContract(context.Background(), fcid)
+	if !errors.Is(err, api.ErrContractNotFound) {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert it has no ancestors
+	ancestors, err := ss.AncestorContracts(context.Background(), fcid, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(ancestors) != 0 {
+		t.Fatal("unexpected", len(ancestors))
+	}
+
+	// create a contract set
+	if err := ss.UpdateContractSet(context.Background(), t.Name(), []types.FileContractID{fcid}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					EncryptionKey: object.GenerateEncryptionKey(),
+					MinShards:     1,
+					Shards:        newTestShards(hk, fcid, types.Hash256{1}),
+				},
+			},
+		},
+	}
+
+	// add the object.
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+		t.Fatal(err)
+	}
+
+	// no slabs should be unhealthy
+	if err := ss.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, t.Name(), 10); err != nil {
+		t.Fatal(err)
+	} else if len(slabs) > 0 {
+		t.Fatal("shouldn't return any slabs", len(slabs))
+	}
+
+	// renew it
+	fcidR := types.FileContractID{2}
+	if err := ss.renewTestContract(hk, fcid, fcidR, 1); err != nil {
+		t.Fatal("unexpected")
+	}
+
+	// assert we can now fetch the renewed contract
+	renewal, err := ss.RenewedContract(context.Background(), fcid)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if renewal.ID != fcidR {
+		t.Fatal("unexpected")
+	}
+
+	// assert the original contract is now an ancestor
+	ancestors, err = ss.AncestorContracts(context.Background(), fcidR, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(ancestors) != 1 {
+		t.Fatal("unexpected", len(ancestors))
+	} else if ancestors[0].ID != fcid {
+		t.Fatal("unexpected")
+	}
+
+	// assert the contract set was updated.
+	csc, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(csc) != 1 {
+		t.Fatal("unexpected", len(csc))
+	} else if csc[0].ID != fcidR {
+		t.Fatal("unexpected")
+	}
+
+	// slab should still be in good shape.
+	if err := ss.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, t.Name(), 10); err != nil {
+		t.Fatal(err)
+	} else if len(slabs) > 0 {
+		t.Fatal("shouldn't return any slabs", len(slabs))
+	}
+
+	// assert the contract is not being returned
+	_, err = ss.Contract(context.Background(), fcid)
+	if !errors.Is(err, api.ErrContractNotFound) {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert it's not returned when listing all contracts either
+	cs, err := ss.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cs) != 1 {
+		t.Fatal("unexpected number of contracts", len(cs))
+	} else if cs[0].ID != fcidR {
+		t.Fatal("unexpected")
+	}
+
+	// assert it's returned if we change the filter mode
+	cs, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cs) != 2 {
+		t.Fatal("unexpected number of contracts", len(cs))
+	}
+
+	// assert the archived contract is not in the set
+	cs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name(), FilterMode: api.ContractFilterModeAll})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cs) != 1 {
+		t.Fatal("unexpected number of contracts", len(cs))
+	} else if cs[0].ID != fcidR {
+		t.Fatal("unexpected contract", cs[0])
+	}
+}
+
 func TestRefreshHealth(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
