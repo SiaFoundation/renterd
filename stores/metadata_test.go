@@ -344,9 +344,10 @@ func TestObjectMetadata(t *testing.T) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
-	}
-	if !reflect.DeepEqual(got.Metadata, testMetadata) {
+	} else if !reflect.DeepEqual(got.Metadata, testMetadata) {
 		t.Fatal("meta mismatch", cmp.Diff(got.Metadata, testMetadata))
+	} else if got.Bucket != testBucket {
+		t.Fatal("unexpected bucket", got.Bucket)
 	}
 
 	// assert metadata CASCADE on object delete
@@ -1126,6 +1127,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	expectedObj := api.Object{
 		ObjectMetadata: api.ObjectMetadata{
+			Bucket:   testBucket,
 			ETag:     testETag,
 			Health:   1,
 			ModTime:  api.TimeRFC3339{},
@@ -1457,7 +1459,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	resp, err := ss.ListObjects(context.Background(), testBucket, "/", "", "", "", "", "", -1)
+	resp, err := ss.ListObjects(context.Background(), testBucket, "/", "", "", "", "", "", -1, object.EncryptionKey{})
 	entries := resp.Objects
 	if err != nil {
 		t.Fatal(err)
@@ -1468,7 +1470,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	resp, err = ss.ListObjects(context.Background(), testBucket, "/", "foo", "", "", "", "", -1)
+	resp, err = ss.ListObjects(context.Background(), testBucket, "/", "foo", "", "", "", "", -1, object.EncryptionKey{})
 	if err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
@@ -1609,8 +1611,14 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 		{"/", "", "size", "DESC", []api.ObjectMetadata{{Key: "/foo/", Size: 10, Health: .5}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
 		{"/", "", "size", "ASC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
 	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].Bucket = testBucket
+		}
+	}
 	for _, test := range tests {
-		resp, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
+		resp, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1623,7 +1631,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			resp, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1)
+			resp, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1, object.EncryptionKey{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1645,7 +1653,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 				continue
 			}
 
-			resp, err = ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Key, 1)
+			resp, err = ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Key, 1, object.EncryptionKey{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1711,8 +1719,14 @@ func TestListObjectsExplicitDir(t *testing.T) {
 		}},
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].Bucket = testBucket
+		}
+	}
 	for _, test := range tests {
-		got, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
+		got, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1721,6 +1735,68 @@ func TestListObjectsExplicitDir(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got.Objects, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
+		}
+	}
+}
+
+func TestListObjectsSlabEncryptionKey(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create a host
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// create a contract
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+
+	// create a slab.
+	slab := object.Slab{
+		Health:        1.0,
+		EncryptionKey: object.GenerateEncryptionKey(),
+		MinShards:     1,
+		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
+	}
+
+	// add 3 objects that all reference the slab
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(),
+		Slabs: []object.SlabSlice{
+			{
+				Slab:   slab,
+				Offset: 1,
+				Length: 0, // incremented later
+			},
+		},
+	}
+	for _, name := range []string{"obj1", "obj2", "obj3"} {
+		obj.Slabs[0].Length++
+		if _, err := ss.addTestObject(name, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the objects by slab.
+	res, err := ss.ListObjects(context.Background(), "", "", "", "", "", "", "", -1, slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"obj1", "obj2", "obj3"} {
+		if res.Objects[i].Key != name {
+			t.Fatal("unexpected object name", res.Objects[i].Key, name)
+		}
+		if res.Objects[i].Size != int64(i)+1 {
+			t.Fatal("unexpected object size", res.Objects[i].Size, i+1)
+		}
+		if res.Objects[i].Health != 1.0 {
+			t.Fatal("unexpected object health", res.Objects[i].Health)
 		}
 	}
 }
@@ -1780,7 +1856,7 @@ func TestListObjectsSubstring(t *testing.T) {
 		{"uu", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		resp, err := ss.ListObjects(ctx, testBucket, "", test.key, "", "", "", "", -1)
+		resp, err := ss.ListObjects(ctx, testBucket, "", test.key, "", "", "", "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1788,7 +1864,7 @@ func TestListObjectsSubstring(t *testing.T) {
 		assertEqual(got, test.want)
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			if resp, err := ss.ListObjects(ctx, testBucket, "", test.key, "", "", "", marker, 1); err != nil {
+			if resp, err := ss.ListObjects(ctx, testBucket, "", test.key, "", "", "", marker, 1, object.EncryptionKey{}); err != nil {
 				t.Fatal(err)
 			} else if got := resp.Objects; len(got) != 1 {
 				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.key, len(got))
@@ -2633,7 +2709,7 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	resp, err := ss.ListObjects(ctx, testBucket, "", "/", "", "", "", "", 100)
+	resp, err := ss.ListObjects(ctx, testBucket, "", "/", "", "", "", "", 100, object.EncryptionKey{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3257,68 +3333,6 @@ func TestContractSizes(t *testing.T) {
 	}
 }
 
-func TestObjectsBySlabKey(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// create a host
-	hks, err := ss.addTestHosts(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hk1 := hks[0]
-
-	// create a contract
-	fcids, _, err := ss.addTestContracts(hks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fcid1 := fcids[0]
-
-	// create a slab.
-	slab := object.Slab{
-		Health:        1.0,
-		EncryptionKey: object.GenerateEncryptionKey(),
-		MinShards:     1,
-		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
-	}
-
-	// Add 3 objects that all reference the slab.
-	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab:   slab,
-				Offset: 1,
-				Length: 0, // incremented later
-			},
-		},
-	}
-	for _, name := range []string{"obj1", "obj2", "obj3"} {
-		obj.Slabs[0].Length++
-		if _, err := ss.addTestObject(name, obj); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Fetch the objects by slab.
-	objs, err := ss.ObjectsBySlabKey(context.Background(), testBucket, slab.EncryptionKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, name := range []string{"obj1", "obj2", "obj3"} {
-		if objs[i].Key != name {
-			t.Fatal("unexpected object name", objs[i].Key, name)
-		}
-		if objs[i].Size != int64(i)+1 {
-			t.Fatal("unexpected object size", objs[i].Size, i+1)
-		}
-		if objs[i].Health != 1.0 {
-			t.Fatal("unexpected object health", objs[i].Health)
-		}
-	}
-}
-
 func TestBuckets(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -3410,45 +3424,53 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// List the objects in the buckets.
-	if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 2 {
 		t.Fatal("unexpected size", entries[0].Size)
+	} else if resp, err := ss.ListObjects(context.Background(), "", "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if entries := resp.Objects; len(entries) != 2 {
+		t.Fatal("expected 2 entries", len(entries))
 	}
 
 	// Search the objects in the buckets.
-	if resp, err := ss.ListObjects(context.Background(), b1, "", "", "", "", "", "", -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b1, "", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 3 || objects[1].Size != 1 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 4 || objects[1].Size != 2 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
+	} else if resp, err := ss.ListObjects(context.Background(), "", "", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if objects := resp.Objects; len(objects) != 4 {
+		t.Fatal("expected 4 objects", len(objects))
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
 	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Key != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Key)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3459,13 +3481,13 @@ func TestBucketObjects(t *testing.T) {
 	// Rename foo/bar in bucket 2 using the batch rename.
 	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if entries[0].Key != "/foo/baz" {
 		t.Fatal("unexpected name", entries[0].Key)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3478,28 +3500,28 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.RemoveObjectBlocking(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1); err != nil {
+	if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if err := ss.RemoveObjectsBlocking(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b2, "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if resp, err := ss.ListObjects(context.Background(), b1, "/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(context.Background(), b1, "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3517,13 +3539,13 @@ func TestBucketObjects(t *testing.T) {
 	// See if we can fetch the object by slab.
 	if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].EncryptionKey); err != nil {
+	} else if res, err := ss.ListObjects(context.Background(), b1, "", "", "", "", "", "", -1, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 1 {
+	} else if len(res.Objects) != 1 {
 		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].EncryptionKey); err != nil {
+	} else if res, err := ss.ListObjects(context.Background(), b2, "", "", "", "", "", "", -1, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 0 {
+	} else if len(res.Objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
 	}
 }
@@ -3550,7 +3572,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if om, err := ss.CopyObject(ctx, "src", "src", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(ctx, "src", "/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(ctx, "src", "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
@@ -3563,7 +3585,7 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if om, err := ss.CopyObject(ctx, "src", "dst", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if resp, err := ss.ListObjects(ctx, "dst", "/", "", "", "", "", "", -1); err != nil {
+	} else if resp, err := ss.ListObjects(ctx, "dst", "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
@@ -3718,12 +3740,13 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 	// set common fields
 	for i := range tests {
 		for j := range tests[i].want {
+			tests[i].want[j].Bucket = testBucket
 			tests[i].want[j].ETag = testETag
 			tests[i].want[j].MimeType = testMimeType
 		}
 	}
 	for _, test := range tests {
-		res, err := ss.ListObjects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, "", -1)
+		res, err := ss.ListObjects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3738,7 +3761,7 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := ss.ListObjects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1)
+				res, err := ss.ListObjects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1, object.EncryptionKey{})
 				if err != nil {
 					t.Fatal(err)
 				}

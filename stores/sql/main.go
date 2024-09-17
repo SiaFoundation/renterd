@@ -1231,12 +1231,12 @@ func orderByObject(sortBy, sortDir string) (orderByExprs []string, _ error) {
 	return orderByExprs, nil
 }
 
-func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error) {
+func ListObjects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (resp api.ObjectsListResponse, err error) {
 	switch delim {
 	case "":
-		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	case "/":
-		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	default:
 		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
 	}
@@ -1503,6 +1503,7 @@ func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object,
 	om, err := tx.ScanObjectMetadata(tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		WHERE o.id = ?
 	`, tx.SelectObjectMetadataExpr()), objID))
 	if err != nil {
@@ -2345,35 +2346,6 @@ func scanStateElement(s Scanner) (types.StateElement, error) {
 	}, nil
 }
 
-func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON o.db_bucket_id = b.id
-		WHERE b.name = ? AND EXISTS (
-			SELECT 1
-			FROM objects o2
-			INNER JOIN slices sli ON sli.db_object_id = o2.id
-			INNER JOIN slabs sla ON sla.id = sli.db_slab_id
-			WHERE o2.id = o.id AND sla.key = ?
-		)
-	`, tx.SelectObjectMetadataExpr()), bucket, EncryptionKey(slabKey))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-	return objects, nil
-}
-
 func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedSlab) (string, error) {
 	// fetch relevant slab info
 	var slabID, bufferedSlabID int64
@@ -2614,7 +2586,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 	}, nil
 }
 
-func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -2630,9 +2602,14 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		sortDir = api.SortDirAsc
 	}
 
-	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
-	whereArgs := []any{bucket}
+	var whereExprs []string
+	var whereArgs []any
+
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		whereArgs = append(whereArgs, bucket)
+	}
 
 	// apply prefix
 	if prefix != "" {
@@ -2654,12 +2631,20 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 
 	// apply marker
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		markerExprs := []string{"o.object_id = ?"}
+		markerArgs := []any{marker}
+
+		if bucket != "" {
+			markerExprs = append(markerExprs, "b.name = ?")
+			markerArgs = append(markerArgs, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-		`, col), bucket, marker).Scan(dst)
+			WHERE %s
+		`, col, strings.Join(markerExprs, " AND ")), markerArgs...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -2672,19 +2657,32 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	whereExprs = append(whereExprs, markerExprs...)
 	whereArgs = append(whereArgs, markerArgs...)
 
+	// apply slab key
+	if slabEncryptionKey != (object.EncryptionKey{}) {
+		whereExprs = append(whereExprs, "EXISTS(SELECT 1 FROM objects o2 INNER JOIN slices sli ON sli.db_object_id = o2.id INNER JOIN slabs sla ON sla.id = sli.db_slab_id WHERE o2.id = o.id AND sla.key = ?)")
+		whereArgs = append(whereArgs, EncryptionKey(slabEncryptionKey))
+	}
+
 	// apply limit
 	whereArgs = append(whereArgs, limit)
 
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
+
 	// run query
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?
-	`,
+	SELECT %s
+	FROM objects o
+	INNER JOIN buckets b ON b.id = o.db_bucket_id
+	%s
+	ORDER BY %s
+	LIMIT ?
+`,
 		tx.SelectObjectMetadataExpr(),
-		strings.Join(whereExprs, " AND "),
+		whereExpr,
 		strings.Join(orderByExprs, ", ")),
 		whereArgs...)
 	if err != nil {
@@ -2718,7 +2716,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	}, nil
 }
 
-func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
+func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error) {
 	// split prefix into path and object prefix
 	path := "/" // root of bucket
 	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
@@ -2754,7 +2752,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 
 	args := []any{
 		path,
-		dirID, bucket,
+		dirID,
 	}
 
 	// apply prefix
@@ -2767,15 +2765,21 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		)
 	}
 
+	// apply slab key
+	var slabKeyExpr string
+	if slabEncryptionKey != (object.EncryptionKey{}) {
+		slabKeyExpr = "AND EXISTS(SELECT 1 FROM objects o2 INNER JOIN slices sli ON sli.db_object_id = o2.id INNER JOIN slabs sla ON sla.id = sli.db_slab_id WHERE o2.id = o.id AND sla.key = ?)"
+		args = append(args, EncryptionKey(slabEncryptionKey))
+	}
+
 	args = append(args,
-		bucket,
 		path+"%",
 		utf8.RuneCountInString(path), path,
 		dirID,
 	)
 
 	// apply marker
-	var whereExpr string
+	var whereExprs []string
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
 		var groupFn string
 		switch col {
@@ -2786,19 +2790,34 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		default:
 			return fmt.Errorf("unknown column: %v", col)
 		}
+
+		markerExprsObj := []string{"o.object_id = ?"}
+		markerArgsObj := []any{marker}
+		if bucket != "" {
+			markerExprsObj = append(markerExprsObj, "b.name = ?")
+			markerArgsObj = append(markerArgsObj, bucket)
+		}
+
+		markerExprsDir := []string{"d.name = ?"}
+		markerArgsDir := []any{marker}
+		if bucket != "" {
+			markerExprsDir = append(markerExprsDir, "b.name = ?")
+			markerArgsDir = append(markerArgsDir, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
+			WHERE %s
 			UNION ALL
 			SELECT %s(o.%s)
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
-			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
+			WHERE %s
+			GROUP BY d.id, o.db_bucket_id
+		`, col, strings.Join(markerExprsObj, " AND "), groupFn, col, tx.CharLengthExpr(), strings.Join(markerExprsDir, " AND ")), append(markerArgsObj, markerArgsDir...)...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -2808,7 +2827,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	if err != nil {
 		return api.ObjectsListResponse{}, fmt.Errorf("failed to query marker: %w", err)
 	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
+		whereExprs = append(whereExprs, markerExprs...)
 	}
 	args = append(args, markerArgs...)
 
@@ -2818,8 +2837,20 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		return api.ObjectsListResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
 	}
 
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		args = append(args, bucket)
+	}
+
 	// apply offset and limit
 	args = append(args, limit)
+
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
 
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
@@ -2827,27 +2858,25 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+			SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
 			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
+			WHERE o.object_id != ? AND o.db_directory_id = ? AND d.id IS NULL %s %s
 			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+			SELECT o.db_bucket_id, d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
-			GROUP BY d.id
+			WHERE o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND d.db_parent_id = ?
+			GROUP BY d.id, o.db_bucket_id
 		) AS o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		%s
 		ORDER BY %s
 		LIMIT ?
 	`,
 		tx.SelectObjectMetadataExpr(),
 		prefixExpr,
+		slabKeyExpr,
 		tx.CharLengthExpr(),
 		prefixExpr,
 		whereExpr,

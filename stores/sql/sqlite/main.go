@@ -465,8 +465,8 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 	return ssql.ListBuckets(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit)
+func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error) {
+	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
@@ -537,10 +537,6 @@ func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.O
 
 func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {
 	return ssql.ObjectMetadata(ctx, tx, bucket, key)
-}
-
-func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
-	return ssql.ObjectsBySlabKey(ctx, tx, bucket, slabKey)
 }
 
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
@@ -821,7 +817,7 @@ func (tx *MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accou
 
 func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
 	var createdAt string
-	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag}
+	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &createdAt, &md.ETag, &md.Bucket}
 	dst = append(dst, others...)
 	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
@@ -832,7 +828,7 @@ func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md 
 }
 
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
-	return "o.object_id, o.size, o.health, o.mime_type, DATETIME(o.created_at), o.etag"
+	return "o.object_id, o.size, o.health, o.mime_type, DATETIME(o.created_at), o.etag, b.name"
 }
 
 func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {

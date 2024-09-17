@@ -66,7 +66,7 @@ type Bus interface {
 	ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 	// objects
-	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
+	ListObjects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
 	RefreshHealth(ctx context.Context) error
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)

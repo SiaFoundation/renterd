@@ -302,10 +302,11 @@ outer:
 			}
 
 			if resp.err != nil {
-				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
+				mgr.logger.Errorw("slab download failed",
+					zap.Int("index", resp.index),
+					zap.Error(err),
+				)
 				return resp.err
-			} else if resp.surchargeApplied {
-				mgr.logger.Warnf("download for slab %v had to overpay to succeed", resp.index)
 			}
 
 			responses[resp.index] = resp

@@ -1139,12 +1139,8 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var marker, delim, sortBy, sortDir, substring string
-	var bucket string
+	var bucket, marker, delim, sortBy, sortDir, substring string
 	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	} else if bucket == "" {
-		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 
@@ -1167,8 +1163,12 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("substring", &substring) != nil {
 		return
 	}
+	var slabEncryptionKey object.EncryptionKey
+	if jc.DecodeForm("slabEncryptionKey", &slabEncryptionKey) != nil {
+		return
+	}
 
-	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
+	resp, err := b.ms.ListObjects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	if errors.Is(err, api.ErrUnsupportedDelimiter) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1467,26 +1467,6 @@ func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	} else if n > 0 {
 		b.logger.Infow("successfully marked sector as lost", "hk", hk, "root", root)
 	}
-}
-
-func (b *Bus) slabObjectsHandlerGET(jc jape.Context) {
-	var key object.EncryptionKey
-	if jc.DecodeParam("key", &key) != nil {
-		return
-	}
-	var bucket string
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	} else if bucket == "" {
-		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
-		return
-	}
-
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), bucket, key)
-	if jc.Check("failed to retrieve objects by slab", err) != nil {
-		return
-	}
-	jc.Encode(objects)
 }
 
 func (b *Bus) slabHandlerGET(jc jape.Context) {

@@ -234,10 +234,9 @@ type (
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
+		ListObjects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, key string) (api.Object, error)
 		ObjectMetadata(ctx context.Context, bucketName, key string) (api.Object, error)
-		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, key string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
@@ -485,7 +484,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,

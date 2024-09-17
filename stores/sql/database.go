@@ -192,7 +192,7 @@ type (
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 		// ListObjects returns a list of objects from the given bucket.
-		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsListResponse, err error)
+		ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (resp api.ObjectsListResponse, err error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -218,10 +218,6 @@ type (
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
-
-		// ObjectsBySlabKey returns all objects that contain a reference to the
-		// slab with the given slabKey.
-		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error)
 
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)

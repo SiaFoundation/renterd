@@ -62,24 +62,15 @@ func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObj
 	return
 }
 
-// Objects lists objects in the given bucket.
-func (c *Client) Objects(ctx context.Context, bucket string, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
+// ListObjects lists objects in the given bucket.
+func (c *Client) ListObjects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
 	values := url.Values{}
-	values.Set("bucket", bucket)
 	opts.Apply(values)
 
 	prefix = api.ObjectKeyEscape(prefix)
 	prefix += "?" + values.Encode()
 
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/listobjects/%s", prefix), &resp)
-	return
-}
-
-// ObjectsBySlabKey returns all objects that reference a given slab.
-func (c *Client) ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%v/objects?"+values.Encode(), key), &objects)
 	return
 }
 
