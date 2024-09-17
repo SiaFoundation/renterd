@@ -50,7 +50,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	totalSize := int64(nParts * partSize)
 
 	// Upload parts until we have enough data for 2 buffers.
-	resp, err := ss.CreateMultipartUpload(ctx, api.DefaultBucketName, objName, object.NoOpKey, testMimeType, testMetadata)
+	resp, err := ss.CreateMultipartUpload(ctx, testBucket, objName, object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		etag := hex.EncodeToString(frand.Bytes(16))
-		err = ss.AddMultipartPart(ctx, api.DefaultBucketName, objName, testContractSet, etag, resp.UploadID, i, partialSlabs)
+		err = ss.AddMultipartPart(ctx, testBucket, objName, testContractSet, etag, resp.UploadID, i, partialSlabs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,14 +105,14 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	// Complete the upload. Check that the number of slices stays the same.
 	if nSlicesBefore := ss.Count("slices"); nSlicesBefore == 0 {
 		t.Fatal("expected some slices")
-	} else if _, err = ss.CompleteMultipartUpload(ctx, api.DefaultBucketName, objName, resp.UploadID, parts, api.CompleteMultipartOptions{}); err != nil {
+	} else if _, err = ss.CompleteMultipartUpload(ctx, testBucket, objName, resp.UploadID, parts, api.CompleteMultipartOptions{}); err != nil {
 		t.Fatal(err)
 	} else if nSlicesAfter := ss.Count("slices"); nSlicesAfter != nSlicesBefore {
 		t.Fatalf("expected number of slices to stay the same, but got %v before and %v after", nSlicesBefore, nSlicesAfter)
 	}
 
 	// Fetch the object.
-	obj, err := ss.Object(ctx, api.DefaultBucketName, objName)
+	obj, err := ss.Object(ctx, testBucket, objName)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Size != int64(totalSize) {
@@ -169,7 +169,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 
 	// Fetch the object again.
-	obj, err = ss.Object(ctx, api.DefaultBucketName, objName)
+	obj, err = ss.Object(ctx, testBucket, objName)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Size != int64(totalSize) {
@@ -190,15 +190,15 @@ func TestMultipartUploads(t *testing.T) {
 	defer ss.Close()
 
 	// create 3 multipart uploads, the first 2 have the same path
-	resp1, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo", object.NoOpKey, testMimeType, testMetadata)
+	resp1, err := ss.CreateMultipartUpload(context.Background(), testBucket, "/foo", object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp2, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo", object.NoOpKey, testMimeType, testMetadata)
+	resp2, err := ss.CreateMultipartUpload(context.Background(), testBucket, "/foo", object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp3, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", object.NoOpKey, testMimeType, testMetadata)
+	resp3, err := ss.CreateMultipartUpload(context.Background(), testBucket, "/foo2", object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestMultipartUploads(t *testing.T) {
 	})
 
 	// fetch uploads
-	mur, err := ss.MultipartUploads(context.Background(), api.DefaultBucketName, "", "", "", 3)
+	mur, err := ss.MultipartUploads(context.Background(), testBucket, "", "", "", 3)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mur.Uploads) != 3 {
@@ -234,7 +234,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 
 	// fetch uploads with prefix
-	mur, err = ss.MultipartUploads(context.Background(), api.DefaultBucketName, "/foo", "", "", 3)
+	mur, err = ss.MultipartUploads(context.Background(), testBucket, "/foo", "", "", 3)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mur.Uploads) != 3 {
@@ -246,7 +246,7 @@ func TestMultipartUploads(t *testing.T) {
 	} else if mur.Uploads[2].UploadID != orderedUploads[2].uploadID {
 		t.Fatal("unexpected upload id")
 	}
-	mur, err = ss.MultipartUploads(context.Background(), api.DefaultBucketName, "/foo2", "", "", 3)
+	mur, err = ss.MultipartUploads(context.Background(), testBucket, "/foo2", "", "", 3)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(mur.Uploads) != 1 {
@@ -260,7 +260,7 @@ func TestMultipartUploads(t *testing.T) {
 	uploadIDMarker := ""
 	hasMore := true
 	for hasMore {
-		mur, err = ss.MultipartUploads(context.Background(), api.DefaultBucketName, "", keyMarker, uploadIDMarker, 1)
+		mur, err = ss.MultipartUploads(context.Background(), testBucket, "", keyMarker, uploadIDMarker, 1)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(mur.Uploads) != 1 {
@@ -286,32 +286,32 @@ func TestMultipartUploadEmptyObjects(t *testing.T) {
 	defer ss.Close()
 
 	// create 2 multipart parts
-	resp1, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo1", object.NoOpKey, testMimeType, testMetadata)
+	resp1, err := ss.CreateMultipartUpload(context.Background(), testBucket, "/foo1", object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp2, err := ss.CreateMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", object.NoOpKey, testMimeType, testMetadata)
+	resp2, err := ss.CreateMultipartUpload(context.Background(), testBucket, "/foo2", object.NoOpKey, testMimeType, testMetadata)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// complete uploads in reverse order
-	cmu1, err := ss.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "/foo2", resp2.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
+	cmu1, err := ss.CompleteMultipartUpload(context.Background(), testBucket, "/foo2", resp2.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmu2, err := ss.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "/foo1", resp1.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
+	cmu2, err := ss.CompleteMultipartUpload(context.Background(), testBucket, "/foo1", resp1.UploadID, []api.MultipartCompletedPart{}, api.CompleteMultipartOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	foo1, err := ss.ObjectMetadata(context.Background(), api.DefaultBucketName, "/foo1")
+	foo1, err := ss.ObjectMetadata(context.Background(), testBucket, "/foo1")
 	if err != nil {
 		t.Fatal(err)
 	} else if foo1.ETag != cmu1.ETag {
 		t.Fatal("unexpected etag")
 	}
-	foo2, err := ss.ObjectMetadata(context.Background(), api.DefaultBucketName, "/foo2")
+	foo2, err := ss.ObjectMetadata(context.Background(), testBucket, "/foo2")
 	if err != nil {
 		t.Fatal(err)
 	} else if foo2.ETag != cmu2.ETag {

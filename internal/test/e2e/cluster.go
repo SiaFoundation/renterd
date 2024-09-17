@@ -49,6 +49,7 @@ import (
 )
 
 const (
+	testBucket           = "testbucket"
 	testBusFlushInterval = 100 * time.Millisecond
 )
 
@@ -524,6 +525,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 				return nil
 			}
 		})
+	}
+
+	// Add test bucket
+	err = cluster.Bus.CreateBucket(ctx, testBucket, api.CreateBucketOptions{})
+	if err != nil && !utils.IsErr(err, api.ErrBucketExists) {
+		tt.Fatalf("failed to create bucket: %v", err)
 	}
 
 	if nHosts > 0 {

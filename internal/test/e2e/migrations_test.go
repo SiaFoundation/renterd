@@ -42,7 +42,7 @@ func TestMigrations(t *testing.T) {
 
 	// create a helper to fetch used hosts
 	usedHosts := func(key string) map[types.PublicKey]struct{} {
-		res, _ := b.Object(context.Background(), api.DefaultBucketName, key, api.GetObjectOptions{})
+		res, _ := b.Object(context.Background(), testBucket, key, api.GetObjectOptions{})
 		if res.Object == nil {
 			t.Fatal("object not found")
 		}
@@ -58,7 +58,7 @@ func TestMigrations(t *testing.T) {
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, t.Name(), api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, t.Name(), api.UploadObjectOptions{}))
 
 	// assert amount of hosts used
 	used := usedHosts(t.Name())
@@ -83,7 +83,7 @@ func TestMigrations(t *testing.T) {
 		}
 		return nil
 	})
-	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, t.Name(), api.GetObjectOptions{})
+	res, err := cluster.Bus.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	tt.OK(err)
 
 	// check slabs
@@ -160,8 +160,8 @@ func TestMigrations(t *testing.T) {
 
 	// assert we found our two objects across two buckets
 	if want := map[string][]string{
-		api.DefaultBucketName: {fmt.Sprintf("/%s", t.Name())},
-		"newbucket":           {fmt.Sprintf("/%s", t.Name())},
+		testBucket:  {fmt.Sprintf("/%s", t.Name())},
+		"newbucket": {fmt.Sprintf("/%s", t.Name())},
 	}; !reflect.DeepEqual(want, got) {
 		t.Fatal("unexpected", cmp.Diff(want, got))
 	}
