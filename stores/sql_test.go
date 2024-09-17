@@ -319,13 +319,10 @@ func (s *testSQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.F
 }
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
-	rev := testContractRevision(fcid, hk)
-	return s.AddContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, 0, api.ContractStatePending)
-}
-
-func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
-	rev := testContractRevision(fcid, hk)
-	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, startHeight, renewedFrom, api.ContractStatePending)
+	if err := s.PutContract(context.Background(), newTestContract(fcid, hk)); err != nil {
+		return api.ContractMetadata{}, err
+	}
+	return s.Contract(context.Background(), fcid)
 }
 
 func (s *testSQLStore) overrideSlabHealth(objectID string, health float64) (err error) {
@@ -340,4 +337,11 @@ func (s *testSQLStore) overrideSlabHealth(objectID string, health float64) (err 
 		) AS sub
 	)`, health, objectID))
 	return
+}
+
+func (s *testSQLStore) renewTestContract(hk types.PublicKey, renewedFrom, renewedTo types.FileContractID, startHeight uint64) error {
+	renewal := newTestContract(renewedTo, hk)
+	renewal.StartHeight = startHeight
+	renewal.RenewedFrom = renewedFrom
+	return s.AddRenewal(context.Background(), renewal)
 }

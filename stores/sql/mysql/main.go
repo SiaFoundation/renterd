@@ -11,7 +11,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -181,7 +180,7 @@ func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) e
 	return nil
 }
 
-func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error) {
 	return ssql.AncestorContracts(ctx, tx, fcid, startHeight)
 }
 
@@ -337,18 +336,6 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
 }
 
-func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
-	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
-}
-
-func (tx *MainDatabaseTx) InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	return ssql.InsertContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
-}
-
-func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
-	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
-}
-
 func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
 	return ssql.DeleteSetting(ctx, tx, key)
 }
@@ -414,6 +401,14 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 
 func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	return ssql.Hosts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
+}
+
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
@@ -668,6 +663,48 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadata) error {
+	// validate metadata
+	var state ssql.ContractState
+	if err := state.LoadString(c.State); err != nil {
+		return err
+	} else if c.ID == (types.FileContractID{}) {
+		return errors.New("contract id is required")
+	} else if c.HostKey == (types.PublicKey{}) {
+		return errors.New("host key is required")
+	}
+
+	// fetch host id
+	var hostID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = ?`, ssql.PublicKey(c.HostKey)).Scan(&hostID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrHostNotFound
+	}
+
+	// update contract
+	_, err = tx.Exec(ctx, `
+INSERT INTO contracts (
+	created_at, fcid, host_id, host_key,
+	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
+	contract_price, initial_renter_funds,
+	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	created_at = VALUES(created_at), fcid = VALUES(fcid), host_id = VALUES(host_id), host_key = VALUES(host_key),
+	archival_reason = VALUES(archival_reason), proof_height = VALUES(proof_height), renewed_from = VALUES(renewed_from), renewed_to = VALUES(renewed_to), revision_height = VALUES(revision_height), revision_number = VALUES(revision_number), size = VALUES(size), start_height = VALUES(start_height), state = VALUES(state), window_start = VALUES(window_start), window_end = VALUES(window_end),
+	contract_price = VALUES(contract_price), initial_renter_funds = VALUES(initial_renter_funds),
+	delete_spending = VALUES(delete_spending), fund_account_spending = VALUES(fund_account_spending), sector_roots_spending = VALUES(sector_roots_spending), upload_spending = VALUES(upload_spending)`,
+		time.Now(), ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey),
+		ssql.NullableString(c.ArchivalReason), c.ProofHeight, ssql.FileContractID(c.RenewedFrom), ssql.FileContractID(c.RenewedTo), c.RevisionHeight, c.RevisionNumber, c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
+		ssql.Currency(c.ContractPrice), ssql.Currency(c.InitialRenterFunds),
+		ssql.Currency(c.Spending.Deletions), ssql.Currency(c.Spending.FundAccount), ssql.Currency(c.Spending.SectorRoots), ssql.Currency(c.Spending.Uploads),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update contract: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
 	return ssql.RecordContractSpending(ctx, tx, fcid, revisionNumber, size, newSpending)
 }
@@ -757,12 +794,8 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
-func (tx *MainDatabaseTx) RenewContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	return ssql.RenewContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
-}
-
-func (tx *MainDatabaseTx) RenewedContract(ctx context.Context, renwedFrom types.FileContractID) (api.ContractMetadata, error) {
-	return ssql.RenewedContract(ctx, tx, renwedFrom)
+func (tx *MainDatabaseTx) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+	return ssql.RenewedContract(ctx, tx, renewedFrom)
 }
 
 func (tx *MainDatabaseTx) ResetChainState(ctx context.Context) error {
@@ -854,6 +887,10 @@ func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot)
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
+}
+
+func (tx *MainDatabaseTx) UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error {
+	return ssql.UpdateContract(ctx, tx, fcid, c)
 }
 
 func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {

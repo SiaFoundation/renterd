@@ -228,8 +228,8 @@ func TestNewTestCluster(t *testing.T) {
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	if contract.EndHeight() != expectedEndHeight || contract.Revision.EndHeight() != expectedEndHeight {
 		t.Fatal("wrong endHeight", contract.EndHeight(), contract.Revision.EndHeight())
-	} else if contract.TotalCost.IsZero() || contract.ContractPrice.IsZero() {
-		t.Fatal("TotalCost and ContractPrice shouldn't be zero")
+	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
+		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}
 
 	// Wait for contract set to form
@@ -274,7 +274,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Now wait for the revision and proof to be caught by the hostdb.
-	var ac api.ArchivedContract
+	var ac api.ContractMetadata
 	tt.Retry(20, time.Second, func() error {
 		archivedContracts, err := cluster.Bus.AncestorContracts(context.Background(), renewalID, 0)
 		if err != nil {
@@ -927,9 +927,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 			if !c.Spending.Uploads.IsZero() {
 				t.Fatal("upload spending should be zero")
 			}
-			if !c.Spending.Downloads.IsZero() {
-				t.Fatal("download spending should be zero")
-			}
 			if !c.Spending.FundAccount.IsZero() {
 				nFunded++
 				if c.RevisionNumber == 0 {
@@ -1044,9 +1041,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 		for _, c := range cms {
 			if c.Spending.Uploads.IsZero() {
 				t.Fatal("upload spending shouldn't be zero")
-			}
-			if !c.Spending.Downloads.IsZero() {
-				t.Fatal("download spending should be zero")
 			}
 			if c.RevisionNumber == 0 {
 				t.Fatalf("revision number for contract wasn't recorded: %v", c.RevisionNumber)
@@ -1502,7 +1496,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
 
-	// we should have a contract with the host
+	// assert we have a contract
 	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
 	if len(contracts) != 1 {
@@ -1510,27 +1504,17 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	}
 	c := contracts[0]
 
-	// add a contract to the bus
-	_, err = cluster.bs.AddContract(context.Background(), rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID: types.FileContractID{1},
-			UnlockConditions: types.UnlockConditions{
-				PublicKeys: []types.UnlockKey{
-					c.HostKey.UnlockKey(),
-					c.HostKey.UnlockKey(),
-				},
-			},
-			FileContract: types.FileContract{
-				Filesize:       0,
-				FileMerkleRoot: types.Hash256{},
-				WindowStart:    math.MaxUint32,
-				WindowEnd:      math.MaxUint32 + 10,
-				Payout:         types.ZeroCurrency,
-				UnlockHash:     types.Hash256{},
-				RevisionNumber: 0,
-			},
-		},
-	}, types.NewCurrency64(1), types.Siacoins(1), cs.BlockHeight, api.ContractStatePending)
+	// manually insert a contract
+	err = cluster.bs.PutContract(context.Background(), api.ContractMetadata{
+		ID:                 types.FileContractID{1},
+		HostKey:            c.HostKey,
+		StartHeight:        cs.BlockHeight,
+		State:              api.ContractStatePending,
+		WindowStart:        math.MaxUint32,
+		WindowEnd:          math.MaxUint32 + 10,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
+	})
 	tt.OK(err)
 
 	// should have 2 contracts now
@@ -2422,14 +2406,12 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatal("expected zero RevisionNumber")
 	} else if !m.UploadSpending.IsZero() {
 		t.Fatal("expected zero UploadSpending")
-	} else if !m.DownloadSpending.IsZero() {
-		t.Fatal("expected zero DownloadSpending")
 	} else if m.FundAccountSpending == (types.Currency{}) {
 		t.Fatal("expected non-zero FundAccountSpending")
 	} else if !m.DeleteSpending.IsZero() {
 		t.Fatal("expected zero DeleteSpending")
-	} else if !m.ListSpending.IsZero() {
-		t.Fatal("expected zero ListSpending")
+	} else if !m.SectorRootsSpending.IsZero() {
+		t.Fatal("expected zero SectorRootsSpending")
 	}
 
 	// prune one of the metrics

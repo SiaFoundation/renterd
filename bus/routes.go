@@ -633,8 +633,23 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("contractset", &cs) != nil {
 		return
 	}
+	filterMode := api.ContractFilterModeActive
+	if jc.DecodeForm("filtermode", &filterMode) != nil {
+		return
+	}
+
+	switch filterMode {
+	case api.ContractFilterModeAll:
+	case api.ContractFilterModeActive:
+	case api.ContractFilterModeArchived:
+	default:
+		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
+		return
+	}
+
 	contracts, err := b.ms.Contracts(jc.Request.Context(), api.ContractsOpts{
 		ContractSet: cs,
+		FilterMode:  filterMode,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(contracts)
@@ -954,24 +969,24 @@ func (b *Bus) contractIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
-	var id types.FileContractID
-	var req api.ContractAddRequest
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
-		return
-	} else if req.Contract.ID() != id {
-		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
-		return
-	} else if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+func (b *Bus) contractsHandlerPUT(jc jape.Context) {
+	// decode request
+	var c api.ContractMetadata
+	if jc.Decode(&c) != nil {
 		return
 	}
 
-	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
+	// upsert the contract
+	if jc.Check("failed to add contract", b.ms.PutContract(jc.Request.Context(), c)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleContract,
+			Event:  api.EventAdd,
+			Payload: api.EventContractAdd{
+				Added:     c,
+				Timestamp: time.Now().UTC(),
+			},
+		})
 	}
-	jc.Encode(a)
 }
 
 func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
@@ -1031,11 +1046,11 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	var newRevision rhpv2.ContractRevision
-	var contractPrice, fundAmount types.Currency
+	var contractPrice, initialRenterFunds types.Currency
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		newRevision, contractPrice, fundAmount, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		newRevision, contractPrice, initialRenterFunds, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
 			jc.Error(err, http.StatusBadRequest)
 			return
@@ -1044,39 +1059,11 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		}
 	}
 
-	// add renewal contract to store
-	metadata, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
+	// add the renewal
+	metadata, err := b.addRenewal(ctx, fcid, newRevision, contractPrice, initialRenterFunds, cs.Index.Height, api.ContractStatePending)
+	if jc.Check("couldn't add renewal", err) == nil {
+		jc.Encode(metadata)
 	}
-
-	// send the response
-	jc.Encode(metadata)
-}
-
-func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
-	var id types.FileContractID
-	var req api.ContractRenewedRequest
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
-		return
-	}
-	if req.Contract.ID() != id {
-		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
-		return
-	}
-	if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
-		return
-	}
-	if req.State == "" {
-		req.State = api.ContractStatePending
-	}
-	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
-	}
-
-	jc.Encode(r)
 }
 
 func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -2249,11 +2236,11 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
-	var contract rhpv2.ContractRevision
+	var rev rhpv2.ContractRevision
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		contract, err = b.formContract(
+		rev, err = b.formContract(
 			ctx,
 			settings,
 			rfr.RenterAddress,
@@ -2268,16 +2255,16 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 		}
 	}
 
-	// store the contract
+	// add the contract
 	metadata, err := b.addContract(
 		ctx,
-		contract,
-		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
+		rev,
+		rev.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
 		rfr.RenterFunds,
 		b.cm.Tip().Height,
 		api.ContractStatePending,
 	)
-	if jc.Check("couldn't store contract", err) != nil {
+	if jc.Check("couldn't add contract", err) != nil {
 		return
 	}
 

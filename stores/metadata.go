@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -109,44 +108,28 @@ func (s *SQLStore) SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error) {
 	return buffers, nil
 }
 
-func (s *SQLStore) AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (_ api.ContractMetadata, err error) {
-	var contract api.ContractMetadata
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		contract, err = tx.InsertContract(ctx, c, contractPrice, totalCost, startHeight, types.FileContractID{}, state)
-		return err
-	})
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to add contract: %w", err)
-	}
+func (s *SQLStore) AddRenewal(ctx context.Context, c api.ContractMetadata) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		// fetch renewed contract
+		renewed, err := tx.Contract(ctx, c.RenewedFrom)
+		if err != nil {
+			return err
+		}
 
-	return contract, nil
+		// insert renewal by updating the renewed contract
+		err = tx.UpdateContract(ctx, c.RenewedFrom, c)
+		if err != nil {
+			return err
+		}
+
+		// reinsert renewed contract
+		renewed.ArchivalReason = api.ContractArchivalReasonRenewed
+		renewed.RenewedTo = c.ID
+		return tx.PutContract(ctx, renewed)
+	})
 }
 
-func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	var contracts []api.ContractMetadata
-	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		contracts, err = tx.Contracts(ctx, opts)
-		return
-	})
-	return contracts, err
-}
-
-// AddRenewedContract adds a new contract which was created as the result of a renewal to the store.
-// The old contract specified as 'renewedFrom' will be deleted from the active
-// contracts and moved to the archive. Both new and old contract will be linked
-// to each other through the RenewedFrom and RenewedTo fields respectively.
-func (s *SQLStore) AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		renewed, err = tx.RenewContract(ctx, c, contractPrice, totalCost, startHeight, renewedFrom, state)
-		return err
-	})
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to add renewed contract: %w", err)
-	}
-	return
-}
-
-func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ArchivedContract, err error) {
+func (s *SQLStore) AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) (ancestors []api.ContractMetadata, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		ancestors, err = tx.AncestorContracts(ctx, id, startHeight)
 		return err
@@ -205,6 +188,15 @@ func (s *SQLStore) Contract(ctx context.Context, id types.FileContractID) (cm ap
 	return
 }
 
+func (s *SQLStore) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
+	var contracts []api.ContractMetadata
+	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		contracts, err = tx.Contracts(ctx, opts)
+		return
+	})
+	return contracts, err
+}
+
 func (s *SQLStore) ContractRoots(ctx context.Context, id types.FileContractID) (roots []types.Hash256, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		roots, err = tx.ContractRoots(ctx, id)
@@ -235,6 +227,12 @@ func (s *SQLStore) ContractSize(ctx context.Context, id types.FileContractID) (c
 		return
 	})
 	return cs, err
+}
+
+func (s *SQLStore) PutContract(ctx context.Context, c api.ContractMetadata) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.PutContract(ctx, c)
+	})
 }
 
 func (s *SQLStore) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
@@ -366,19 +364,15 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				RemainingFunds:      latestValues[fcid].validRenterPayout,
 				RevisionNumber:      latestValues[fcid].revision,
 				UploadSpending:      contract.Spending.Uploads.Add(newSpending.Uploads),
-				DownloadSpending:    contract.Spending.Downloads.Add(newSpending.Downloads),
 				FundAccountSpending: contract.Spending.FundAccount.Add(newSpending.FundAccount),
 				DeleteSpending:      contract.Spending.Deletions.Add(newSpending.Deletions),
-				ListSpending:        contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
+				SectorRootsSpending: contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
 			}
 			metrics = append(metrics, m)
 
 			var updates api.ContractSpending
 			if !newSpending.Uploads.IsZero() {
 				updates.Uploads = m.UploadSpending
-			}
-			if !newSpending.Downloads.IsZero() {
-				updates.Downloads = m.DownloadSpending
 			}
 			if !newSpending.FundAccount.IsZero() {
 				updates.FundAccount = m.FundAccountSpending
@@ -387,7 +381,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				updates.Deletions = m.DeleteSpending
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates.SectorRoots = m.ListSpending
+				updates.SectorRoots = m.SectorRootsSpending
 			}
 			return tx.RecordContractSpending(ctx, fcid, latestValues[fcid].revision, latestValues[fcid].size, updates)
 		})
