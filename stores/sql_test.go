@@ -184,6 +184,11 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		t.Fatal("failed to create SQLStore", err)
 	}
 
+	err = sqlStore.CreateBucket(context.Background(), testBucket, api.BucketPolicy{})
+	if err != nil {
+		t.Fatal("failed to create test bucket", err)
+	}
+
 	if !cfg.skipContractSet {
 		err = sqlStore.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{}, nil)
 		if err != nil {
