@@ -1142,9 +1142,6 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	var bucket, marker, delim, sortBy, sortDir, substring string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	} else if bucket == "" {
-		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
-		return
 	}
 
 	if jc.DecodeForm("delimiter", &delim) != nil {
