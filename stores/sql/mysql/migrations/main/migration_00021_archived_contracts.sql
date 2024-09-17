@@ -3,7 +3,7 @@ ALTER TABLE contracts
     RENAME COLUMN list_spending TO sector_roots_spending;
 
 ALTER TABLE contracts
-    ADD COLUMN host_key varbinary(32) NOT NULL DEFAULT UNHEX('0000000000000000000000000000000000000000000000000000000000000000'),
+    ADD COLUMN host_key varbinary(32) NOT NULL DEFAULT 0x0000000000000000000000000000000000000000000000000000000000000000,
     ADD COLUMN archival_reason VARCHAR(191) DEFAULT NULL,
     ADD COLUMN renewed_to VARBINARY(32) DEFAULT NULL;
 
@@ -11,7 +11,7 @@ CREATE INDEX `idx_contracts_archival_reason` ON `contracts`(`archival_reason`);
 CREATE INDEX `idx_contracts_host_key` ON `contracts`(`host_key`);
 CREATE INDEX `idx_contracts_renewed_to` ON `contracts`(`renewed_to`);
 
-DROP INDEX `idx_contracts_fc_id` ON table_name;
+DROP INDEX `idx_contracts_fc_id` ON contracts;
 CREATE INDEX `idx_contracts_fc_id` ON `contracts`(`fcid`);
 
 UPDATE contracts c
