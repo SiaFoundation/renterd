@@ -170,6 +170,15 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) 
 	return
 }
 
+// RemoveObjects removes the object with given prefix.
+func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err error) {
+	err = c.c.WithContext(ctx).POST("/objects/remove", api.ObjectsRemoveRequest{
+		Bucket: bucket,
+		Prefix: prefix,
+	}, nil)
+	return
+}
+
 // State returns the current state of the worker.
 func (c *Client) State() (state api.WorkerStateResponse, err error) {
 	err = c.c.GET("/state", &state)
