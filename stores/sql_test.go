@@ -185,7 +185,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 
 	err = sqlStore.CreateBucket(context.Background(), testBucket, api.BucketPolicy{})
-	if err != nil {
+	if err != nil && !errors.Is(err, api.ErrBucketExists) {
 		t.Fatal("failed to create test bucket", err)
 	}
 
