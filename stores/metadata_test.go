@@ -26,6 +26,8 @@ import (
 	"lukechampine.com/frand"
 )
 
+const testBucket = "testbucket"
+
 func (s *testSQLStore) InsertSlab(slab object.Slab) {
 	s.t.Helper()
 	obj := object.Object{
@@ -36,7 +38,7 @@ func (s *testSQLStore) InsertSlab(slab object.Slab) {
 			},
 		},
 	}
-	err := s.UpdateObject(context.Background(), api.DefaultBucketName, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
+	err := s.UpdateObject(context.Background(), testBucket, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -176,10 +178,10 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// delete every other object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, fmt.Sprintf("%s_1", t.Name())); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("%s_1", t.Name())); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, fmt.Sprintf("%s_3", t.Name())); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("%s_3", t.Name())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -265,7 +267,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = ss.Object(context.Background(), api.DefaultBucketName, t.Name())
+	_, err = ss.Object(context.Background(), testBucket, t.Name())
 	if !errors.Is(err, api.ErrObjectCorrupted) {
 		t.Fatal("unexpected err", err)
 	}
@@ -353,7 +355,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// remove the object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1108,7 +1110,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it using get and verify every field.
-	obj, err := ss.Object(context.Background(), api.DefaultBucketName, objID)
+	obj, err := ss.Object(context.Background(), testBucket, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1184,7 +1186,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it again and verify.
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, objID)
+	obj, err = ss.Object(context.Background(), testBucket, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1201,7 +1203,7 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	// Fetch it and verify again.
-	fullObj, err := ss.Object(ctx, api.DefaultBucketName, objID)
+	fullObj, err := ss.Object(ctx, testBucket, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1359,7 +1361,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// Delete the object. Due to the cascade this should delete everything
 	// but the sectors.
-	if err := ss.RemoveObjectBlocking(ctx, api.DefaultBucketName, objID); err != nil {
+	if err := ss.RemoveObjectBlocking(ctx, testBucket, objID); err != nil {
 		t.Fatal(err)
 	}
 	if err := countCheck(0, 0, 0, 0); err != nil {
@@ -1430,7 +1432,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health
-	obj, err := ss.Object(context.Background(), api.DefaultBucketName, "/foo")
+	obj, err := ss.Object(context.Background(), testBucket, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
@@ -1447,7 +1449,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth := float64(2) / float64(3)
 
 	// assert object method
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, "/foo")
+	obj, err = ss.Object(context.Background(), testBucket, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1455,7 +1457,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	resp, err := ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "", "", "", "", "", -1)
+	resp, err := ss.ListObjects(context.Background(), testBucket, "/", "", "", "", "", "", -1)
 	entries := resp.Objects
 	if err != nil {
 		t.Fatal(err)
@@ -1466,7 +1468,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	resp, err = ss.ListObjects(context.Background(), api.DefaultBucketName, "/", "foo", "", "", "", "", -1)
+	resp, err = ss.ListObjects(context.Background(), testBucket, "/", "foo", "", "", "", "", -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if entries := resp.Objects; len(entries) != 1 {
@@ -1485,7 +1487,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth = float64(1) / float64(3)
 
 	// assert health is the min. health of the slabs
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, "/foo")
+	obj, err = ss.Object(context.Background(), testBucket, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1608,7 +1610,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 		{"/", "", "size", "ASC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
 	}
 	for _, test := range tests {
-		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
+		resp, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1621,7 +1623,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			resp, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1)
+			resp, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1643,7 +1645,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 				continue
 			}
 
-			resp, err = ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Key, 1)
+			resp, err = ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Key, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1710,7 +1712,7 @@ func TestListObjectsExplicitDir(t *testing.T) {
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
 	for _, test := range tests {
-		got, err := ss.ListObjects(ctx, api.DefaultBucketName, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
+		got, err := ss.ListObjects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1778,7 +1780,7 @@ func TestListObjectsSubstring(t *testing.T) {
 		{"uu", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", test.key, "", "", "", "", -1)
+		resp, err := ss.ListObjects(ctx, testBucket, "", test.key, "", "", "", "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1786,7 +1788,7 @@ func TestListObjectsSubstring(t *testing.T) {
 		assertEqual(got, test.want)
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			if resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", test.key, "", "", "", marker, 1); err != nil {
+			if resp, err := ss.ListObjects(ctx, testBucket, "", test.key, "", "", "", marker, 1); err != nil {
 				t.Fatal(err)
 			} else if got := resp.Objects; len(got) != 1 {
 				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.key, len(got))
@@ -2241,7 +2243,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// Delete the object.
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2412,7 +2414,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := ss.Object(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if obj, err := ss.Object(context.Background(), testBucket, t.Name()); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
@@ -2577,37 +2579,37 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Try renaming objects that don't exist.
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// Perform some renames.
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/foo", "/fileś/foo", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/foo", "/fileś/foo", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/bar", "/fileś/bar", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/bar", "/fileś/bar", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/baz", "/fileś/baz", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/baz", "/fileś/baz", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/case", "/fileś/case1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/CASE", "/fileś/case2", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal(err)
-	} else if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
+	} else if err := ss.RenameObjectsBlocking(ctx, testBucket, "/baz2", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
-	} else if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
+	} else if err := ss.RenameObjectBlocking(ctx, testBucket, "/baz3", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2631,7 +2633,7 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	resp, err := ss.ListObjects(ctx, api.DefaultBucketName, "", "/", "", "", "", "", 100)
+	resp, err := ss.ListObjects(ctx, testBucket, "", "/", "", "", "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2772,8 +2774,8 @@ func TestObjectsStats(t *testing.T) {
 
 	// Check sizes.
 	for _, opts := range []api.ObjectsStatsOpts{
-		{},                              // any bucket
-		{Bucket: api.DefaultBucketName}, // specific bucket
+		{},                   // any bucket
+		{Bucket: testBucket}, // specific bucket
 	} {
 		info, err = ss.ObjectsStats(context.Background(), opts)
 		if err != nil {
@@ -3207,7 +3209,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the first object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "obj_1"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "obj_1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3219,7 +3221,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the second object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3300,7 +3302,7 @@ func TestObjectsBySlabKey(t *testing.T) {
 	}
 
 	// Fetch the objects by slab.
-	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.EncryptionKey)
+	objs, err := ss.ObjectsBySlabKey(context.Background(), testBucket, slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3327,7 +3329,7 @@ func TestBuckets(t *testing.T) {
 		t.Fatal(err)
 	} else if len(buckets) != 1 {
 		t.Fatal("expected 1 bucket", len(buckets))
-	} else if buckets[0].Name != api.DefaultBucketName {
+	} else if buckets[0].Name != testBucket {
 		t.Fatal("expected default bucket")
 	}
 
@@ -3338,7 +3340,7 @@ func TestBuckets(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.CreateBucket(context.Background(), b2, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := ss.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+	} else if err := ss.DeleteBucket(context.Background(), testBucket); err != nil {
 		t.Fatal(err)
 	} else if buckets, err := ss.ListBuckets(context.Background()); err != nil {
 		t.Fatal(err)
@@ -3721,7 +3723,7 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 		}
 	}
 	for _, test := range tests {
-		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", "", test.sortBy, test.sortDir, "", -1)
+		res, err := ss.ListObjects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, "", -1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3736,7 +3738,7 @@ func TestListObjectsNoDelimiter(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1)
+				res, err := ss.ListObjects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -4048,7 +4050,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 
 	// prepare a slab with pieces on h3 and h4
 	s2 := object.GenerateEncryptionKey()
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	err = ss.UpdateObject(context.Background(), testBucket, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
 		Key: object.GenerateEncryptionKey(),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			EncryptionKey: s2,
@@ -4153,7 +4155,7 @@ func TestRefreshHealth(t *testing.T) {
 	// define a helper function to return an object's health
 	health := func(name string) float64 {
 		t.Helper()
-		o, err := ss.Object(context.Background(), api.DefaultBucketName, name)
+		o, err := ss.Object(context.Background(), testBucket, name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -4334,7 +4336,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "1")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4345,7 +4347,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete second object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "2")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "2")
 	if err != nil {
 		t.Fatal(err)
 	} else if slabCntr := ss.Count("slabs"); slabCntr != 0 {
@@ -4373,7 +4375,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete third object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "3")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "3")
 	if err != nil {
 		t.Fatal(err)
 	} else if slabCntr := ss.Count("slabs"); slabCntr != 1 {
@@ -4788,7 +4790,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 			}
 
 			// update the object
-			if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+			if err := ss.UpdateObject(context.Background(), testBucket, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
 				t.Error(err)
 				return
 			}
