@@ -503,7 +503,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Update the bus settings.
 	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
-	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
 	tt.OK(busClient.UpdateUploadSettings(ctx, us))
 	tt.OK(busClient.UpdateS3Settings(ctx, s3))
 
