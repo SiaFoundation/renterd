@@ -18,7 +18,7 @@ UPDATE contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 SET c.host_key = h.public_key;
 
-INSERT INTO contracts_temp (
+INSERT INTO contracts (
     created_at,
     fcid,
     host_id,
