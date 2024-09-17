@@ -672,15 +672,6 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 }
 
 func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadata) error {
-	// assert decorated fields are unset
-	if c.HostIP != "" {
-		return errors.New("host IP should not be set")
-	} else if c.ContractSets != nil {
-		return errors.New("contract sets should not be set")
-	} else if c.SiamuxAddr != "" {
-		return errors.New("siamux address should not be set")
-	}
-
 	// validate metadata
 	var state ssql.ContractState
 	if err := state.LoadString(c.State); err != nil {
