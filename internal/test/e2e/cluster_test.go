@@ -542,7 +542,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 
 	// delete all uploads
 	for _, upload := range uploads {
-		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, upload.key, api.DeleteObjectOptions{}))
+		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, upload.key))
 	}
 
 	// assert root dir is empty
@@ -870,7 +870,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		// delete the object
-		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, path, api.DeleteObjectOptions{}))
+		tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, path))
 	}
 }
 
@@ -1216,7 +1216,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects under /dir/.
-	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/dir/", api.DeleteObjectOptions{Batch: true}); err != nil {
+	if err := cluster.Bus.RemoveObjects(context.Background(), api.DefaultBucketName, "/dir/"); err != nil {
 		t.Fatal(err)
 	}
 	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
@@ -1227,7 +1227,7 @@ func TestParallelUpload(t *testing.T) {
 	}
 
 	// Delete all objects under /.
-	if err := cluster.Bus.DeleteObject(context.Background(), api.DefaultBucketName, "/", api.DeleteObjectOptions{Batch: true}); err != nil {
+	if err := cluster.Bus.RemoveObjects(context.Background(), api.DefaultBucketName, "/"); err != nil {
 		t.Fatal(err)
 	}
 	resp, err = cluster.Bus.Objects(context.Background(), api.DefaultBucketName, "", api.ListObjectOptions{Substring: "/", Limit: 100})
@@ -1402,7 +1402,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		}
 
 		// delete the object
-		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("foo_%d", i), api.DeleteObjectOptions{}))
+		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, fmt.Sprintf("foo_%d", i)))
 	}
 
 	// wait until the slabs and sectors were pruned before constructing the

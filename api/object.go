@@ -103,6 +103,12 @@ type (
 		Objects    []ObjectMetadata `json:"objects"`
 	}
 
+	// ObjectsRemoveRequest is the request type for the /bus/objects/remove endpoint.
+	ObjectsRemoveRequest struct {
+		Bucket string `json:"bucket"`
+		Prefix string `json:"prefix"`
+	}
+
 	// ObjectsRenameRequest is the request type for the /bus/objects/rename endpoint.
 	ObjectsRenameRequest struct {
 		Bucket string `json:"bucket"`
@@ -187,10 +193,6 @@ type (
 
 		MimeType string             `json:"mimeType"`
 		Metadata ObjectUserMetadata `json:"metadata"`
-	}
-
-	DeleteObjectOptions struct {
-		Batch bool
 	}
 
 	HeadObjectOptions struct {
@@ -281,12 +283,6 @@ func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 		} else {
 			h.Set("Range", fmt.Sprintf("bytes=%v-%v", opts.Range.Offset, opts.Range.Offset+opts.Range.Length-1))
 		}
-	}
-}
-
-func (opts DeleteObjectOptions) Apply(values url.Values) {
-	if opts.Batch {
-		values.Set("batch", "true")
 	}
 }
 

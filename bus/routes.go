@@ -1183,7 +1183,7 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	jc.Encode(resp)
 }
 
-func (b *Bus) objectsHandlerPUT(jc jape.Context) {
+func (b *Bus) objectHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) != nil {
 		return
@@ -1206,6 +1206,22 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("Last-Modified", om.ModTime.Std().Format(http.TimeFormat))
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(om.ETag))
 	jc.Encode(om)
+}
+
+func (b *Bus) objectsRemoveHandlerPOST(jc jape.Context) {
+	var orr api.ObjectsRemoveRequest
+	if jc.Decode(&orr) != nil {
+		return
+	} else if orr.Bucket == "" {
+		orr.Bucket = api.DefaultBucketName
+	}
+
+	if orr.Prefix == "" {
+		jc.Error(errors.New("prefix cannot be empty"), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to remove objects", b.ms.RemoveObjects(jc.Request.Context(), orr.Bucket, orr.Prefix))
 }
 
 func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
@@ -1238,21 +1254,12 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
-	var batch bool
-	if jc.DecodeForm("batch", &batch) != nil {
-		return
-	}
+func (b *Bus) objectHandlerDELETE(jc jape.Context) {
 	bucket := api.DefaultBucketName
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	var err error
-	if batch {
-		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("key"))
-	} else {
-		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("key"))
-	}
+	err := b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("key"))
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return

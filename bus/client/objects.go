@@ -12,7 +12,7 @@ import (
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error) {
 	path = api.ObjectKeyEscape(path)
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/object/%s", path), api.AddObjectRequest{
 		Bucket:      bucket,
 		ContractSet: contractSet,
 		Object:      o,
@@ -37,15 +37,22 @@ func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, d
 	return
 }
 
-// DeleteObject either deletes the object at the given key or if batch=true
-// deletes all objects that start with the given key.
-func (c *Client) DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) (err error) {
+// DeleteObject deletes the object with given key.
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string) (err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
-	opts.Apply(values)
 
 	key = api.ObjectKeyEscape(key)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), key))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/object/%s?"+values.Encode(), key))
+	return
+}
+
+// RemoveObjects removes objects with given prefix.
+func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err error) {
+	err = c.c.WithContext(ctx).POST("/objects/remove", api.ObjectsRemoveRequest{
+		Bucket: bucket,
+		Prefix: prefix,
+	}, nil)
 	return
 }
 
@@ -58,7 +65,7 @@ func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObj
 	key = api.ObjectKeyEscape(key)
 	key += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", key), &res)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", key), &res)
 	return
 }
 
