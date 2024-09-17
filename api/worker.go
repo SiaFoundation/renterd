@@ -70,13 +70,6 @@ type (
 		Total     uint64 `json:"total"`
 	}
 
-	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
-	MigrateSlabResponse struct {
-		NumShardsMigrated int    `json:"numShardsMigrated"`
-		SurchargeApplied  bool   `json:"surchargeApplied,omitempty"`
-		Error             string `json:"error,omitempty"`
-	}
-
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
 	RHPFormResponse struct {
 		ContractID     types.FileContractID   `json:"contractID"`
