@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -316,6 +317,8 @@ func execSQLFile(ctx context.Context, tx Tx, fs embed.FS, folder, filename strin
 	file, err := fs.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", path, err)
+	} else if len(bytes.TrimSpace(file)) == 0 {
+		return nil
 	}
 
 	// execute it
