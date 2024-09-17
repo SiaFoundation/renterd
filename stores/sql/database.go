@@ -188,10 +188,6 @@ type (
 		// Hosts returns a list of hosts that match the provided filters
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 
-		// HostsForScanning returns a list of hosts to scan which haven't been
-		// scanned since at least maxLastScan.
-		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
-
 		// ListBuckets returns a list of all buckets in the database.
 		ListBuckets(ctx context.Context) ([]api.Bucket, error)
 

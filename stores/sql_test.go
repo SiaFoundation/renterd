@@ -184,6 +184,11 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		t.Fatal("failed to create SQLStore", err)
 	}
 
+	err = sqlStore.CreateBucket(context.Background(), testBucket, api.BucketPolicy{})
+	if err != nil && !errors.Is(err, api.ErrBucketExists) {
+		t.Fatal("failed to create test bucket", err)
+	}
+
 	if !cfg.skipContractSet {
 		err = sqlStore.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{}, nil)
 		if err != nil {
@@ -253,7 +258,7 @@ func (s *testSQLStore) Close() error {
 }
 
 func (s *testSQLStore) DefaultBucketID() (id int64) {
-	if err := s.DB().QueryRow(context.Background(), "SELECT id FROM buckets WHERE name = ?", api.DefaultBucketName).
+	if err := s.DB().QueryRow(context.Background(), "SELECT id FROM buckets WHERE name = ?", testBucket).
 		Scan(&id); err != nil {
 		s.t.Fatal(err)
 	}
@@ -283,9 +288,9 @@ func (s *testSQLStore) Retry(tries int, durationBetweenAttempts time.Duration, f
 }
 
 func (s *testSQLStore) addTestObject(key string, o object.Object) (api.Object, error) {
-	if err := s.UpdateObjectBlocking(context.Background(), api.DefaultBucketName, key, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
+	if err := s.UpdateObjectBlocking(context.Background(), testBucket, key, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err
-	} else if obj, err := s.Object(context.Background(), api.DefaultBucketName, key); err != nil {
+	} else if obj, err := s.Object(context.Background(), testBucket, key); err != nil {
 		return api.Object{}, err
 	} else {
 		return obj, nil

@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -26,6 +25,7 @@ func (c *Client) Hosts(ctx context.Context, opts api.HostOptions) (hosts []api.H
 		UsabilityMode:   opts.UsabilityMode,
 		AddressContains: opts.AddressContains,
 		KeyIn:           opts.KeyIn,
+		MaxLastScan:     opts.MaxLastScan,
 	}, &hosts)
 	return
 }
@@ -39,15 +39,6 @@ func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey
 // HostBlocklist returns a host blocklist.
 func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = c.c.WithContext(ctx).GET("/hosts/blocklist", &blocklist)
-	return
-}
-
-// HostsForScanning returns 'limit' host addresses at given 'offset' which
-// haven't been scanned after lastScan.
-func (c *Client) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) (hosts []api.HostAddress, err error) {
-	values := url.Values{}
-	opts.Apply(values)
-	err = c.c.WithContext(ctx).GET("/hosts/scanning?"+values.Encode(), &hosts)
 	return
 }
 

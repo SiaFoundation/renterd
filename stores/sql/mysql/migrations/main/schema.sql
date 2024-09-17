@@ -556,6 +556,3 @@ CREATE TABLE `wallet_outputs` (
   UNIQUE KEY `output_id` (`output_id`),
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- create default bucket
-INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

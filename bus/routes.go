@@ -508,6 +508,7 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		KeyIn:           req.KeyIn,
 		Offset:          req.Offset,
 		Limit:           req.Limit,
+		MaxLastScan:     req.MaxLastScan,
 	})
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
@@ -533,20 +534,6 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		return
 	}
 	jc.Encode(removed)
-}
-
-func (b *Bus) hostsScanningHandlerGET(jc jape.Context) {
-	offset := 0
-	limit := -1
-	maxLastScan := time.Now()
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
-		return
-	}
-	hosts, err := b.hs.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
-	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
-		return
-	}
-	jc.Encode(hosts)
 }
 
 func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
@@ -1121,10 +1108,14 @@ func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
 
 func (b *Bus) objectHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
+
 	var onlymetadata bool
 	if jc.DecodeForm("onlymetadata", &onlymetadata) != nil {
 		return
@@ -1151,7 +1142,11 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	var bucket, marker, delim, sortBy, sortDir, substring string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
+
 	if jc.DecodeForm("delimiter", &delim) != nil {
 		return
 	}
@@ -1191,7 +1186,8 @@ func (b *Bus) objectsHandlerPUT(jc jape.Context) {
 	if jc.Decode(&aor) != nil {
 		return
 	} else if aor.Bucket == "" {
-		aor.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
@@ -1216,7 +1212,8 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	} else if orr.Bucket == "" {
-		orr.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 	if orr.Mode == api.ObjectsRenameModeSingle {
 		// Single object rename.
@@ -1246,10 +1243,14 @@ func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
 	if jc.DecodeForm("batch", &batch) != nil {
 		return
 	}
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
+
 	var err error
 	if batch {
 		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("key"))
@@ -2148,7 +2149,8 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		return
 	}
 	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	} else if req.ContractSet == "" {
 		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
 		return

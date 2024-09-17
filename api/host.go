@@ -1,9 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -51,7 +51,7 @@ type (
 		PriceTableUpdates []HostPriceTableUpdate `json:"priceTableUpdates"`
 	}
 
-	// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
+	// HostsRemoveRequest is the request type for the delete /hosts endpoint.
 	HostsRemoveRequest struct {
 		MaxDowntimeHours           DurationH `json:"maxDowntimeHours"`
 		MaxConsecutiveScanFailures uint64    `json:"maxConsecutiveScanFailures"`
@@ -66,6 +66,7 @@ type (
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
+		MaxLastScan     TimeRFC3339       `json:"maxLastScan"`
 	}
 )
 
@@ -87,12 +88,6 @@ type (
 
 // Option types.
 type (
-	HostsForScanningOptions struct {
-		MaxLastScan TimeRFC3339
-		Limit       int
-		Offset      int
-	}
-
 	HostOptions struct {
 		AutopilotID     string
 		AddressContains string
@@ -100,21 +95,10 @@ type (
 		UsabilityMode   string
 		KeyIn           []types.PublicKey
 		Limit           int
+		MaxLastScan     TimeRFC3339
 		Offset          int
 	}
 )
-
-func (opts HostsForScanningOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if !opts.MaxLastScan.IsZero() {
-		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
-	}
-}
 
 type (
 	Host struct {
@@ -131,11 +115,6 @@ type (
 		StoredData        uint64               `json:"storedData"`
 		ResolvedAddresses []string             `json:"resolvedAddresses"`
 		Subnets           []string             `json:"subnets"`
-	}
-
-	HostAddress struct {
-		PublicKey  types.PublicKey `json:"publicKey"`
-		NetAddress string          `json:"netAddress"`
 	}
 
 	HostInteractions struct {
@@ -174,9 +153,9 @@ type (
 	}
 
 	HostCheck struct {
-		Gouging   HostGougingBreakdown   `json:"gouging"`
-		Score     HostScoreBreakdown     `json:"score"`
-		Usability HostUsabilityBreakdown `json:"usability"`
+		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
+		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
+		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
 	}
 
 	HostGougingBreakdown struct {
@@ -208,6 +187,19 @@ type (
 		NotCompletingScan     bool `json:"notCompletingScan"`
 	}
 )
+
+func (hc HostCheck) MarshalJSON() ([]byte, error) {
+	type check HostCheck
+	return json.Marshal(struct {
+		check
+		Score  float64 `json:"score"`
+		Usable bool    `json:"usable"`
+	}{
+		check:  check(hc),
+		Score:  hc.ScoreBreakdown.Score(),
+		Usable: hc.UsabilityBreakdown.IsUsable(),
+	})
+}
 
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {

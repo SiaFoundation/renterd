@@ -40,7 +40,7 @@ func TestS3Basic(t *testing.T) {
 	// delete default bucket before testing.
 	s3 := cluster.S3Aws
 	tt := cluster.tt
-	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+	if err := cluster.Bus.DeleteBucket(context.Background(), testBucket); err != nil {
 		t.Fatal(err)
 	}
 
@@ -230,7 +230,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// add object to the bucket
-	_, err := s3.PutObject(context.Background(), api.DefaultBucketName, t.Name(), bytes.NewReader([]byte(t.Name())), int64(len([]byte(t.Name()))), minio.PutObjectOptions{UserMetadata: metadata})
+	_, err := s3.PutObject(context.Background(), testBucket, t.Name(), bytes.NewReader([]byte(t.Name())), int64(len([]byte(t.Name()))), minio.PutObjectOptions{UserMetadata: metadata})
 	tt.OK(err)
 
 	// create helper to assert metadata is present
@@ -244,7 +244,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// perform GET request
-	obj, err := s3.GetObject(context.Background(), api.DefaultBucketName, t.Name(), minio.GetObjectOptions{})
+	obj, err := s3.GetObject(context.Background(), testBucket, t.Name(), minio.GetObjectOptions{})
 	tt.OK(err)
 
 	// assert metadata is set
@@ -253,7 +253,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	assertMetadata(metadata, get.UserMetadata)
 
 	// perform HEAD request
-	head, err := s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	head, err := s3.StatObject(context.Background(), testBucket, t.Name(), minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, head.UserMetadata)
 
@@ -261,13 +261,13 @@ func TestS3ObjectMetadata(t *testing.T) {
 	metadata["Baz"] = "updated"
 	_, err = s3.CopyObject(
 		context.Background(),
-		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name(), UserMetadata: metadata, ReplaceMetadata: true},
-		minio.CopySrcOptions{Bucket: api.DefaultBucketName, Object: t.Name()},
+		minio.CopyDestOptions{Bucket: testBucket, Object: t.Name(), UserMetadata: metadata, ReplaceMetadata: true},
+		minio.CopySrcOptions{Bucket: testBucket, Object: t.Name()},
 	)
 	tt.OK(err)
 
 	// perform HEAD request
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	head, err = s3.StatObject(context.Background(), testBucket, t.Name(), minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, head.UserMetadata)
 
@@ -275,25 +275,25 @@ func TestS3ObjectMetadata(t *testing.T) {
 	metadata["Baz"] = "copied"
 	_, err = s3.CopyObject(
 		context.Background(),
-		minio.CopyDestOptions{Bucket: api.DefaultBucketName, Object: t.Name() + "copied", UserMetadata: metadata, ReplaceMetadata: true},
-		minio.CopySrcOptions{Bucket: api.DefaultBucketName, Object: t.Name()},
+		minio.CopyDestOptions{Bucket: testBucket, Object: t.Name() + "copied", UserMetadata: metadata, ReplaceMetadata: true},
+		minio.CopySrcOptions{Bucket: testBucket, Object: t.Name()},
 	)
 	tt.OK(err)
 
 	// perform HEAD request
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name()+"copied", minio.StatObjectOptions{})
+	head, err = s3.StatObject(context.Background(), testBucket, t.Name()+"copied", minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, head.UserMetadata)
 
 	// assert the original object's metadata is unchanged
 	metadata["Baz"] = "updated"
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, t.Name(), minio.StatObjectOptions{})
+	head, err = s3.StatObject(context.Background(), testBucket, t.Name(), minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, head.UserMetadata)
 
 	// upload a file using multipart upload
 	core := cluster.S3Core
-	uid, err := core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "multi", minio.PutObjectOptions{
+	uid, err := core.NewMultipartUpload(context.Background(), testBucket, "multi", minio.PutObjectOptions{
 		UserMetadata: map[string]string{
 			"New": "1",
 		},
@@ -301,9 +301,9 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 	data := frand.Bytes(3)
 
-	part, err := core.PutObjectPart(context.Background(), api.DefaultBucketName, "foo", uid, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
+	part, err := core.PutObjectPart(context.Background(), testBucket, "foo", uid, 1, bytes.NewReader(data), int64(len(data)), minio.PutObjectPartOptions{})
 	tt.OK(err)
-	_, err = core.CompleteMultipartUpload(context.Background(), api.DefaultBucketName, "multi", uid, []minio.CompletePart{
+	_, err = core.CompleteMultipartUpload(context.Background(), testBucket, "multi", uid, []minio.CompletePart{
 		{
 			PartNumber: part.PartNumber,
 			ETag:       part.ETag,
@@ -316,7 +316,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 
 	// check metadata
-	head, err = s3.StatObject(context.Background(), api.DefaultBucketName, "multi", minio.StatObjectOptions{})
+	head, err = s3.StatObject(context.Background(), testBucket, "multi", minio.StatObjectOptions{})
 	tt.OK(err)
 	assertMetadata(map[string]string{
 		"New":      "1",
@@ -335,7 +335,7 @@ func TestS3Authentication(t *testing.T) {
 
 	assertAuth := func(c *minio.Core, shouldWork bool) {
 		t.Helper()
-		_, err := c.ListObjectsV2(api.DefaultBucketName, "/", "", "", "", 100)
+		_, err := c.ListObjectsV2(testBucket, "/", "", "", "", 100)
 		if shouldWork && err != nil {
 			t.Fatal(err)
 		} else if !shouldWork && err == nil {
@@ -365,12 +365,12 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Authenticated, true)
 
 	// Update the policy of the bucket to allow public read access.
-	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
+	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), testBucket, api.BucketPolicy{
 		PublicReadAccess: true,
 	}))
 
 	// Check that the policy was updated.
-	b, err := cluster.Bus.Bucket(context.Background(), api.DefaultBucketName)
+	b, err := cluster.Bus.Bucket(context.Background(), testBucket)
 	tt.OK(err)
 	if b.Policy.PublicReadAccess != true {
 		t.Fatal("expected public read access")
@@ -380,12 +380,12 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Unauthenticated, true)
 
 	// Update the policy again to disable access.
-	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
+	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), testBucket, api.BucketPolicy{
 		PublicReadAccess: false,
 	}))
 
 	// Check that the policy was updated.
-	b, err = cluster.Bus.Bucket(context.Background(), api.DefaultBucketName)
+	b, err = cluster.Bus.Bucket(context.Background(), testBucket)
 	tt.OK(err)
 	if b.Policy.PublicReadAccess == true {
 		t.Fatal("expected no public read access")
@@ -576,7 +576,7 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// Start another one in the default bucket. This should not show up when
 	// listing the uploads in the 'multipart' bucket.
-	tt.OKAll(core.NewMultipartUpload(context.Background(), api.DefaultBucketName, "foo", minio.PutObjectOptions{}))
+	tt.OKAll(core.NewMultipartUpload(context.Background(), testBucket, "foo", minio.PutObjectOptions{}))
 
 	// List uploads
 	lmu, err := core.ListMultipartUploads(context.Background(), "multipart", "", "", "", "", 0)
@@ -589,7 +589,7 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// delete default bucket for the remainder of the test. This makes sure we
 	// can delete the bucket even though it contains a multipart upload.
-	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
+	tt.OK(cluster.Bus.DeleteBucket(context.Background(), testBucket))
 
 	// Add 3 parts out of order to make sure the object is reconstructed
 	// correctly.
@@ -714,7 +714,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	tt := cluster.tt
 
 	// delete default bucket before testing.
-	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
+	tt.OK(cluster.Bus.DeleteBucket(context.Background(), testBucket))
 
 	// Create bucket.
 	tt.OK(s3.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{}))
@@ -767,13 +767,13 @@ func TestS3SpecialChars(t *testing.T) {
 	// manually create the 'a/' object as a directory. It should also be
 	// possible to call StatObject on it without errors.
 	objectKey := "foo/höst (1).log"
-	tt.OKAll(s3.PutObject(context.Background(), api.DefaultBucketName, objectKey, bytes.NewReader([]byte("bar")), 0, minio.PutObjectOptions{}))
-	so, err := s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	tt.OKAll(s3.PutObject(context.Background(), testBucket, objectKey, bytes.NewReader([]byte("bar")), 0, minio.PutObjectOptions{}))
+	so, err := s3.StatObject(context.Background(), testBucket, objectKey, minio.StatObjectOptions{})
 	tt.OK(err)
 	if so.Key != objectKey {
 		t.Fatal("unexpected key:", so.Key)
 	}
-	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
+	for res := range s3.ListObjects(context.Background(), testBucket, minio.ListObjectsOptions{Prefix: "foo/"}) {
 		tt.OK(res.Err)
 		if res.Key != objectKey {
 			t.Fatal("unexpected key:", res.Key)
@@ -781,12 +781,12 @@ func TestS3SpecialChars(t *testing.T) {
 	}
 
 	// delete it and verify its gone.
-	tt.OK(s3.RemoveObject(context.Background(), api.DefaultBucketName, objectKey, minio.RemoveObjectOptions{}))
-	so, err = s3.StatObject(context.Background(), api.DefaultBucketName, objectKey, minio.StatObjectOptions{})
+	tt.OK(s3.RemoveObject(context.Background(), testBucket, objectKey, minio.RemoveObjectOptions{}))
+	so, err = s3.StatObject(context.Background(), testBucket, objectKey, minio.StatObjectOptions{})
 	if err == nil {
 		t.Fatal("shouldn't exist", err)
 	}
-	for res := range s3.ListObjects(context.Background(), api.DefaultBucketName, minio.ListObjectsOptions{Prefix: "foo/"}) {
+	for res := range s3.ListObjects(context.Background(), testBucket, minio.ListObjectsOptions{Prefix: "foo/"}) {
 		tt.OK(res.Err)
 		if res.Key == objectKey {
 			t.Fatal("unexpected key:", res.Key)

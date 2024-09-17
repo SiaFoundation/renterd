@@ -15,6 +15,10 @@ import (
 )
 
 var (
+	// ErrBucketMissing is returned by the worker API by endpoints that need a
+	// bucket when it wasn't specified.
+	ErrBucketMissing = errors.New("'bucket' parameter is required")
+
 	// ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
 	// consensus and the consensus is not synced.
 	ErrConsensusNotSynced = errors.New("consensus is not synced")

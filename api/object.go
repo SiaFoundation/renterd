@@ -217,12 +217,6 @@ type (
 		SlabEncryptionKey object.EncryptionKey
 	}
 
-	SearchObjectOptions struct {
-		Key    string
-		Offset int
-		Limit  int
-	}
-
 	// UploadObjectOptions is the options type for the worker client.
 	UploadObjectOptions struct {
 		MinShards     int
@@ -336,18 +330,6 @@ func (opts ListObjectOptions) Apply(values url.Values) {
 	}
 	if opts.SlabEncryptionKey != (object.EncryptionKey{}) {
 		values.Set("slabEncryptionKey", opts.SlabEncryptionKey.String())
-	}
-}
-
-func (opts SearchObjectOptions) Apply(values url.Values) {
-	if opts.Key != "" {
-		values.Set("key", opts.Key)
-	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
 	}
 }
 

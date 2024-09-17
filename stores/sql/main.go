@@ -758,6 +758,12 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		}
 	}
 
+	// filter max last scan
+	if !opts.MaxLastScan.IsZero() {
+		whereExprs = append(whereExprs, "last_scan < ?")
+		args = append(args, UnixTimeMS(opts.MaxLastScan))
+	}
+
 	// offset + limit
 	if opts.Limit == -1 {
 		opts.Limit = math.MaxInt64
@@ -878,11 +884,11 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		var ap string
 		var pk PublicKey
 		var hc api.HostCheck
-		err := rows.Scan(&pk, &ap, &hc.Usability.Blocked, &hc.Usability.Offline, &hc.Usability.LowScore, &hc.Usability.RedundantIP,
-			&hc.Usability.Gouging, &hc.Usability.NotAcceptingContracts, &hc.Usability.NotAnnounced, &hc.Usability.NotCompletingScan,
-			&hc.Score.Age, &hc.Score.Collateral, &hc.Score.Interactions, &hc.Score.StorageRemaining, &hc.Score.Uptime,
-			&hc.Score.Version, &hc.Score.Prices, &hc.Gouging.ContractErr, &hc.Gouging.DownloadErr, &hc.Gouging.GougingErr,
-			&hc.Gouging.PruneErr, &hc.Gouging.UploadErr)
+		err := rows.Scan(&pk, &ap, &hc.UsabilityBreakdown.Blocked, &hc.UsabilityBreakdown.Offline, &hc.UsabilityBreakdown.LowScore, &hc.UsabilityBreakdown.RedundantIP,
+			&hc.UsabilityBreakdown.Gouging, &hc.UsabilityBreakdown.NotAcceptingContracts, &hc.UsabilityBreakdown.NotAnnounced, &hc.UsabilityBreakdown.NotCompletingScan,
+			&hc.ScoreBreakdown.Age, &hc.ScoreBreakdown.Collateral, &hc.ScoreBreakdown.Interactions, &hc.ScoreBreakdown.StorageRemaining, &hc.ScoreBreakdown.Uptime,
+			&hc.ScoreBreakdown.Version, &hc.ScoreBreakdown.Prices, &hc.GougingBreakdown.ContractErr, &hc.GougingBreakdown.DownloadErr, &hc.GougingBreakdown.GougingErr,
+			&hc.GougingBreakdown.PruneErr, &hc.GougingBreakdown.UploadErr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -895,31 +901,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	// fill in hosts
 	for i := range hosts {
 		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
-	}
-	return hosts, nil
-}
-
-func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
-	if offset < 0 {
-		return nil, ErrNegativeOffset
-	} else if limit == -1 {
-		limit = math.MaxInt64
-	}
-
-	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
-		UnixTimeMS(maxLastScan), limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
-	}
-	defer rows.Close()
-
-	var hosts []api.HostAddress
-	for rows.Next() {
-		var ha api.HostAddress
-		if err := rows.Scan((*PublicKey)(&ha.PublicKey), &ha.NetAddress); err != nil {
-			return nil, fmt.Errorf("failed to scan host row: %w", err)
-		}
-		hosts = append(hosts, ha)
 	}
 	return hosts, nil
 }
