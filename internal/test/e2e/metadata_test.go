@@ -34,13 +34,13 @@ func TestObjectMetadata(t *testing.T) {
 
 	// upload the object
 	data := []byte(t.Name())
-	_, err := w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, t.Name(), opts)
+	_, err := w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, t.Name(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// get the object from the bus and assert it has the metadata
-	or, err := b.Object(context.Background(), api.DefaultBucketName, t.Name(), api.GetObjectOptions{})
+	or, err := b.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// get the object from the worker and assert it has the metadata
-	gor, err := w.GetObject(context.Background(), api.DefaultBucketName, t.Name(), api.DownloadObjectOptions{})
+	gor, err := w.GetObject(context.Background(), testBucket, t.Name(), api.DownloadObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// perform a HEAD request and assert the headers are all present
-	hor, err := w.HeadObject(context.Background(), api.DefaultBucketName, t.Name(), api.HeadObjectOptions{Range: &api.DownloadRange{Offset: 1, Length: 1}})
+	hor, err := w.HeadObject(context.Background(), testBucket, t.Name(), api.HeadObjectOptions{Range: &api.DownloadRange{Offset: 1, Length: 1}})
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hor, &api.HeadObjectResponse{
@@ -83,13 +83,13 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// re-upload the object
-	_, err = w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), api.DefaultBucketName, t.Name(), api.UploadObjectOptions{})
+	_, err = w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), testBucket, t.Name(), api.UploadObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert metadata was removed
-	gor, err = w.GetObject(context.Background(), api.DefaultBucketName, t.Name(), api.DownloadObjectOptions{})
+	gor, err = w.GetObject(context.Background(), testBucket, t.Name(), api.DownloadObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

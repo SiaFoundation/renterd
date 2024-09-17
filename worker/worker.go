@@ -479,8 +479,11 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 
 func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 	// parse bucket
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 
@@ -532,10 +535,14 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 
 	ctx := jc.Request.Context()
 
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
+
 	var prefix string
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
@@ -621,8 +628,11 @@ func (w *Worker) objectsHandlerPUT(jc jape.Context) {
 	}
 
 	// decode the bucket from the query string
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 
@@ -686,8 +696,11 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// decode the bucket from the query string
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 

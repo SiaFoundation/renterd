@@ -214,6 +214,3 @@ CREATE INDEX `idx_wallet_events_block_id_height` ON `wallet_events`(`block_id`,`
 CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`output_id` blob NOT NULL,`leaf_index` integer,`merkle_proof` longblob NOT NULL,`value` text,`address` blob,`maturity_height` integer);
 CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
-
--- create default bucket
-INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');
