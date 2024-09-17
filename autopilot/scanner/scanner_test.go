@@ -26,7 +26,7 @@ type mockHostStore struct {
 	removals []string
 }
 
-func (hs *mockHostStore) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error) {
+func (hs *mockHostStore) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	hs.scans = append(hs.scans, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
@@ -41,14 +41,7 @@ func (hs *mockHostStore) HostsForScanning(ctx context.Context, opts api.HostsFor
 		end = len(hs.hosts)
 	}
 
-	var hostAddresses []api.HostAddress
-	for _, h := range hs.hosts[start:end] {
-		hostAddresses = append(hostAddresses, api.HostAddress{
-			NetAddress: h.NetAddress,
-			PublicKey:  h.PublicKey,
-		})
-	}
-	return hostAddresses, nil
+	return hs.hosts[start:end], nil
 }
 
 func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error) {

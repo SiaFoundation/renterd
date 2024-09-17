@@ -41,15 +41,6 @@ func (s *SQLStore) UpdateHostCheck(ctx context.Context, autopilotID string, hk t
 	})
 }
 
-// HostsForScanning returns the address of hosts for scanning.
-func (s *SQLStore) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) (hosts []api.HostAddress, err error) {
-	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		hosts, err = tx.HostsForScanning(ctx, maxLastScan, offset, limit)
-		return err
-	})
-	return
-}
-
 func (s *SQLStore) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.ResetLostSectors(ctx, hk)
