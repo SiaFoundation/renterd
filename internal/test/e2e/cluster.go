@@ -328,7 +328,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	busAddr := fmt.Sprintf("http://%s/bus", busListener.Addr().String())
 	workerAddr := "http://" + workerListener.Addr().String()
-	s3Addr := s3Listener.Addr().String() // not fully qualified path
+	s3Addr := "http://" + s3Listener.Addr().String() // not fully qualified path
 	autopilotAddr := "http://" + autopilotListener.Addr().String()
 
 	// Create clients.
@@ -338,7 +338,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	mySession := session.Must(session.NewSession())
 	s3AWSClient := s3aws.New(mySession, aws.NewConfig().
-		WithEndpoint(fmt.Sprintf("http://%s", s3Addr)).
+		WithEndpoint(s3Addr).
 		WithRegion("dummy").
 		WithS3ForcePathStyle(true).
 		WithCredentials(credentials.NewCredentials(&credentials.StaticProvider{
