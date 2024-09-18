@@ -633,8 +633,23 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("contractset", &cs) != nil {
 		return
 	}
+	filterMode := api.ContractFilterModeActive
+	if jc.DecodeForm("filtermode", &filterMode) != nil {
+		return
+	}
+
+	switch filterMode {
+	case api.ContractFilterModeAll:
+	case api.ContractFilterModeActive:
+	case api.ContractFilterModeArchived:
+	default:
+		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
+		return
+	}
+
 	contracts, err := b.ms.Contracts(jc.Request.Context(), api.ContractsOpts{
 		ContractSet: cs,
+		FilterMode:  filterMode,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
 		jc.Encode(contracts)
@@ -954,24 +969,24 @@ func (b *Bus) contractIDHandlerGET(jc jape.Context) {
 	}
 }
 
-func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
-	var id types.FileContractID
-	var req api.ContractAddRequest
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
-		return
-	} else if req.Contract.ID() != id {
-		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
-		return
-	} else if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+func (b *Bus) contractsHandlerPUT(jc jape.Context) {
+	// decode request
+	var c api.ContractMetadata
+	if jc.Decode(&c) != nil {
 		return
 	}
 
-	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
+	// upsert the contract
+	if jc.Check("failed to add contract", b.ms.PutContract(jc.Request.Context(), c)) == nil {
+		b.broadcastAction(webhooks.Event{
+			Module: api.ModuleContract,
+			Event:  api.EventAdd,
+			Payload: api.EventContractAdd{
+				Added:     c,
+				Timestamp: time.Now().UTC(),
+			},
+		})
 	}
-	jc.Encode(a)
 }
 
 func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
@@ -1031,11 +1046,11 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	var newRevision rhpv2.ContractRevision
-	var contractPrice, fundAmount types.Currency
+	var contractPrice, initialRenterFunds types.Currency
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		newRevision, contractPrice, fundAmount, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		newRevision, contractPrice, initialRenterFunds, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
 			jc.Error(err, http.StatusBadRequest)
 			return
@@ -1044,39 +1059,11 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		}
 	}
 
-	// add renewal contract to store
-	metadata, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
+	// add the renewal
+	metadata, err := b.addRenewal(ctx, fcid, newRevision, contractPrice, initialRenterFunds, cs.Index.Height, api.ContractStatePending)
+	if jc.Check("couldn't add renewal", err) == nil {
+		jc.Encode(metadata)
 	}
-
-	// send the response
-	jc.Encode(metadata)
-}
-
-func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
-	var id types.FileContractID
-	var req api.ContractRenewedRequest
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
-		return
-	}
-	if req.Contract.ID() != id {
-		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
-		return
-	}
-	if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
-		return
-	}
-	if req.State == "" {
-		req.State = api.ContractStatePending
-	}
-	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
-	}
-
-	jc.Encode(r)
 }
 
 func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1108,10 +1095,14 @@ func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
 
 func (b *Bus) objectHandlerGET(jc jape.Context) {
 	key := jc.PathParam("key")
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
+
 	var onlymetadata bool
 	if jc.DecodeForm("onlymetadata", &onlymetadata) != nil {
 		return
@@ -1135,11 +1126,11 @@ func (b *Bus) objectHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var marker, delim, sortBy, sortDir, substring string
-	bucket := api.DefaultBucketName
+	var bucket, marker, delim, sortBy, sortDir, substring string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
+
 	if jc.DecodeForm("delimiter", &delim) != nil {
 		return
 	}
@@ -1159,8 +1150,12 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("substring", &substring) != nil {
 		return
 	}
+	var slabEncryptionKey object.EncryptionKey
+	if jc.DecodeForm("slabEncryptionKey", &slabEncryptionKey) != nil {
+		return
+	}
 
-	resp, err := b.ms.Objects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit)
+	resp, err := b.ms.Objects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	if errors.Is(err, api.ErrUnsupportedDelimiter) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1175,7 +1170,8 @@ func (b *Bus) objectHandlerPUT(jc jape.Context) {
 	if jc.Decode(&aor) != nil {
 		return
 	} else if aor.Bucket == "" {
-		aor.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
@@ -1200,7 +1196,8 @@ func (b *Bus) objectsRemoveHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	} else if orr.Bucket == "" {
-		orr.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 
 	if orr.Prefix == "" {
@@ -1216,7 +1213,8 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	} else if orr.Bucket == "" {
-		orr.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 	if orr.Mode == api.ObjectsRenameModeSingle {
 		// Single object rename.
@@ -1242,8 +1240,11 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 }
 
 func (b *Bus) objectHandlerDELETE(jc jape.Context) {
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 	err := b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("key"))
@@ -1309,7 +1310,6 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
 	gs, err := b.ss.GougingSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("gouging settings not found, returning defaults")
 		jc.Encode(api.DefaultGougingSettings)
 		return
 	} else if jc.Check("failed to get gouging settings", err) == nil {
@@ -1340,25 +1340,25 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 	ps, err := b.ss.PinnedSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("pinned settings not found, returning defaults")
-		jc.Encode(api.DefaultPinnedSettings)
+		ps = api.DefaultPinnedSettings
+	} else if jc.Check("failed to get pinned settings", err) != nil {
 		return
-	} else if jc.Check("failed to get pinned settings", err) == nil {
-		// populate the Autopilots map with the current autopilots
-		aps, err := b.as.Autopilots(jc.Request.Context())
-		if jc.Check("failed to fetch autopilots", err) != nil {
-			return
-		}
-		if ps.Autopilots == nil {
-			ps.Autopilots = make(map[string]api.AutopilotPins)
-		}
-		for _, ap := range aps {
-			if _, exists := ps.Autopilots[ap.ID]; !exists {
-				ps.Autopilots[ap.ID] = api.AutopilotPins{}
-			}
-		}
-		jc.Encode(ps)
 	}
+
+	// populate the Autopilots map with the current autopilots
+	aps, err := b.as.Autopilots(jc.Request.Context())
+	if jc.Check("failed to fetch autopilots", err) != nil {
+		return
+	}
+	if ps.Autopilots == nil {
+		ps.Autopilots = make(map[string]api.AutopilotPins)
+	}
+	for _, ap := range aps {
+		if _, exists := ps.Autopilots[ap.ID]; !exists {
+			ps.Autopilots[ap.ID] = api.AutopilotPins{}
+		}
+	}
+	jc.Encode(ps)
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
@@ -1389,7 +1389,6 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 	us, err := b.ss.UploadSettings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("upload settings not found, returning defaults")
 		jc.Encode(api.DefaultUploadSettings(b.cm.TipState().Network.Name))
 		return
 	} else if jc.Check("failed to get upload settings", err) == nil {
@@ -1419,7 +1418,6 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
 	s3s, err := b.ss.S3Settings(jc.Request.Context())
 	if errors.Is(err, sql.ErrSettingNotFound) {
-		b.logger.Warn("S3 settings not found, returning defaults")
 		jc.Encode(api.DefaultS3Settings)
 		return
 	} else if jc.Check("failed to get S3 settings", err) == nil {
@@ -1460,22 +1458,6 @@ func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	} else if n > 0 {
 		b.logger.Infow("successfully marked sector as lost", "hk", hk, "root", root)
 	}
-}
-
-func (b *Bus) slabObjectsHandlerGET(jc jape.Context) {
-	var key object.EncryptionKey
-	if jc.DecodeParam("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), bucket, key)
-	if jc.Check("failed to retrieve objects by slab", err) != nil {
-		return
-	}
-	jc.Encode(objects)
 }
 
 func (b *Bus) slabHandlerGET(jc jape.Context) {
@@ -2155,7 +2137,8 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		return
 	}
 	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	} else if req.ContractSet == "" {
 		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
 		return
@@ -2260,11 +2243,11 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
-	var contract rhpv2.ContractRevision
+	var rev rhpv2.ContractRevision
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		contract, err = b.formContract(
+		rev, err = b.formContract(
 			ctx,
 			settings,
 			rfr.RenterAddress,
@@ -2279,16 +2262,16 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 		}
 	}
 
-	// store the contract
+	// add the contract
 	metadata, err := b.addContract(
 		ctx,
-		contract,
-		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
+		rev,
+		rev.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
 		rfr.RenterFunds,
 		b.cm.Tip().Height,
 		api.ContractStatePending,
 	)
-	if jc.Check("couldn't store contract", err) != nil {
+	if jc.Check("couldn't add contract", err) != nil {
 		return
 	}
 

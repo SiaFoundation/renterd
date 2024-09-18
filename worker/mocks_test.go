@@ -554,6 +554,10 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 	return
 }
 
+func (os *objectStoreMock) Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error) {
+	return api.ObjectsResponse{}, nil
+}
+
 func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
@@ -630,10 +634,6 @@ func (*s3Mock) ListBuckets(context.Context) (buckets []api.Bucket, err error) {
 
 func (*s3Mock) CopyObject(context.Context, string, string, string, string, api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
 	return api.ObjectMetadata{}, nil
-}
-
-func (*s3Mock) ListObjects(context.Context, string, api.ListObjectOptions) (resp api.ObjectsResponse, err error) {
-	return api.ObjectsResponse{}, nil
 }
 
 func (*s3Mock) AbortMultipartUpload(context.Context, string, string, string) (err error) {

@@ -6,7 +6,13 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
+)
+
+var (
+	alertMigrationID = alerts.RandomAlertID() // constant until restarted
 )
 
 func randomAlertID() types.Hash256 {
@@ -26,6 +32,46 @@ func newDownloadFailedAlert(bucket, key string, offset, length, contracts int64,
 			"contracts": contracts,
 			"error":     err.Error(),
 		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objects []api.ObjectMetadata, err error) alerts.Alert {
+	data := map[string]interface{}{
+		"error":   err.Error(),
+		"health":  health,
+		"slabKey": slabKey.String(),
+		"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously. It might be necessary to increase the MigrationSurchargeMultiplier in the gouging settings to ensure it has every chance of succeeding.",
+	}
+
+	if len(objects) > 0 {
+		data["objects"] = objects
+	}
+
+	hostErr := err
+	for errors.Unwrap(hostErr) != nil {
+		hostErr = errors.Unwrap(hostErr)
+	}
+	if set, ok := hostErr.(HostErrorSet); ok {
+		hostErrors := make(map[string]string, len(set))
+		for hk, err := range set {
+			hostErrors[hk.String()] = err.Error()
+		}
+		data["hosts"] = hostErrors
+	}
+
+	severity := alerts.SeverityError
+	if health < 0.25 {
+		severity = alerts.SeverityCritical
+	} else if health < 0.5 {
+		severity = alerts.SeverityWarning
+	}
+
+	return alerts.Alert{
+		ID:        alerts.IDForSlab(alertMigrationID, slabKey),
+		Severity:  severity,
+		Message:   "Slab migration failed",
+		Data:      data,
 		Timestamp: time.Now(),
 	}
 }

@@ -206,9 +206,8 @@ type (
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
-		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		AddRenewal(ctx context.Context, c api.ContractMetadata) error
+		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
@@ -217,6 +216,7 @@ type (
 		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 		RemoveContractSet(ctx context.Context, name string) error
+		PutContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 
@@ -235,9 +235,8 @@ type (
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
 		Object(ctx context.Context, bucketName, key string) (api.Object, error)
-		Objects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (api.ObjectsResponse, error)
+		Objects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error)
 		ObjectMetadata(ctx context.Context, bucketName, key string) (api.Object, error)
-		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, key string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
@@ -408,10 +407,11 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
-		"POST   /contracts":              b.contractsFormHandler,
+		"PUT    /contracts":              b.contractsHandlerPUT,
 		"GET    /contracts":              b.contractsHandlerGET,
 		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
 		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
+		"POST   /contracts/form":         b.contractsFormHandler,
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
 		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
@@ -419,7 +419,6 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
-		"POST   /contract/:id":           b.contractIDHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
@@ -427,7 +426,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
 		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
-		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
@@ -486,7 +484,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
 		"PUT    /slab":                b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,
@@ -527,8 +524,21 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 	)
 }
 
-func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	c, err := b.ms.AddContract(ctx, rev, contractPrice, totalCost, startHeight, state)
+func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	if err := b.ms.PutContract(ctx, api.ContractMetadata{
+		ID:                 rev.ID(),
+		HostKey:            rev.HostKey(),
+		StartHeight:        startHeight,
+		State:              state,
+		WindowStart:        rev.Revision.WindowStart,
+		WindowEnd:          rev.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: initialRenterFunds,
+	}); err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	added, err := b.ms.Contract(ctx, rev.ID())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -537,29 +547,45 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 		Module: api.ModuleContract,
 		Event:  api.EventAdd,
 		Payload: api.EventContractAdd{
-			Added:     c,
+			Added:     added,
 			Timestamp: time.Now().UTC(),
 		},
 	})
-	return c, nil
+
+	return added, err
 }
 
-func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
+func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
+	if err := b.ms.AddRenewal(ctx, api.ContractMetadata{
+		ID:                 rev.ID(),
+		HostKey:            rev.HostKey(),
+		RenewedFrom:        renewedFrom,
+		StartHeight:        startHeight,
+		State:              state,
+		WindowStart:        rev.Revision.WindowStart,
+		WindowEnd:          rev.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: initialRenterFunds,
+	}); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
+	}
+
+	renewal, err := b.ms.Contract(ctx, rev.ID())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
 
-	b.sectors.HandleRenewal(r.ID, r.RenewedFrom)
+	b.sectors.HandleRenewal(renewal.ID, renewal.RenewedFrom)
 	b.broadcastAction(webhooks.Event{
 		Module: api.ModuleContract,
 		Event:  api.EventRenew,
 		Payload: api.EventContractRenew{
-			Renewal:   r,
+			Renewal:   renewal,
 			Timestamp: time.Now().UTC(),
 		},
 	})
-	return r, nil
+
+	return renewal, err
 }
 
 func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {

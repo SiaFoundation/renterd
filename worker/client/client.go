@@ -163,11 +163,10 @@ func (c *Client) Memory(ctx context.Context) (resp api.MemoryResponse, err error
 }
 
 // MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) (res api.MigrateSlabResponse, err error) {
+func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) error {
 	values := make(url.Values)
 	values.Set("contractset", set)
-	err = c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, &res)
-	return
+	return c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, nil)
 }
 
 // RemoveObjects removes the object with given prefix.

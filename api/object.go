@@ -63,6 +63,7 @@ type (
 
 	// ObjectMetadata contains various metadata about an object.
 	ObjectMetadata struct {
+		Bucket   string      `json:"bucket"`
 		ETag     string      `json:"eTag,omitempty"`
 		Health   float64     `json:"health"`
 		ModTime  TimeRFC3339 `json:"modTime"`
@@ -208,12 +209,14 @@ type (
 	}
 
 	ListObjectOptions struct {
-		Delimiter string
-		Limit     int
-		Marker    string
-		SortBy    string
-		SortDir   string
-		Substring string
+		Bucket            string
+		Delimiter         string
+		Limit             int
+		Marker            string
+		SortBy            string
+		SortDir           string
+		Substring         string
+		SlabEncryptionKey object.EncryptionKey
 	}
 
 	// UploadObjectOptions is the options type for the worker client.
@@ -300,6 +303,9 @@ func (opts GetObjectOptions) Apply(values url.Values) {
 }
 
 func (opts ListObjectOptions) Apply(values url.Values) {
+	if opts.Bucket != "" {
+		values.Set("bucket", opts.Bucket)
+	}
 	if opts.Delimiter != "" {
 		values.Set("delimiter", opts.Delimiter)
 	}
@@ -317,6 +323,9 @@ func (opts ListObjectOptions) Apply(values url.Values) {
 	}
 	if opts.Substring != "" {
 		values.Set("substring", opts.Substring)
+	}
+	if opts.SlabEncryptionKey != (object.EncryptionKey{}) {
+		values.Set("slabEncryptionKey", opts.SlabEncryptionKey.String())
 	}
 }
 

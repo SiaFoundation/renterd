@@ -66,21 +66,10 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 }
 
 func prepareDB(db *isql.DB, fcid types.FileContractID, n int) (roots []types.Hash256, _ error) {
-	// insert host
+	// insert contract
 	hk := types.PublicKey{1}
 	res, err := db.Exec(context.Background(), `
-INSERT INTO hosts (public_key) VALUES (?)`, sql.PublicKey(hk))
-	if err != nil {
-		return nil, err
-	}
-	hostID, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// insert contract
-	res, err = db.Exec(context.Background(), `
-INSERT INTO contracts (host_id, fcid,start_height) VALUES (?, ?, ?)`, hostID, sql.FileContractID(fcid), 0)
+INSERT INTO contracts (fcid, host_key, start_height) VALUES (?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0)
 	if err != nil {
 		return nil, err
 	}

@@ -5,7 +5,6 @@ import (
 	"io"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -21,9 +20,9 @@ type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		UpdateChainIndex(index types.ChainIndex) error
-		UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
-		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
 		UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error
+		UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
+		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
 		UpdateFailedContracts(blockHeight uint64) error
 		UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
 
@@ -66,7 +65,7 @@ type (
 
 		// AncestorContracts returns all ancestor contracts of the contract up
 		// until the given start height.
-		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error)
+		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error)
 
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
@@ -97,8 +96,9 @@ type (
 		// duplicates but can contain gaps.
 		CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (string, error)
 
-		// Contract returns the metadata of the contract with the given ID or
-		// ErrContractNotFound.
+		// Contract returns the metadata of the contract with the given id, if
+		// the requested contract does not exist, or if it is archived,
+		// ErrContractNotFound is returned.
 		Contract(ctx context.Context, id types.FileContractID) (cm api.ContractMetadata, err error)
 
 		// ContractRoots returns the roots of the contract with the given ID.
@@ -161,22 +161,8 @@ type (
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
-		// InsertBufferedSlab inserts a buffered slab into the database. This
-		// includes the creation of a buffered slab as well as the corresponding
-		// regular slab it is linked to. It returns the ID of the buffered slab
-		// that was created.
-		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
-
-		// InsertContract inserts a new contract into the database.
-		InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
-
-		// InsertMultipartUpload creates a new multipart upload and returns a
-		// unique upload ID.
-		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
-
-		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
-		// are associated with any of the provided contracts.
-		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
+		// Hosts returns a list of hosts that match the provided filters
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 
 		// HostAllowlist returns the list of public keys of hosts on the
 		// allowlist.
@@ -185,11 +171,22 @@ type (
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
 
+		// InsertBufferedSlab inserts a buffered slab into the database. This
+		// includes the creation of a buffered slab as well as the corresponding
+		// regular slab it is linked to. It returns the ID of the buffered slab
+		// that was created.
+		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
+
+		// InsertMultipartUpload creates a new multipart upload and returns a
+		// unique upload ID.
+		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
+
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
-		// Hosts returns a list of hosts that match the provided filters
-		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
+		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
+		// are associated with any of the provided contracts.
+		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
 		// MakeDirsForPath creates all directories for a given object's path.
 		MakeDirsForPath(ctx context.Context, path string) (int64, error)
@@ -214,14 +211,10 @@ type (
 		Object(ctx context.Context, bucket, key string) (api.Object, error)
 
 		// Objects returns a list of objects from the given bucket.
-		Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsResponse, err error)
+		Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, encryptionKey object.EncryptionKey) (resp api.ObjectsResponse, err error)
 
 		// ObjectMetadata returns an object's metadata.
 		ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error)
-
-		// ObjectsBySlabKey returns all objects that contain a reference to the
-		// slab with the given slabKey.
-		ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error)
 
 		// ObjectsStats returns overall stats about stored objects
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
@@ -249,6 +242,10 @@ type (
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
+
+		// PutContract inserts the contract if it does not exist, otherwise it
+		// will overwrite all fields.
+		PutContract(ctx context.Context, c api.ContractMetadata) error
 
 		// RecordContractSpending records new spending for a contract
 		RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error
@@ -289,12 +286,6 @@ type (
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
 		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
-
-		// RenewContract renews the contract in the database. That means the
-		// contract with the ID of 'renewedFrom' will be moved to the archived
-		// contracts and the new contract will overwrite the existing one,
-		// inheriting its sectors.
-		RenewContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
 
 		// RenewedContract returns the metadata of the contract that was renewed
 		// from the specified contract or ErrContractNotFound otherwise.
@@ -337,6 +328,9 @@ type (
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
+
+		// UpdateContract sets the given metadata on the contract with given fcid.
+		UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error
 
 		// UpdateContractSet adds/removes the provided contract ids to/from
 		// the contract set. The contract set is created in the process if

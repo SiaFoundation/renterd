@@ -126,60 +126,65 @@ func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, erro
 	return accounts, nil
 }
 
-func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) (ancestors []api.ContractMetadata, _ error) {
 	rows, err := tx.Query(ctx, `
-		WITH RECURSIVE ancestors AS
+		WITH RECURSIVE c AS
 		(
 			SELECT *
-			FROM archived_contracts
+			FROM contracts
 			WHERE renewed_to = ?
 			UNION ALL
-			SELECT archived_contracts.*
-			FROM ancestors, archived_contracts
-			WHERE archived_contracts.renewed_to = ancestors.fcid
+			SELECT contracts.*
+			FROM c, contracts
+			WHERE contracts.renewed_to = c.fcid
 		)
-		SELECT fcid, host, renewed_to, upload_spending, download_spending, fund_account_spending, delete_spending,
-		proof_height, revision_height, revision_number, size, start_height, state, window_start, window_end,
-		COALESCE(h.net_address, ''), contract_price, renewed_from, total_cost, reason
-		FROM ancestors
-		LEFT JOIN hosts h ON h.public_key = ancestors.host
-		WHERE start_height >= ?
+		SELECT
+			c.fcid, c.host_id, c.host_key,
+			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
+			c.contract_price, c.initial_renter_funds,
+			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
+			"", COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
+		FROM contracts AS c
+		LEFT JOIN hosts h ON h.public_key = c.host_key
+		WHERE start_height >= ? AND archival_reason IS NOT NULL
+		ORDER BY start_height DESC
 	`, FileContractID(fcid), startHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ancestor contracts: %w", err)
 	}
 	defer rows.Close()
 
-	var contracts []api.ArchivedContract
 	for rows.Next() {
-		var c api.ArchivedContract
-		var state ContractState
-		err := rows.Scan((*FileContractID)(&c.ID), (*PublicKey)(&c.HostKey), (*FileContractID)(&c.RenewedTo),
-			(*Currency)(&c.Spending.Uploads), (*Currency)(&c.Spending.Downloads), (*Currency)(&c.Spending.FundAccount),
-			(*Currency)(&c.Spending.Deletions), &c.ProofHeight,
-			&c.RevisionHeight, &c.RevisionNumber, &c.Size, &c.StartHeight, &state, &c.WindowStart,
-			&c.WindowEnd, &c.HostIP, (*Currency)(&c.ContractPrice), (*FileContractID)(&c.RenewedFrom),
-			(*Currency)(&c.TotalCost), &c.ArchivalReason)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan contract: %w", err)
+		var r ContractRow
+		if err := r.Scan(rows); err != nil {
+			return nil, fmt.Errorf("failed to scan ancestor: %w", err)
 		}
-		c.State = state.String()
-		contracts = append(contracts, c)
+		ancestors = append(ancestors, r.ContractMetadata())
 	}
-	return contracts, nil
+
+	return
 }
 
 func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, reason string) error {
-	if err := copyContractToArchive(ctx, tx, fcid, nil, reason); err != nil {
-		return fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
+	// validate reason
+	if reason == "" {
+		return fmt.Errorf("archival reason cannot be empty")
 	}
-	res, err := tx.Exec(ctx, "DELETE FROM contracts WHERE fcid = ?", FileContractID(fcid))
+
+	// archive contract
+	res, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
 	if err != nil {
-		return fmt.Errorf("failed to delete contract from contracts: %w", err)
+		return fmt.Errorf("failed to archive contract: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
 		return fmt.Errorf("failed to fetch rows affected: %w", err)
 	} else if n == 0 {
-		return fmt.Errorf("expected to delete 1 row, deleted %d", n)
+		return fmt.Errorf("expected to update 1 row, updated %d", n)
+	}
+
+	// delete its sectors
+	_, err = tx.Exec(ctx, "DELETE FROM contract_sectors WHERE db_contract_id IN (SELECT id FROM contracts WHERE fcid = ?)", FileContractID(fcid))
+	if err != nil {
+		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
 	return nil
 }
@@ -240,7 +245,7 @@ func Buckets(ctx context.Context, tx sql.Tx) ([]api.Bucket, error) {
 }
 
 func Contract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractMetadata, error) {
-	contracts, err := QueryContracts(ctx, tx, []string{"c.fcid = ?"}, []any{FileContractID(fcid)})
+	contracts, err := QueryContracts(ctx, tx, []string{"c.fcid = ?", "c.archival_reason IS NULL"}, []any{FileContractID(fcid)})
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract: %w", err)
 	} else if len(contracts) == 0 {
@@ -286,6 +291,23 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 		whereExprs = append(whereExprs, "cs.id = ?")
 		whereArgs = append(whereArgs, contractSetID)
 	}
+
+	if opts.FilterMode != "" {
+		// validate filter mode
+		switch opts.FilterMode {
+		case api.ContractFilterModeActive:
+			whereExprs = append(whereExprs, "c.archival_reason IS NULL")
+		case api.ContractFilterModeArchived:
+			whereExprs = append(whereExprs, "c.archival_reason IS NOT NULL")
+		case api.ContractFilterModeAll:
+		default:
+			return nil, fmt.Errorf("invalid filter mode: %v", opts.FilterMode)
+		}
+	} else {
+		// default to active contracts
+		whereExprs = append(whereExprs, "c.archival_reason IS NULL")
+	}
+
 	return QueryContracts(ctx, tx, whereExprs, whereArgs)
 }
 
@@ -320,7 +342,7 @@ func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
 
 func ContractSize(ctx context.Context, tx sql.Tx, id types.FileContractID) (api.ContractSize, error) {
 	var contractID, size uint64
-	if err := tx.QueryRow(ctx, "SELECT id, size FROM contracts WHERE fcid = ?", FileContractID(id)).
+	if err := tx.QueryRow(ctx, "SELECT id, size FROM contracts WHERE fcid = ? AND archival_reason IS NULL", FileContractID(id)).
 		Scan(&contractID, &size); errors.Is(err, dsql.ErrNoRows) {
 		return api.ContractSize{}, api.ErrContractNotFound
 	} else if err != nil {
@@ -353,7 +375,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	rows, err := tx.Query(ctx, `
 		SELECT c.fcid, c.size, c.size
 		FROM contracts c
-		WHERE NOT EXISTS (
+		WHERE archival_reason IS NULL AND NOT EXISTS (
 			SELECT 1
 			FROM contract_sectors cs
 			WHERE cs.db_contract_id = c.id
@@ -364,6 +386,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 			SELECT c.fcid, c.size, MAX(c.size) as contract_size, COUNT(*) * ? as sector_size
 			FROM contracts c
 			INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+			WHERE archival_reason IS NULL
 			GROUP BY c.fcid
 		) i
 	`, rhpv2.SectorSize)
@@ -500,12 +523,11 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 		UPDATE sectors
 		SET latest_host = COALESCE((
 			SELECT * FROM (
-				SELECT h.public_key
-				FROM hosts h
-				INNER JOIN contracts c ON c.host_id = h.id
+				SELECT c.host_key
+				FROM contracts c
 				INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
 				INNER JOIN sectors s ON s.id = cs.db_sector_id
-				WHERE s.root = ? AND h.public_key != ?
+				WHERE s.root = ? AND c.host_key != ? AND c.archival_reason IS NULL
 				LIMIT 1
 			) AS _
 		), ?)
@@ -525,8 +547,7 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 		) AND db_contract_id IN (
 			SELECT c.id
 			FROM contracts c
-			INNER JOIN hosts h ON h.id = c.host_id
-			WHERE h.public_key = ?
+			WHERE c.host_key = ?
 		)
 	`, Hash256(root), PublicKey(hk))
 	if err != nil {
@@ -789,20 +810,20 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	offsetLimitStr := fmt.Sprintf("LIMIT %d OFFSET %d", opts.Limit, opts.Offset)
 
 	// fetch stored data for each host
-	rows, err := tx.Query(ctx, "SELECT host_id, SUM(size) FROM contracts GROUP BY host_id")
+	rows, err := tx.Query(ctx, "SELECT host_key, SUM(size) FROM contracts WHERE archival_reason IS NULL GROUP BY host_key")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch stored data: %w", err)
 	}
 	defer rows.Close()
 
-	storedDataMap := make(map[int64]uint64)
+	storedDataMap := make(map[types.PublicKey]uint64)
 	for rows.Next() {
-		var hostID int64
+		var hostKey PublicKey
 		var storedData uint64
-		if err := rows.Scan(&hostID, &storedData); err != nil {
+		if err := rows.Scan(&hostKey, &storedData); err != nil {
 			return nil, fmt.Errorf("failed to scan stored data: %w", err)
 		}
-		storedDataMap[hostID] = storedData
+		storedDataMap[types.PublicKey(hostKey)] = storedData
 	}
 
 	// query hosts
@@ -866,7 +887,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 			}
 		}
 		h.PriceTable.Expiry = pte.Time
-		h.StoredData = storedDataMap[hostID]
+		h.StoredData = storedDataMap[h.PublicKey]
 		hosts = append(hosts, h)
 	}
 
@@ -943,42 +964,6 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 		return 0, fmt.Errorf("failed to insert slab: %w", err)
 	}
 	return bufferedSlabID, nil
-}
-
-func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	var contractState ContractState
-	if err := contractState.LoadString(state); err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
-	}
-	var hostID int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = ?",
-		PublicKey(rev.HostKey())).Scan(&hostID); err != nil {
-		return api.ContractMetadata{}, api.ErrHostNotFound
-	}
-
-	res, err := tx.Exec(ctx, `
-		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
-		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending,
-		fund_account_spending, delete_spending, list_spending)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
-		contractState, Currency(totalCost), 0, 0, "0", rev.Revision.Filesize, startHeight, rev.Revision.WindowStart, rev.Revision.WindowEnd,
-		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency)
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to insert contract: %w", err)
-	}
-	cid, err := res.LastInsertId()
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract id: %w", err)
-	}
-
-	contracts, err := QueryContracts(ctx, tx, []string{"c.id = ?"}, []any{cid})
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to fetch contract: %w", err)
-	} else if len(contracts) == 0 {
-		return api.ContractMetadata{}, api.ErrContractNotFound
-	}
-	return contracts[0], nil
 }
 
 func InsertMetadata(ctx context.Context, tx sql.Tx, objID, muID *int64, md api.ObjectUserMetadata) error {
@@ -1132,11 +1117,11 @@ func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Tim
 		CREATE TEMPORARY TABLE slabs_health AS
 			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
 			THEN
-				CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) < slabs.min_shards)
+				CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_key END)) < slabs.min_shards)
 				THEN -1
 				ELSE 1
 				END
-			ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_id END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
+			ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_key END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
 			END as health
 			FROM slabs
 			INNER JOIN sectors s ON s.db_slab_id = slabs.id
@@ -1473,12 +1458,12 @@ func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
 	return id, nil
 }
 
-func Objects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int) (resp api.ObjectsResponse, err error) {
+func Objects(ctx context.Context, tx Tx, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (resp api.ObjectsResponse, err error) {
 	switch delim {
 	case "":
-		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsNoDelim(ctx, tx, bucket, prefix, substring, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	case "/":
-		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+		resp, err = listObjectsSlashDelim(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit, slabEncryptionKey)
 	default:
 		err = fmt.Errorf("unsupported delimiter: '%s'", delim)
 	}
@@ -1503,6 +1488,7 @@ func ObjectMetadata(ctx context.Context, tx Tx, bucket, key string) (api.Object,
 	om, err := tx.ScanObjectMetadata(tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		WHERE o.id = ?
 	`, tx.SelectObjectMetadataExpr()), objID))
 	if err != nil {
@@ -1600,7 +1586,7 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}
 
 	var totalUploaded uint64
-	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(size), 0) FROM contracts").
+	err = tx.QueryRow(ctx, "SELECT COALESCE(SUM(size), 0) FROM contracts WHERE archival_reason IS NULL").
 		Scan(&totalUploaded)
 	if err != nil {
 		return api.ObjectsStatsResponse{}, fmt.Errorf("failed to fetch contract stats: %w", err)
@@ -1792,13 +1778,12 @@ func RemoveContractSet(ctx context.Context, tx sql.Tx, contractSet string) error
 }
 
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
-	// fetch contracts
+	// fetch contracts belonging to offline hosts
 	rows, err := tx.Query(ctx, `
-		SELECT fcid
-		FROM contracts
-		INNER JOIN hosts h ON h.id = contracts.host_id
-		WHERE recent_downtime >= ? AND recent_scan_failures >= ?
-	`, DurationMS(maxDownTime), minRecentFailures)
+SELECT fcid
+FROM contracts c
+INNER JOIN hosts h ON h.public_key = c.host_key
+WHERE h.recent_downtime >= ? AND h.recent_scan_failures >= ?`, DurationMS(maxDownTime), minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch contracts: %w", err)
 	}
@@ -1813,7 +1798,7 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		fcids = append(fcids, types.FileContractID(fcid))
 	}
 
-	// archive contracts
+	// archive those contracts
 	for _, fcid := range fcids {
 		if err := ArchiveContract(ctx, tx, fcid, api.ContractArchivalReasonHostPruned); err != nil {
 			return 0, fmt.Errorf("failed to archive contract %v: %w", fcid, err)
@@ -1821,54 +1806,11 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 	}
 
 	// delete hosts
-	res, err := tx.Exec(ctx, "DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?",
-		DurationMS(maxDownTime), minRecentFailures)
+	res, err := tx.Exec(ctx, `DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?`, DurationMS(maxDownTime), minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
-}
-
-func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	var contractState ContractState
-	if err := contractState.LoadString(state); err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to load contract state: %w", err)
-	}
-	// create copy of contract in archived_contracts
-	if err := copyContractToArchive(ctx, tx, renewedFrom, &rev.Revision.ParentID, api.ContractArchivalReasonRenewed); err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to copy contract to archived_contracts: %w", err)
-	}
-	// update existing contract
-	_, err := tx.Exec(ctx, `
-		UPDATE contracts SET
-			created_at = ?,
-			fcid = ?,
-			renewed_from = ?,
-			contract_price = ?,
-			state = ?,
-			total_cost = ?,
-			proof_height = ?,
-			revision_height = ?,
-			revision_number = ?,
-			size = ?,
-			start_height = ?,
-			window_start = ?,
-			window_end = ?,
-			upload_spending = ?,
-			download_spending = ?,
-			fund_account_spending = ?,
-			delete_spending = ?,
-			list_spending = ?
-		WHERE fcid = ?
-	`,
-		time.Now(), FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice), contractState,
-		Currency(totalCost), 0, 0, fmt.Sprint(rev.Revision.RevisionNumber), rev.Revision.Filesize, startHeight,
-		rev.Revision.WindowStart, rev.Revision.WindowEnd, ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
-		ZeroCurrency, FileContractID(renewedFrom))
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to update contract: %w", err)
-	}
-	return Contract(ctx, tx, rev.ID())
 }
 
 func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
@@ -1876,19 +1818,20 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 	if len(whereExprs) > 0 {
 		whereExpr = "WHERE " + strings.Join(whereExprs, " AND ")
 	}
+
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
-			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
-			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
-			FROM contracts AS c
-			INNER JOIN hosts h ON h.id = c.host_id
-			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			%s
-			ORDER BY c.id ASC`, whereExpr),
-		whereArgs...,
-	)
+SELECT
+	c.fcid, c.host_id, c.host_key,
+	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
+	c.contract_price, c.initial_renter_funds,
+	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
+	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+FROM contracts AS c
+LEFT JOIN hosts h ON h.public_key = c.host_key
+LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
+LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
+%s
+ORDER BY c.id ASC`, whereExpr), whereArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -2007,7 +1950,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 		SELECT h.public_key, c.fcid
 		FROM contract_sectors cs
 		INNER JOIN contracts c ON c.id = cs.db_contract_id
-		INNER JOIN hosts h ON h.id = c.host_id
+		INNER JOIN hosts h ON h.public_key = c.host_key
 		WHERE cs.db_sector_id = ?
 		ORDER BY c.id
 	`)
@@ -2123,6 +2066,37 @@ func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.Bu
 	return nil
 }
 
+func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, c api.ContractMetadata) error {
+	// validate metadata
+	var state ContractState
+	if err := state.LoadString(c.State); err != nil {
+		return err
+	} else if c.ID == (types.FileContractID{}) {
+		return errors.New("contract id is required")
+	} else if c.HostKey == (types.PublicKey{}) {
+		return errors.New("host key is required")
+	}
+
+	// update contract
+	_, err := tx.Exec(ctx, `
+UPDATE contracts SET
+	created_at = ?, fcid = ?,
+	proof_height = ?, renewed_from = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
+	contract_price = ?, initial_renter_funds = ?,
+	delete_spending = ?, fund_account_spending = ?, sector_roots_spending = ?, upload_spending = ?
+WHERE fcid = ?`,
+		time.Now(), FileContractID(c.ID),
+		0, FileContractID(c.RenewedFrom), 0, fmt.Sprint(c.RevisionNumber), c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
+		Currency(c.ContractPrice), Currency(c.InitialRenterFunds),
+		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
+		FileContractID(c.RenewedFrom),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update contract: %w", err)
+	}
+	return nil
+}
+
 func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer.PeerInfo)) error {
 	info, err := PeerInfo(ctx, tx, addr)
 	if err != nil {
@@ -2213,22 +2187,6 @@ func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) 
 		return 0, fmt.Errorf("failed to count wallet events: %w", err)
 	}
 	return uint64(n), nil
-}
-
-func copyContractToArchive(ctx context.Context, tx sql.Tx, fcid types.FileContractID, renewedTo *types.FileContractID, reason string) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO archived_contracts (created_at, fcid, renewed_from, contract_price, state, total_cost,
-			proof_height, revision_height, revision_number, size, start_height, window_start, window_end,
-			upload_spending, download_spending, fund_account_spending, delete_spending, list_spending, renewed_to,
-			host, reason)
-		SELECT ?, fcid, renewed_from, contract_price, state, total_cost, proof_height, revision_height, revision_number,
-			size, start_height, window_start, window_end, upload_spending, download_spending, fund_account_spending,
-			delete_spending, list_spending, ?, h.public_key, ?
-		FROM contracts c
-		INNER JOIN hosts h ON h.id = c.host_id
-		WHERE fcid = ?
-	`, time.Now(), (*FileContractID)(renewedTo), reason, FileContractID(fcid))
-	return err
 }
 
 func scanAutopilot(s Scanner) (api.Autopilot, error) {
@@ -2345,35 +2303,6 @@ func scanStateElement(s Scanner) (types.StateElement, error) {
 	}, nil
 }
 
-func ObjectsBySlabKey(ctx context.Context, tx Tx, bucket string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error) {
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		INNER JOIN buckets b ON o.db_bucket_id = b.id
-		WHERE b.name = ? AND EXISTS (
-			SELECT 1
-			FROM objects o2
-			INNER JOIN slices sli ON sli.db_object_id = o2.id
-			INNER JOIN slabs sla ON sla.id = sli.db_slab_id
-			WHERE o2.id = o.id AND sla.key = ?
-		)
-	`, tx.SelectObjectMetadataExpr()), bucket, EncryptionKey(slabKey))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query objects: %w", err)
-	}
-	defer rows.Close()
-
-	var objects []api.ObjectMetadata
-	for rows.Next() {
-		om, err := tx.ScanObjectMetadata(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan object metadata: %w", err)
-		}
-		objects = append(objects, om)
-	}
-	return objects, nil
-}
-
 func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedSlab) (string, error) {
 	// fetch relevant slab info
 	var slabID, bufferedSlabID int64
@@ -2455,10 +2384,6 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 		updateKeys = append(updateKeys, "upload_spending = ?")
 		updateValues = append(updateValues, Currency(newSpending.Uploads))
 	}
-	if !newSpending.Downloads.IsZero() {
-		updateKeys = append(updateKeys, "download_spending = ?")
-		updateValues = append(updateValues, Currency(newSpending.Downloads))
-	}
 	if !newSpending.FundAccount.IsZero() {
 		updateKeys = append(updateKeys, "fund_account_spending = ?")
 		updateValues = append(updateValues, Currency(newSpending.FundAccount))
@@ -2468,7 +2393,7 @@ func RecordContractSpending(ctx context.Context, tx Tx, fcid types.FileContractI
 		updateValues = append(updateValues, Currency(newSpending.Deletions))
 	}
 	if !newSpending.SectorRoots.IsZero() {
-		updateKeys = append(updateKeys, "list_spending = ?")
+		updateKeys = append(updateKeys, "sector_roots_spending = ?")
 		updateValues = append(updateValues, Currency(newSpending.SectorRoots))
 	}
 	updateKeys = append(updateKeys, "revision_number = ?", "size = ?")
@@ -2526,13 +2451,12 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(sec.latest_host, ?), COALESCE(c.fcid, ?), COALESCE(h.public_key, ?)
+		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(sec.latest_host, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
 		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
 		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
 		LEFT JOIN contracts c ON c.id = csec.db_contract_id
-		LEFT JOIN hosts h ON h.id = c.host_id
 		WHERE sli.db_object_id = ?
 		ORDER BY sli.object_index ASC, sec.slab_index ASC
 	`, Hash256{}, PublicKey{}, FileContractID{}, PublicKey{}, objID)
@@ -2614,7 +2538,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 	}, nil
 }
 
-func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int) (api.ObjectsResponse, error) {
+func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error) {
 	// fetch one more to see if there are more entries
 	if limit <= -1 {
 		limit = math.MaxInt
@@ -2630,9 +2554,14 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 		sortDir = api.SortDirAsc
 	}
 
-	// filter by bucket
-	whereExprs := []string{"o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)"}
-	whereArgs := []any{bucket}
+	var whereExprs []string
+	var whereArgs []any
+
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		whereArgs = append(whereArgs, bucket)
+	}
 
 	// apply prefix
 	if prefix != "" {
@@ -2654,12 +2583,20 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 
 	// apply marker
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
+		markerExprs := []string{"o.object_id = ?"}
+		markerArgs := []any{marker}
+
+		if bucket != "" {
+			markerExprs = append(markerExprs, "b.name = ?")
+			markerArgs = append(markerArgs, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
-		`, col), bucket, marker).Scan(dst)
+			WHERE %s
+		`, col, strings.Join(markerExprs, " AND ")), markerArgs...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -2672,19 +2609,32 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	whereExprs = append(whereExprs, markerExprs...)
 	whereArgs = append(whereArgs, markerArgs...)
 
+	// apply slab key
+	if slabEncryptionKey != (object.EncryptionKey{}) {
+		whereExprs = append(whereExprs, "EXISTS(SELECT 1 FROM objects o2 INNER JOIN slices sli ON sli.db_object_id = o2.id INNER JOIN slabs sla ON sla.id = sli.db_slab_id WHERE o2.id = o.id AND sla.key = ?)")
+		whereArgs = append(whereArgs, EncryptionKey(slabEncryptionKey))
+	}
+
 	// apply limit
 	whereArgs = append(whereArgs, limit)
 
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
+
 	// run query
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM objects o
-		WHERE %s
-		ORDER BY %s
-		LIMIT ?
-	`,
+	SELECT %s
+	FROM objects o
+	INNER JOIN buckets b ON b.id = o.db_bucket_id
+	%s
+	ORDER BY %s
+	LIMIT ?
+`,
 		tx.SelectObjectMetadataExpr(),
-		strings.Join(whereExprs, " AND "),
+		whereExpr,
 		strings.Join(orderByExprs, ", ")),
 		whereArgs...)
 	if err != nil {
@@ -2718,7 +2668,7 @@ func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, s
 	}, nil
 }
 
-func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsResponse, error) {
+func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error) {
 	// split prefix into path and object prefix
 	path := "/" // root of bucket
 	if idx := strings.LastIndex(prefix, "/"); idx != -1 {
@@ -2754,7 +2704,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 
 	args := []any{
 		path,
-		dirID, bucket,
+		dirID,
 	}
 
 	// apply prefix
@@ -2767,15 +2717,21 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		)
 	}
 
+	// apply slab key
+	var slabKeyExpr string
+	if slabEncryptionKey != (object.EncryptionKey{}) {
+		slabKeyExpr = "AND EXISTS(SELECT 1 FROM objects o2 INNER JOIN slices sli ON sli.db_object_id = o2.id INNER JOIN slabs sla ON sla.id = sli.db_slab_id WHERE o2.id = o.id AND sla.key = ?)"
+		args = append(args, EncryptionKey(slabEncryptionKey))
+	}
+
 	args = append(args,
-		bucket,
 		path+"%",
 		utf8.RuneCountInString(path), path,
 		dirID,
 	)
 
 	// apply marker
-	var whereExpr string
+	var whereExprs []string
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
 		var groupFn string
 		switch col {
@@ -2786,19 +2742,34 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		default:
 			return fmt.Errorf("unknown column: %v", col)
 		}
+
+		markerExprsObj := []string{"o.object_id = ?"}
+		markerArgsObj := []any{marker}
+		if bucket != "" {
+			markerExprsObj = append(markerExprsObj, "b.name = ?")
+			markerArgsObj = append(markerArgsObj, bucket)
+		}
+
+		markerExprsDir := []string{"d.name = ?"}
+		markerArgsDir := []any{marker}
+		if bucket != "" {
+			markerExprsDir = append(markerExprsDir, "b.name = ?")
+			markerArgsDir = append(markerArgsDir, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
+			WHERE %s
 			UNION ALL
 			SELECT %s(o.%s)
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
-			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
+			WHERE %s
+			GROUP BY d.id, o.db_bucket_id
+		`, col, strings.Join(markerExprsObj, " AND "), groupFn, col, tx.CharLengthExpr(), strings.Join(markerExprsDir, " AND ")), append(markerArgsObj, markerArgsDir...)...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -2808,7 +2779,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	if err != nil {
 		return api.ObjectsResponse{}, fmt.Errorf("failed to query marker: %w", err)
 	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
+		whereExprs = append(whereExprs, markerExprs...)
 	}
 	args = append(args, markerArgs...)
 
@@ -2818,8 +2789,20 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 		return api.ObjectsResponse{}, fmt.Errorf("failed to apply sorting: %w", err)
 	}
 
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		args = append(args, bucket)
+	}
+
 	// apply offset and limit
 	args = append(args, limit)
+
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
 
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
@@ -2827,27 +2810,25 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+			SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 			FROM objects o
 			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
+			WHERE o.object_id != ? AND o.db_directory_id = ? AND d.id IS NULL %s %s
 			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+			SELECT o.db_bucket_id, d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 			FROM objects o
 			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
-			GROUP BY d.id
+			WHERE o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND d.db_parent_id = ?
+			GROUP BY d.id, o.db_bucket_id
 		) AS o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		%s
 		ORDER BY %s
 		LIMIT ?
 	`,
 		tx.SelectObjectMetadataExpr(),
 		prefixExpr,
+		slabKeyExpr,
 		tx.CharLengthExpr(),
 		prefixExpr,
 		whereExpr,

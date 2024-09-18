@@ -237,6 +237,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_idx_db_directory", log)
 				},
 			},
+			{
+				ID: "00021_archived_contracts",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00021_archived_contracts", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
@@ -262,6 +268,12 @@ var (
 				ID: "00003_unix_ms",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
+				},
+			},
+			{
+				ID: "00004_contract_spending",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_contract_spending", log)
 				},
 			},
 		}

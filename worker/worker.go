@@ -114,6 +114,7 @@ type (
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
+		Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
@@ -406,21 +407,21 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 		}
 	}
 
-	// migrate the slab
-	numShardsMigrated, surchargeApplied, err := w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
-	if err != nil {
-		jc.Encode(api.MigrateSlabResponse{
-			NumShardsMigrated: numShardsMigrated,
-			SurchargeApplied:  surchargeApplied,
-			Error:             err.Error(),
-		})
-		return
+	// migrate the slab and handle alerts
+	err = w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
+	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
+		var objects []api.ObjectMetadata
+		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
+			w.logger.Errorf("failed to list objects for slab key; %w", err)
+		} else {
+			objects = res.Objects
+		}
+		w.alerts.RegisterAlert(ctx, newMigrationFailedAlert(slab.EncryptionKey, slab.Health, objects, err))
+	} else if err == nil {
+		w.alerts.DismissAlerts(jc.Request.Context(), alerts.IDForSlab(alertMigrationID, slab.EncryptionKey))
 	}
 
-	jc.Encode(api.MigrateSlabResponse{
-		NumShardsMigrated: numShardsMigrated,
-		SurchargeApplied:  surchargeApplied,
-	})
+	jc.Check("failed to migrate slab", err)
 }
 
 func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
@@ -480,8 +481,11 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 
 func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 	// parse bucket
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 
@@ -533,10 +537,14 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 
 	ctx := jc.Request.Context()
 
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
+
 	var prefix string
 	if jc.DecodeForm("prefix", &prefix) != nil {
 		return
@@ -622,8 +630,11 @@ func (w *Worker) objectHandlerPUT(jc jape.Context) {
 	}
 
 	// decode the bucket from the query string
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 
@@ -687,8 +698,11 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 	}
 
 	// decode the bucket from the query string
-	bucket := api.DefaultBucketName
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
 
@@ -779,7 +793,8 @@ func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	} else if orr.Bucket == "" {
-		orr.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 
 	if orr.Prefix == "" {
@@ -960,7 +975,7 @@ func (w *Worker) Handler() http.Handler {
 
 		"POST   /event": w.eventHandlerPOST,
 
-		"GET /memory": w.memoryGET,
+		"GET    /memory": w.memoryGET,
 
 		"GET    /rhp/contracts":  w.rhpContractsHandlerGET,
 		"POST   /rhp/scan":       w.rhpScanHandler,
@@ -970,11 +985,11 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
-		"HEAD   /object/*key":  w.objectHandlerHEAD,
-		"GET    /object/*key":  w.objectHandlerGET,
-		"PUT    /object/*key":  w.objectHandlerPUT,
-		"DELETE /object/*key":  w.objectHandlerDELETE,
-		"POST /objects/remove": w.objectsRemoveHandlerPOST,
+		"HEAD   /object/*key":    w.objectHandlerHEAD,
+		"GET    /object/*key":    w.objectHandlerGET,
+		"PUT    /object/*key":    w.objectHandlerPUT,
+		"DELETE /object/*key":    w.objectHandlerDELETE,
+		"POST   /objects/remove": w.objectsRemoveHandlerPOST,
 
 		"PUT    /multipart/*key": w.multipartUploadHandlerPUT,
 

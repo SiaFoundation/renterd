@@ -17,7 +17,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	s3aws "github.com/aws/aws-sdk-go/service/s3"
-	"github.com/minio/minio-go/v7"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -49,6 +48,7 @@ import (
 )
 
 const (
+	testBucket           = "testbucket"
 	testBusFlushInterval = 100 * time.Millisecond
 )
 
@@ -65,9 +65,7 @@ type TestCluster struct {
 	Autopilot *autopilot.Client
 	Bus       *bus.Client
 	Worker    *worker.Client
-	S3Aws     *s3aws.S3
-	S3        *minio.Client
-	S3Core    *minio.Core
+	S3        *s3TestClient
 
 	workerShutdownFns    []func(context.Context) error
 	busShutdownFns       []func(context.Context) error
@@ -331,28 +329,17 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	busAddr := fmt.Sprintf("http://%s/bus", busListener.Addr().String())
 	workerAddr := "http://" + workerListener.Addr().String()
-	s3Addr := s3Listener.Addr().String() // not fully qualified path
+	s3Addr := "http://" + s3Listener.Addr().String() // not fully qualified path
 	autopilotAddr := "http://" + autopilotListener.Addr().String()
 
 	// Create clients.
 	autopilotClient := autopilot.NewClient(autopilotAddr, autopilotPassword)
 	busClient := bus.NewClient(busAddr, busPassword)
 	workerClient := worker.NewClient(workerAddr, workerPassword)
-	s3Client, err := minio.New(s3Addr, &minio.Options{
-		Creds:  test.S3Credentials,
-		Secure: false,
-	})
-	tt.OK(err)
-
-	url := s3Client.EndpointURL()
-	s3Core, err := minio.NewCore(url.Host+url.Path, &minio.Options{
-		Creds: test.S3Credentials,
-	})
-	tt.OK(err)
 
 	mySession := session.Must(session.NewSession())
 	s3AWSClient := s3aws.New(mySession, aws.NewConfig().
-		WithEndpoint(s3Client.EndpointURL().String()).
+		WithEndpoint(s3Addr).
 		WithRegion("dummy").
 		WithS3ForcePathStyle(true).
 		WithCredentials(credentials.NewCredentials(&credentials.StaticProvider{
@@ -430,9 +417,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		Autopilot: autopilotClient,
 		Bus:       busClient,
 		Worker:    workerClient,
-		S3:        s3Client,
-		S3Aws:     s3AWSClient,
-		S3Core:    s3Core,
+		S3:        &s3TestClient{s3AWSClient},
 
 		workerShutdownFns:    workerShutdownFns,
 		busShutdownFns:       busShutdownFns,
@@ -502,7 +487,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Update the bus settings.
 	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
-	tt.OK(busClient.UpdatePinnedSettings(ctx, test.PricePinSettings))
 	tt.OK(busClient.UpdateUploadSettings(ctx, us))
 	tt.OK(busClient.UpdateS3Settings(ctx, s3))
 
@@ -524,6 +508,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 				return nil
 			}
 		})
+	}
+
+	// Add test bucket
+	err = cluster.Bus.CreateBucket(ctx, testBucket, api.CreateBucketOptions{})
+	if err != nil && !utils.IsErr(err, api.ErrBucketExists) {
+		tt.Fatalf("failed to create bucket: %v", err)
 	}
 
 	if nHosts > 0 {

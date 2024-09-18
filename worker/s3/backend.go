@@ -91,7 +91,8 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		page.Marker = "/" + page.Marker
 	}
 
-	resp, err := s.b.Objects(ctx, bucketName, prefix.Prefix, api.ListObjectOptions{
+	resp, err := s.b.Objects(ctx, prefix.Prefix, api.ListObjectOptions{
+		Bucket:    bucketName,
 		Delimiter: prefix.Delimiter,
 		Limit:     int(page.MaxKeys),
 		Marker:    page.Marker,
@@ -230,14 +231,15 @@ func (s *s3) GetObject(ctx context.Context, bucketName, key string, rangeRequest
 		}
 	}
 
-	// ensure metadata is not nil
-	if res.Metadata == nil {
-		res.Metadata = make(map[string]string)
+	// set user metadata
+	metadata := make(map[string]string)
+	for k, v := range res.Metadata {
+		metadata[amazonMetadataPrefix+k] = v
 	}
 
 	// decorate metadata
-	res.Metadata["Content-Type"] = res.ContentType
-	res.Metadata["Last-Modified"] = res.LastModified.Std().Format(http.TimeFormat)
+	metadata["Content-Type"] = res.ContentType
+	metadata["Last-Modified"] = res.LastModified.Std().Format(http.TimeFormat)
 
 	// etag to bytes
 	etag, err := hex.DecodeString(res.Etag)
@@ -248,7 +250,7 @@ func (s *s3) GetObject(ctx context.Context, bucketName, key string, rangeRequest
 	return &gofakes3.Object{
 		Hash:     etag,
 		Name:     gofakes3.URLEncode(key),
-		Metadata: res.Metadata,
+		Metadata: metadata,
 		Size:     res.Size,
 		Contents: res.Content,
 		Range:    objectRange,
