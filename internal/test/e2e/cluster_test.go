@@ -34,7 +34,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestListObjectsWithNoDelimiter(t *testing.T) {
+func TestObjectsWithNoDelimiter(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -123,7 +123,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.ListObjects(context.Background(), test.prefix, api.ListObjectOptions{
+		res, err := b.Objects(context.Background(), test.prefix, api.ListObjectOptions{
 			Bucket:  testBucket,
 			SortBy:  test.sortBy,
 			SortDir: test.sortDir,
@@ -142,7 +142,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := b.ListObjects(context.Background(), test.prefix, api.ListObjectOptions{
+				res, err := b.Objects(context.Background(), test.prefix, api.ListObjectOptions{
 					Bucket:  testBucket,
 					SortBy:  test.sortBy,
 					SortDir: test.sortDir,
@@ -168,7 +168,7 @@ func TestListObjectsWithNoDelimiter(t *testing.T) {
 	}
 
 	// list invalid marker
-	_, err := b.ListObjects(context.Background(), "", api.ListObjectOptions{
+	_, err := b.Objects(context.Background(), "", api.ListObjectOptions{
 		Bucket: testBucket,
 		Marker: "invalid",
 		SortBy: api.ObjectSortByHealth,
@@ -382,11 +382,11 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
-// TestListObjectsWithDelimiterSlash is an integration test that verifies
+// TestObjectsWithDelimiterSlash is an integration test that verifies
 // objects are uploaded, download and deleted from and to the paths we
 // would expect. It is similar to the TestObjectEntries unit test, but uses
 // the worker and bus client to verify paths are passed correctly.
-func TestListObjectsWithDelimiterSlash(t *testing.T) {
+func TestObjectsWithDelimiterSlash(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -491,7 +491,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 	}
 	for _, test := range tests {
 		// use the bus client
-		res, err := b.ListObjects(context.Background(), test.path+test.prefix, api.ListObjectOptions{
+		res, err := b.Objects(context.Background(), test.path+test.prefix, api.ListObjectOptions{
 			Bucket:    testBucket,
 			Delimiter: "/",
 			SortBy:    test.sortBy,
@@ -507,7 +507,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 		}
 		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			res, err := b.ListObjects(context.Background(), test.path+test.prefix, api.ListObjectOptions{
+			res, err := b.Objects(context.Background(), test.path+test.prefix, api.ListObjectOptions{
 				Bucket:    testBucket,
 				Delimiter: "/",
 				SortBy:    test.sortBy,
@@ -534,7 +534,7 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 				continue
 			}
 
-			res, err = b.ListObjects(context.Background(), test.path+test.prefix, api.ListObjectOptions{
+			res, err = b.Objects(context.Background(), test.path+test.prefix, api.ListObjectOptions{
 				Bucket:    testBucket,
 				Delimiter: "/",
 				SortBy:    test.sortBy,
@@ -560,11 +560,11 @@ func TestListObjectsWithDelimiterSlash(t *testing.T) {
 
 	// delete all uploads
 	for _, upload := range uploads {
-		tt.OK(w.DeleteObject(context.Background(), testBucket, upload.key, api.DeleteObjectOptions{}))
+		tt.OK(w.DeleteObject(context.Background(), testBucket, upload.key))
 	}
 
 	// assert root dir is empty
-	if resp, err := b.ListObjects(context.Background(), "/", api.ListObjectOptions{Bucket: testBucket}); err != nil {
+	if resp, err := b.Objects(context.Background(), "/", api.ListObjectOptions{Bucket: testBucket}); err != nil {
 		t.Fatal(err)
 	} else if len(resp.Objects) != 0 {
 		t.Fatal("there should be no entries left", resp.Objects)
@@ -778,7 +778,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), testBucket, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	resp, err := cluster.Bus.ListObjects(context.Background(), "fileś/", api.ListObjectOptions{
+	resp, err := cluster.Bus.Objects(context.Background(), "fileś/", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -794,7 +794,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "file"
-	res, err := cluster.Bus.ListObjects(context.Background(), "fileś/file", api.ListObjectOptions{
+	res, err := cluster.Bus.Objects(context.Background(), "fileś/file", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -804,7 +804,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "foo"
-	res, err = cluster.Bus.ListObjects(context.Background(), "fileś/foo", api.ListObjectOptions{
+	res, err = cluster.Bus.Objects(context.Background(), "fileś/foo", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -891,7 +891,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 		}
 
 		// delete the object
-		tt.OK(w.DeleteObject(context.Background(), testBucket, path, api.DeleteObjectOptions{}))
+		tt.OK(w.DeleteObject(context.Background(), testBucket, path))
 	}
 }
 
@@ -974,17 +974,17 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload()
 
 	// Fuzzy search for uploaded data in various ways.
-	resp, err := cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket})
+	resp, err := cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket})
 	tt.OK(err)
 	if len(resp.Objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(resp.Objects))
 	}
-	resp, err = cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "ata"})
+	resp, err = cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "ata"})
 	tt.OK(err)
 	if len(resp.Objects) != 2 {
 		t.Fatalf("should have 2 objects but got %v", len(resp.Objects))
 	}
-	resp, err = cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "1258"})
+	resp, err = cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "1258"})
 	tt.OK(err)
 	if len(resp.Objects) != 1 {
 		t.Fatalf("should have 1 objects but got %v", len(resp.Objects))
@@ -1215,7 +1215,7 @@ func TestParallelUpload(t *testing.T) {
 	wg.Wait()
 
 	// Check if objects exist.
-	resp, err := cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/dir/", Limit: 100})
+	resp, err := cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/dir/", Limit: 100})
 	tt.OK(err)
 	if len(resp.Objects) != 3 {
 		t.Fatal("wrong number of objects", len(resp.Objects))
@@ -1224,29 +1224,29 @@ func TestParallelUpload(t *testing.T) {
 	// Upload one more object.
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte("data")), testBucket, "/foo", api.UploadObjectOptions{}))
 
-	resp, err = cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
 	tt.OK(err)
 	if len(resp.Objects) != 4 {
 		t.Fatal("wrong number of objects", len(resp.Objects))
 	}
 
 	// Delete all objects under /dir/.
-	if err := cluster.Bus.DeleteObject(context.Background(), testBucket, "/dir/", api.DeleteObjectOptions{Batch: true}); err != nil {
+	if err := cluster.Bus.RemoveObjects(context.Background(), testBucket, "/dir/"); err != nil {
 		t.Fatal(err)
 	}
-	resp, err = cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
-	cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
+	cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
 	tt.OK(err)
 	if len(resp.Objects) != 1 {
 		t.Fatal("objects weren't deleted")
 	}
 
 	// Delete all objects under /.
-	if err := cluster.Bus.DeleteObject(context.Background(), testBucket, "/", api.DeleteObjectOptions{Batch: true}); err != nil {
+	if err := cluster.Bus.RemoveObjects(context.Background(), testBucket, "/"); err != nil {
 		t.Fatal(err)
 	}
-	resp, err = cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
-	cluster.Bus.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
+	resp, err = cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
+	cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, Substring: "/", Limit: 100})
 	tt.OK(err)
 	if len(resp.Objects) != 0 {
 		t.Fatal("objects weren't deleted")
@@ -1417,7 +1417,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		}
 
 		// delete the object
-		tt.OK(b.DeleteObject(context.Background(), testBucket, fmt.Sprintf("foo_%d", i), api.DeleteObjectOptions{}))
+		tt.OK(b.DeleteObject(context.Background(), testBucket, fmt.Sprintf("foo_%d", i)))
 	}
 
 	// wait until the slabs and sectors were pruned before constructing the
@@ -1653,7 +1653,7 @@ func TestUploadPacking(t *testing.T) {
 		if res.Size != int64(len(data)) {
 			t.Fatal("unexpected size after upload", res.Size, len(data))
 		}
-		resp, err := b.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket})
+		resp, err := b.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1746,11 +1746,11 @@ func TestUploadPacking(t *testing.T) {
 		return nil
 	})
 
-	// ListObjects should return 2 objects for the slab of file1 since file1 and
+	// Objects should return 2 objects for the slab of file1 since file1 and
 	// file2 share the same slab.
 	o, err := b.Object(context.Background(), testBucket, "file1", api.GetObjectOptions{})
 	tt.OK(err)
-	res, err := b.ListObjects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, SlabEncryptionKey: o.Object.Slabs[0].EncryptionKey})
+	res, err := b.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket, SlabEncryptionKey: o.Object.Slabs[0].EncryptionKey})
 	tt.OK(err)
 	if len(res.Objects) != 2 {
 		t.Fatal("expected 2 objects", len(res.Objects))

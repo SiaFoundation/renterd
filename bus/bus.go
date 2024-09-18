@@ -228,14 +228,14 @@ type (
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
+		Buckets(_ context.Context) ([]api.Bucket, error)
 		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
 		DeleteBucket(_ context.Context, bucketName string) error
-		ListBuckets(_ context.Context) ([]api.Bucket, error)
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
 		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error)
 		Object(ctx context.Context, bucketName, key string) (api.Object, error)
+		Objects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error)
 		ObjectMetadata(ctx context.Context, bucketName, key string) (api.Object, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
 		RemoveObject(ctx context.Context, bucketName, key string) error
@@ -453,12 +453,13 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
-		"GET    /listobjects/*prefix": b.objectsHandlerGET,
-		"GET    /objects/*key":        b.objectHandlerGET,
-		"PUT    /objects/*key":        b.objectsHandlerPUT,
-		"DELETE /objects/*key":        b.objectsHandlerDELETE,
-		"POST   /objects/copy":        b.objectsCopyHandlerPOST,
-		"POST   /objects/rename":      b.objectsRenameHandlerPOST,
+		"GET    /object/*key":     b.objectHandlerGET,
+		"PUT    /object/*key":     b.objectHandlerPUT,
+		"DELETE /object/*key":     b.objectHandlerDELETE,
+		"GET    /objects/*prefix": b.objectsHandlerGET,
+		"POST   /objects/copy":    b.objectsCopyHandlerPOST,
+		"POST   /objects/remove":  b.objectsRemoveHandlerPOST,
+		"POST   /objects/rename":  b.objectsRenameHandlerPOST,
 
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,

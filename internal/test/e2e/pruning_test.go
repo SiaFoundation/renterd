@@ -181,7 +181,7 @@ func TestSectorPruning(t *testing.T) {
 	// delete every other object
 	for i := 0; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OK(b.DeleteObject(context.Background(), testBucket, filename, api.DeleteObjectOptions{}))
+		tt.OK(b.DeleteObject(context.Background(), testBucket, filename))
 	}
 
 	// assert amount of prunable data
@@ -227,7 +227,7 @@ func TestSectorPruning(t *testing.T) {
 	// delete other object
 	for i := 1; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OK(b.DeleteObject(context.Background(), testBucket, filename, api.DeleteObjectOptions{}))
+		tt.OK(b.DeleteObject(context.Background(), testBucket, filename))
 	}
 
 	// assert amount of prunable data

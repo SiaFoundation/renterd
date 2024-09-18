@@ -42,7 +42,7 @@ func TestMetrics(t *testing.T) {
 	data := frand.Bytes(rhpv2.SectorSize)
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{}))
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "foo", api.DownloadObjectOptions{}))
-	tt.OK(w.DeleteObject(context.Background(), testBucket, "foo", api.DeleteObjectOptions{}))
+	tt.OK(w.DeleteObject(context.Background(), testBucket, "foo"))
 
 	tt.Retry(30, time.Second, func() (err error) {
 		defer func() {

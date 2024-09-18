@@ -216,6 +216,10 @@ func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket
 	return ssql.Bucket(ctx, tx, bucket)
 }
 
+func (tx *MainDatabaseTx) Buckets(ctx context.Context) ([]api.Bucket, error) {
+	return ssql.Buckets(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) CharLengthExpr() string {
 	return "CHAR_LENGTH"
 }
@@ -470,14 +474,6 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
-	return ssql.ListBuckets(ctx, tx)
-}
-
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
-}
-
 func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
 	// Create root dir.
 	dirID := int64(sql.DirectoriesRootID)
@@ -532,6 +528,10 @@ func (tx *MainDatabaseTx) MultipartUploads(ctx context.Context, bucket, prefix, 
 
 func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.Object, error) {
 	return ssql.Object(ctx, tx, bucket, key)
+}
+
+func (tx *MainDatabaseTx) Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error) {
+	return ssql.Objects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 }
 
 func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {

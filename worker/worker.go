@@ -114,7 +114,7 @@ type (
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
-		ListObjects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
+		Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
@@ -122,9 +122,10 @@ type (
 		// NOTE: used by worker
 		Bucket(_ context.Context, bucket string) (api.Bucket, error)
 		Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (api.Object, error)
-		DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) error
+		DeleteObject(ctx context.Context, bucket, key string) error
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
 		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+		RemoveObjects(ctx context.Context, bucket, prefix string) error
 	}
 
 	SettingStore interface {
@@ -410,7 +411,7 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	err = w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
 	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
 		var objects []api.ObjectMetadata
-		if res, err := w.bus.ListObjects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
+		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
 			w.logger.Errorf("failed to list objects for slab key; %w", err)
 		} else {
 			objects = res.Objects
@@ -478,7 +479,7 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 }
 
-func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
+func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 	// parse bucket
 	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
@@ -531,7 +532,7 @@ func (w *Worker) objectsHandlerHEAD(jc jape.Context) {
 	serveContent(jc.ResponseWriter, jc.Request, path, bytes.NewReader(nil), *hor)
 }
 
-func (w *Worker) objectsHandlerGET(jc jape.Context) {
+func (w *Worker) objectHandlerGET(jc jape.Context) {
 	jc.Custom(nil, []api.ObjectMetadata{})
 
 	ctx := jc.Request.Context()
@@ -609,7 +610,7 @@ func (w *Worker) objectsHandlerGET(jc jape.Context) {
 	serveContent(jc.ResponseWriter, jc.Request, key, gor.Content, gor.HeadObjectResponse)
 }
 
-func (w *Worker) objectsHandlerPUT(jc jape.Context) {
+func (w *Worker) objectHandlerPUT(jc jape.Context) {
 	jc.Custom((*[]byte)(nil), nil)
 	ctx := jc.Request.Context()
 
@@ -774,21 +775,34 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 	jc.ResponseWriter.Header().Set("ETag", api.FormatETag(resp.ETag))
 }
 
-func (w *Worker) objectsHandlerDELETE(jc jape.Context) {
-	var batch bool
-	if jc.DecodeForm("batch", &batch) != nil {
-		return
-	}
+func (w *Worker) objectHandlerDELETE(jc jape.Context) {
 	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
-	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("key"), api.DeleteObjectOptions{Batch: batch})
+	err := w.bus.DeleteObject(jc.Request.Context(), bucket, jc.PathParam("key"))
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
 	jc.Check("couldn't delete object", err)
+}
+
+func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
+	var orr api.ObjectsRemoveRequest
+	if jc.Decode(&orr) != nil {
+		return
+	} else if orr.Bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
+	}
+
+	if orr.Prefix == "" {
+		jc.Error(errors.New("prefix cannot be empty"), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("couldn't remove objects", w.bus.RemoveObjects(jc.Request.Context(), orr.Bucket, orr.Prefix))
 }
 
 func (w *Worker) rhpContractsHandlerGET(jc jape.Context) {
@@ -961,7 +975,7 @@ func (w *Worker) Handler() http.Handler {
 
 		"POST   /event": w.eventHandlerPOST,
 
-		"GET /memory": w.memoryGET,
+		"GET    /memory": w.memoryGET,
 
 		"GET    /rhp/contracts":  w.rhpContractsHandlerGET,
 		"POST   /rhp/scan":       w.rhpScanHandler,
@@ -971,10 +985,11 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 		"POST   /slab/migrate":    w.slabMigrateHandler,
 
-		"HEAD   /objects/*key": w.objectsHandlerHEAD,
-		"GET    /objects/*key": w.objectsHandlerGET,
-		"PUT    /objects/*key": w.objectsHandlerPUT,
-		"DELETE /objects/*key": w.objectsHandlerDELETE,
+		"HEAD   /object/*key":    w.objectHandlerHEAD,
+		"GET    /object/*key":    w.objectHandlerGET,
+		"PUT    /object/*key":    w.objectHandlerPUT,
+		"DELETE /object/*key":    w.objectHandlerDELETE,
+		"POST   /objects/remove": w.objectsRemoveHandlerPOST,
 
 		"PUT    /multipart/*key": w.multipartUploadHandlerPUT,
 

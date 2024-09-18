@@ -32,8 +32,8 @@ type Bus interface {
 
 	AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
-	DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) (err error)
-	ListObjects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error)
+	DeleteObject(ctx context.Context, bucket, key string) (err error)
+	Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 
 	AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) (err error)
 	CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)

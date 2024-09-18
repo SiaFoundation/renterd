@@ -58,13 +58,12 @@ func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp
 }
 
 // DeleteObject deletes the object at the given path.
-func (c *Client) DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) (err error) {
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string) (err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
-	opts.Apply(values)
 
 	key = api.ObjectKeyEscape(key)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), key))
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/object/%s?"+values.Encode(), key))
 	return
 }
 
@@ -92,7 +91,7 @@ func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
 
 // HeadObject returns the metadata of the object at the given key.
 func (c *Client) HeadObject(ctx context.Context, bucket, key string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
-	c.c.Custom("HEAD", fmt.Sprintf("/objects/%s", key), nil, nil)
+	c.c.Custom("HEAD", fmt.Sprintf("/object/%s", key), nil, nil)
 
 	values := url.Values{}
 	values.Set("bucket", url.QueryEscape(bucket))
@@ -101,7 +100,7 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	key += "?" + values.Encode()
 
 	// TODO: support HEAD in jape client
-	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, key), http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, "HEAD", fmt.Sprintf("%s/object/%s", c.c.BaseURL, key), http.NoBody)
 	if err != nil {
 		panic(err)
 	}
@@ -170,6 +169,15 @@ func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab, set string) 
 	return c.c.WithContext(ctx).POST("/slab/migrate?"+values.Encode(), slab, nil)
 }
 
+// RemoveObjects removes the object with given prefix.
+func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err error) {
+	err = c.c.WithContext(ctx).POST("/objects/remove", api.ObjectsRemoveRequest{
+		Bucket: bucket,
+		Prefix: prefix,
+	}, nil)
+	return
+}
+
 // State returns the current state of the worker.
 func (c *Client) State() (state api.WorkerStateResponse, err error) {
 	err = c.c.GET("/state", &state)
@@ -212,12 +220,12 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 // UploadObject uploads the data in r, creating an object at the given path.
 func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, key string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
 	key = api.ObjectKeyEscape(key)
-	c.c.Custom("PUT", fmt.Sprintf("/objects/%s", key), []byte{}, nil)
+	c.c.Custom("PUT", fmt.Sprintf("/object/%s", key), []byte{}, nil)
 
 	values := make(url.Values)
 	values.Set("bucket", bucket)
 	opts.ApplyValues(values)
-	u, err := url.Parse(fmt.Sprintf("%v/objects/%v", c.c.BaseURL, key))
+	u, err := url.Parse(fmt.Sprintf("%v/object/%v", c.c.BaseURL, key))
 	if err != nil {
 		panic(err)
 	}
@@ -257,8 +265,8 @@ func (c *Client) object(ctx context.Context, bucket, key string, opts api.Downlo
 	values.Set("bucket", url.QueryEscape(bucket))
 	key += "?" + values.Encode()
 
-	c.c.Custom("GET", fmt.Sprintf("/objects/%s", key), nil, (*[]api.ObjectMetadata)(nil))
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/objects/%s", c.c.BaseURL, key), http.NoBody)
+	c.c.Custom("GET", fmt.Sprintf("/object/%s", key), nil, (*[]api.ObjectMetadata)(nil))
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/object/%s", c.c.BaseURL, key), http.NoBody)
 	if err != nil {
 		panic(err)
 	}

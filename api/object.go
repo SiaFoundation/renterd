@@ -97,11 +97,17 @@ type (
 		Metadata     ObjectUserMetadata
 	}
 
-	// ObjectsListResponse is the response type for the /bus/objects/list endpoint.
-	ObjectsListResponse struct {
+	// ObjectsResponse is the response type for the /bus/objects endpoint.
+	ObjectsResponse struct {
 		HasMore    bool             `json:"hasMore"`
 		NextMarker string           `json:"nextMarker"`
 		Objects    []ObjectMetadata `json:"objects"`
+	}
+
+	// ObjectsRemoveRequest is the request type for the /bus/objects/remove endpoint.
+	ObjectsRemoveRequest struct {
+		Bucket string `json:"bucket"`
+		Prefix string `json:"prefix"`
 	}
 
 	// ObjectsRenameRequest is the request type for the /bus/objects/rename endpoint.
@@ -190,10 +196,6 @@ type (
 		Metadata ObjectUserMetadata `json:"metadata"`
 	}
 
-	DeleteObjectOptions struct {
-		Batch bool
-	}
-
 	HeadObjectOptions struct {
 		Range *DownloadRange
 	}
@@ -278,12 +280,6 @@ func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 		} else {
 			h.Set("Range", fmt.Sprintf("bytes=%v-%v", opts.Range.Offset, opts.Range.Offset+opts.Range.Length-1))
 		}
-	}
-}
-
-func (opts DeleteObjectOptions) Apply(values url.Values) {
-	if opts.Batch {
-		values.Set("batch", "true")
 	}
 }
 

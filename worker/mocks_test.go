@@ -384,7 +384,7 @@ func (os *objectStoreMock) DeleteHostSector(ctx context.Context, hk types.Public
 	return nil
 }
 
-func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, key string, opts api.DeleteObjectOptions) error {
+func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
@@ -554,8 +554,8 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 	return
 }
 
-func (os *objectStoreMock) ListObjects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
-	return api.ObjectsListResponse{}, nil
+func (os *objectStoreMock) Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error) {
+	return api.ObjectsResponse{}, nil
 }
 
 func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
@@ -589,6 +589,10 @@ func (os *objectStoreMock) Bucket(_ context.Context, bucket string) (api.Bucket,
 
 func (os *objectStoreMock) MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error) {
 	return api.MultipartUpload{}, nil
+}
+
+func (os *objectStoreMock) RemoveObjects(ctx context.Context, bucket, prefix string) error {
+	return nil
 }
 
 func (os *objectStoreMock) totalSlabBufferSize() (total int) {

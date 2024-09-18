@@ -44,7 +44,7 @@ func (t TreeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func Auth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/objects/") {
+			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/object/") {
 				h.ServeHTTP(w, req)
 			} else {
 				jape.BasicAuth(password)(h).ServeHTTP(w, req)

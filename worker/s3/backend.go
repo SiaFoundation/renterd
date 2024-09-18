@@ -91,7 +91,7 @@ func (s *s3) ListBucket(ctx context.Context, bucketName string, prefix *gofakes3
 		page.Marker = "/" + page.Marker
 	}
 
-	resp, err := s.b.ListObjects(ctx, prefix.Prefix, api.ListObjectOptions{
+	resp, err := s.b.Objects(ctx, prefix.Prefix, api.ListObjectOptions{
 		Bucket:    bucketName,
 		Delimiter: prefix.Delimiter,
 		Limit:     int(page.MaxKeys),
@@ -315,7 +315,7 @@ func (s *s3) HeadObject(ctx context.Context, bucketName, key string) (*gofakes3.
 //	delete marker, which becomes the latest version of the object. If there
 //	isn't a null version, Amazon S3 does not remove any objects.
 func (s *s3) DeleteObject(ctx context.Context, bucketName, key string) (gofakes3.ObjectDeleteResult, error) {
-	err := s.b.DeleteObject(ctx, bucketName, key, api.DeleteObjectOptions{})
+	err := s.b.DeleteObject(ctx, bucketName, key)
 	if utils.IsErr(err, api.ErrBucketNotFound) {
 		return gofakes3.ObjectDeleteResult{}, gofakes3.BucketNotFound(bucketName)
 	} else if utils.IsErr(err, api.ErrObjectNotFound) {
@@ -356,7 +356,7 @@ func (s *s3) PutObject(ctx context.Context, bucketName, key string, meta map[str
 func (s *s3) DeleteMulti(ctx context.Context, bucketName string, objects ...string) (gofakes3.MultiDeleteResult, error) {
 	var res gofakes3.MultiDeleteResult
 	for _, key := range objects {
-		err := s.b.DeleteObject(ctx, bucketName, key, api.DeleteObjectOptions{})
+		err := s.b.DeleteObject(ctx, bucketName, key)
 		if err != nil && !utils.IsErr(err, api.ErrObjectNotFound) {
 			res.Error = append(res.Error, gofakes3.ErrorResult{
 				Key:     key,
