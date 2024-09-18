@@ -15,6 +15,10 @@ import (
 )
 
 var (
+	// ErrBucketMissing is returned by the worker API by endpoints that need a
+	// bucket when it wasn't specified.
+	ErrBucketMissing = errors.New("'bucket' parameter is required")
+
 	// ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
 	// consensus and the consensus is not synced.
 	ErrConsensusNotSynced = errors.New("consensus is not synced")
@@ -58,9 +62,6 @@ type (
 	ContractsResponse struct {
 		Contracts []Contract                 `json:"contracts"`
 		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
-
-		// deprecated
-		Error string `json:"error,omitempty"`
 	}
 
 	MemoryResponse struct {
@@ -71,13 +72,6 @@ type (
 	MemoryStatus struct {
 		Available uint64 `json:"available"`
 		Total     uint64 `json:"total"`
-	}
-
-	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
-	MigrateSlabResponse struct {
-		NumShardsMigrated int    `json:"numShardsMigrated"`
-		SurchargeApplied  bool   `json:"surchargeApplied,omitempty"`
-		Error             string `json:"error,omitempty"`
 	}
 
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
@@ -95,50 +89,11 @@ type (
 		Balance    types.Currency       `json:"balance"`
 	}
 
-	// RHPPruneContractRequest is the request type for the /rhp/contract/:id/prune
-	// endpoint.
-	RHPPruneContractRequest struct {
-		Timeout DurationMS `json:"timeout"`
-	}
-
-	// RHPPruneContractResponse is the response type for the /rhp/contract/:id/prune
-	// endpoint.
-	RHPPruneContractResponse struct {
-		Pruned    uint64 `json:"pruned"`
-		Remaining uint64 `json:"remaining"`
-		Error     string `json:"error,omitempty"`
-	}
-
 	// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
 	RHPPriceTableRequest struct {
 		HostKey    types.PublicKey `json:"hostKey"`
 		SiamuxAddr string          `json:"siamuxAddr"`
 		Timeout    DurationMS      `json:"timeout"`
-	}
-
-	// RHPRenewRequest is the request type for the /rhp/renew endpoint.
-	RHPRenewRequest struct {
-		ContractID         types.FileContractID `json:"contractID"`
-		EndHeight          uint64               `json:"endHeight"`
-		ExpectedNewStorage uint64               `json:"expectedNewStorage"`
-		HostAddress        types.Address        `json:"hostAddress"`
-		HostKey            types.PublicKey      `json:"hostKey"`
-		MaxFundAmount      types.Currency       `json:"maxFundAmount"`
-		MinNewCollateral   types.Currency       `json:"minNewCollateral"`
-		SiamuxAddr         string               `json:"siamuxAddr"`
-		RenterAddress      types.Address        `json:"renterAddress"`
-		RenterFunds        types.Currency       `json:"renterFunds"`
-		WindowSize         uint64               `json:"windowSize"`
-	}
-
-	// RHPRenewResponse is the response type for the /rhp/renew endpoint.
-	RHPRenewResponse struct {
-		Error          string                 `json:"error"`
-		ContractID     types.FileContractID   `json:"contractID"`
-		Contract       rhpv2.ContractRevision `json:"contract"`
-		ContractPrice  types.Currency         `json:"contractPrice"`
-		FundAmount     types.Currency         `json:"fundAmount"`
-		TransactionSet []types.Transaction    `json:"transactionSet"`
 	}
 
 	// RHPScanRequest is the request type for the /rhp/scan endpoint.

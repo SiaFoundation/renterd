@@ -13,8 +13,6 @@ import (
 )
 
 const (
-	bytesPerTB = 1e12
-
 	// maxBaseRPCPriceVsBandwidth is the max ratio for sane pricing between the
 	// MinBaseRPCPrice and the MinDownloadBandwidthPrice. This ensures that 1
 	// million base RPC charges are at most 1% of the cost to download 4TB. This
@@ -32,7 +30,7 @@ const (
 )
 
 var (
-	errHostSettingsGouging = errors.New("host settings gouging detected")
+	ErrHostSettingsGouging = errors.New("host settings gouging detected")
 	ErrPriceTableGouging   = errors.New("price table gouging detected")
 )
 
@@ -190,7 +188,11 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 	}
 
 	// check LatestRevisionCost - expect sane value
-	maxRevisionCost, overflow := gs.MaxRPCPrice.AddWithOverflow(gs.MaxDownloadPrice.Div64(bytesPerTB).Mul64(2048))
+	twoKiBMax, overflow := gs.MaxDownloadPrice.Mul64WithOverflow(2048)
+	if overflow {
+		twoKiBMax = types.MaxCurrency
+	}
+	maxRevisionCost, overflow := gs.MaxRPCPrice.AddWithOverflow(twoKiBMax)
 	if overflow {
 		maxRevisionCost = types.MaxCurrency
 	}
@@ -243,7 +245,7 @@ func checkContractGougingRHPv2(period, renewWindow *uint64, hs *rhpv2.HostSettin
 
 	err = checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
 	if err != nil {
-		err = fmt.Errorf("%w: %v", errHostSettingsGouging, err)
+		err = fmt.Errorf("%w: %v", ErrHostSettingsGouging, err)
 	}
 	return
 }
@@ -290,14 +292,11 @@ func checkPruneGougingRHPv2(gs api.GougingSettings, hs *rhpv2.HostSettings) erro
 		hs.UploadBandwidthPrice,
 	)
 	if overflow {
-		return fmt.Errorf("%w: overflow detected when computing sector download price", errHostSettingsGouging)
+		return fmt.Errorf("%w: overflow detected when computing sector download price", ErrHostSettingsGouging)
 	}
-	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(uint64(bytesPerTB) / rhpv2.SectorSize) // sectors per TB
-	if overflow {
-		return fmt.Errorf("%w: overflow detected when computing download price per TiB", errHostSettingsGouging)
-	}
-	if !gs.MaxDownloadPrice.IsZero() && dpptb.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("%w: cost per TiB exceeds max dl price: %v > %v", errHostSettingsGouging, dpptb, gs.MaxDownloadPrice)
+	dppb := sectorDownloadPrice.Div64(rhpv2.SectorSize)
+	if !gs.MaxDownloadPrice.IsZero() && dppb.Cmp(gs.MaxDownloadPrice) > 0 {
+		return fmt.Errorf("%w: cost per byte exceeds max dl price: %v > %v", ErrHostSettingsGouging, dppb, gs.MaxDownloadPrice)
 	}
 	return nil
 }
@@ -310,12 +309,9 @@ func checkDownloadGougingRHPv3(gs api.GougingSettings, pt *rhpv3.HostPriceTable)
 	if overflow {
 		return fmt.Errorf("%w: overflow detected when computing sector download price", ErrPriceTableGouging)
 	}
-	dpptb, overflow := sectorDownloadPrice.Mul64WithOverflow(uint64(bytesPerTB) / rhpv2.SectorSize) // sectors per TiB
-	if overflow {
-		return fmt.Errorf("%w: overflow detected when computing download price per TiB", ErrPriceTableGouging)
-	}
-	if !gs.MaxDownloadPrice.IsZero() && dpptb.Cmp(gs.MaxDownloadPrice) > 0 {
-		return fmt.Errorf("%w: cost per TiB exceeds max dl price: %v > %v", ErrPriceTableGouging, dpptb, gs.MaxDownloadPrice)
+	dppb := sectorDownloadPrice.Div64(rhpv2.SectorSize)
+	if !gs.MaxDownloadPrice.IsZero() && dppb.Cmp(gs.MaxDownloadPrice) > 0 {
+		return fmt.Errorf("%w: cost per byte exceeds max dl price: %v > %v", ErrPriceTableGouging, dppb, gs.MaxDownloadPrice)
 	}
 	return nil
 }
@@ -328,12 +324,9 @@ func checkUploadGougingRHPv3(gs api.GougingSettings, pt *rhpv3.HostPriceTable) e
 	if overflow {
 		return fmt.Errorf("%w: overflow detected when computing sector price", ErrPriceTableGouging)
 	}
-	uploadPrice, overflow := sectorUploadPricePerMonth.Mul64WithOverflow(uint64(bytesPerTB) / rhpv2.SectorSize) // sectors per TiB
-	if overflow {
-		return fmt.Errorf("%w: overflow detected when computing upload price per TiB", ErrPriceTableGouging)
-	}
+	uploadPrice := sectorUploadPricePerMonth.Div64(rhpv2.SectorSize)
 	if !gs.MaxUploadPrice.IsZero() && uploadPrice.Cmp(gs.MaxUploadPrice) > 0 {
-		return fmt.Errorf("%w: cost per TiB exceeds max ul price: %v > %v", ErrPriceTableGouging, uploadPrice, gs.MaxUploadPrice)
+		return fmt.Errorf("%w: cost per byte exceeds max ul price: %v > %v", ErrPriceTableGouging, uploadPrice, gs.MaxUploadPrice)
 	}
 	return nil
 }

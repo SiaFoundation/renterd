@@ -159,21 +159,21 @@ func (c *Client) FundAccount(ctx context.Context, rev *types.FileContractRevisio
 	})
 }
 
-func (c *Client) Renew(ctx context.Context, rrr api.RHPRenewRequest, gougingChecker gouging.Checker, renewer PrepareRenewFunc, signer SignFunc, rev types.FileContractRevision, renterKey types.PrivateKey) (newRev rhpv2.ContractRevision, txnSet []types.Transaction, contractPrice, fundAmount types.Currency, err error) {
-	err = c.tpool.withTransport(ctx, rrr.HostKey, rrr.SiamuxAddr, func(ctx context.Context, t *transportV3) error {
-		newRev, txnSet, contractPrice, fundAmount, err = rpcRenew(ctx, rrr, gougingChecker, renewer, signer, t, rev, renterKey)
+func (c *Client) Renew(ctx context.Context, gc gouging.Checker, rev types.FileContractRevision, renterKey types.PrivateKey, hostKey types.PublicKey, hostSiamuxAddr string, renewTxnFn PrepareRenewFn, signTxnFn SignTxnFn) (newRev rhpv2.ContractRevision, txnSet []types.Transaction, contractPrice, fundAmount types.Currency, err error) {
+	err = c.tpool.withTransport(ctx, hostKey, hostSiamuxAddr, func(ctx context.Context, t *transportV3) error {
+		newRev, txnSet, contractPrice, fundAmount, err = rpcRenew(ctx, t, gc, rev, renterKey, renewTxnFn, signTxnFn)
 		return err
 	})
 	return
 }
 
-func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.SettingsID, rk types.PrivateKey) (balance types.Currency, _ error) {
+func (c *Client) SyncAccount(ctx context.Context, rev *types.FileContractRevision, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, pt rhpv3.HostPriceTable, rk types.PrivateKey) (balance types.Currency, _ error) {
 	return balance, c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
-		payment, err := payByContract(rev, types.NewCurrency64(1), accID, rk)
+		payment, err := payByContract(rev, pt.AccountBalanceCost, accID, rk)
 		if err != nil {
 			return err
 		}
-		balance, err = rpcAccountBalance(ctx, t, &payment, accID, pt)
+		balance, err = rpcAccountBalance(ctx, t, &payment, accID, pt.UID)
 		return err
 	})
 }

@@ -102,7 +102,7 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 				e.Type,
 				data,
 				e.MaturityHeight,
-				ssql.UnixTimeNS(e.Timestamp),
+				ssql.UnixTimeMS(e.Timestamp),
 			); err != nil {
 				return fmt.Errorf("failed to insert new event: %w", err)
 			}
@@ -180,12 +180,12 @@ func (c chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 	return ssql.UpdateChainIndex(c.ctx, c.tx, index, c.l)
 }
 
-func (c chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
-	return ssql.UpdateContract(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
-}
-
 func (c chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
 	return ssql.UpdateContractProofHeight(c.ctx, c.tx, fcid, proofHeight, c.l)
+}
+
+func (c chainUpdateTx) UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
+	return ssql.UpdateContractRevision(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
 }
 
 func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {

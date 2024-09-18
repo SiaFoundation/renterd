@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 )
 
 type (
@@ -44,30 +44,6 @@ type (
 		DependsOn   []types.Transaction `json:"dependsOn"`
 	}
 
-	// WalletPrepareRenewRequest is the request type for the /wallet/prepare/renew
-	// endpoint.
-	WalletPrepareRenewRequest struct {
-		Revision           types.FileContractRevision `json:"revision"`
-		EndHeight          uint64                     `json:"endHeight"`
-		ExpectedNewStorage uint64                     `json:"expectedNewStorage"`
-		HostAddress        types.Address              `json:"hostAddress"`
-		PriceTable         rhpv3.HostPriceTable       `json:"priceTable"`
-		MaxFundAmount      types.Currency             `json:"maxFundAmount"`
-		MinNewCollateral   types.Currency             `json:"minNewCollateral"`
-		RenterAddress      types.Address              `json:"renterAddress"`
-		RenterFunds        types.Currency             `json:"renterFunds"`
-		RenterKey          types.PrivateKey           `json:"renterKey"`
-		WindowSize         uint64                     `json:"windowSize"`
-	}
-
-	// WalletPrepareRenewResponse is the response type for the /wallet/prepare/renew
-	// endpoint.
-	WalletPrepareRenewResponse struct {
-		FundAmount     types.Currency      `json:"fundAmount"`
-		ToSign         []types.Hash256     `json:"toSign"`
-		TransactionSet []types.Transaction `json:"transactionSet"`
-	}
-
 	// WalletRedistributeRequest is the request type for the /wallet/redistribute
 	// endpoint.
 	WalletRedistributeRequest struct {
@@ -77,12 +53,10 @@ type (
 
 	// WalletResponse is the response type for the /wallet endpoint.
 	WalletResponse struct {
-		ScanHeight  uint64         `json:"scanHeight"`
-		Address     types.Address  `json:"address"`
-		Spendable   types.Currency `json:"spendable"`
-		Confirmed   types.Currency `json:"confirmed"`
-		Unconfirmed types.Currency `json:"unconfirmed"`
-		Immature    types.Currency `json:"immature"`
+		wallet.Balance
+
+		Address    types.Address `json:"address"`
+		ScanHeight uint64        `json:"scanHeight"`
 	}
 
 	WalletSendRequest struct {
@@ -102,18 +76,6 @@ type (
 
 // WalletTransactionsOption is an option for the WalletTransactions method.
 type WalletTransactionsOption func(url.Values)
-
-func WalletTransactionsWithBefore(before time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("before", before.Format(time.RFC3339))
-	}
-}
-
-func WalletTransactionsWithSince(since time.Time) WalletTransactionsOption {
-	return func(q url.Values) {
-		q.Set("since", since.Format(time.RFC3339))
-	}
-}
 
 func WalletTransactionsWithLimit(limit int) WalletTransactionsOption {
 	return func(q url.Values) {

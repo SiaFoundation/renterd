@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"time"
 
@@ -20,35 +19,13 @@ import (
 	"go.sia.tech/renterd/webhooks"
 )
 
-var _ AccountStore = (*accountsMock)(nil)
-
 type accountsMock struct{}
 
-func (*accountsMock) Accounts(context.Context) ([]api.Account, error) {
+func (*accountsMock) Accounts(context.Context, string) ([]api.Account, error) {
 	return nil, nil
 }
 
-func (*accountsMock) AddBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
-	return nil
-}
-
-func (*accountsMock) LockAccount(context.Context, rhpv3.Account, types.PublicKey, bool, time.Duration) (api.Account, uint64, error) {
-	return api.Account{}, 0, nil
-}
-
-func (*accountsMock) UnlockAccount(context.Context, rhpv3.Account, uint64) error {
-	return nil
-}
-
-func (*accountsMock) ResetDrift(context.Context, rhpv3.Account) error {
-	return nil
-}
-
-func (*accountsMock) SetBalance(context.Context, rhpv3.Account, types.PublicKey, *big.Int) error {
-	return nil
-}
-
-func (*accountsMock) ScheduleSync(context.Context, rhpv3.Account, types.PublicKey) error {
+func (*accountsMock) UpdateAccounts(context.Context, []api.Account) error {
 	return nil
 }
 
@@ -72,8 +49,6 @@ func (c *chainMock) ConsensusState(ctx context.Context) (api.ConsensusState, err
 	return c.cs, nil
 }
 
-var _ Bus = (*busMock)(nil)
-
 type busMock struct {
 	*alerterMock
 	*accountsMock
@@ -85,7 +60,6 @@ type busMock struct {
 	*settingStoreMock
 	*syncerMock
 	*s3Mock
-	*walletMock
 	*webhookBroadcasterMock
 	*webhookStoreMock
 }
@@ -101,9 +75,12 @@ func newBusMock(cs *contractStoreMock, hs *hostStoreMock, os *objectStoreMock) *
 		objectStoreMock:        os,
 		settingStoreMock:       &settingStoreMock{},
 		syncerMock:             &syncerMock{},
-		walletMock:             &walletMock{},
 		webhookBroadcasterMock: &webhookBroadcasterMock{},
 	}
+}
+
+func (b *busMock) FundAccount(ctx context.Context, acc rhpv3.Account, fcid types.FileContractID, desired types.Currency) (types.Currency, error) {
+	return types.ZeroCurrency, nil
 }
 
 type contractMock struct {
@@ -131,7 +108,6 @@ func (c *contractMock) AddSector(root types.Hash256, sector *[rhpv2.SectorSize]b
 	c.mu.Lock()
 	c.sectors[root] = sector
 	c.mu.Unlock()
-	return
 }
 
 func (c *contractMock) Sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
@@ -156,13 +132,12 @@ func newContractLockerMock() *contractLockerMock {
 
 func (cs *contractLockerMock) AcquireContract(_ context.Context, fcid types.FileContractID, _ int, _ time.Duration) (uint64, error) {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	lock, exists := cs.locks[fcid]
 	if !exists {
 		cs.locks[fcid] = new(sync.Mutex)
 		lock = cs.locks[fcid]
 	}
+	cs.mu.Unlock()
 
 	lock.Lock()
 	return 0, nil
@@ -173,7 +148,6 @@ func (cs *contractLockerMock) ReleaseContract(_ context.Context, fcid types.File
 	defer cs.mu.Unlock()
 
 	cs.locks[fcid].Unlock()
-	delete(cs.locks, fcid)
 	return nil
 }
 
@@ -410,7 +384,7 @@ func (os *objectStoreMock) DeleteHostSector(ctx context.Context, hk types.Public
 	return nil
 }
 
-func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) error {
+func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
@@ -457,32 +431,32 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 	return []object.SlabSlice{ss}, os.totalSlabBufferSize() > os.slabBufferMaxSizeSoft, nil
 }
 
-func (os *objectStoreMock) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (api.ObjectsResponse, error) {
+func (os *objectStoreMock) Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (api.Object, error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
 	// check if the bucket exists
 	if _, exists := os.objects[bucket]; !exists {
-		return api.ObjectsResponse{}, api.ErrBucketNotFound
+		return api.Object{}, api.ErrBucketNotFound
 	}
 
 	// check if the object exists
-	if _, exists := os.objects[bucket][path]; !exists {
-		return api.ObjectsResponse{}, api.ErrObjectNotFound
+	if _, exists := os.objects[bucket][key]; !exists {
+		return api.Object{}, api.ErrObjectNotFound
 	}
 
 	// clone to ensure the store isn't unwillingly modified
 	var o object.Object
-	if b, err := json.Marshal(os.objects[bucket][path]); err != nil {
+	if b, err := json.Marshal(os.objects[bucket][key]); err != nil {
 		panic(err)
 	} else if err := json.Unmarshal(b, &o); err != nil {
 		panic(err)
 	}
 
-	return api.ObjectsResponse{Object: &api.Object{
-		ObjectMetadata: api.ObjectMetadata{Name: path, Size: o.TotalSize()},
+	return api.Object{
+		ObjectMetadata: api.ObjectMetadata{Key: key, Size: o.TotalSize()},
 		Object:         &o,
-	}}, nil
+	}, nil
 }
 
 func (os *objectStoreMock) FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error) {
@@ -504,9 +478,9 @@ func (os *objectStoreMock) Slab(ctx context.Context, key object.EncryptionKey) (
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
-	os.forEachObject(func(bucket, path string, o object.Object) {
+	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for _, s := range o.Slabs {
-			if s.Slab.Key.String() == key.String() {
+			if s.Slab.EncryptionKey.String() == key.String() {
 				slab = s.Slab
 				return
 			}
@@ -520,13 +494,13 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
-	os.forEachObject(func(bucket, path string, o object.Object) {
+	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			if slab.Key.String() != s.Key.String() {
+			if slab.EncryptionKey.String() != s.EncryptionKey.String() {
 				continue
 			}
 			// update slab
-			shards := os.objects[bucket][path].Slabs[i].Slab.Shards
+			shards := os.objects[bucket][objKey].Slabs[i].Slab.Shards
 			for sI := range shards {
 				// overwrite latest host
 				shards[sI].LatestHost = s.Shards[sI].LatestHost
@@ -547,7 +521,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 					}
 				}
 			}
-			os.objects[bucket][path].Slabs[i].Slab.Shards = shards
+			os.objects[bucket][objKey].Slabs[i].Slab.Shards = shards
 			return
 		}
 	})
@@ -568,9 +542,9 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 		if ps.parameterKey == parameterKey && time.Now().After(ps.lockedUntil) {
 			ps.lockedUntil = time.Now().Add(lockingDuration)
 			pss = append(pss, api.PackedSlab{
-				BufferID: ps.bufferID,
-				Data:     ps.data,
-				Key:      ps.slabKey,
+				BufferID:      ps.bufferID,
+				Data:          ps.data,
+				EncryptionKey: ps.slabKey,
 			})
 			if len(pss) == limit {
 				break
@@ -578,6 +552,10 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 		}
 	}
 	return
+}
+
+func (os *objectStoreMock) Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error) {
+	return api.ObjectsResponse{}, nil
 }
 
 func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
@@ -590,9 +568,9 @@ func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	}
 
 	slabKeyToSlab := make(map[string]*object.Slab)
-	os.forEachObject(func(bucket, path string, o object.Object) {
+	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			slabKeyToSlab[slab.Slab.Key.String()] = &os.objects[bucket][path].Slabs[i].Slab
+			slabKeyToSlab[slab.Slab.EncryptionKey.String()] = &os.objects[bucket][objKey].Slabs[i].Slab
 		}
 	})
 
@@ -613,6 +591,10 @@ func (os *objectStoreMock) MultipartUpload(ctx context.Context, uploadID string)
 	return api.MultipartUpload{}, nil
 }
 
+func (os *objectStoreMock) RemoveObjects(ctx context.Context, bucket, prefix string) error {
+	return nil
+}
+
 func (os *objectStoreMock) totalSlabBufferSize() (total int) {
 	for _, p := range os.partials {
 		if time.Now().After(p.lockedUntil) {
@@ -628,7 +610,7 @@ func (os *objectStoreMock) setSlabBufferMaxSizeSoft(n int) {
 	os.slabBufferMaxSizeSoft = n
 }
 
-func (os *objectStoreMock) forEachObject(fn func(bucket, path string, o object.Object)) {
+func (os *objectStoreMock) forEachObject(fn func(bucket, key string, o object.Object)) {
 	for bucket, objects := range os.objects {
 		for path, object := range objects {
 			fn(bucket, path, object)
@@ -654,10 +636,6 @@ func (*s3Mock) CopyObject(context.Context, string, string, string, string, api.C
 	return api.ObjectMetadata{}, nil
 }
 
-func (*s3Mock) ListObjects(context.Context, string, api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
-	return api.ObjectsListResponse{}, nil
-}
-
 func (*s3Mock) AbortMultipartUpload(context.Context, string, string, string) (err error) {
 	return nil
 }
@@ -678,8 +656,8 @@ func (*s3Mock) MultipartUploadParts(ctx context.Context, bucket, object string, 
 	return api.MultipartListPartsResponse{}, nil
 }
 
-func (*s3Mock) S3AuthenticationSettings(context.Context) (as api.S3AuthenticationSettings, err error) {
-	return api.S3AuthenticationSettings{}, nil
+func (*s3Mock) S3Settings(context.Context) (as api.S3Settings, err error) {
+	return api.S3Settings{}, nil
 }
 
 func (*s3Mock) UpdateSetting(context.Context, string, interface{}) error {
@@ -708,26 +686,6 @@ func (*syncerMock) BroadcastTransaction(context.Context, []types.Transaction) er
 
 func (*syncerMock) SyncerPeers(context.Context) ([]string, error) {
 	return nil, nil
-}
-
-var _ Wallet = (*walletMock)(nil)
-
-type walletMock struct{}
-
-func (*walletMock) WalletDiscard(context.Context, types.Transaction) error {
-	return nil
-}
-
-func (*walletMock) WalletFund(context.Context, *types.Transaction, types.Currency, bool) ([]types.Hash256, []types.Transaction, error) {
-	return nil, nil, nil
-}
-
-func (*walletMock) WalletPrepareRenew(context.Context, types.FileContractRevision, types.Address, types.Address, types.PrivateKey, types.Currency, types.Currency, types.Currency, rhpv3.HostPriceTable, uint64, uint64, uint64) (api.WalletPrepareRenewResponse, error) {
-	return api.WalletPrepareRenewResponse{}, nil
-}
-
-func (*walletMock) WalletSign(context.Context, *types.Transaction, []types.Hash256, types.CoveredFields) error {
-	return nil
 }
 
 var _ webhooks.Broadcaster = (*webhookBroadcasterMock)(nil)

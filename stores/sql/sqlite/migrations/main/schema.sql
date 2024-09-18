@@ -1,16 +1,3 @@
--- dbArchivedContract
-CREATE TABLE `archived_contracts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`fcid` blob NOT NULL UNIQUE,`renewed_from` blob,`contract_price` text,`state` integer NOT NULL DEFAULT 0,`total_cost` text,`proof_height` integer DEFAULT 0,`revision_height` integer DEFAULT 0,`revision_number` text NOT NULL DEFAULT "0",`size` integer,`start_height` integer NOT NULL,`window_start` integer NOT NULL DEFAULT 0,`window_end` integer NOT NULL DEFAULT 0,`upload_spending` text,`download_spending` text,`fund_account_spending` text,`delete_spending` text,`list_spending` text,`renewed_to` blob,`host` blob NOT NULL,`reason` text);
-CREATE INDEX `idx_archived_contracts_start_height` ON `archived_contracts`(`start_height`);
-CREATE INDEX `idx_archived_contracts_revision_height` ON `archived_contracts`(`revision_height`);
-CREATE INDEX `idx_archived_contracts_proof_height` ON `archived_contracts`(`proof_height`);
-CREATE INDEX `idx_archived_contracts_fc_id` ON `archived_contracts`(`fcid`);
-CREATE INDEX `idx_archived_contracts_host` ON `archived_contracts`(`host`);
-CREATE INDEX `idx_archived_contracts_renewed_to` ON `archived_contracts`(`renewed_to`);
-CREATE INDEX `idx_archived_contracts_window_end` ON `archived_contracts`(`window_end`);
-CREATE INDEX `idx_archived_contracts_window_start` ON `archived_contracts`(`window_start`);
-CREATE INDEX `idx_archived_contracts_state` ON `archived_contracts`(`state`);
-CREATE INDEX `idx_archived_contracts_renewed_from` ON `archived_contracts`(`renewed_from`);
-
 -- dbHost
 CREATE TABLE `hosts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`public_key` blob NOT NULL UNIQUE,`settings` text,`price_table` text,`price_table_expiry` datetime,`total_scans` integer,`last_scan` integer,`last_scan_success` numeric,`second_to_last_scan_success` numeric,`scanned` numeric,`uptime` integer,`downtime` integer,`recent_downtime` integer,`recent_scan_failures` integer,`successful_interactions` real,`failed_interactions` real,`lost_sectors` integer,`last_announcement` datetime,`net_address` text,`resolved_addresses` text NOT NULL DEFAULT '');
 CREATE INDEX `idx_hosts_recent_scan_failures` ON `hosts`(`recent_scan_failures`);
@@ -21,16 +8,19 @@ CREATE INDEX `idx_hosts_public_key` ON `hosts`(`public_key`);
 CREATE INDEX `idx_hosts_net_address` ON `hosts`(`net_address`);
 
 -- dbContract
-CREATE TABLE `contracts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`fcid` blob NOT NULL UNIQUE,`renewed_from` blob,`contract_price` text,`state` integer NOT NULL DEFAULT 0,`total_cost` text,`proof_height` integer DEFAULT 0,`revision_height` integer DEFAULT 0,`revision_number` text NOT NULL DEFAULT "0",`size` integer,`start_height` integer NOT NULL,`window_start` integer NOT NULL DEFAULT 0,`window_end` integer NOT NULL DEFAULT 0,`upload_spending` text,`download_spending` text,`fund_account_spending` text,`delete_spending` text,`list_spending` text,`host_id` integer,CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts`(`id`));
-CREATE INDEX `idx_contracts_proof_height` ON `contracts`(`proof_height`);
-CREATE INDEX `idx_contracts_state` ON `contracts`(`state`);
-CREATE INDEX `idx_contracts_renewed_from` ON `contracts`(`renewed_from`);
+CREATE TABLE contracts (`id` integer PRIMARY KEY AUTOINCREMENT, `created_at` datetime, `fcid` blob NOT NULL UNIQUE, `host_id` integer, `host_key` blob NOT NULL, `archival_reason` text DEFAULT NULL, `proof_height` integer DEFAULT 0, `renewed_from` blob, `renewed_to` blob, `revision_height` integer DEFAULT 0, `revision_number` text NOT NULL DEFAULT "0", `size` integer, `start_height` integer NOT NULL, `state` integer NOT NULL DEFAULT 0, `window_start` integer NOT NULL DEFAULT 0, `window_end` integer NOT NULL DEFAULT 0, `contract_price` text, `initial_renter_funds` text, `delete_spending` text, `fund_account_spending` text, `sector_roots_spending` text, `upload_spending` text, CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts`(`id`));
+CREATE INDEX `idx_contracts_archival_reason` ON `contracts`(`archival_reason`);
+CREATE INDEX `idx_contracts_fcid` ON `contracts`(`fcid`);
 CREATE INDEX `idx_contracts_host_id` ON `contracts`(`host_id`);
-CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
-CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);
+CREATE INDEX `idx_contracts_host_key` ON `contracts`(`host_key`);
+CREATE INDEX `idx_contracts_proof_height` ON `contracts`(`proof_height`);
+CREATE INDEX `idx_contracts_renewed_from` ON `contracts`(`renewed_from`);
+CREATE INDEX `idx_contracts_renewed_to` ON `contracts`(`renewed_to`);
 CREATE INDEX `idx_contracts_revision_height` ON `contracts`(`revision_height`);
 CREATE INDEX `idx_contracts_start_height` ON `contracts`(`start_height`);
-CREATE INDEX `idx_contracts_fc_id` ON `contracts`(`fcid`);
+CREATE INDEX `idx_contracts_state` ON `contracts`(`state`);
+CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
+CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);
 
 -- dbContractSet
 CREATE TABLE `contract_sets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`name` text UNIQUE);
@@ -58,6 +48,7 @@ CREATE INDEX `idx_objects_object_id` ON `objects`(`object_id`);
 CREATE INDEX `idx_objects_size` ON `objects`(`size`);
 CREATE UNIQUE INDEX `idx_object_bucket` ON `objects`(`db_bucket_id`,`object_id`);
 CREATE INDEX `idx_objects_created_at` ON `objects`(`created_at`);
+CREATE INDEX `idx_objects_db_directory_id` ON `objects`(`db_directory_id`);
 
 -- dbMultipartUpload
 CREATE TABLE `multipart_uploads` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`key` blob,`upload_id` text NOT NULL,`object_id` text NOT NULL,`db_bucket_id` integer NOT NULL,`mime_type` text,CONSTRAINT `fk_multipart_uploads_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`) ON DELETE CASCADE);
@@ -130,8 +121,9 @@ CREATE TABLE `settings` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` dat
 CREATE INDEX `idx_settings_key` ON `settings`(`key`);
 
 -- dbAccount
-CREATE TABLE `ephemeral_accounts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`account_id` blob NOT NULL UNIQUE,`clean_shutdown` numeric DEFAULT false,`host` blob NOT NULL,`balance` text,`drift` text,`requires_sync` numeric);
+CREATE TABLE `ephemeral_accounts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`account_id` blob NOT NULL UNIQUE,`clean_shutdown` numeric DEFAULT false,`host` blob NOT NULL,`balance` text,`drift` text,`requires_sync` numeric, `owner` text NOT NULL);
 CREATE INDEX `idx_ephemeral_accounts_requires_sync` ON `ephemeral_accounts`(`requires_sync`);
+CREATE INDEX `idx_ephemeral_accounts_owner` ON `ephemeral_accounts`(`owner`);
 
 -- dbAutopilot
 CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`identifier` text NOT NULL UNIQUE,`config` text,`current_period` integer DEFAULT 0);
@@ -222,6 +214,3 @@ CREATE INDEX `idx_wallet_events_block_id_height` ON `wallet_events`(`block_id`,`
 CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`output_id` blob NOT NULL,`leaf_index` integer,`merkle_proof` longblob NOT NULL,`value` text,`address` blob,`maturity_height` integer);
 CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
-
--- create default bucket
-INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

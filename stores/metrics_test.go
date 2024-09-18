@@ -118,10 +118,9 @@ func TestContractMetrics(t *testing.T) {
 				RemainingFunds:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				RevisionNumber:      math.MaxUint64,
 				UploadSpending:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
-				DownloadSpending:    types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				FundAccountSpending: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				DeleteSpending:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
-				ListSpending:        types.NewCurrency64(1),
+				SectorRootsSpending: types.NewCurrency64(1),
 			}
 			fcid2Metric[metric.ContractID] = metric
 			metricsTimeAsc = append(metricsTimeAsc, metric)
@@ -189,10 +188,9 @@ func TestContractMetrics(t *testing.T) {
 		expectedMetric.RemainingFunds, _ = metricsTimeAsc[2*i].RemainingFunds.AddWithOverflow(metricsTimeAsc[2*i+1].RemainingFunds)
 		expectedMetric.RevisionNumber = 0
 		expectedMetric.UploadSpending, _ = metricsTimeAsc[2*i].UploadSpending.AddWithOverflow(metricsTimeAsc[2*i+1].UploadSpending)
-		expectedMetric.DownloadSpending, _ = metricsTimeAsc[2*i].DownloadSpending.AddWithOverflow(metricsTimeAsc[2*i+1].DownloadSpending)
 		expectedMetric.FundAccountSpending, _ = metricsTimeAsc[2*i].FundAccountSpending.AddWithOverflow(metricsTimeAsc[2*i+1].FundAccountSpending)
 		expectedMetric.DeleteSpending, _ = metricsTimeAsc[2*i].DeleteSpending.AddWithOverflow(metricsTimeAsc[2*i+1].DeleteSpending)
-		expectedMetric.ListSpending, _ = metricsTimeAsc[2*i].ListSpending.AddWithOverflow(metricsTimeAsc[2*i+1].ListSpending)
+		expectedMetric.SectorRootsSpending, _ = metricsTimeAsc[2*i].SectorRootsSpending.AddWithOverflow(metricsTimeAsc[2*i+1].SectorRootsSpending)
 		if !cmp.Equal(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)) {
 			t.Fatal(i, "unexpected metric", cmp.Diff(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)))
 		}
@@ -428,91 +426,6 @@ func TestNormaliseTimestamp(t *testing.T) {
 		if result := time.Time(normaliseTimestamp(test.start, test.interval, sql.UnixTimeMS(test.ti))); !result.Equal(test.result) {
 			t.Fatalf("expected %v, got %v", test.result, result)
 		}
-	}
-}
-
-func TestPerformanceMetrics(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// Create metrics to query.
-	actions := []string{"download", "upload"}
-	hosts := []types.PublicKey{types.GeneratePrivateKey().PublicKey(), types.GeneratePrivateKey().PublicKey()}
-	origins := []string{"worker1", "worker2"}
-	durations := []time.Duration{time.Second, time.Hour}
-	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
-	var i byte
-	for _, action := range actions {
-		for _, host := range hosts {
-			for _, origin := range origins {
-				for _, duration := range durations {
-					for _, recordedTime := range times {
-						if err := ss.RecordPerformanceMetric(context.Background(), api.PerformanceMetric{
-							Action:    action,
-							Timestamp: api.TimeRFC3339(recordedTime),
-							Duration:  duration,
-							HostKey:   host,
-							Origin:    origin,
-						}); err != nil {
-							t.Fatal(err)
-						}
-						i++
-					}
-				}
-			}
-		}
-	}
-
-	assertMetrics := func(start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts, expected int, cmp func(api.PerformanceMetric)) {
-		t.Helper()
-		metrics, err := ss.PerformanceMetrics(context.Background(), start, n, interval, opts)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(metrics) != expected {
-			t.Fatalf("expected %v metrics, got %v", expected, len(metrics))
-		} else if !sort.SliceIsSorted(metrics, func(i, j int) bool {
-			return time.Time(metrics[i].Timestamp).Before(time.Time(metrics[j].Timestamp))
-		}) {
-			t.Fatal("expected metrics to be sorted by time")
-		}
-		for _, m := range metrics {
-			cmp(m)
-		}
-	}
-
-	// Query without any filters.
-	start := time.UnixMilli(1)
-	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{}, 3, func(m api.PerformanceMetric) {})
-
-	// Filter by actions.
-	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{Action: actions[0]}, 3, func(m api.PerformanceMetric) {
-		if m.Action != actions[0] {
-			t.Fatalf("expected action to be %v, got %v", actions[0], m.Action)
-		}
-	})
-
-	// Filter by hosts.
-	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{HostKey: hosts[0]}, 3, func(m api.PerformanceMetric) {
-		if m.HostKey != hosts[0] {
-			t.Fatalf("expected hosts to be %v, got %v", hosts[0], m.HostKey)
-		}
-	})
-
-	// Filter by reporters.
-	assertMetrics(start, 3, time.Millisecond, api.PerformanceMetricsQueryOpts{Origin: origins[0]}, 3, func(m api.PerformanceMetric) {
-		if m.Origin != origins[0] {
-			t.Fatalf("expected origin to be %v, got %v", origins[0], m.Origin)
-		}
-	})
-
-	// Prune metrics
-	if err := ss.PruneMetrics(context.Background(), api.MetricPerformance, time.UnixMilli(3)); err != nil {
-		t.Fatal(err)
-	} else if metrics, err := ss.PerformanceMetrics(context.Background(), time.UnixMilli(1), 3, time.Millisecond, api.PerformanceMetricsQueryOpts{}); err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 1 {
-		t.Fatalf("expected 1 metric, got %v", len(metrics))
 	}
 }
 

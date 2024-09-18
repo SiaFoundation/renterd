@@ -65,7 +65,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	// upload an object using our custom reader
 	br := newBlockedReader(data)
 	go func() {
-		_, err := w.UploadObject(context.Background(), br, api.DefaultBucketName, t.Name(), api.UploadObjectOptions{})
+		_, err := w.UploadObject(context.Background(), br, testBucket, t.Name(), api.UploadObjectOptions{})
 		if err != nil {
 			t.Error(err)
 		}
@@ -135,7 +135,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 			}
 		}
 
-		cr, err := w.RHPContractRoots(context.Background(), id)
+		cr, err := cluster.ContractRoots(context.Background(), id)
 		tt.OK(err)
 		expected := make(map[types.Hash256]struct{})
 		for _, root := range cr {

@@ -57,7 +57,7 @@ func TestWebhooks(t *testing.T) {
 	mux := http.NewServeMux()
 	var events []webhooks.Event
 	var mu sync.Mutex
-	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
 		var event webhooks.Event
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			t.Fatal(err)
@@ -72,7 +72,7 @@ func TestWebhooks(t *testing.T) {
 	// register a hook
 	wh := webhooks.Webhook{
 		Module: webhookModule,
-		URL:    fmt.Sprintf("http://%v/events", srv.Listener.Addr().String()),
+		URL:    fmt.Sprintf("http://%v/event", srv.Listener.Addr().String()),
 	}
 	if hookID := wh.String(); hookID != fmt.Sprintf("%v.%v.%v", wh.URL, wh.Module, "") {
 		t.Fatalf("wrong result for wh.String(): %v != %v", wh.String(), hookID)

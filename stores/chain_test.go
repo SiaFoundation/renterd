@@ -64,7 +64,7 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// assert update contract is successful
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		if err := tx.UpdateContract(fcid, 1, 2, 3); err != nil {
+		if err := tx.UpdateContractRevision(fcid, 1, 2, 3); err != nil {
 			return err
 		} else if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
 			return err
@@ -95,7 +95,7 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// assert we only update revision height if the rev number doesn't increase
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		return tx.UpdateContract(fcid, 2, 2, 4)
+		return tx.UpdateContractRevision(fcid, 2, 2, 4)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
@@ -122,8 +122,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// renew the contract
-	_, err = ss.addTestRenewedContract(types.FileContractID{2}, fcid, hks[0], 1)
-	if err != nil {
+	if err = ss.renewTestContract(hks[0], fcid, types.FileContractID{2}, 1); err != nil {
 		t.Fatal(err)
 	}
 

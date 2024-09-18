@@ -132,6 +132,7 @@ func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
 
 func newTestWorkerCfg() config.Worker {
 	return config.Worker{
+		AccountsRefillInterval:   time.Second,
 		ID:                       "test",
 		ContractLockTimeout:      time.Second,
 		BusFlushInterval:         time.Second,

@@ -37,13 +37,14 @@ type (
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
 	MerkleProof     struct{ Hashes []types.Hash256 }
+	NullableString  string
 	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
 	PublicKey       types.PublicKey
 	EncryptionKey   object.EncryptionKey
 	Uint64Str       uint64
 	UnixTimeMS      time.Time
-	UnixTimeNS      time.Time
+	DurationMS      time.Duration
 	Unsigned64      uint64
 )
 
@@ -61,12 +62,13 @@ var (
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
 	_ scannerValuer = (*MerkleProof)(nil)
+	_ scannerValuer = (*NullableString)(nil)
 	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
 	_ scannerValuer = (*EncryptionKey)(nil)
 	_ scannerValuer = (*UnixTimeMS)(nil)
-	_ scannerValuer = (*UnixTimeNS)(nil)
+	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
 )
 
@@ -159,6 +161,10 @@ func (c Currency) Value() (driver.Value, error) {
 
 // Scan scan value into fileContractID, implements sql.Scanner interface.
 func (fcid *FileContractID) Scan(value interface{}) error {
+	if value == nil {
+		*fcid = FileContractID{}
+		return nil
+	}
 	bytes, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal fcid value:", value))
@@ -204,6 +210,9 @@ func (hs *HostSettings) Scan(value interface{}) error {
 
 // Value returns a HostSettings value, implements driver.Valuer interface.
 func (hs HostSettings) Value() (driver.Value, error) {
+	if hs == (HostSettings{}) {
+		return []byte("{}"), nil
+	}
 	return json.Marshal(hs)
 }
 
@@ -218,6 +227,9 @@ func (pt *PriceTable) Scan(value interface{}) error {
 
 // Value returns a PriceTable value, implements driver.Valuer interface.
 func (pt PriceTable) Value() (driver.Value, error) {
+	if pt == (PriceTable{}) {
+		return []byte("{}"), nil
+	}
 	return json.Marshal(pt)
 }
 
@@ -331,8 +343,10 @@ func (u *UnixTimeMS) Scan(value interface{}) error {
 	default:
 		return fmt.Errorf("failed to unmarshal unixTimeMS value: %v %T", value, value)
 	}
-
-	*u = UnixTimeMS(time.UnixMilli(msec))
+	*u = UnixTimeMS(time.Time{})
+	if msec > 0 {
+		*u = UnixTimeMS(time.UnixMilli(msec))
+	}
 	return nil
 }
 
@@ -342,34 +356,30 @@ func (u UnixTimeMS) Value() (driver.Value, error) {
 	return time.Time(u).UnixMilli(), nil
 }
 
-// Scan scan value into UnixTimeNS, implements sql.Scanner interface.
-func (u *UnixTimeNS) Scan(value interface{}) error {
-	var nsec int64
+// Scan scan value into DurationMS, implements sql.Scanner interface.
+func (d *DurationMS) Scan(value interface{}) error {
+	var msec int64
 	var err error
 	switch value := value.(type) {
 	case int64:
-		nsec = value
+		msec = value
 	case []uint8:
-		nsec, err = strconv.ParseInt(string(value), 10, 64)
+		msec, err = strconv.ParseInt(string(value), 10, 64)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal UnixTimeNS value: %v %T", value, value)
+			return fmt.Errorf("failed to unmarshal DurationMS value: %v %T", value, value)
 		}
 	default:
-		return fmt.Errorf("failed to unmarshal UnixTimeNS value: %v %T", value, value)
+		return fmt.Errorf("failed to unmarshal DurationMS value: %v %T", value, value)
 	}
 
-	if nsec == 0 {
-		*u = UnixTimeNS{}
-	} else {
-		*u = UnixTimeNS(time.Unix(0, nsec))
-	}
+	*d = DurationMS(msec) * DurationMS(time.Millisecond)
 	return nil
 }
 
-// Value returns a int64 value representing a unix timestamp in milliseconds,
+// Value returns a int64 value representing a duration in milliseconds,
 // implements driver.Valuer interface.
-func (u UnixTimeNS) Value() (driver.Value, error) {
-	return time.Time(u).UnixNano(), nil
+func (d DurationMS) Value() (driver.Value, error) {
+	return time.Duration(d).Milliseconds(), nil
 }
 
 // Scan scan value into Uint64, implements sql.Scanner interface.
@@ -450,4 +460,30 @@ func (u *Unsigned64) Scan(value interface{}) error {
 // Value returns an Unsigned64 value, implements driver.Valuer interface.
 func (u Unsigned64) Value() (driver.Value, error) {
 	return int64(u), nil
+}
+
+// Scan scan value into NullableString, implements sql.Scanner interface.
+func (s *NullableString) Scan(value interface{}) error {
+	if value == nil {
+		*s = ""
+		return nil
+	}
+
+	switch value := value.(type) {
+	case string:
+		*s = NullableString(value)
+	case []byte:
+		*s = NullableString(value)
+	default:
+		return fmt.Errorf("failed to unmarshal NullableString value: %v %T", value, value)
+	}
+	return nil
+}
+
+// Value returns a NullableString value, implements driver.Valuer interface.
+func (s NullableString) Value() (driver.Value, error) {
+	if s == "" {
+		return nil, nil
+	}
+	return []byte(s), nil
 }

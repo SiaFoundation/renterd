@@ -181,11 +181,8 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 		log = log.With("hk", e.HostKey, "ts", e.Timestamp)
 		c.handleHostUpdate(e)
 	case api.EventSettingUpdate:
-		log = log.With("key", e.Key, "ts", e.Timestamp)
-		err = c.handleSettingUpdate(e)
-	case api.EventSettingDelete:
-		log = log.With("key", e.Key, "ts", e.Timestamp)
-		c.handleSettingDelete(e)
+		log = log.With("gouging", e.GougingSettings != nil, "pinned", e.PinnedSettings != nil, "upload", e.UploadSettings != nil, "ts", e.Timestamp)
+		c.handleSettingUpdate(e)
 	default:
 		log.Info("unhandled event", e)
 		return
@@ -310,52 +307,22 @@ func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
 }
 
-func (c *cache) handleSettingDelete(e api.EventSettingDelete) {
-	if e.Key == api.SettingGouging || e.Key == api.SettingRedundancy {
-		c.cache.Invalidate(cacheKeyGougingParams)
-	}
-}
-
-func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) (err error) {
+func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) {
 	// return early if the cache doesn't have gouging params to update
 	value, found, _ := c.cache.Get(cacheKeyGougingParams)
 	if !found {
-		return nil
+		return
 	}
+
+	// update the cache
 	gp := value.(api.GougingParams)
-
-	// marshal the updated value
-	data, err := json.Marshal(e.Update)
-	if err != nil {
-		return fmt.Errorf("couldn't marshal the given value, error: %v", err)
+	if e.GougingSettings != nil {
+		gp.GougingSettings = *e.GougingSettings
 	}
-
-	// unmarshal into the appropriated setting and update the cache
-	switch e.Key {
-	case api.SettingGouging:
-		var gs api.GougingSettings
-		if err := json.Unmarshal(data, &gs); err != nil {
-			return fmt.Errorf("couldn't update gouging settings, invalid request body, %t", e.Update)
-		} else if err := gs.Validate(); err != nil {
-			return fmt.Errorf("couldn't update gouging settings, error: %v", err)
-		}
-
-		gp.GougingSettings = gs
-		c.cache.Set(cacheKeyGougingParams, gp)
-	case api.SettingRedundancy:
-		var rs api.RedundancySettings
-		if err := json.Unmarshal(data, &rs); err != nil {
-			return fmt.Errorf("couldn't update redundancy settings, invalid request body, %t", e.Update)
-		} else if err := rs.Validate(); err != nil {
-			return fmt.Errorf("couldn't update redundancy settings, error: %v", err)
-		}
-
-		gp.RedundancySettings = rs
-		c.cache.Set(cacheKeyGougingParams, gp)
-	default:
+	if e.UploadSettings != nil {
+		gp.RedundancySettings = e.UploadSettings.Redundancy
 	}
-
-	return nil
+	c.cache.Set(cacheKeyGougingParams, gp)
 }
 
 func contractsEqual(x, y []api.ContractMetadata) bool {

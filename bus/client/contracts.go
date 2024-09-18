@@ -6,38 +6,18 @@ import (
 	"net/url"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
-// AddContract adds the provided contract to the metadata store.
-func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
-		Contract:      contract,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &added)
-	return
-}
-
-// AddRenewedContract adds the provided contract to the metadata store.
-func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractRenewedRequest{
-		Contract:      contract,
-		RenewedFrom:   renewedFrom,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &renewed)
-	return
+// AddContract adds the provided contract to the metadata store, if the contract
+// already exists it will be replaced.
+func (c *Client) AddContract(ctx context.Context, contract api.ContractMetadata) error {
+	return c.c.WithContext(ctx).PUT("/contracts", contract)
 }
 
 // AncestorContracts returns any ancestors of a given contract.
-func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
+func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
 	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), contractID), &contracts)
@@ -59,6 +39,12 @@ func (c *Client) AcquireContract(ctx context.Context, contractID types.FileContr
 // ArchiveContracts archives the contracts with the given IDs and archival reason.
 func (c *Client) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) (err error) {
 	err = c.c.WithContext(ctx).POST("/contracts/archive", toArchive, nil)
+	return
+}
+
+// BroadcastContract broadcasts the latest revision for a contract.
+func (c *Client) BroadcastContract(ctx context.Context, contractID types.FileContractID) (txnID types.TransactionID, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/broadcast", contractID), nil, &txnID)
 	return
 }
 
@@ -97,6 +83,9 @@ func (c *Client) Contracts(ctx context.Context, opts api.ContractsOpts) (contrac
 	if opts.ContractSet != "" {
 		values.Set("contractset", opts.ContractSet)
 	}
+	if opts.FilterMode != "" {
+		values.Set("filtermode", opts.FilterMode)
+	}
 	err = c.c.WithContext(ctx).GET("/contracts?"+values.Encode(), &contracts)
 	return
 }
@@ -132,7 +121,7 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 
 // FormContract forms a contract with a host and adds it to the bus.
 func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST("/contracts", api.ContractFormRequest{
+	err = c.c.WithContext(ctx).POST("/contracts/form", api.ContractFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
 		HostKey:        hostKey,
@@ -160,6 +149,25 @@ func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPr
 	return
 }
 
+// PruneContract prunes the given contract.
+func (c *Client) PruneContract(ctx context.Context, contractID types.FileContractID, timeout time.Duration) (res api.ContractPruneResponse, err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/prune", contractID), api.ContractPruneRequest{Timeout: api.DurationMS(timeout)}, &res)
+	return
+}
+
+// RenewContract renews an existing contract with a host and adds it to the bus.
+func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
+	req := api.ContractRenewRequest{
+		EndHeight:          endHeight,
+		ExpectedNewStorage: expectedStorage,
+		MaxFundAmount:      maxFundAmount,
+		MinNewCollateral:   minNewCollateral,
+		RenterFunds:        renterFunds,
+	}
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renew", contractID), req, &renewal)
+	return
+}
+
 // RenewedContract returns the renewed contract for the given ID.
 func (c *Client) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contracts/renewed/%s", renewedFrom), &contract)
@@ -180,8 +188,11 @@ func (c *Client) ReleaseContract(ctx context.Context, contractID types.FileContr
 	return
 }
 
-// SetContractSet adds the given contracts to the given set.
-func (c *Client) SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contracts/set/%s", set), contracts)
+// UpdateContractSet adds/removes the given contracts to/from the given set.
+func (c *Client) UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contracts/set/%s", set), api.ContractSetUpdateRequest{
+		ToAdd:    toAdd,
+		ToRemove: toRemove,
+	}, nil)
 	return
 }

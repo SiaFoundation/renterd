@@ -117,11 +117,11 @@ func (b *authenticatedBackend) permsFromCtx(ctx context.Context, bucket string) 
 }
 
 func (b *authenticatedBackend) reloadV4Keys(ctx context.Context) error {
-	as, err := b.backend.b.S3AuthenticationSettings(ctx)
+	s3, err := b.backend.b.S3Settings(ctx)
 	if err != nil {
 		return err
 	}
-	signature.ReloadKeys(as.V4Keypairs)
+	signature.ReloadKeys(s3.Authentication.V4Keypairs)
 	return nil
 }
 
@@ -141,13 +141,18 @@ func (b *authenticatedBackend) AuthenticationMiddleware(h http.Handler) http.Han
 				return
 			}
 			// verify signature
-			if _, result := signature.V4SignVerify(rq); result != signature.ErrNone {
+			if accessKeyID, result := signature.V4SignVerify(rq); result == signature.ErrNone {
+				// authenticated request successfully
+				perms = rootPerms
+			} else if accessKeyID == "" {
+				// no access key provided; bucket policy might still permit access
+				// NOTE: this happens when the official aws sdk is used without
+				// credentials
+			} else {
 				// authentication attempted but failed.
 				writeResponse(w, signature.GetAPIError(result))
 				return
 			}
-			// authenticated request successfully
-			perms = rootPerms
 		}
 
 		// add permissions to context

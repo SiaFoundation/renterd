@@ -117,7 +117,7 @@ func GenerateEncryptionKey() EncryptionKey {
 // tagged omitempty to make sure responses where no object is returned remain
 // clean.
 type Object struct {
-	Key   EncryptionKey `json:"key,omitempty"`
+	Key   EncryptionKey `json:"encryptionKey,omitempty"`
 	Slabs SlabSlices    `json:"slabs,omitempty"`
 }
 

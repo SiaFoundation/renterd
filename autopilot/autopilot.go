@@ -10,9 +10,8 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -31,8 +30,7 @@ type Bus interface {
 	webhooks.Broadcaster
 
 	// Accounts
-	Account(ctx context.Context, id rhpv3.Account, hostKey types.PublicKey) (account api.Account, err error)
-	Accounts(ctx context.Context) (accounts []api.Account, err error)
+	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
 
 	// Autopilots
 	Autopilot(ctx context.Context, id string) (autopilot api.Autopilot, err error)
@@ -42,21 +40,22 @@ type Bus interface {
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// contracts
-	AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
-	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
+	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
-	SetContractSet(ctx context.Context, set string, contracts []types.FileContractID) error
+	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
+	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
+	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 
 	// hostdb
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
-	HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
-	RemoveOfflineHosts(ctx context.Context, minRecentScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
+	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
+	RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 
 	// metrics
@@ -67,15 +66,14 @@ type Bus interface {
 	ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 	// objects
-	ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error)
+	Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 	RefreshHealth(ctx context.Context) error
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
 	// settings
-	UpdateSetting(ctx context.Context, key string, value interface{}) error
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
-	RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error)
+	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
 
 	// syncer
 	SyncerPeers(ctx context.Context) (resp []string, err error)
@@ -86,9 +84,7 @@ type Bus interface {
 
 	// wallet
 	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletDiscard(ctx context.Context, txn types.Transaction) error
-	WalletOutputs(ctx context.Context) (resp []api.SiacoinElement, err error)
-	WalletPending(ctx context.Context) (resp []types.Transaction, err error)
+	WalletPending(ctx context.Context) (resp []wallet.Event, err error)
 	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
 
@@ -100,7 +96,6 @@ type Autopilot struct {
 	logger  *zap.SugaredLogger
 	workers *workerPool
 
-	a *accounts
 	c *contractor.Contractor
 	m *migrator
 	s scanner.Scanner
@@ -149,7 +144,6 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 
 	ap.c = contractor.New(bus, bus, ap.logger, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval)
 	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
-	ap.a = newAccounts(ap, ap.bus, ap.bus, ap.workers, ap.logger, cfg.AccountsRefillInterval, cfg.RevisionSubmissionBuffer)
 
 	return ap, nil
 }
@@ -161,13 +155,11 @@ func (ap *Autopilot) Config(ctx context.Context) (api.Autopilot, error) {
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"GET    /config":        ap.configHandlerGET,
-		"PUT    /config":        ap.configHandlerPUT,
-		"POST   /config":        ap.configHandlerPOST,
-		"POST   /hosts":         ap.hostsHandlerPOST,
-		"GET    /host/:hostKey": ap.hostHandlerGET,
-		"GET    /state":         ap.stateHandlerGET,
-		"POST   /trigger":       ap.triggerHandlerPOST,
+		"GET    /config":  ap.configHandlerGET,
+		"PUT    /config":  ap.configHandlerPUT,
+		"POST   /config":  ap.configHandlerPOST,
+		"GET    /state":   ap.stateHandlerGET,
+		"POST   /trigger": ap.triggerHandlerPOST,
 	})
 }
 
@@ -194,7 +186,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// fetch hosts
-	hosts, err := ap.bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
+	hosts, err := ap.bus.Hosts(ctx, api.HostOptions{})
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -240,7 +232,6 @@ func (ap *Autopilot) Run() {
 	}
 
 	var forceScan bool
-	var launchAccountRefillsOnce sync.Once
 	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
@@ -323,20 +314,12 @@ func (ap *Autopilot) Run() {
 				ap.m.SignalMaintenanceFinished()
 			}
 
-			// launch account refills after successful contract maintenance.
-			if maintenanceSuccess {
-				launchAccountRefillsOnce.Do(func() {
-					ap.logger.Info("account refills loop launched")
-					go ap.a.refillWorkersAccountsLoop(ap.shutdownCtx)
-				})
-			}
-
 			// migration
 			ap.m.tryPerformMigrations(ap.workers)
 
 			// pruning
 			if autopilot.Config.Contracts.Prune {
-				ap.tryPerformPruning(ap.workers)
+				ap.tryPerformPruning()
 			} else {
 				ap.logger.Info("pruning disabled")
 			}
@@ -352,7 +335,6 @@ func (ap *Autopilot) Run() {
 		case <-tickerFired:
 		}
 	}
-	return
 }
 
 // Shutdown shuts down the autopilot.
@@ -625,27 +607,15 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	}
 	for _, txn := range pending {
 		for _, mTxnID := range ap.maintenanceTxnIDs {
-			if mTxnID == txn.ID() {
+			if mTxnID == types.TransactionID(txn.ID) {
 				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
 			}
 		}
 	}
 
-	wantedNumOutputs := 10
-
-	// enough outputs - nothing to do
-	available, err := b.WalletOutputs(ctx)
-	if err != nil {
-		return err
-	}
-	if uint64(len(available)) >= uint64(wantedNumOutputs) {
-		l.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", len(available), uint64(wantedNumOutputs))
-		return nil
-	}
-	wantedNumOutputs -= len(available)
-
 	// figure out the amount per output
+	wantedNumOutputs := 10
 	amount := cfg.Contracts.Allowance.Div64(uint64(wantedNumOutputs))
 
 	// redistribute outputs
@@ -685,6 +655,9 @@ func (ap *Autopilot) configHandlerPUT(jc jape.Context) {
 	autopilot, err := ap.bus.Autopilot(jc.Request.Context(), ap.id)
 	if utils.IsErr(err, api.ErrAutopilotNotFound) {
 		autopilot = api.Autopilot{ID: ap.id, Config: cfg}
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
 	} else {
 		if autopilot.Config.Contracts.Set != cfg.Contracts.Set {
 			contractSetChanged = true
@@ -716,93 +689,6 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (ap *Autopilot) hostHandlerGET(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostKey", &hk) != nil {
-		return
-	}
-
-	state, err := ap.buildState(jc.Request.Context())
-	if jc.Check("failed to build state", err) != nil {
-		return
-	}
-
-	// TODO: remove on next major release
-	if jc.Check("failed to get host", compatV105Host(jc.Request.Context(), state.ContractsConfig(), ap.bus, hk)) != nil {
-		return
-	}
-
-	hi, err := ap.bus.Host(jc.Request.Context(), hk)
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-
-	check, ok := hi.Checks[ap.id]
-	if ok {
-		jc.Encode(api.HostResponse{
-			Host: hi,
-			Checks: &api.HostChecks{
-				Gouging:          check.Gouging.Gouging(),
-				GougingBreakdown: check.Gouging,
-				Score:            check.Score.Score(),
-				ScoreBreakdown:   check.Score,
-				Usable:           check.Usability.IsUsable(),
-				UnusableReasons:  check.Usability.UnusableReasons(),
-			},
-		})
-		return
-	}
-
-	jc.Encode(api.HostResponse{Host: hi})
-}
-
-func (ap *Autopilot) hostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
-	if jc.Decode(&req) != nil {
-		return
-	} else if req.AutopilotID != "" && req.AutopilotID != ap.id {
-		jc.Error(errors.New("invalid autopilot id"), http.StatusBadRequest)
-		return
-	}
-
-	// TODO: remove on next major release
-	if jc.Check("failed to get host info", compatV105UsabilityFilterModeCheck(req.UsabilityMode)) != nil {
-		return
-	}
-
-	hosts, err := ap.bus.SearchHosts(jc.Request.Context(), api.SearchHostOptions{
-		AutopilotID:     ap.id,
-		Offset:          req.Offset,
-		Limit:           req.Limit,
-		FilterMode:      req.FilterMode,
-		UsabilityMode:   req.UsabilityMode,
-		AddressContains: req.AddressContains,
-		KeyIn:           req.KeyIn,
-	})
-	if jc.Check("failed to get host info", err) != nil {
-		return
-	}
-	resps := make([]api.HostResponse, len(hosts))
-	for i, host := range hosts {
-		if check, ok := host.Checks[ap.id]; ok {
-			resps[i] = api.HostResponse{
-				Host: host,
-				Checks: &api.HostChecks{
-					Gouging:          check.Gouging.Gouging(),
-					GougingBreakdown: check.Gouging,
-					Score:            check.Score.Score(),
-					ScoreBreakdown:   check.Score,
-					Usable:           check.Usability.IsUsable(),
-					UnusableReasons:  check.Usability.UnusableReasons(),
-				},
-			}
-		} else {
-			resps[i] = api.HostResponse{Host: host}
-		}
-	}
-	jc.Encode(resps)
-}
-
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	ap.mu.Lock()
 	pruning, pLastStart := ap.pruning, ap.pruningLastStart // TODO: move to a 'pruner' type
@@ -816,6 +702,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	}
 
 	jc.Encode(api.AutopilotStateResponse{
+		ID:                 ap.id,
 		Configured:         err == nil,
 		Migrating:          migrating,
 		MigratingLastStart: api.TimeRFC3339(mLastStart),
@@ -848,10 +735,10 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
 	}
 
-	// fetch redundancy settings
-	rs, err := ap.bus.RedundancySettings(ctx)
+	// fetch upload settings
+	us, err := ap.bus.UploadSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch redundancy settings, err: %v", err)
+		return nil, fmt.Errorf("could not fetch upload settings, err: %v", err)
 	}
 
 	// fetch gouging settings
@@ -901,66 +788,13 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 
 	return &contractor.MaintenanceState{
 		GS: gs,
-		RS: rs,
+		RS: us.Redundancy,
 		AP: autopilot,
 
 		Address:                address,
 		Fee:                    fee,
 		SkipContractFormations: skipContractFormations,
 	}, nil
-}
-
-// compatV105Host performs some state checks and bus calls we no longer need but
-// are necessary checks to make sure our API is consistent. This should be
-// removed in the next major release.
-func compatV105Host(ctx context.Context, cfg api.ContractsConfig, b Bus, hk types.PublicKey) error {
-	// state checks
-	if cfg.Allowance.IsZero() {
-		return fmt.Errorf("can not score hosts because contracts allowance is zero")
-	}
-	if cfg.Amount == 0 {
-		return fmt.Errorf("can not score hosts because contracts amount is zero")
-	}
-	if cfg.Period == 0 {
-		return fmt.Errorf("can not score hosts because contract period is zero")
-	}
-
-	// fetch host
-	_, err := b.Host(ctx, hk)
-	if err != nil {
-		return fmt.Errorf("failed to fetch requested host from bus: %w", err)
-	}
-
-	// other checks
-	_, err = b.GougingSettings(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch gouging settings from bus: %w", err)
-	}
-	_, err = b.RedundancySettings(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch redundancy settings from bus: %w", err)
-	}
-	_, err = b.ConsensusState(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch consensus state from bus: %w", err)
-	}
-	_, err = b.RecommendedFee(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch recommended fee from bus: %w", err)
-	}
-	return nil
-}
-
-func compatV105UsabilityFilterModeCheck(usabilityMode string) error {
-	switch usabilityMode {
-	case api.UsabilityFilterModeUsable:
-	case api.UsabilityFilterModeUnusable:
-	case api.UsabilityFilterModeAll:
-	case "":
-	default:
-		return fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", usabilityMode)
-	}
-	return nil
 }
 
 func computeNextPeriod(bh, currentPeriod, period uint64) uint64 {

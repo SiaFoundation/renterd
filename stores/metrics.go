@@ -40,14 +40,6 @@ func (s *SQLStore) ContractSetMetrics(ctx context.Context, start time.Time, n ui
 	return
 }
 
-func (s *SQLStore) PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) (metrics []api.PerformanceMetric, err error) {
-	err = s.dbMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) (txErr error) {
-		metrics, txErr = tx.PerformanceMetrics(ctx, start, n, interval, opts)
-		return
-	})
-	return
-}
-
 func (s *SQLStore) RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error {
 	return s.dbMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
 		return tx.RecordContractMetric(ctx, metrics...)
@@ -69,12 +61,6 @@ func (s *SQLStore) RecordContractSetChurnMetric(ctx context.Context, metrics ...
 func (s *SQLStore) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
 	return s.dbMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
 		return tx.RecordContractSetMetric(ctx, metrics...)
-	})
-}
-
-func (s *SQLStore) RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error {
-	return s.dbMetrics.Transaction(ctx, func(tx sql.MetricsDatabaseTx) error {
-		return tx.RecordPerformanceMetric(ctx, metrics...)
 	})
 }
 

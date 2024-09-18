@@ -33,6 +33,10 @@ type (
 		// an account and the balance reported by a host.
 		Drift *big.Int `json:"drift"`
 
+		// Owner is the owner of the account which is responsible for funding
+		// it.
+		Owner string `json:"owner"`
+
 		// RequiresSync indicates whether an account needs to be synced with the
 		// host before it can be used again.
 		RequiresSync bool `json:"requiresSync"`

@@ -407,7 +407,7 @@ func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.Chain
 
 		// reverted renewal: 'complete' -> 'active'
 		if curr != nil {
-			if err := tx.UpdateContract(fcid, index.Height, prev.revisionNumber, prev.fileSize); err != nil {
+			if err := tx.UpdateContractRevision(fcid, index.Height, prev.revisionNumber, prev.fileSize); err != nil {
 				return fmt.Errorf("failed to revert contract: %w", err)
 			}
 			if state == api.ContractStateComplete {
@@ -440,7 +440,7 @@ func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.Chain
 	}
 
 	// handle apply
-	if err := tx.UpdateContract(fcid, index.Height, curr.revisionNumber, curr.fileSize); err != nil {
+	if err := tx.UpdateContractRevision(fcid, index.Height, curr.revisionNumber, curr.fileSize); err != nil {
 		return fmt.Errorf("failed to update contract %v: %w", fcid, err)
 	}
 

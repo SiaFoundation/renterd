@@ -43,10 +43,9 @@ func ContractMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, 
 			(*Unsigned64)(&cm.RemainingFunds.Lo), (*Unsigned64)(&cm.RemainingFunds.Hi),
 			&placeHolderRevisionNumber,
 			(*Unsigned64)(&cm.UploadSpending.Lo), (*Unsigned64)(&cm.UploadSpending.Hi),
-			(*Unsigned64)(&cm.DownloadSpending.Lo), (*Unsigned64)(&cm.DownloadSpending.Hi),
 			(*Unsigned64)(&cm.FundAccountSpending.Lo), (*Unsigned64)(&cm.FundAccountSpending.Hi),
 			(*Unsigned64)(&cm.DeleteSpending.Lo), (*Unsigned64)(&cm.DeleteSpending.Hi),
-			(*Unsigned64)(&cm.ListSpending.Lo), (*Unsigned64)(&cm.ListSpending.Hi),
+			(*Unsigned64)(&cm.SectorRootsSpending.Lo), (*Unsigned64)(&cm.SectorRootsSpending.Hi),
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to scan contract metric: %w", err)
@@ -89,7 +88,7 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 			&m.HostVersion,
 			(*Unsigned64)(&m.Pruned),
 			(*Unsigned64)(&m.Remaining),
-			&m.Duration,
+			(*DurationMS)(&m.Duration),
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to scan contract prune metric: %w", err)
@@ -144,29 +143,6 @@ func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint6
 	})
 }
 
-func PerformanceMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.PerformanceMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			&m.Action,
-			(*PublicKey)(&m.HostKey),
-			&m.Origin,
-			&m.Duration,
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
 func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Time) error {
 	if metric == "" {
 		return errors.New("metric must be set")
@@ -196,7 +172,7 @@ func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Tim
 }
 
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, download_spending_lo, download_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, list_spending_lo, list_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, sector_roots_spending_lo, sector_roots_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract metric: %w", err)
 	}
@@ -232,14 +208,12 @@ func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.Contrac
 			Unsigned64(metric.RevisionNumber),
 			Unsigned64(metric.UploadSpending.Lo),
 			Unsigned64(metric.UploadSpending.Hi),
-			Unsigned64(metric.DownloadSpending.Lo),
-			Unsigned64(metric.DownloadSpending.Hi),
 			Unsigned64(metric.FundAccountSpending.Lo),
 			Unsigned64(metric.FundAccountSpending.Hi),
 			Unsigned64(metric.DeleteSpending.Lo),
 			Unsigned64(metric.DeleteSpending.Hi),
-			Unsigned64(metric.ListSpending.Lo),
-			Unsigned64(metric.ListSpending.Hi),
+			Unsigned64(metric.SectorRootsSpending.Lo),
+			Unsigned64(metric.SectorRootsSpending.Hi),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert contract metric: %w", err)
@@ -269,7 +243,7 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 			metric.HostVersion,
 			Unsigned64(metric.Pruned),
 			Unsigned64(metric.Remaining),
-			metric.Duration,
+			(DurationMS)(metric.Duration),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert contract prune metric: %w", err)
@@ -331,34 +305,6 @@ func RecordContractSetMetric(ctx context.Context, tx sql.Tx, metrics ...api.Cont
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert contract set metric: no rows affected")
-		}
-	}
-
-	return nil
-}
-
-func RecordPerformanceMetric(ctx context.Context, tx sql.Tx, metrics ...api.PerformanceMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO performance (created_at, timestamp, action, host, origin, duration) VALUES (?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert performance metric: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, metric := range metrics {
-		res, err := insertStmt.Exec(ctx,
-			time.Now().UTC(),
-			UnixTimeMS(metric.Timestamp),
-			metric.Action,
-			PublicKey(metric.HostKey),
-			metric.Origin,
-			metric.Duration,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert performance metric: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert performance metric: no rows affected")
 		}
 	}
 
@@ -606,10 +552,9 @@ func aggregateMetrics(x, y api.ContractMetric) (out api.ContractMetric) {
 	out.RemainingCollateral, _ = out.RemainingCollateral.AddWithOverflow(y.RemainingCollateral)
 	out.RemainingFunds, _ = out.RemainingFunds.AddWithOverflow(y.RemainingFunds)
 	out.UploadSpending, _ = out.UploadSpending.AddWithOverflow(y.UploadSpending)
-	out.DownloadSpending, _ = out.DownloadSpending.AddWithOverflow(y.DownloadSpending)
 	out.FundAccountSpending, _ = out.FundAccountSpending.AddWithOverflow(y.FundAccountSpending)
 	out.DeleteSpending, _ = out.DeleteSpending.AddWithOverflow(y.DeleteSpending)
-	out.ListSpending, _ = out.ListSpending.AddWithOverflow(y.ListSpending)
+	out.SectorRootsSpending, _ = out.SectorRootsSpending.AddWithOverflow(y.SectorRootsSpending)
 	return
 }
 

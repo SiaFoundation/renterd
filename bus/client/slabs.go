@@ -3,7 +3,6 @@ package client
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 )
 
@@ -33,18 +33,8 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 		panic(err)
 	}
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, false, err
-	}
-	defer io.Copy(io.Discard, resp.Body)
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := io.ReadAll(resp.Body)
-		return nil, false, errors.New(string(err))
-	}
 	var apsr api.AddPartialSlabResponse
-	err = json.NewDecoder(resp.Body).Decode(&apsr)
+	_, _, err = utils.DoRequest(req, &apsr)
 	if err != nil {
 		return nil, false, err
 	}

@@ -10,9 +10,9 @@ import (
 
 func encryptPartialSlab(data []byte, key object.EncryptionKey, minShards, totalShards uint8) [][]byte {
 	slab := object.Slab{
-		Key:       key,
-		MinShards: minShards,
-		Shards:    make([]object.Sector, totalShards),
+		EncryptionKey: key,
+		MinShards:     minShards,
+		Shards:        make([]object.Sector, totalShards),
 	}
 	encodedShards := make([][]byte, totalShards)
 	slab.Encode(data, encodedShards)
