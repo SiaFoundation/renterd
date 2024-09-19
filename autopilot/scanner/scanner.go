@@ -165,9 +165,11 @@ func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Ti
 			}
 
 			scan, err := w.RHPScan(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
-			if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			} else if err != nil {
 				s.logger.Errorw("worker stopped", zap.Error(err), "hk", h.hostKey)
-				break // abort
+				return // abort
 			} else if err := scan.Error(); err != nil {
 				s.logger.Debugw("host scan failed", zap.Error(err), "hk", h.hostKey, "ip", h.hostIP)
 			} else {
@@ -178,7 +180,7 @@ func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Ti
 	}
 
 	var exhausted bool
-	for !exhausted {
+	for !exhausted && !s.isShutdown() {
 		jobs := make(chan scanJob)
 		var wg sync.WaitGroup
 
