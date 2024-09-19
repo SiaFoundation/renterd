@@ -205,6 +205,18 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00015_reset_drift", log)
 				},
 			},
+			{
+				ID: "00016_account_owner",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00016_account_owner", log)
+				},
+			},
+			{
+				ID: "00017_unix_ms",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
@@ -224,6 +236,12 @@ var (
 				ID: "00002_idx_wallet_metrics_immature",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00002_idx_wallet_metrics_immature", log)
+				},
+			},
+			{
+				ID: "00003_unix_ms",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
 				},
 			},
 		}

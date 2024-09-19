@@ -52,7 +52,7 @@ type (
 		AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error
 
 		// Accounts returns all accounts from the db.
-		Accounts(ctx context.Context) ([]api.Account, error)
+		Accounts(ctx context.Context, owner string) ([]api.Account, error)
 
 		// AddMultipartPart adds a part to an unfinished multipart upload.
 		AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
@@ -243,6 +243,10 @@ type (
 		// ProcessChainUpdate applies the given chain update to the database.
 		ProcessChainUpdate(ctx context.Context, applyFn func(ChainUpdateTx) error) error
 
+		// PrunableContractRoots returns the indices of roots that are not in
+		// the contract.
+		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
+
 		// PruneEmptydirs prunes any directories that are empty.
 		PruneEmptydirs(ctx context.Context) error
 
@@ -307,7 +311,7 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 
 		// SaveAccounts saves the given accounts in the db, overwriting any
-		// existing ones and setting the clean shutdown flag.
+		// existing ones.
 		SaveAccounts(ctx context.Context, accounts []api.Account) error
 
 		// SearchHosts returns a list of hosts that match the provided filters
@@ -317,13 +321,10 @@ type (
 		// substring.
 		SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error)
 
-		// SetUncleanShutdown sets the clean shutdown flag on the accounts to
-		// 'false' and also marks them as requiring a resync.
-		SetUncleanShutdown(ctx context.Context) error
-
-		// SetContractSet creates the contract set with the given name and
-		// associates it with the provided contract IDs.
-		SetContractSet(ctx context.Context, name string, contractIds []types.FileContractID) error
+		// UpdateContractSet adds/removes the provided contract ids to/from
+		// the contract set. The contract set is created in the process if
+		// it doesn't exist already.
+		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// Setting returns the setting with the given key from the database.
 		Setting(ctx context.Context, key string) (string, error)
@@ -426,9 +427,6 @@ type (
 		// time range and options.
 		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
 
-		// PerformanceMetrics returns performance metrics for the given time range
-		PerformanceMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.PerformanceMetricsQueryOpts) ([]api.PerformanceMetric, error)
-
 		// PruneMetrics deletes metrics of a certain type older than the given
 		// cutoff time.
 		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
@@ -444,9 +442,6 @@ type (
 
 		// RecordContractSetMetric records contract set metrics.
 		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
-
-		// RecordPerformanceMetric records performance metrics.
-		RecordPerformanceMetric(ctx context.Context, metrics ...api.PerformanceMetric) error
 
 		// RecordWalletMetric records wallet metrics.
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error

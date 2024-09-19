@@ -37,9 +37,9 @@ func TestAutopilotStore(t *testing.T) {
 			Set: testContractSet,
 		},
 		Hosts: api.HostsConfig{
-			MaxDowntimeHours:      10,
-			MinRecentScanFailures: 10,
-			AllowRedundantIPs:     true, // allow for integration tests by default
+			MaxDowntimeHours:           10,
+			MaxConsecutiveScanFailures: 10,
+			AllowRedundantIPs:          true, // allow for integration tests by default
 		},
 	}
 

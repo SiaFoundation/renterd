@@ -3,7 +3,6 @@ package test
 import (
 	"time"
 
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -27,9 +26,9 @@ var (
 			Prune: false,
 		},
 		Hosts: api.HostsConfig{
-			MaxDowntimeHours:      10,
-			MinRecentScanFailures: 10,
-			AllowRedundantIPs:     true, // allow for integration tests by default
+			MaxDowntimeHours:           10,
+			MaxConsecutiveScanFailures: 10,
+			AllowRedundantIPs:          true, // allow for integration tests by default
 		},
 	}
 
@@ -61,5 +60,4 @@ var (
 
 	S3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"
 	S3SecretAccessKey = "Rh30BNyj+qNI4ftYRteoZbHJ3X4Ln71QtZkRXzJ9"
-	S3Credentials     = credentials.NewStaticV4(S3AccessKeyID, S3SecretAccessKey, "")
 )

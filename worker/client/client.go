@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -35,6 +36,18 @@ func New(addr, password string) *Client {
 // Account returns the account id for a given host.
 func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
+	return
+}
+
+// Accounts returns all accounts.
+func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts"), &accounts)
+	return
+}
+
+// ResetDrift resets the drift of an account to zero.
+func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/account/%s/resetdrift", id), nil, nil)
 	return
 }
 
@@ -96,21 +109,14 @@ func (c *Client) HeadObject(ctx context.Context, bucket, path string, opts api.H
 	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
 	opts.ApplyHeaders(req.Header)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		_ = resp.Body.Close()
-		switch resp.StatusCode {
-		case http.StatusNotFound:
-			return nil, api.ErrObjectNotFound
-		default:
-			return nil, errors.New(http.StatusText(resp.StatusCode))
-		}
+	headers, statusCode, err := utils.DoRequest(req, nil)
+	if err != nil && statusCode == http.StatusNotFound {
+		return nil, api.ErrObjectNotFound
+	} else if err != nil {
+		return nil, errors.New(http.StatusText(statusCode))
 	}
 
-	head, err := parseObjectResponseHeaders(resp.Header)
+	head, err := parseObjectResponseHeaders(headers)
 	if err != nil {
 		return nil, err
 	}
@@ -213,17 +219,11 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	} else if req.ContentLength, err = sizeFromSeeker(r); err != nil {
 		return nil, fmt.Errorf("failed to get content length from seeker: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	header, _, err := utils.DoRequest(req, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer io.Copy(io.Discard, resp.Body)
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := io.ReadAll(resp.Body)
-		return nil, errors.New(string(err))
-	}
-	return &api.UploadMultipartUploadPartResponse{ETag: resp.Header.Get("ETag")}, nil
+	return &api.UploadMultipartUploadPartResponse{ETag: header.Get("ETag")}, nil
 }
 
 // UploadObject uploads the data in r, creating an object at the given path.
@@ -250,17 +250,11 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, path str
 	} else if req.ContentLength, err = sizeFromSeeker(r); err != nil {
 		return nil, fmt.Errorf("failed to get content length from seeker: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	header, _, err := utils.DoRequest(req, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer io.Copy(io.Discard, resp.Body)
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		err, _ := io.ReadAll(resp.Body)
-		return nil, errors.New(string(err))
-	}
-	return &api.UploadObjectResponse{ETag: resp.Header.Get("ETag")}, nil
+	return &api.UploadObjectResponse{ETag: header.Get("ETag")}, nil
 }
 
 // UploadStats returns the upload stats.
@@ -271,7 +265,7 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 
 // NotifyEvent notifies the worker of an event.
 func (c *Client) NotifyEvent(ctx context.Context, e webhooks.Event) (err error) {
-	err = c.c.WithContext(ctx).POST("/events", e, nil)
+	err = c.c.WithContext(ctx).POST("/event", e, nil)
 	return
 }
 

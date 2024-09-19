@@ -97,8 +97,15 @@ func AbortMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, up
 	return errors.New("failed to delete multipart upload for unknown reason")
 }
 
-func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
-	rows, err := tx.Query(ctx, "SELECT account_id, clean_shutdown, host, balance, drift, requires_sync FROM ephemeral_accounts")
+func Accounts(ctx context.Context, tx sql.Tx, owner string) ([]api.Account, error) {
+	var whereExpr string
+	var args []any
+	if owner != "" {
+		whereExpr = "WHERE owner = ?"
+		args = append(args, owner)
+	}
+	rows, err := tx.Query(ctx, fmt.Sprintf("SELECT account_id, clean_shutdown, host, balance, drift, requires_sync, owner FROM ephemeral_accounts %s", whereExpr),
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch accounts: %w", err)
 	}
@@ -107,7 +114,7 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 	var accounts []api.Account
 	for rows.Next() {
 		a := api.Account{Balance: new(big.Int), Drift: new(big.Int)} // init big.Int
-		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync); err != nil {
+		if err := rows.Scan((*PublicKey)(&a.ID), &a.CleanShutdown, (*PublicKey)(&a.HostKey), (*BigInt)(a.Balance), (*BigInt)(a.Drift), &a.RequiresSync, &a.Owner); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
 		accounts = append(accounts, a)
@@ -117,7 +124,7 @@ func Accounts(ctx context.Context, tx sql.Tx) ([]api.Account, error) {
 
 func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
 	rows, err := tx.Query(ctx, `
-		WITH RECURSIVE ancestors AS 
+		WITH RECURSIVE ancestors AS
 		(
 			SELECT *
 			FROM archived_contracts
@@ -663,7 +670,7 @@ func HostsForScanning(ctx context.Context, tx sql.Tx, maxLastScan time.Time, off
 	}
 
 	rows, err := tx.Query(ctx, "SELECT public_key, net_address FROM hosts WHERE last_scan < ? LIMIT ? OFFSET ?",
-		maxLastScan.UnixNano(), limit, offset)
+		UnixTimeMS(maxLastScan), limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts for scanning: %w", err)
 	}
@@ -715,7 +722,7 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 
 	res, err := tx.Exec(ctx, `
 		INSERT INTO contracts (created_at, host_id, fcid, renewed_from, contract_price, state, total_cost, proof_height,
-		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending, 
+		revision_height, revision_number, size, start_height, window_start, window_end, upload_spending, download_spending,
 		fund_account_spending, delete_spending, list_spending)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, time.Now(), hostID, FileContractID(rev.ID()), FileContractID(renewedFrom), Currency(contractPrice),
@@ -1744,7 +1751,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 
 	now := time.Now()
 	for _, scan := range scans {
-		scanTime := scan.Timestamp.UnixNano()
+		scanTime := scan.Timestamp.UnixMilli()
 		_, err = stmt.Exec(ctx,
 			scan.Success,                                    // scanned
 			scan.Success,                                    // last_scan_success
@@ -1820,7 +1827,7 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		FROM contracts
 		INNER JOIN hosts h ON h.id = contracts.host_id
 		WHERE recent_downtime >= ? AND recent_scan_failures >= ?
-	`, maxDownTime, minRecentFailures)
+	`, DurationMS(maxDownTime), minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch contracts: %w", err)
 	}
@@ -1844,7 +1851,7 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 
 	// delete hosts
 	res, err := tx.Exec(ctx, "DELETE FROM hosts WHERE recent_downtime >= ? AND recent_scan_failures >= ?",
-		maxDownTime, minRecentFailures)
+		DurationMS(maxDownTime), minRecentFailures)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
@@ -1902,7 +1909,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 			SELECT c.fcid, c.renewed_from, c.contract_price, c.state, c.total_cost, c.proof_height,
 			c.revision_height, c.revision_number, c.size, c.start_height, c.window_start, c.window_end,
 			c.upload_spending, c.download_spending, c.fund_account_spending, c.delete_spending, c.list_spending,
-			COALESCE(cs.name, ""), h.net_address, h.public_key, h.settings->>'$.siamuxport' AS siamux_port
+			COALESCE(cs.name, ""), h.net_address, h.public_key, COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 			FROM contracts AS c
 			INNER JOIN hosts h ON h.id = c.host_id
 			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
@@ -2127,8 +2134,8 @@ func SearchHosts(ctx context.Context, tx sql.Tx, autopilot, filterMode, usabilit
 		var resolvedAddresses string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeNS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
-			&h.Interactions.SecondToLastScanSuccess, &h.Interactions.Uptime, &h.Interactions.Downtime,
+			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &resolvedAddresses, &h.Blocked,
 		)
@@ -2229,20 +2236,12 @@ func Settings(ctx context.Context, tx sql.Tx) ([]string, error) {
 	return settings, nil
 }
 
-func SetUncleanShutdown(ctx context.Context, tx sql.Tx) error {
-	_, err := tx.Exec(ctx, "UPDATE ephemeral_accounts SET clean_shutdown = 0, requires_sync = 1")
-	if err != nil {
-		return fmt.Errorf("failed to set unclean shutdown: %w", err)
-	}
-	return err
-}
-
 func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab, error) {
 	// fetch slab
 	var slabID int64
 	slab := object.Slab{Key: key}
 	err := tx.QueryRow(ctx, `
-		SELECT id, health, min_shards 
+		SELECT id, health, min_shards
 		FROM slabs sla
 		WHERE sla.key = ?
 	`, EncryptionKey(key)).Scan(&slabID, &slab.Health, &slab.MinShards)
@@ -2548,7 +2547,7 @@ func scanWalletEvent(s Scanner) (wallet.Event, error) {
 	var inflow, outflow Currency
 	var edata []byte
 	var etype string
-	var ts UnixTimeNS
+	var ts UnixTimeMS
 	if err := s.Scan(
 		&eventID,
 		&blockID,

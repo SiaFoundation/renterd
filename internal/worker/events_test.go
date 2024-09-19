@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -117,7 +117,7 @@ func TestEventSubscriber(t *testing.T) {
 	}
 
 	// setup a server
-	mux := jape.Mux(map[string]jape.Handler{"POST /events": func(jc jape.Context) {
+	mux := jape.Mux(map[string]jape.Handler{"POST /event": func(jc jape.Context) {
 		var event webhooks.Event
 		if jc.Decode(&event) != nil {
 			return
@@ -132,7 +132,7 @@ func TestEventSubscriber(t *testing.T) {
 	defer srv.Close()
 
 	// register the subscriber
-	eventsURL := fmt.Sprintf("http://%v/events", srv.Listener.Addr().String())
+	eventsURL := fmt.Sprintf("http://%v/event", srv.Listener.Addr().String())
 	go func() {
 		if err := s.Register(context.Background(), eventsURL); err != nil {
 			t.Error(err)
@@ -202,18 +202,7 @@ func sendEvent(url string, event webhooks.Event) error {
 	if err != nil {
 		return err
 	}
-	defer io.ReadAll(req.Body) // always drain body
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		errStr, err := io.ReadAll(req.Body)
-		if err != nil {
-			return fmt.Errorf("failed to read response body: %w", err)
-		}
-		return fmt.Errorf("Webhook returned unexpected status %v: %v", resp.StatusCode, string(errStr))
-	}
-	return nil
+	_, _, err = utils.DoRequest(req, nil)
+	return err
 }
