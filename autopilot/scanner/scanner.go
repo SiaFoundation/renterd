@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -166,11 +167,14 @@ func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Ti
 
 			scan, err := w.RHPScan(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
 			if errors.Is(err, context.Canceled) {
+				fmt.Println("RHPScan", err)
 				return
 			} else if err != nil {
+				fmt.Println("RHPScan2", err)
 				s.logger.Errorw("worker stopped", zap.Error(err), "hk", h.hostKey)
 				return // abort
 			} else if err := scan.Error(); err != nil {
+				fmt.Println("RHPScan3", err)
 				s.logger.Debugw("host scan failed", zap.Error(err), "hk", h.hostKey, "ip", h.hostIP)
 			} else {
 				s.statsHostPingMS.Track(float64(time.Duration(scan.Ping).Milliseconds()))
@@ -219,6 +223,7 @@ LOOP:
 			break
 		}
 		exhausted = len(hosts) < s.scanBatchSize
+		fmt.Println("exhausted", exhausted, len(hosts), s.scanBatchSize)
 
 		// send batch to workers
 		for _, h := range hosts {
