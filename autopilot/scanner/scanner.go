@@ -180,7 +180,16 @@ func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Ti
 	}
 
 	var exhausted bool
-	for !exhausted && !s.isShutdown() {
+LOOP:
+	for !exhausted {
+		select {
+		case <-ctx.Done():
+			break LOOP
+		case <-s.shutdownChan:
+			break LOOP
+		default:
+		}
+
 		jobs := make(chan scanJob)
 		var wg sync.WaitGroup
 
