@@ -158,42 +158,47 @@ func (s *scanner) UpdateHostsConfig(cfg api.HostsConfig) {
 }
 
 func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Time) (scanned uint64) {
-	fmt.Println("scanHosts start")
-	defer fmt.Println("scanHosts done")
+	fmt.Println("DEBUG: scanHosts start")
+	defer fmt.Println("DEBUG: scanHosts done")
 	// define worker
 	worker := func(jobChan <-chan scanJob) {
 		for h := range jobChan {
+			fmt.Println("DEBUG: worker loop start")
 			if s.isShutdown() || s.isInterrupted() {
+				fmt.Println("DEBUG: worker exit")
 				return // shutdown
 			}
 
 			scan, err := w.RHPScan(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
 			if errors.Is(err, context.Canceled) {
-				fmt.Println("RHPScan", err)
+				fmt.Println("DEBUG: RHPScan", err)
 				return
 			} else if err != nil {
-				fmt.Println("RHPScan2", err)
+				fmt.Println("DEBUG: RHPScan2", err)
 				s.logger.Errorw("worker stopped", zap.Error(err), "hk", h.hostKey)
 				return // abort
 			} else if err := scan.Error(); err != nil {
-				fmt.Println("RHPScan3", err)
+				fmt.Println("DEBUG: RHPScan3", err)
 				s.logger.Debugw("host scan failed", zap.Error(err), "hk", h.hostKey, "ip", h.hostIP)
 			} else {
 				s.statsHostPingMS.Track(float64(time.Duration(scan.Ping).Milliseconds()))
 				atomic.AddUint64(&scanned, 1)
 			}
+			fmt.Println("DEBUG: worker loop end")
 		}
 	}
 
 	var exhausted bool
-LOOP:
 	for !exhausted {
 		select {
 		case <-ctx.Done():
-			break LOOP
+			fmt.Println("DEBUG: exist done")
+			return
 		case <-s.shutdownChan:
-			break LOOP
+			fmt.Println("DEBUG: exist shutdown")
+			return
 		default:
+			fmt.Println("DEBUG: default")
 		}
 
 		jobs := make(chan scanJob)
@@ -206,38 +211,54 @@ LOOP:
 
 		// launch all workers for this batch
 		for i := 0; i < s.scanThreads; i++ {
+			fmt.Println("DEBUG: launch thread")
 			wg.Add(1)
 			go func() {
 				worker(jobs)
 				wg.Done()
 			}()
+			fmt.Println("DEBUG: launch thread done")
 		}
 
 		// fetch batch
+		fmt.Println("DEBUG: fetch batch")
 		hosts, err := s.hs.Hosts(ctx, api.HostOptions{
 			MaxLastScan: api.TimeRFC3339(cutoff),
 			Offset:      0,
 			Limit:       s.scanBatchSize,
 		})
+		fmt.Println("DEBUG: fetch batch done", err)
 		if err != nil {
 			s.logger.Errorf("could not get hosts for scanning, err: %v", err)
+			fmt.Println("DEBUG: break err", err)
 			joinWorkers()
+			fmt.Println("DEBUG: break err2", err)
 			break
 		}
+		fmt.Println("DEBUG: before exhausted", s == nil)
 		exhausted = len(hosts) < s.scanBatchSize
 		fmt.Println("exhausted", exhausted, len(hosts), s.scanBatchSize)
 
 		// send batch to workers
 		for _, h := range hosts {
-			jobs <- scanJob{
+			select {
+			case jobs <- scanJob{
 				hostKey: h.PublicKey,
 				hostIP:  h.NetAddress,
+			}:
+			case <-ctx.Done():
+				fmt.Println("DEBUG: continue1")
+				continue
+			case <-s.shutdownChan:
+				fmt.Println("DEBUG: continue2")
+				continue
 			}
 		}
+		fmt.Println("DEBUG: done iteration")
 		joinWorkers()
+		fmt.Println("DEBUG: done iteration")
 	}
 
-	fmt.Println("scanHost done")
 	s.statsHostPingMS.Recompute()
 	return
 }
