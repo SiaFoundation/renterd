@@ -128,13 +128,13 @@ func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
 }
 
 func (s *scanner) Shutdown(ctx context.Context) error {
-	defer close(s.shutdownChan)
-
 	waitChan := make(chan struct{})
 	go func() {
 		s.wg.Wait()
 		close(waitChan)
 	}()
+
+	close(s.shutdownChan)
 
 	select {
 	case <-ctx.Done():
@@ -158,11 +158,13 @@ func (s *scanner) UpdateHostsConfig(cfg api.HostsConfig) {
 }
 
 func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Time) (scanned uint64) {
+	fmt.Println("scanHosts start")
+	defer fmt.Println("scanHosts done")
 	// define worker
 	worker := func(jobChan <-chan scanJob) {
 		for h := range jobChan {
 			if s.isShutdown() || s.isInterrupted() {
-				break // shutdown
+				return // shutdown
 			}
 
 			scan, err := w.RHPScan(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
@@ -203,7 +205,7 @@ LOOP:
 		}
 
 		// launch all workers for this batch
-		for t := 0; t < s.scanThreads; t++ {
+		for i := 0; i < s.scanThreads; i++ {
 			wg.Add(1)
 			go func() {
 				worker(jobs)
@@ -235,6 +237,7 @@ LOOP:
 		joinWorkers()
 	}
 
+	fmt.Println("scanHost done")
 	s.statsHostPingMS.Recompute()
 	return
 }
