@@ -2083,7 +2083,7 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 	if req.DisableClientSideEncryption {
 		key = object.NoOpKey
 	} else {
-		key = object.GenerateEncryptionKey()
+		key = object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	}
 
 	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, key, req.MimeType, req.Metadata)

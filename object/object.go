@@ -35,9 +35,12 @@ func (o Object) TotalSize() int64 {
 	}
 	return n
 }
+func (o Object) Decrypt(w io.Writer, opts EncryptionOptions) (cipher.StreamWriter, error) {
+	return o.Key.Decrypt(w, opts)
+}
 
 // Encrypt wraps the given reader with a reader that encrypts the stream using
 // the object's key.
-func (o Object) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
-	return o.Key.Encrypt(r, offset)
+func (o Object) Encrypt(r io.Reader, opts EncryptionOptions) (cipher.StreamReader, error) {
+	return o.Key.Encrypt(r, opts)
 }

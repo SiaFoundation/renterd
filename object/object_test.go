@@ -10,11 +10,11 @@ import (
 )
 
 func TestEncryptionOffset(t *testing.T) {
-	key := GenerateEncryptionKey()
+	key := GenerateEncryptionKey(EncryptionKeyTypeSalted)
 
 	encrypt := func(offset uint64, plainText []byte) []byte {
 		t.Helper()
-		sr, err := key.Encrypt(bytes.NewReader(plainText), offset)
+		sr, err := key.encrypt(bytes.NewReader(plainText), offset)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,7 +26,7 @@ func TestEncryptionOffset(t *testing.T) {
 	}
 	decrypt := func(offset uint64, cipherText []byte) []byte {
 		pt := bytes.NewBuffer(nil)
-		_, err := key.Decrypt(pt, offset).Write(cipherText)
+		_, err := key.decrypt(pt, offset).Write(cipherText)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,9 +44,9 @@ func TestEncryptionOffset(t *testing.T) {
 
 func TestEncryptionOverflow(t *testing.T) {
 	// Create a random key.
-	key := GenerateEncryptionKey()
+	key := GenerateEncryptionKey(EncryptionKeyTypeSalted)
 	data := frand.Bytes(3 * 64)
-	sr, err := key.Encrypt(bytes.NewReader(data), 0)
+	sr, err := key.encrypt(bytes.NewReader(data), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestEncryptionOverflow(t *testing.T) {
 
 	// Assert data matches.
 	buf := bytes.NewBuffer(nil)
-	written, err := key.Decrypt(buf, 0).Write(b)
+	written, err := key.decrypt(buf, 0).Write(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestEncryptionOverflow(t *testing.T) {
 
 	// Assert data matches.
 	buf = bytes.NewBuffer(nil)
-	written, err = key.Decrypt(buf, math.MaxUint32*64-64).Write(b)
+	written, err = key.decrypt(buf, math.MaxUint32*64-64).Write(b)
 	if err != nil {
 		t.Fatal(err)
 	}

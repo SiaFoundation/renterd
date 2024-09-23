@@ -481,7 +481,7 @@ func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, contractSetID uint
 		return nil, err
 	}
 
-	ec := object.GenerateEncryptionKey()
+	ec := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	bufferedSlabID, err := tx.InsertBufferedSlab(ctx, fileName, int64(contractSetID), ec, minShards, totalShards)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert buffered slab: %w", err)
