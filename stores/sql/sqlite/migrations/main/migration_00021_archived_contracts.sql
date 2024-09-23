@@ -27,6 +27,19 @@ CREATE TABLE contracts_temp (
     `fund_account_spending` text,
     `upload_spending` text
 );
+
+DROP INDEX IF EXISTS `idx_contracts_archival_reason`;
+DROP INDEX IF EXISTS `idx_contracts_fcid`;
+DROP INDEX IF EXISTS `idx_contracts_host_key`;
+DROP INDEX IF EXISTS `idx_contracts_proof_height`;
+DROP INDEX IF EXISTS `idx_contracts_renewed_from`;
+DROP INDEX IF EXISTS `idx_contracts_renewed_to`;
+DROP INDEX IF EXISTS `idx_contracts_revision_height`;
+DROP INDEX IF EXISTS `idx_contracts_start_height`;
+DROP INDEX IF EXISTS `idx_contracts_state`;
+DROP INDEX IF EXISTS `idx_contracts_window_end`;
+DROP INDEX IF EXISTS `idx_contracts_window_start`;
+
 CREATE INDEX `idx_contracts_archival_reason` ON `contracts_temp`(`archival_reason`);
 CREATE INDEX `idx_contracts_fcid` ON `contracts_temp`(`fcid`);
 CREATE INDEX `idx_contracts_host_key` ON `contracts_temp`(`host_key`);
