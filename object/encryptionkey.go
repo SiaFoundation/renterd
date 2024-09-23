@@ -6,17 +6,13 @@ import (
 	"encoding"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
-)
-
-var (
-	_ EncryptionKeyInterface = EncryptionKeyBasic{}
-	_ EncryptionKeyInterface = EncryptionKeySalted{}
 )
 
 type EncryptionKeyInterface interface {
@@ -67,11 +63,15 @@ func (k EncryptionKey) String() string {
 	case EncryptionKeyTypeBasic:
 		prefix = "key"
 	case EncryptionKeyTypeSalted:
-		prefix = "skey"
+
 	default:
 		return ""
 	}
 	return fmt.Sprintf("%s:%s", prefix, hex.EncodeToString(k.entropy[:]))
+}
+
+func (k EncryptionKey) Type() EncryptionKeyType {
+	return k.keyType
 }
 
 // MarshalBinary implements encoding.BinaryMarshaler.
@@ -161,6 +161,42 @@ func (k EncryptionKey) decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
 
 type EncryptionKeyBasic EncryptionKey
 
+type EncryptionOptions struct {
+	Offset uint64
+	Key    *[32]byte
+}
+
+var ErrKeyType = errors.New("invalid key type")
+var ErrKeyRequired = errors.New("key required")
+
+func (k EncryptionKey) Encrypt(r io.Reader, opts EncryptionOptions) (cipher.StreamReader, error) {
+	switch k.keyType {
+	case EncryptionKeyTypeBasic:
+		return EncryptionKeyBasic(k).Encrypt(r, opts.Offset)
+	case EncryptionKeyTypeSalted:
+		if opts.Key != nil {
+			return cipher.StreamReader{}, ErrKeyRequired
+		}
+		return EncryptionKeySalted(k).Encrypt(r, opts.Offset, *opts.Key)
+	default:
+		return cipher.StreamReader{}, fmt.Errorf("%w: %v", ErrKeyType, k.keyType)
+	}
+}
+
+func (k EncryptionKey) Decrypt(w io.Writer, opts EncryptionOptions) (cipher.StreamWriter, error) {
+	switch k.keyType {
+	case EncryptionKeyTypeBasic:
+		return EncryptionKeyBasic(k).Decrypt(w, opts.Offset), nil
+	case EncryptionKeyTypeSalted:
+		if opts.Key != nil {
+			return cipher.StreamWriter{}, ErrKeyRequired
+		}
+		return EncryptionKeySalted(k).Decrypt(w, opts.Offset, *opts.Key), nil
+	default:
+		return cipher.StreamWriter{}, fmt.Errorf("%w: %v", ErrKeyType, k.keyType)
+	}
+}
+
 func (k EncryptionKeyBasic) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
 	return EncryptionKey(k).encrypt(r, offset)
 }
@@ -170,10 +206,10 @@ func (k EncryptionKeyBasic) Decrypt(w io.Writer, offset uint64) cipher.StreamWri
 
 type EncryptionKeySalted EncryptionKey
 
-func (k EncryptionKeySalted) Encrypt(secretKey [32]byte, r io.Reader, offset uint64) (cipher.StreamReader, error) {
+func (k EncryptionKeySalted) Encrypt(r io.Reader, offset uint64, key [32]byte) (cipher.StreamReader, error) {
 	panic("not implemented")
 }
-func (k EncryptionKeySalted) Decrypt(secretKey [32]byte, w io.Writer, offset uint64) cipher.StreamWriter {
+func (k EncryptionKeySalted) Decrypt(w io.Writer, offset uint64, key [32]byte) cipher.StreamWriter {
 	panic("not implemented")
 }
 

@@ -195,7 +195,13 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	}
 
 	// create the cipher writer
-	cw := o.Key.Decrypt(w, offset)
+	cw, err := o.Key.Decrypt(w, object.EncryptionOptions{
+		Offset: offset,
+		Key:    nil, // TODO: pass the correct key
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create cipher writer: %w", err)
+	}
 
 	// buffer the writer we recover to making sure that we don't hammer the
 	// response writer with tiny writes

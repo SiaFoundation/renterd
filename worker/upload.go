@@ -397,7 +397,10 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	r = io.TeeReader(r, hasher)
 
 	// create the cipher reader
-	cr, err := o.Encrypt(r, up.encryptionOffset)
+	cr, err := o.Encrypt(r, object.EncryptionOptions{
+		Offset: up.encryptionOffset,
+		Key:    nil, // TODO: pass the correct key
+	})
 	if err != nil {
 		return false, "", err
 	}
