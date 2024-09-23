@@ -155,7 +155,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 			c.l.Debugw(fmt.Sprintf("recreate unspent output %v", e.ID), "height", index.Height, "block_id", index.ID)
 			if _, err := insertOutputStmt.Exec(c.ctx,
 				time.Now().UTC(),
-				e.ID,
+				ssql.Hash256(e.ID),
 				e.StateElement.LeafIndex,
 				ssql.MerkleProof{Hashes: e.StateElement.MerkleProof},
 				ssql.Currency(e.SiacoinOutput.Value),
