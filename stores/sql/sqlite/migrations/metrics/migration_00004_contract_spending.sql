@@ -18,6 +18,19 @@ CREATE TABLE `contracts_temp` (
     `sector_roots_spending_lo` BIGINT NOT NULL,
     `sector_roots_spending_hi` BIGINT NOT NULL
 );
+
+DROP INDEX IF EXISTS `idx_sector_roots_spending`;
+DROP INDEX IF EXISTS `idx_fund_account_spending`;
+DROP INDEX IF EXISTS `idx_contracts_fc_id`;
+DROP INDEX IF EXISTS `idx_remaining_collateral`;
+DROP INDEX IF EXISTS `idx_contracts_host`;
+DROP INDEX IF EXISTS `idx_contracts_timestamp`;
+DROP INDEX IF EXISTS `idx_delete_spending`;
+DROP INDEX IF EXISTS `idx_upload_spending`;
+DROP INDEX IF EXISTS `idx_contracts_revision_number`;
+DROP INDEX IF EXISTS `idx_remaining_funds`;
+DROP INDEX IF EXISTS `idx_contracts_fcid_timestamp`;
+
 CREATE INDEX `idx_sector_roots_spending` ON `contracts_temp`(`sector_roots_spending_lo`,`sector_roots_spending_hi`);
 CREATE INDEX `idx_fund_account_spending` ON `contracts_temp`(`fund_account_spending_lo`,`fund_account_spending_hi`);
 CREATE INDEX `idx_contracts_fc_id` ON `contracts_temp`(`fcid`);
