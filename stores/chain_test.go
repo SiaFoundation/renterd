@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/stores/sql"
 )
@@ -206,5 +207,50 @@ func TestProcessChainUpdate(t *testing.T) {
 	// assert we recover from panic
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error { return nil }); err != nil {
 		panic("oh no")
+	}
+
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+		index3 := types.ChainIndex{Height: 3}
+		index4 := types.ChainIndex{Height: 4}
+		created := []types.SiacoinElement{
+			{
+				StateElement:   types.StateElement{},
+				SiacoinOutput:  types.SiacoinOutput{},
+				MaturityHeight: 100,
+			},
+		}
+		events := []wallet.Event{
+			{
+				Type: wallet.EventTypeV2Transaction,
+				Data: wallet.EventV2Transaction{},
+			},
+		}
+
+		// create some elements
+		err := tx.WalletApplyIndex(index3, created, nil, events, time.Now())
+		if err != nil {
+			return err
+		}
+
+		// spend them
+		err = tx.WalletApplyIndex(index4, nil, created, events, time.Now())
+		if err != nil {
+			return err
+		}
+
+		// revert the spend
+		err = tx.WalletRevertIndex(index4, nil, created, time.Now())
+		if err != nil {
+			return err
+		}
+
+		// revert the creation
+		err = tx.WalletRevertIndex(index3, nil, created, time.Now())
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal("unexpected error", err)
 	}
 }
