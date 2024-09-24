@@ -489,18 +489,7 @@ func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 		return
 	}
 
-	// parse key
-	path := jc.PathParam("key")
-
-	var off int
-	if jc.DecodeForm("offset", &off) != nil {
-		return
-	}
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
-
+	// parse range
 	dr, err := api.ParseDownloadRange(jc.Request)
 	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
 		jc.Error(err, http.StatusBadRequest)
@@ -512,6 +501,9 @@ func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+
+	// parse key
+	path := jc.PathParam("key")
 
 	// fetch object metadata
 	hor, err := w.HeadObject(jc.Request.Context(), bucket, path, api.HeadObjectOptions{
@@ -559,14 +551,6 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 	}
 	var marker string
 	if jc.DecodeForm("marker", &marker) != nil {
-		return
-	}
-	var off int
-	if jc.DecodeForm("offset", &off) != nil {
-		return
-	}
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
 	var ignoreDelim bool
@@ -739,12 +723,12 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 		ContentLength:    jc.Request.ContentLength,
 	}
 
-	// get the offset
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
+	// get the encryption offset
+	var encryptionOffset int
+	if jc.DecodeForm("encryptionoffset", &encryptionOffset) != nil {
 		return
-	} else if jc.Request.FormValue("offset") != "" {
-		opts.EncryptionOffset = &offset
+	} else if jc.Request.FormValue("encryptionoffset") != "" {
+		opts.EncryptionOffset = &encryptionOffset
 	}
 
 	// upload the multipart

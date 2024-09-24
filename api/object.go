@@ -261,7 +261,7 @@ func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 
 func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	if opts.EncryptionOffset != nil {
-		values.Set("offset", fmt.Sprint(*opts.EncryptionOffset))
+		values.Set("encryptionoffset", fmt.Sprint(*opts.EncryptionOffset))
 	}
 	if opts.MinShards != 0 {
 		values.Set("minshards", fmt.Sprint(opts.MinShards))

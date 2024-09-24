@@ -270,11 +270,18 @@ func (b *Bus) walletHandler(jc jape.Context) {
 }
 
 func (b *Bus) walletEventsHandler(jc jape.Context) {
-	offset := 0
-	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil ||
-		jc.DecodeForm("limit", &limit) != nil {
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
 		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+	}
+
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
 	}
 
 	events, err := b.w.Events(offset, limit)
@@ -1505,18 +1512,21 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
+
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
 	}
+
 	var length int
 	if jc.DecodeForm("length", &length) != nil {
 		return
+	} else if length <= 0 {
+		jc.Error(api.ErrInvalidLength, http.StatusBadRequest)
 	}
-	if length <= 0 || offset < 0 {
-		jc.Error(fmt.Errorf("length must be positive and offset must be non-negative"), http.StatusBadRequest)
-		return
-	}
+
 	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1686,22 +1696,25 @@ func (b *Bus) handleGETAlertsDeprecated(jc jape.Context) {
 }
 
 func (b *Bus) handleGETAlerts(jc jape.Context) {
-	if jc.Request.FormValue("offset") == "" && jc.Request.FormValue("limit") == "" {
-		b.handleGETAlertsDeprecated(jc)
+	var severity alerts.Severity
+	if jc.DecodeForm("severity", &severity) != nil {
 		return
 	}
-	offset, limit := 0, -1
-	var severity alerts.Severity
+
+	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
-	} else if jc.DecodeForm("limit", &limit) != nil {
-		return
 	} else if offset < 0 {
-		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
-		return
-	} else if jc.DecodeForm("severity", &severity) != nil {
-		return
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
 	}
+
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+	}
+
 	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
 		Offset:   offset,
 		Limit:    limit,
