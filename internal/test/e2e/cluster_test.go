@@ -382,6 +382,42 @@ func TestNewTestCluster(t *testing.T) {
 	}
 }
 
+// TestObjectsBucket is a test that verifies whether we properly escape bucket
+// names.
+func TestObjectsBucket(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: test.RedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// create a test bucket
+	bucket := "hello world"
+	tt.OK(b.CreateBucket(context.Background(), bucket, api.CreateBucketOptions{}))
+
+	// upload an object to this bucket
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(nil), bucket, t.Name(), api.UploadObjectOptions{}))
+
+	// assert we can fetch the object
+	tt.OKAll(b.Object(context.Background(), bucket, t.Name(), api.GetObjectOptions{}))
+	tt.OKAll(w.HeadObject(context.Background(), bucket, t.Name(), api.HeadObjectOptions{}))
+
+	// assert delete object takes into account the bucket
+	err := w.DeleteObject(context.Background(), bucket+"notthesame", t.Name())
+	if !utils.IsErr(err, api.ErrObjectNotFound) {
+		t.Fatal("expected object not found error", err)
+	}
+	tt.OK(w.DeleteObject(context.Background(), bucket, t.Name()))
+}
+
 // TestObjectsWithDelimiterSlash is an integration test that verifies
 // objects are uploaded, download and deleted from and to the paths we
 // would expect. It is similar to the TestObjectEntries unit test, but uses
