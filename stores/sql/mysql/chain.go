@@ -46,7 +46,7 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
 			} else if n != 1 {
-				return fmt.Errorf("failed to delete spent output: no rows affected")
+				return fmt.Errorf("failed to delete spent output: %w", ssql.ErrOutputNotFound)
 			}
 		}
 	}
@@ -134,7 +134,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
 			} else if n != 1 {
-				return fmt.Errorf("failed to delete removed output: no rows affected")
+				return fmt.Errorf("failed to delete removed output: %w", ssql.ErrOutputNotFound)
 			}
 		}
 	}

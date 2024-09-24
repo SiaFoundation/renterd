@@ -49,7 +49,7 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
 			} else if n != 1 {
-				return fmt.Errorf("failed to delete spent output: no rows affected")
+				return fmt.Errorf("failed to delete spent output: %w", ssql.ErrOutputNotFound)
 			}
 		}
 	}
@@ -89,6 +89,12 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 
 		// insert new events
 		for _, e := range events {
+			if e.Index != index {
+				return fmt.Errorf("event index %v doesn't match index being applied %v", e.Index, index)
+			} else if e.ID == (types.Hash256{}) {
+				return fmt.Errorf("event id is required")
+			}
+
 			c.l.Debugw(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 			data, err := json.Marshal(e.Data)
 			if err != nil {
@@ -137,7 +143,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 			} else if n, err := res.RowsAffected(); err != nil {
 				return fmt.Errorf("failed to get rows affected: %w", err)
 			} else if n != 1 {
-				return fmt.Errorf("failed to delete removed output: no rows affected")
+				return fmt.Errorf("failed to delete removed output: %w", ssql.ErrOutputNotFound)
 			}
 		}
 	}

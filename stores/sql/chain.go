@@ -12,6 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrOutputNotFound = errors.New("output not found")
+)
+
 var contractTables = []string{
 	"contracts",
 	"archived_contracts",
