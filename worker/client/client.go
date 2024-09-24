@@ -94,7 +94,7 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	c.c.Custom("HEAD", fmt.Sprintf("/object/%s", key), nil, nil)
 
 	values := url.Values{}
-	values.Set("bucket", url.QueryEscape(bucket))
+	values.Set("bucket", bucket)
 	opts.Apply(values)
 	key = api.ObjectKeyEscape(key)
 	key += "?" + values.Encode()
@@ -262,7 +262,7 @@ func (c *Client) NotifyEvent(ctx context.Context, e webhooks.Event) (err error) 
 
 func (c *Client) object(ctx context.Context, bucket, key string, opts api.DownloadObjectOptions) (_ io.ReadCloser, _ http.Header, err error) {
 	values := url.Values{}
-	values.Set("bucket", url.QueryEscape(bucket))
+	values.Set("bucket", bucket)
 	key += "?" + values.Encode()
 
 	c.c.Custom("GET", fmt.Sprintf("/object/%s", key), nil, (*[]api.ObjectMetadata)(nil))
