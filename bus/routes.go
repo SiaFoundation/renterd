@@ -275,6 +275,7 @@ func (b *Bus) walletEventsHandler(jc jape.Context) {
 		return
 	} else if offset < 0 {
 		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
 	}
 
 	limit := -1
@@ -282,6 +283,7 @@ func (b *Bus) walletEventsHandler(jc jape.Context) {
 		return
 	} else if limit < -1 {
 		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+		return
 	}
 
 	events, err := b.w.Events(offset, limit)
@@ -1518,6 +1520,7 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 		return
 	} else if offset < 0 {
 		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
 	}
 
 	var length int
@@ -1525,6 +1528,7 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 		return
 	} else if length <= 0 {
 		jc.Error(api.ErrInvalidLength, http.StatusBadRequest)
+		return
 	}
 
 	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
@@ -1698,6 +1702,7 @@ func (b *Bus) handleGETAlerts(jc jape.Context) {
 		return
 	} else if offset < 0 {
 		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
 	}
 
 	limit := -1
@@ -1705,6 +1710,7 @@ func (b *Bus) handleGETAlerts(jc jape.Context) {
 		return
 	} else if limit < -1 {
 		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+		return
 	}
 
 	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
