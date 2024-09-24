@@ -365,4 +365,19 @@ func TestProcessChainUpdate(t *testing.T) {
 	}); !errors.Is(err, sql.ErrOutputNotFound) {
 		t.Fatal("expected ErrOutputNotFound", err)
 	}
+
+	// assert we can't apply an index and pass events with mismatching index
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+		return tx.WalletApplyIndex(types.ChainIndex{Height: 5}, nil, nil, []wallet.Event{
+			{
+				ID:        types.Hash256{1},
+				Index:     types.ChainIndex{Height: 6},
+				Type:      wallet.EventTypeV2Transaction,
+				Data:      wallet.EventV2Transaction{},
+				Timestamp: now,
+			},
+		}, now)
+	}); !errors.Is(err, sql.ErrIndexMissmatch) {
+		t.Fatal("expected ErrIndexMissmatch", err)
+	}
 }

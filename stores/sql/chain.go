@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	ErrIndexMissmatch = errors.New("index missmatch")
 	ErrOutputNotFound = errors.New("output not found")
 )
 
