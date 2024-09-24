@@ -155,44 +155,6 @@ CREATE INDEX `idx_host_checks_score_uptime` ON `host_checks` (`score_uptime`);
 CREATE INDEX `idx_host_checks_score_version` ON `host_checks` (`score_version`);
 CREATE INDEX `idx_host_checks_score_prices` ON `host_checks` (`score_prices`);
 
--- dbObject trigger to delete from slices
-CREATE TRIGGER before_delete_on_objects_delete_slices
-BEFORE DELETE ON objects
-BEGIN
-    DELETE FROM slices
-    WHERE slices.db_object_id = OLD.id;
-END;
-
--- dbMultipartUpload trigger to delete from dbMultipartPart
-CREATE TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
-BEFORE DELETE ON multipart_uploads
-BEGIN
-    DELETE FROM multipart_parts
-    WHERE multipart_parts.db_multipart_upload_id = OLD.id;
-END;
-
--- dbMultipartPart trigger to delete from slices
-CREATE TRIGGER before_delete_on_multipart_parts_delete_slices
-BEFORE DELETE ON multipart_parts
-BEGIN
-    DELETE FROM slices
-    WHERE slices.db_multipart_part_id = OLD.id;
-END;
-
--- dbSlices trigger to prune slabs
-CREATE TRIGGER after_delete_on_slices_delete_slabs
-AFTER DELETE ON slices
-BEGIN
-    DELETE FROM slabs
-    WHERE slabs.id = OLD.db_slab_id
-    AND slabs.db_buffered_slab_id IS NULL
-    AND NOT EXISTS (
-        SELECT 1
-        FROM slices
-        WHERE slices.db_slab_id = OLD.db_slab_id
-    );
-END;
-
 -- dbSyncerPeer
 CREATE TABLE `syncer_peers` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`address` text NOT NULL,`first_seen` BIGINT NOT NULL,`last_connect` BIGINT,`synced_blocks` BIGINT,`sync_duration` BIGINT);
 CREATE UNIQUE INDEX `idx_syncer_peers_address` ON `syncer_peers`(`address`);
