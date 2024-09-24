@@ -44,7 +44,7 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 			if res, err := deleteSpentStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete spent output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
-				return fmt.Errorf("failed to get rows affected: %w", err)
+				return fmt.Errorf("failed to delete spent output: %w", err)
 			} else if n != 1 {
 				return fmt.Errorf("failed to delete spent output: %w", ssql.ErrOutputNotFound)
 			}
@@ -86,6 +86,14 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 
 		// insert new events
 		for _, e := range events {
+			if e.Index != index {
+				return fmt.Errorf("%w, event index %v != applied index %v", ssql.ErrIndexMissmatch, e.Index, index)
+			} else if e.ID == (types.Hash256{}) {
+				return fmt.Errorf("event id is required")
+			} else if e.Timestamp.IsZero() {
+				return fmt.Errorf("event timestamp is required")
+			}
+
 			c.l.Debugw(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 			data, err := json.Marshal(e.Data)
 			if err != nil {
@@ -132,7 +140,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 			if res, err := deleteRemovedStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete removed output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
-				return fmt.Errorf("failed to get rows affected: %w", err)
+				return fmt.Errorf("failed to delete removed output: %w", err)
 			} else if n != 1 {
 				return fmt.Errorf("failed to delete removed output: %w", ssql.ErrOutputNotFound)
 			}
@@ -169,7 +177,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return fmt.Errorf("failed to delete events: %w", err)
 	} else if n > 0 {
 		c.l.Debugw(fmt.Sprintf("removed %d events", n), "height", index.Height, "block_id", index.ID)
 	}
