@@ -1687,14 +1687,6 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	}, nil
 }
 
-func (b *Bus) handleGETAlertsDeprecated(jc jape.Context) {
-	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
-	if jc.Check("failed to fetch alerts", err) != nil {
-		return
-	}
-	jc.Encode(ar.Alerts)
-}
-
 func (b *Bus) handleGETAlerts(jc jape.Context) {
 	var severity alerts.Severity
 	if jc.DecodeForm("severity", &severity) != nil {
