@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 
+	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
@@ -63,7 +64,7 @@ func (k EncryptionKey) String() string {
 	case EncryptionKeyTypeBasic:
 		prefix = "key"
 	case EncryptionKeyTypeSalted:
-
+		prefix = "skey"
 	default:
 		return ""
 	}
@@ -96,7 +97,7 @@ func (k EncryptionKey) MarshalText() ([]byte, error) {
 // UnmarshalText implements the encoding.TextUnmarshaler interface.
 func (k *EncryptionKey) UnmarshalText(b []byte) error {
 	splits := bytes.Split(b, []byte(":"))
-	if len(b) != 2 {
+	if len(splits) != 2 {
 		return fmt.Errorf("expected the key to have the form prefix:entropy but had %v pieces", len(splits))
 	}
 	// prefix
@@ -106,7 +107,7 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 	case "skey":
 		k.keyType = EncryptionKeyTypeSalted
 	default:
-		return fmt.Errorf("invalid prefix for key: %s", splits[0])
+		return fmt.Errorf("invalid prefix for key: '%s'", splits[0])
 	}
 
 	// entropy
@@ -119,48 +120,6 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 	return nil
 }
 
-// Encrypt returns a cipher.StreamReader that encrypts r with k starting at the
-// given offset.
-func (k EncryptionKey) encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
-	if offset%64 != 0 {
-		return cipher.StreamReader{}, fmt.Errorf("offset must be a multiple of 64, got %v", offset)
-	}
-	if k.IsNoopKey() {
-		return cipher.StreamReader{S: &noOpStream{}, R: r}, nil
-	}
-	nonce64 := offset / (64 * math.MaxUint32)
-	offset %= 64 * math.MaxUint32
-
-	nonce := make([]byte, 24)
-	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
-	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce)
-	c.SetCounter(uint32(offset / 64))
-	rs := &rekeyStream{key: k.entropy[:], c: c}
-	return cipher.StreamReader{S: rs, R: r}, nil
-}
-
-// Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
-// specified offset.
-func (k EncryptionKey) decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
-	if k.IsNoopKey() {
-		return cipher.StreamWriter{S: &noOpStream{}, W: w}
-	}
-	nonce64 := offset / (64 * math.MaxUint32)
-	offset %= 64 * math.MaxUint32
-
-	nonce := make([]byte, 24)
-	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
-	c, _ := chacha20.NewUnauthenticatedCipher(k.entropy[:], nonce)
-	c.SetCounter(uint32(offset / 64))
-
-	var buf [64]byte
-	c.XORKeyStream(buf[:offset%64], buf[:offset%64])
-	rs := &rekeyStream{key: k.entropy[:], c: c, counter: offset, nonce: nonce64}
-	return cipher.StreamWriter{S: rs, W: w}
-}
-
-type EncryptionKeyBasic EncryptionKey
-
 type EncryptionOptions struct {
 	Offset uint64
 	Key    *[32]byte
@@ -169,48 +128,57 @@ type EncryptionOptions struct {
 var ErrKeyType = errors.New("invalid key type")
 var ErrKeyRequired = errors.New("key required")
 
-func (k EncryptionKey) Encrypt(r io.Reader, opts EncryptionOptions) (cipher.StreamReader, error) {
+func (k *EncryptionKey) Encrypt(r io.Reader, opts EncryptionOptions) (cipher.StreamReader, error) {
 	switch k.keyType {
 	case EncryptionKeyTypeBasic:
-		return EncryptionKeyBasic(k).Encrypt(r, opts.Offset)
+		return (*encryptionKeyBasic)(k).Encrypt(r, opts.Offset)
 	case EncryptionKeyTypeSalted:
-		if opts.Key != nil {
+		if opts.Key == nil {
 			return cipher.StreamReader{}, ErrKeyRequired
 		}
-		return EncryptionKeySalted(k).Encrypt(r, opts.Offset, *opts.Key)
+		return (*encryptionKeySalted)(k).Encrypt(r, opts.Offset, opts.Key)
 	default:
 		return cipher.StreamReader{}, fmt.Errorf("%w: %v", ErrKeyType, k.keyType)
 	}
 }
 
-func (k EncryptionKey) Decrypt(w io.Writer, opts EncryptionOptions) (cipher.StreamWriter, error) {
+func (k *EncryptionKey) Decrypt(w io.Writer, opts EncryptionOptions) (cipher.StreamWriter, error) {
 	switch k.keyType {
 	case EncryptionKeyTypeBasic:
-		return EncryptionKeyBasic(k).Decrypt(w, opts.Offset), nil
+		return (*encryptionKeyBasic)(k).Decrypt(w, opts.Offset), nil
 	case EncryptionKeyTypeSalted:
-		if opts.Key != nil {
+		if opts.Key == nil {
 			return cipher.StreamWriter{}, ErrKeyRequired
 		}
-		return EncryptionKeySalted(k).Decrypt(w, opts.Offset, *opts.Key), nil
+		return (*encryptionKeySalted)(k).Decrypt(w, opts.Offset, opts.Key), nil
 	default:
 		return cipher.StreamWriter{}, fmt.Errorf("%w: %v", ErrKeyType, k.keyType)
 	}
 }
 
-func (k EncryptionKeyBasic) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
-	return EncryptionKey(k).encrypt(r, offset)
+type encryptionKeyBasic EncryptionKey
+
+func (k *encryptionKeyBasic) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
+	return encrypt(k.entropy, r, offset)
 }
-func (k EncryptionKeyBasic) Decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
-	return EncryptionKey(k).decrypt(w, offset)
+func (k *encryptionKeyBasic) Decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
+	return decrypt(k.entropy, w, offset)
 }
 
-type EncryptionKeySalted EncryptionKey
+type encryptionKeySalted EncryptionKey
 
-func (k EncryptionKeySalted) Encrypt(r io.Reader, offset uint64, key [32]byte) (cipher.StreamReader, error) {
-	panic("not implemented")
+func (k *encryptionKeySalted) deriveEncryptionKey(key *[32]byte) *[32]byte {
+	entropy := append([]byte(nil), key[:]...)
+	entropy = append(entropy, k.entropy[:]...)
+	sum := blake2b.Sum256(entropy)
+	return &sum
 }
-func (k EncryptionKeySalted) Decrypt(w io.Writer, offset uint64, key [32]byte) cipher.StreamWriter {
-	panic("not implemented")
+
+func (k *encryptionKeySalted) Encrypt(r io.Reader, offset uint64, key *[32]byte) (cipher.StreamReader, error) {
+	return encrypt(k.deriveEncryptionKey(key), r, offset)
+}
+func (k *encryptionKeySalted) Decrypt(w io.Writer, offset uint64, key *[32]byte) cipher.StreamWriter {
+	return decrypt(k.deriveEncryptionKey(key), w, offset)
 }
 
 type rekeyStream struct {
@@ -245,4 +213,44 @@ type noOpStream struct{}
 
 func (noOpStream) XORKeyStream(dst, src []byte) {
 	copy(dst, src)
+}
+
+// Encrypt returns a cipher.StreamReader that encrypts r with k starting at the
+// given offset.
+func encrypt(key *[32]byte, r io.Reader, offset uint64) (cipher.StreamReader, error) {
+	if offset%64 != 0 {
+		return cipher.StreamReader{}, fmt.Errorf("offset must be a multiple of 64, got %v", offset)
+	}
+	if bytes.Equal(key[:], NoOpKey.entropy[:]) {
+		return cipher.StreamReader{S: &noOpStream{}, R: r}, nil
+	}
+	nonce64 := offset / (64 * math.MaxUint32)
+	offset %= 64 * math.MaxUint32
+
+	nonce := make([]byte, 24)
+	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
+	c, _ := chacha20.NewUnauthenticatedCipher(key[:], nonce)
+	c.SetCounter(uint32(offset / 64))
+	rs := &rekeyStream{key: key[:], c: c}
+	return cipher.StreamReader{S: rs, R: r}, nil
+}
+
+// Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
+// specified offset.
+func decrypt(key *[32]byte, w io.Writer, offset uint64) cipher.StreamWriter {
+	if bytes.Equal(key[:], NoOpKey.entropy[:]) {
+		return cipher.StreamWriter{S: &noOpStream{}, W: w}
+	}
+	nonce64 := offset / (64 * math.MaxUint32)
+	offset %= 64 * math.MaxUint32
+
+	nonce := make([]byte, 24)
+	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
+	c, _ := chacha20.NewUnauthenticatedCipher(key[:], nonce)
+	c.SetCounter(uint32(offset / 64))
+
+	var buf [64]byte
+	c.XORKeyStream(buf[:offset%64], buf[:offset%64])
+	rs := &rekeyStream{key: key[:], c: c, counter: offset, nonce: nonce64}
+	return cipher.StreamWriter{S: rs, W: w}
 }

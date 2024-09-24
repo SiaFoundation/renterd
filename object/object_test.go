@@ -10,11 +10,13 @@ import (
 )
 
 func TestEncryptionOffset(t *testing.T) {
-	key := GenerateEncryptionKey(EncryptionKeyTypeSalted)
+	key := GenerateEncryptionKey(EncryptionKeyTypeBasic)
 
 	encrypt := func(offset uint64, plainText []byte) []byte {
 		t.Helper()
-		sr, err := key.encrypt(bytes.NewReader(plainText), offset)
+		sr, err := key.Encrypt(bytes.NewReader(plainText), EncryptionOptions{
+			Offset: offset,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,8 +28,12 @@ func TestEncryptionOffset(t *testing.T) {
 	}
 	decrypt := func(offset uint64, cipherText []byte) []byte {
 		pt := bytes.NewBuffer(nil)
-		_, err := key.decrypt(pt, offset).Write(cipherText)
+		sw, err := key.Decrypt(pt, EncryptionOptions{
+			Offset: offset,
+		})
 		if err != nil {
+			t.Fatal(err)
+		} else if _, err := sw.Write(cipherText); err != nil {
 			t.Fatal(err)
 		}
 		return pt.Bytes()
@@ -44,9 +50,9 @@ func TestEncryptionOffset(t *testing.T) {
 
 func TestEncryptionOverflow(t *testing.T) {
 	// Create a random key.
-	key := GenerateEncryptionKey(EncryptionKeyTypeSalted)
+	key := GenerateEncryptionKey(EncryptionKeyTypeBasic)
 	data := frand.Bytes(3 * 64)
-	sr, err := key.encrypt(bytes.NewReader(data), 0)
+	sr, err := key.Encrypt(bytes.NewReader(data), EncryptionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,11 +86,14 @@ func TestEncryptionOverflow(t *testing.T) {
 
 	// Assert data matches.
 	buf := bytes.NewBuffer(nil)
-	written, err := key.decrypt(buf, 0).Write(b)
+	sw, err := key.Decrypt(buf, EncryptionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if written != len(b) {
+	written, err := sw.Write(b)
+	if err != nil {
+		t.Fatal(err)
+	} else if written != len(b) {
 		t.Fatal("unexpected")
 	}
 	if !bytes.Equal(buf.Bytes(), data[:64]) {
@@ -113,7 +122,11 @@ func TestEncryptionOverflow(t *testing.T) {
 
 	// Assert data matches.
 	buf = bytes.NewBuffer(nil)
-	written, err = key.decrypt(buf, math.MaxUint32*64-64).Write(b)
+	sw, err = key.Decrypt(buf, EncryptionOptions{Offset: math.MaxUint32*64 - 64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err = sw.Write(b)
 	if err != nil {
 		t.Fatal(err)
 	}
