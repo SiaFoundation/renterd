@@ -77,15 +77,33 @@ func (k EncryptionKey) Type() EncryptionKeyType {
 
 // MarshalBinary implements encoding.BinaryMarshaler.
 func (k EncryptionKey) MarshalBinary() ([]byte, error) {
-	return append([]byte{}, k.entropy[:]...), nil
+	var b [33]byte
+	switch k.keyType {
+	case EncryptionKeyTypeBasic:
+		b[0] = 1
+	case EncryptionKeyTypeSalted:
+		b[0] = 2
+	default:
+		return nil, ErrKeyType
+	}
+	copy(b[1:], k.entropy[:])
+	return b[:], nil
 }
 
 func (k *EncryptionKey) UnmarshalBinary(b []byte) error {
 	k.entropy = new([32]byte)
-	if len(b) != len(k.entropy) {
-		return fmt.Errorf("wrong key length: expected %v, got %v", len(k.entropy), len(b))
+	if len(b) != len(k.entropy)+1 {
+		return fmt.Errorf("wrong key length: expected %v, got %v", len(k.entropy)+1, len(b))
 	}
-	copy(k.entropy[:], b)
+	switch b[0] {
+	case 1:
+		k.keyType = EncryptionKeyTypeBasic
+	case 2:
+		k.keyType = EncryptionKeyTypeSalted
+	default:
+		return ErrKeyType
+	}
+	copy(k.entropy[:], b[1:])
 	return nil
 }
 
