@@ -31,10 +31,11 @@ var (
 
 type (
 	downloadManager struct {
-		hm     HostManager
-		mm     MemoryManager
-		os     ObjectStore
-		logger *zap.SugaredLogger
+		hm        HostManager
+		mm        MemoryManager
+		os        ObjectStore
+		uploadKey *[32]byte
+		logger    *zap.SugaredLogger
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
@@ -127,20 +128,21 @@ type (
 	}
 )
 
-func (w *Worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (w *Worker) initDownloadManager(uploadKey *[32]byte, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
-	w.downloadManager = newDownloadManager(w.shutdownCtx, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
+	w.downloadManager = newDownloadManager(w.shutdownCtx, uploadKey, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(ctx context.Context, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
+func newDownloadManager(ctx context.Context, uploadKey *[32]byte, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
 	logger = logger.Named("downloadmanager")
 	return &downloadManager{
-		hm:     hm,
-		mm:     newMemoryManager(maxMemory, logger),
-		os:     os,
-		logger: logger.Sugar(),
+		hm:        hm,
+		mm:        newMemoryManager(maxMemory, logger),
+		os:        os,
+		uploadKey: uploadKey,
+		logger:    logger.Sugar(),
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
@@ -197,7 +199,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	// create the cipher writer
 	cw, err := o.Key.Decrypt(w, object.EncryptionOptions{
 		Offset: offset,
-		Key:    nil, // TODO: pass the correct key
+		Key:    mgr.uploadKey,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create cipher writer: %w", err)

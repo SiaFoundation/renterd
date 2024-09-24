@@ -665,8 +665,8 @@ func testParameters(key string) uploadParameters {
 		bucket: testBucket,
 		key:    key,
 
-		ec:               object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted), // random key
-		encryptionOffset: 0,                                                            // from the beginning
+		ec:               object.GenerateEncryptionKey(object.EncryptionKeyTypeBasic), // random key
+		encryptionOffset: 0,                                                           // from the beginning
 
 		contractSet: testContractSet,
 		rs:          testRedundancySettings,

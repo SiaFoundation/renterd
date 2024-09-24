@@ -39,12 +39,13 @@ var (
 
 type (
 	uploadManager struct {
-		hm     HostManager
-		mm     MemoryManager
-		os     ObjectStore
-		cl     ContractLocker
-		cs     ContractStore
-		logger *zap.SugaredLogger
+		hm        HostManager
+		mm        MemoryManager
+		os        ObjectStore
+		cl        ContractLocker
+		cs        ContractStore
+		uploadKey *[32]byte
+		logger    *zap.SugaredLogger
 
 		contractLockDuration time.Duration
 
@@ -146,12 +147,12 @@ type (
 	}
 )
 
-func (w *Worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (w *Worker) initUploadManager(uploadKey *[32]byte, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, uploadKey, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
 func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
@@ -302,15 +303,16 @@ func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.Pac
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
+func newUploadManager(ctx context.Context, uploadKey *[32]byte, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
-		hm:     hm,
-		mm:     newMemoryManager(maxMemory, logger),
-		os:     os,
-		cl:     cl,
-		cs:     cs,
-		logger: logger.Sugar(),
+		hm:        hm,
+		mm:        newMemoryManager(maxMemory, logger),
+		os:        os,
+		cl:        cl,
+		cs:        cs,
+		uploadKey: uploadKey,
+		logger:    logger.Sugar(),
 
 		contractLockDuration: contractLockDuration,
 
@@ -399,7 +401,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// create the cipher reader
 	cr, err := o.Encrypt(r, object.EncryptionOptions{
 		Offset: up.encryptionOffset,
-		Key:    nil, // TODO: pass the correct key
+		Key:    mgr.uploadKey,
 	})
 	if err != nil {
 		return false, "", err
