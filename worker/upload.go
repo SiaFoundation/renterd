@@ -44,7 +44,7 @@ type (
 		os        ObjectStore
 		cl        ContractLocker
 		cs        ContractStore
-		uploadKey *[32]byte
+		uploadKey *utils.UploadKey
 		logger    *zap.SugaredLogger
 
 		contractLockDuration time.Duration
@@ -147,7 +147,7 @@ type (
 	}
 )
 
-func (w *Worker) initUploadManager(uploadKey *[32]byte, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (w *Worker) initUploadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
@@ -303,7 +303,7 @@ func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.Pac
 	return nil
 }
 
-func newUploadManager(ctx context.Context, uploadKey *[32]byte, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
+func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
 		hm:        hm,
