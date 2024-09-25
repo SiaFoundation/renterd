@@ -58,6 +58,7 @@ func main() {
 	} else if flag.Arg(0) == "sqlite" && flag.Arg(1) == "backup" &&
 		flag.Arg(2) != "" && flag.Arg(3) != "" {
 		cmdBackup()
+		return
 	} else if flag.Arg(0) != "" {
 		flag.Usage()
 		return

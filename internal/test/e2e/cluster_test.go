@@ -30,6 +30,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -2706,4 +2707,44 @@ func TestHostScan(t *testing.T) {
 	if len(toScan) != 1 {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
+}
+
+func TestBackup(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	bus := cluster.Bus
+
+	// test that backup fails for MySQL
+	isSqlite := config.MySQLConfigFromEnv().URI == ""
+	if !isSqlite {
+		err := bus.Backup(context.Background(), "", "")
+		cluster.tt.AssertIs(err, api.ErrBackupNotSupported)
+		return
+	}
+
+	// test creating a backup
+	tmpDir := t.TempDir()
+	mainDst := filepath.Join(tmpDir, "main.sqlite")
+	metricsDst := filepath.Join(tmpDir, "metrics.sqlite")
+	cluster.tt.OK(bus.Backup(context.Background(), "main", mainDst))
+	cluster.tt.OK(bus.Backup(context.Background(), "metrics", metricsDst))
+	cluster.tt.OKAll(os.Stat(mainDst))
+	cluster.tt.OKAll(os.Stat(metricsDst))
+
+	// test creating backing up an invalid db
+	invalidDst := filepath.Join(tmpDir, "invalid.sqlite")
+	err := bus.Backup(context.Background(), "invalid", invalidDst)
+	cluster.tt.AssertIs(err, api.ErrInvalidDatabase)
+	_, err = os.Stat(invalidDst)
+	if !os.IsNotExist(err) {
+		t.Fatal("expected file to not exist")
+	}
+
+	// ping backups
+	dbMain, err := sqlite.Open(mainDst)
+	cluster.tt.OK(err)
+	cluster.tt.OK(dbMain.Ping())
+	dbMetrics, err := sqlite.Open(metricsDst)
+	cluster.tt.OK(err)
+	cluster.tt.OK(dbMetrics.Ping())
 }
