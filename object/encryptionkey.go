@@ -26,6 +26,7 @@ type EncryptionKeyInterface interface {
 
 var NoOpKey = EncryptionKey{
 	entropy: new([32]byte),
+	keyType: EncryptionKeyTypeBasic,
 }
 
 type EncryptionKeyType int
