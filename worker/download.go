@@ -34,7 +34,7 @@ type (
 		hm        HostManager
 		mm        MemoryManager
 		os        ObjectStore
-		uploadKey *[32]byte
+		uploadKey *utils.UploadKey
 		logger    *zap.SugaredLogger
 
 		maxOverdrive     uint64
@@ -128,14 +128,14 @@ type (
 	}
 )
 
-func (w *Worker) initDownloadManager(uploadKey *[32]byte, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (w *Worker) initDownloadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
 	w.downloadManager = newDownloadManager(w.shutdownCtx, uploadKey, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(ctx context.Context, uploadKey *[32]byte, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
+func newDownloadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
 	logger = logger.Named("downloadmanager")
 	return &downloadManager{
 		hm:        hm,

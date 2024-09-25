@@ -11,7 +11,7 @@ import (
 	"io"
 	"math"
 
-	"golang.org/x/crypto/blake2b"
+	"go.sia.tech/renterd/internal/utils"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
@@ -141,7 +141,7 @@ func (k *EncryptionKey) UnmarshalText(b []byte) error {
 
 type EncryptionOptions struct {
 	Offset uint64
-	Key    *[32]byte
+	Key    *utils.UploadKey
 }
 
 var ErrKeyType = errors.New("invalid key type")
@@ -186,18 +186,13 @@ func (k *encryptionKeyBasic) Decrypt(w io.Writer, offset uint64) cipher.StreamWr
 
 type encryptionKeySalted EncryptionKey
 
-func (k *encryptionKeySalted) deriveEncryptionKey(key *[32]byte) *[32]byte {
-	entropy := append([]byte(nil), key[:]...)
-	entropy = append(entropy, k.entropy[:]...)
-	sum := blake2b.Sum256(entropy)
-	return &sum
+func (k *encryptionKeySalted) Encrypt(r io.Reader, offset uint64, key *utils.UploadKey) (cipher.StreamReader, error) {
+	derivedKey := key.DeriveKey(k.entropy)
+	return encrypt(&derivedKey, r, offset)
 }
-
-func (k *encryptionKeySalted) Encrypt(r io.Reader, offset uint64, key *[32]byte) (cipher.StreamReader, error) {
-	return encrypt(k.deriveEncryptionKey(key), r, offset)
-}
-func (k *encryptionKeySalted) Decrypt(w io.Writer, offset uint64, key *[32]byte) cipher.StreamWriter {
-	return decrypt(k.deriveEncryptionKey(key), w, offset)
+func (k *encryptionKeySalted) Decrypt(w io.Writer, offset uint64, key *utils.UploadKey) cipher.StreamWriter {
+	derivedKey := key.DeriveKey(k.entropy)
+	return decrypt(&derivedKey, w, offset)
 }
 
 type rekeyStream struct {

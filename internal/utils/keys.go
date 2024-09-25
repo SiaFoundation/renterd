@@ -10,6 +10,7 @@ import (
 type (
 	MasterKey   [32]byte
 	AccountsKey types.PrivateKey
+	UploadKey   [32]byte
 )
 
 // DeriveAccountsKey derives an accounts key from a masterkey which is used
@@ -17,6 +18,12 @@ type (
 func (key *MasterKey) DeriveAccountsKey(workerID string) AccountsKey {
 	keyPath := fmt.Sprintf("accounts/%s", workerID)
 	return AccountsKey(key.deriveSubKey(keyPath))
+}
+
+// DeriveAccountsKey derives an accounts key from a masterkey which is used
+// to derive individual account keys from.
+func (key *MasterKey) DeriveUploadKey() UploadKey {
+	return UploadKey(key.deriveSubKey("uploads"))
 }
 
 // DeriveContractKey derives a contract key from a masterkey which is used to
@@ -28,6 +35,13 @@ func (key *MasterKey) DeriveContractKey(hostKey types.PublicKey) types.PrivateKe
 		seed[i] = 0
 	}
 	return pk
+}
+
+func (key *UploadKey) DeriveKey(salt *[32]byte) [32]byte {
+	entropy := append([]byte(nil), key[:]...)
+	entropy = append(entropy, salt[:]...)
+	sum := blake2b.Sum256(entropy)
+	return sum
 }
 
 // deriveSubKey can be used to derive a sub-masterkey from the worker's
