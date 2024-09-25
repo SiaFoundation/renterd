@@ -2743,8 +2743,11 @@ func TestBackup(t *testing.T) {
 	// ping backups
 	dbMain, err := sqlite.Open(mainDst)
 	cluster.tt.OK(err)
+	defer dbMain.Close()
 	cluster.tt.OK(dbMain.Ping())
+
 	dbMetrics, err := sqlite.Open(metricsDst)
 	cluster.tt.OK(err)
+	defer dbMetrics.Close()
 	cluster.tt.OK(dbMetrics.Ping())
 }
