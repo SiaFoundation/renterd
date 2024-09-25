@@ -1141,17 +1141,17 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
 	}
-	if jc.DecodeForm("sortBy", &sortBy) != nil {
+	if jc.DecodeForm("sortby", &sortBy) != nil {
 		return
 	}
-	if jc.DecodeForm("sortDir", &sortDir) != nil {
+	if jc.DecodeForm("sortdir", &sortDir) != nil {
 		return
 	}
 	if jc.DecodeForm("substring", &substring) != nil {
 		return
 	}
 	var slabEncryptionKey object.EncryptionKey
-	if jc.DecodeForm("slabEncryptionKey", &slabEncryptionKey) != nil {
+	if jc.DecodeForm("slabencryptionkey", &slabEncryptionKey) != nil {
 		return
 	}
 
@@ -1530,15 +1530,15 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 
 func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	var minShards int
-	if jc.DecodeForm("minShards", &minShards) != nil {
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
 	var totalShards int
-	if jc.DecodeForm("totalShards", &totalShards) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
 	var contractSet string
-	if jc.DecodeForm("contractSet", &contractSet) != nil {
+	if jc.DecodeForm("contractset", &contractSet) != nil {
 		return
 	}
 	if minShards <= 0 || totalShards <= minShards {
@@ -1578,7 +1578,7 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	var minStartHeight uint64
-	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
+	if jc.DecodeForm("minstartheight", &minStartHeight) != nil {
 		return
 	}
 	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
@@ -2010,19 +2010,19 @@ func (b *Bus) metricsHandlerGET(jc jape.Context) {
 	switch key {
 	case api.MetricContract:
 		var opts api.ContractMetricsQueryOpts
-		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractid", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostkey", &opts.HostKey) != nil {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricContractPrune:
 		var opts api.ContractPruneMetricsQueryOpts
-		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractid", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostkey", &opts.HostKey) != nil {
 			return
-		} else if jc.DecodeForm("hostVersion", &opts.HostVersion) != nil {
+		} else if jc.DecodeForm("hostversion", &opts.HostVersion) != nil {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)

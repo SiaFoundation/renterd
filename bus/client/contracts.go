@@ -19,7 +19,7 @@ func (c *Client) AddContract(ctx context.Context, contract api.ContractMetadata)
 // AncestorContracts returns any ancestors of a given contract.
 func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
-	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
+	values.Set("minstartheight", fmt.Sprint(minStartHeight))
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), contractID), &contracts)
 	return
 }
