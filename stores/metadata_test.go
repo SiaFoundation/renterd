@@ -4017,18 +4017,23 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// create objects
-	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health) VALUES (?, ?, ?, ?);")
+	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health, `key`) VALUES (?, ?, ?, ?, ?);")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer insertObjStmt.Close()
 
+	randomKey := func() sql.EncryptionKey {
+		return sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted))
+	}
+
 	var obj1ID, obj2ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1); err != nil {
+	obj1Key, obj2Key := randomKey(), randomKey()
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
 		t.Fatal(err)
 	} else if obj1ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1); err != nil {
+	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
 		t.Fatal(err)
 	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4084,7 +4089,8 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	var obj3ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1); err != nil {
+	obj3Key := randomKey()
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1, obj3Key); err != nil {
 		t.Fatal(err)
 	} else if obj3ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
