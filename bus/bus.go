@@ -164,6 +164,7 @@ type (
 	Store interface {
 		AccountStore
 		AutopilotStore
+		BackupStore
 		ChainStore
 		HostStore
 		MetadataStore
@@ -184,6 +185,11 @@ type (
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
 		Autopilots(ctx context.Context) ([]api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+	}
+
+	// BackupStore is the interface of a store that can be backed up.
+	BackupStore interface {
+		Backup(ctx context.Context, dbID, destPath string) error
 	}
 
 	// A ChainStore stores information about the chain.
@@ -314,13 +320,7 @@ type Bus struct {
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
-
-	accounts AccountStore
-	as       AutopilotStore
-	hs       HostStore
-	ms       MetadataStore
-	mtrcs    MetricsStore
-	ss       SettingStore
+	store       Store
 
 	rhp2 *rhp2.Client
 	rhp3 *rhp3.Client
@@ -340,15 +340,10 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		startTime: time.Now(),
 		masterKey: masterKey,
 
-		accounts: store,
-		s:        s,
-		cm:       cm,
-		w:        w,
-		hs:       store,
-		as:       store,
-		ms:       store,
-		mtrcs:    store,
-		ss:       store,
+		s:     s,
+		cm:    cm,
+		w:     w,
+		store: store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -497,6 +492,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /syncer/connect": b.syncerConnectHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 
+		"POST /system/database/backup": b.postSystemSQLite3BackupHandler,
+
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
 		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
@@ -533,7 +530,7 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 }
 
 func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	c, err := b.ms.AddContract(ctx, rev, contractPrice, totalCost, startHeight, state)
+	c, err := b.store.AddContract(ctx, rev, contractPrice, totalCost, startHeight, state)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -550,7 +547,7 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 }
 
 func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
+	r, err := b.store.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -580,7 +577,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}()
 
 	// fetch contract
-	c, err := b.ms.Contract(ctx, fcid)
+	c, err := b.store.Contract(ctx, fcid)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
@@ -685,10 +682,10 @@ func (b *Bus) initSettings(ctx context.Context) error {
 		api.SettingRedundancy:    defaultRedundancySettings,
 		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
 	} {
-		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
+		if _, err := b.store.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
 			if bytes, err := json.Marshal(value); err != nil {
 				panic("failed to marshal default settings") // should never happen
-			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
+			} else if err := b.store.UpdateSetting(ctx, key, string(bytes)); err != nil {
 				return err
 			}
 		}
@@ -696,21 +693,21 @@ func (b *Bus) initSettings(ctx context.Context) error {
 
 	// check redundancy settings for validity
 	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
+	if rss, err := b.store.Setting(ctx, api.SettingRedundancy); err != nil {
 		return err
 	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
 		return err
 	} else if err := rs.Validate(); err != nil {
 		b.logger.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
 		bytes, _ := json.Marshal(defaultRedundancySettings)
-		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
+		if err := b.store.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
 			return err
 		}
 	}
 
 	// check gouging settings for validity
 	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
+	if gss, err := b.store.Setting(ctx, api.SettingGouging); err != nil {
 		return err
 	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
 		return err
@@ -722,7 +719,7 @@ func (b *Bus) initSettings(ctx context.Context) error {
 		if err := gs.Validate(); err == nil {
 			b.logger.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
 			bytes, _ := json.Marshal(gs)
-			if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
+			if err := b.store.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 				return err
 			}
 		} else {
@@ -731,13 +728,13 @@ func (b *Bus) initSettings(ctx context.Context) error {
 			if err := gs.Validate(); err == nil {
 				b.logger.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
 				bytes, _ := json.Marshal(gs)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
+				if err := b.store.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 					return err
 				}
 			} else {
 				b.logger.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
 				bytes, _ := json.Marshal(api.DefaultGougingSettings)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
+				if err := b.store.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
 					return err
 				}
 			}
@@ -746,7 +743,7 @@ func (b *Bus) initSettings(ctx context.Context) error {
 
 	// compat: default price pin settings
 	var pps api.PricePinSettings
-	if pss, err := b.ss.Setting(ctx, api.SettingPricePinning); err != nil {
+	if pss, err := b.store.Setting(ctx, api.SettingPricePinning); err != nil {
 		return err
 	} else if err := json.Unmarshal([]byte(pss), &pps); err != nil {
 		return err
@@ -775,7 +772,7 @@ func (b *Bus) initSettings(ctx context.Context) error {
 			updated, _ = json.Marshal(api.DefaultPricePinSettings)
 		}
 
-		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
+		if err := b.store.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
 			return err
 		}
 	}
