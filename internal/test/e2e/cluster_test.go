@@ -781,6 +781,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 		}
 		return nil
 	})
+
+	w.HeadObject(context.Background(), testBucket, path, api.HeadObjectOptions{})
 }
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
