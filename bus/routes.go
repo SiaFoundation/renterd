@@ -1323,8 +1323,7 @@ func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
 func (b *Bus) settingsGougingHandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
-		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
+	if jc.Decode(&patch) != nil {
 		return
 	}
 
@@ -1369,8 +1368,7 @@ func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 func (b *Bus) settingsPinnedHandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
-		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
+	if jc.Decode(&patch) != nil {
 		return
 	}
 
@@ -1415,8 +1413,7 @@ func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 func (b *Bus) settingsUploadHandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
-		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
+	if jc.Decode(&patch) != nil {
 		return
 	}
 
@@ -1459,8 +1456,7 @@ func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
 func (b *Bus) settingsS3HandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
-		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
+	if jc.Decode(&patch) != nil {
 		return
 	}
 
