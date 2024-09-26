@@ -41,7 +41,6 @@ type (
 		ConsensusState     ConsensusState
 		GougingSettings    GougingSettings
 		RedundancySettings RedundancySettings
-		TransactionFee     types.Currency
 	}
 )
 
