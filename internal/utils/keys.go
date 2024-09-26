@@ -20,8 +20,8 @@ func (key *MasterKey) DeriveAccountsKey(workerID string) AccountsKey {
 	return AccountsKey(key.deriveSubKey(keyPath))
 }
 
-// DeriveAccountsKey derives an accounts key from a masterkey which is used
-// to derive individual account keys from.
+// DeriveAccountsKey derives an upload key from a masterkey which is used
+// to encrypt/decrypt files for uploading.
 func (key *MasterKey) DeriveUploadKey() UploadKey {
 	return UploadKey(key.deriveSubKey("uploads"))
 }
@@ -37,6 +37,7 @@ func (key *MasterKey) DeriveContractKey(hostKey types.PublicKey) types.PrivateKe
 	return pk
 }
 
+// DeriveKey combines the upload key with a salt to derive a new key.
 func (key *UploadKey) DeriveKey(salt *[32]byte) [32]byte {
 	entropy := append([]byte(nil), key[:]...)
 	entropy = append(entropy, salt[:]...)

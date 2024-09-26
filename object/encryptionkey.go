@@ -29,6 +29,11 @@ var NoOpKey = EncryptionKey{
 	keyType: EncryptionKeyTypeBasic,
 }
 
+var (
+	ErrKeyType     = errors.New("invalid key type")
+	ErrKeyRequired = errors.New("key required")
+)
+
 type EncryptionKeyType int
 
 const (
@@ -38,8 +43,8 @@ const (
 
 // A EncryptionKey can encrypt and decrypt messages.
 type EncryptionKey struct {
-	entropy *[32]byte         `json:"-"`
-	keyType EncryptionKeyType `json:"-"`
+	entropy *[32]byte
+	keyType EncryptionKeyType
 }
 
 // GenerateEncryptionKey returns a random encryption key.
@@ -143,9 +148,6 @@ type EncryptionOptions struct {
 	Offset uint64
 	Key    *utils.UploadKey
 }
-
-var ErrKeyType = errors.New("invalid key type")
-var ErrKeyRequired = errors.New("key required")
 
 func (k *EncryptionKey) Encrypt(r io.Reader, opts EncryptionOptions) (cipher.StreamReader, error) {
 	switch k.keyType {
