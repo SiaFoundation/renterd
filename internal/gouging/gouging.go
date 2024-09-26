@@ -215,7 +215,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv
 	}
 
 	// check TxnFeeMaxRecommended - expect it to be lower or equal than the max contract price
-	if pt.TxnFeeMaxRecommended.Mul64(4096).Cmp(gs.MaxContractPrice) > 0 {
+	if !gs.MaxContractPrice.IsZero() && pt.TxnFeeMaxRecommended.Mul64(4096).Cmp(gs.MaxContractPrice) > 0 {
 		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, gs.MaxContractPrice.Div64(4096))
 	}
 
