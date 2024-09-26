@@ -780,7 +780,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't fetch gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
 	// apply timeout
 	pruneCtx := ctx
@@ -1673,7 +1673,6 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		ConsensusState:     cs,
 		GougingSettings:    gs,
 		RedundancySettings: us.Redundancy,
-		TransactionFee:     b.cm.RecommendedFee(),
 	}, nil
 }
 
@@ -2215,7 +2214,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
 	// fetch host settings
 	settings, err := b.rhp2.Settings(ctx, rfr.HostKey, rfr.HostIP)
