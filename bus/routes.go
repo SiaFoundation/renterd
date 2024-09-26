@@ -1310,28 +1310,36 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
-	gs, err := b.fetchSetting(jc.Request.Context(), "gouging")
-	if err != nil {
+	if gs, err := b.fetchSetting(jc.Request.Context(), "gouging"); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if gsc, ok := gs.(api.GougingSettings); !ok {
+		panic("unexpected value") // developer error
+	} else {
+		jc.Encode(gsc)
 	}
-	jc.Encode(gs)
 }
 
 func (b *Bus) settingsGougingHandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := jc.Decode(&patch); err != nil {
+	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
 		return
 	}
 
 	// apply patch
 	update, err := b.patchSetting(jc.Request.Context(), "gouging", patch)
-	if err != nil {
+	if errors.Is(err, ErrSettingFieldNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if gs, ok := update.(api.GougingSettings); !ok {
+		panic("unexpected setting") // developer error
+	} else {
+		jc.Encode(gs)
 	}
-	jc.Encode(update)
 }
 
 func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
@@ -1348,24 +1356,30 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	ps, err := b.fetchSetting(jc.Request.Context(), "pinned")
-	if err != nil {
+	if ps, err := b.fetchSetting(jc.Request.Context(), "pinned"); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if psc, ok := ps.(api.PinnedSettings); !ok {
+		panic("unexpected value") // developer error
+	} else {
+		jc.Encode(psc)
 	}
-	jc.Encode(ps)
 }
 
 func (b *Bus) settingsPinnedHandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := jc.Decode(&patch); err != nil {
+	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
 		return
 	}
 
 	// apply patch
 	update, err := b.patchSetting(jc.Request.Context(), "pinned", patch)
-	if err != nil {
+	if errors.Is(err, ErrSettingFieldNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -1388,24 +1402,30 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
-	us, err := b.fetchSetting(jc.Request.Context(), "upload")
-	if err != nil {
+	if us, err := b.fetchSetting(jc.Request.Context(), "upload"); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if usc, ok := us.(api.UploadSettings); !ok {
+		panic("unexpected value") // developer error
+	} else {
+		jc.Encode(usc)
 	}
-	jc.Encode(us)
 }
 
 func (b *Bus) settingsUploadHandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := jc.Decode(&patch); err != nil {
+	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
 		return
 	}
 
 	// apply patch
 	update, err := b.patchSetting(jc.Request.Context(), "upload", patch)
-	if err != nil {
+	if errors.Is(err, ErrSettingFieldNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -1426,24 +1446,30 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
-	s3s, err := b.fetchSetting(jc.Request.Context(), "s3")
-	if err != nil {
+	if s3s, err := b.fetchSetting(jc.Request.Context(), "s3"); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if s3sc, ok := s3s.(api.S3Settings); !ok {
+		panic("unexpected value") // developer error
+	} else {
+		jc.Encode(s3sc)
 	}
-	jc.Encode(s3s)
 }
 
 func (b *Bus) settingsS3HandlerPATCH(jc jape.Context) {
 	// decode patch
 	var patch map[string]any
-	if err := jc.Decode(&patch); err != nil {
+	if err := json.NewDecoder(jc.Request.Body).Decode(&patch); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", patch, err), http.StatusBadRequest)
 		return
 	}
 
 	// apply patch
 	update, err := b.patchSetting(jc.Request.Context(), "s3", patch)
-	if err != nil {
+	if errors.Is(err, ErrSettingFieldNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
