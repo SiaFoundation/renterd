@@ -17,11 +17,6 @@ var (
 	ErrOutputNotFound = errors.New("output not found")
 )
 
-var contractTables = []string{
-	"contracts",
-	"archived_contracts",
-}
-
 func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractState, error) {
 	var cse ContractState
 	err := tx.
