@@ -75,7 +75,7 @@ func (ctx *mCtx) Err() error {
 
 func (ctx *mCtx) GougingChecker(cs api.ConsensusState) gouging.Checker {
 	period, renewWindow := ctx.Period(), ctx.RenewWindow()
-	return gouging.NewChecker(ctx.state.GS, cs, ctx.state.Fee, &period, &renewWindow)
+	return gouging.NewChecker(ctx.state.GS, cs, &period, &renewWindow)
 }
 
 func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
