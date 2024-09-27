@@ -1046,8 +1046,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	var newRevision rhpv2.ContractRevision
 	var contractPrice, initialRenterFunds types.Currency
 	if b.isPassedV2AllowHeight() {
-		jc.Error(errors.New("not implemented"), http.StatusInternalServerError)
-		return
+		panic("not implemented")
 	} else {
 		newRevision, contractPrice, initialRenterFunds, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
@@ -2231,8 +2230,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	var rev rhpv2.ContractRevision
 	if b.isPassedV2AllowHeight() {
-		jc.Error(errors.New("not implemented"), http.StatusInternalServerError)
-		return
+		panic("not implemented")
 	} else {
 		rev, err = b.formContract(
 			ctx,

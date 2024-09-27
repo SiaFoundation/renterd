@@ -617,7 +617,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	if b.isPassedV2AllowHeight() {
-		return types.TransactionID{}, errors.New("not implemented")
+		panic("not implemented")
 	} else {
 		// create the transaction
 		txn := types.Transaction{
