@@ -12,7 +12,7 @@ type Scanner interface {
 
 type ContractRow struct {
 	FCID    FileContractID
-	HostID  int64
+	HostID  NullableInt64
 	HostKey PublicKey
 
 	// state fields
