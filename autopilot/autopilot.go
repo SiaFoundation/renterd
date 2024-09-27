@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
@@ -37,6 +38,7 @@ type Bus interface {
 	UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error
 
 	// consensus
+	ConsensusNetwork(ctx context.Context) (consensus.Network, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
 
 	// contracts
