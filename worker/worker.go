@@ -1145,8 +1145,6 @@ func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadat
 	})
 	if err != nil {
 		return nil, api.Object{}, fmt.Errorf("couldn't fetch object: %w", err)
-	} else if res.Object == nil && !onlyMetadata {
-		return nil, api.Object{}, errors.New("object is a directory")
 	}
 
 	// adjust length
