@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"net/http"
 
 	"go.sia.tech/jape"
@@ -19,6 +20,14 @@ func New(addr, password string) *Client {
 		BaseURL:  addr,
 		Password: password,
 	}}
+}
+
+func (c *Client) Backup(ctx context.Context, database, dstPath string) (err error) {
+	err = c.c.WithContext(ctx).POST("/system/database/backup", api.BackupRequest{
+		Database: database,
+		Path:     dstPath,
+	}, nil)
+	return
 }
 
 // State returns the current state of the bus.
