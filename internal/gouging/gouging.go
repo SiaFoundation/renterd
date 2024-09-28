@@ -49,7 +49,6 @@ type (
 	checker struct {
 		consensusState api.ConsensusState
 		settings       api.GougingSettings
-		txFee          types.Currency
 
 		period      *uint64
 		renewWindow *uint64
@@ -58,11 +57,10 @@ type (
 
 var _ Checker = checker{}
 
-func NewChecker(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, period, renewWindow *uint64) Checker {
+func NewChecker(gs api.GougingSettings, cs api.ConsensusState, period, renewWindow *uint64) Checker {
 	return checker{
 		consensusState: cs,
 		settings:       gs,
-		txFee:          txnFee,
 
 		period:      period,
 		renewWindow: renewWindow,
@@ -91,7 +89,7 @@ func (gc checker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.Ho
 		),
 		DownloadErr: errsToStr(checkDownloadGougingRHPv3(gc.settings, pt)),
 		GougingErr: errsToStr(
-			checkPriceGougingPT(gc.settings, gc.consensusState, gc.txFee, pt),
+			checkPriceGougingPT(gc.settings, gc.consensusState, pt),
 			checkPriceGougingHS(gc.settings, hs),
 		),
 		PruneErr:  errsToStr(checkPruneGougingRHPv2(gc.settings, hs)),
@@ -156,7 +154,7 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 // TODO: if we ever stop assuming that certain prices in the pricetable are
 // always set to 1H we should account for those fields in
 // `hostPeriodCostForScore` as well.
-func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv3.HostPriceTable) error {
 	// check if we have a price table
 	if pt == nil {
 		return nil
@@ -218,9 +216,9 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee t
 		}
 	}
 
-	// check TxnFeeMaxRecommended - expect at most a multiple of our fee
-	if !txnFee.IsZero() && pt.TxnFeeMaxRecommended.Cmp(txnFee.Mul64(5)) > 0 {
-		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, txnFee.Mul64(5))
+	// check TxnFeeMaxRecommended - expect it to be lower or equal than the max contract price
+	if !gs.MaxContractPrice.IsZero() && pt.TxnFeeMaxRecommended.Mul64(4096).Cmp(gs.MaxContractPrice) > 0 {
+		return fmt.Errorf("TxnFeeMaxRecommended %v exceeds %v", pt.TxnFeeMaxRecommended, gs.MaxContractPrice.Div64(4096))
 	}
 
 	// check TxnFeeMinRecommended - expect it to be lower or equal than the max

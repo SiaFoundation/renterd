@@ -94,9 +94,9 @@ func DoRequest(req *http.Request, resp interface{}) (http.Header, int, error) {
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
 		lr := io.LimitReader(r.Body, 1<<20) // 1MiB
 		errMsg, _ := io.ReadAll(lr)
-		return http.Header{}, 0, fmt.Errorf("HTTP error: %s (status: %d)", string(errMsg), r.StatusCode)
+		return r.Header, r.StatusCode, fmt.Errorf("HTTP error: %s (status: %d)", string(errMsg), r.StatusCode)
 	} else if resp != nil {
-		return http.Header{}, 0, json.NewDecoder(r.Body).Decode(resp)
+		return r.Header, r.StatusCode, json.NewDecoder(r.Body).Decode(resp)
 	}
 	return r.Header, r.StatusCode, nil
 }

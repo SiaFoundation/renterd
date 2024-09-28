@@ -36,7 +36,7 @@ func (s Slab) IsPartial() bool {
 // NewSlab returns a new slab for the shards.
 func NewSlab(minShards uint8) Slab {
 	return Slab{
-		EncryptionKey: GenerateEncryptionKey(),
+		EncryptionKey: GenerateEncryptionKey(EncryptionKeyTypeSalted),
 		MinShards:     minShards,
 	}
 }

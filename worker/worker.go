@@ -942,8 +942,9 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	}
 	w.initPriceTables()
 
-	w.initDownloadManager(cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
-	w.initUploadManager(cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	uploadKey := w.masterKey.DeriveUploadKey()
+	w.initDownloadManager(&uploadKey, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
+	w.initUploadManager(&uploadKey, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil

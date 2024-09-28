@@ -249,6 +249,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00022_remove_triggers", log)
 				},
 			},
+			{
+				ID: "00023_key_prefix",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00023_key_prefix", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {

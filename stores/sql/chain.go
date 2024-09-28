@@ -12,6 +12,11 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrIndexMissmatch = errors.New("index missmatch")
+	ErrOutputNotFound = errors.New("output not found")
+)
+
 func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.ContractState, error) {
 	var cse ContractState
 	err := tx.

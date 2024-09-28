@@ -180,10 +180,6 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to get consensus state", err) != nil {
 		return
 	}
-	fee, err := ap.bus.RecommendedFee(ctx)
-	if jc.Check("failed to get recommended fee", err) != nil {
-		return
-	}
 
 	// fetch hosts
 	hosts, err := ap.bus.Hosts(ctx, api.HostOptions{})
@@ -192,7 +188,7 @@ func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
 	}
 
 	// evaluate the config
-	res, err := contractor.EvaluateConfig(reqCfg, cs, fee, rs, gs, hosts)
+	res, err := contractor.EvaluateConfig(reqCfg, cs, rs, gs, hosts)
 	if errors.Is(err, contractor.ErrMissingRequiredFields) {
 		jc.Error(err, http.StatusBadRequest)
 		return

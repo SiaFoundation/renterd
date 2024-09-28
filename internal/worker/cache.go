@@ -230,7 +230,6 @@ func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
 	// update gouging params
 	gp := value.(api.GougingParams)
 	gp.ConsensusState = event.ConsensusState
-	gp.TransactionFee = event.TransactionFee
 	c.cache.Set(cacheKeyGougingParams, gp)
 }
 
