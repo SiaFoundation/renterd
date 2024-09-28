@@ -542,11 +542,11 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 		return
 	}
 	var sortBy string
-	if jc.DecodeForm("sortBy", &sortBy) != nil {
+	if jc.DecodeForm("sortby", &sortBy) != nil {
 		return
 	}
 	var sortDir string
-	if jc.DecodeForm("sortDir", &sortDir) != nil {
+	if jc.DecodeForm("sortdir", &sortDir) != nil {
 		return
 	}
 	var marker string
@@ -554,7 +554,7 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 		return
 	}
 	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+	if jc.DecodeForm("ignoredelim", &ignoreDelim) != nil {
 		return
 	}
 
@@ -1129,8 +1129,6 @@ func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadat
 	})
 	if err != nil {
 		return nil, api.Object{}, fmt.Errorf("couldn't fetch object: %w", err)
-	} else if res.Object == nil {
-		return nil, api.Object{}, errors.New("object is a directory")
 	}
 
 	// adjust length
