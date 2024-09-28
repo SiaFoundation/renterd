@@ -611,8 +611,8 @@ func (s *slabDownload) overdrive(ctx context.Context, resps *sectorResponses) (r
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				if canOverdrive(timeout()) {
-					for {
+				for {
+					if canOverdrive(timeout()) {
 						req := s.nextRequest(ctx, resps, true)
 						if req == nil {
 							break
@@ -755,12 +755,9 @@ loop:
 
 			// handle errors
 			if resp.err != nil {
-				// launch overdrive requests
-				for {
-					if req := s.nextRequest(ctx, resps, true); req != nil {
-						s.launch(req)
-					}
-					break
+				// launch replacement request
+				if req := s.nextRequest(ctx, resps, resp.req.overdrive); req != nil {
+					s.launch(req)
 				}
 
 				// handle lost sectors
