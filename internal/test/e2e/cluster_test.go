@@ -2707,3 +2707,49 @@ func TestHostScan(t *testing.T) {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
 }
+
+// TestDownloadAllHosts makes sure we try to download sectors,
+// from all hosts that a sector is stored on and not just the latestHost.
+func TestDownloadAllHosts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: false, // make sure data is uploaded
+	})
+	defer cluster.Shutdown()
+
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload the data
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
+
+	// fetch object
+	obj, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+	tt.OK(err)
+
+	// update the LatestHost field to hosts we don't have
+	// contracts with
+	for i, slab := range obj.Object.Slabs {
+		for j := range slab.Shards {
+			frand.Read(obj.Object.Slabs[i].Shards[j].LatestHost[:])
+		}
+	}
+	tt.OK(cluster.Bus.AddObject(context.Background(), api.DefaultBucketName, path, test.ContractSet, *obj.Object.Object, api.AddObjectOptions{}))
+
+	// download the object
+	dst := new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
+	if !bytes.Equal(dst.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+}
