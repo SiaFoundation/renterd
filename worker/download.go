@@ -983,7 +983,7 @@ func (sr *sectorResponses) Next() *sectorDownloadResp {
 func isSectorAvailable(s object.Sector, hosts map[types.PublicKey]struct{}) bool {
 	// if any of the other hosts that store the sector are
 	// available, the sector is also considered available
-	for hk, _ := range s.Contracts {
+	for hk := range s.Contracts {
 		if _, available := hosts[hk]; available {
 			return true
 		}
