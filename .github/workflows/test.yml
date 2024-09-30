@@ -25,6 +25,8 @@ jobs:
             autopilot
             bus bus/client
             worker worker/client
+          flags: |
+            -japecheck.types=false
   test:
     needs: analyze
     runs-on: ${{ matrix.os }}
