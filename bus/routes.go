@@ -1321,6 +1321,8 @@ func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerPATCH(jc jape.Context) {
+	jc.Custom((*map[string]any)(nil), api.GougingSettings{})
+
 	// decode patch
 	var patch map[string]any
 	if jc.Decode(&patch) != nil {
@@ -1366,6 +1368,8 @@ func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerPATCH(jc jape.Context) {
+	jc.Custom((*map[string]any)(nil), api.PinnedSettings{})
+
 	// decode patch
 	var patch map[string]any
 	if jc.Decode(&patch) != nil {
@@ -1380,8 +1384,11 @@ func (b *Bus) settingsPinnedHandlerPATCH(jc jape.Context) {
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if gs, ok := update.(api.PinnedSettings); !ok {
+		panic("unexpected setting") // developer error
+	} else {
+		jc.Encode(gs)
 	}
-	jc.Encode(update)
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
@@ -1411,6 +1418,8 @@ func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsUploadHandlerPATCH(jc jape.Context) {
+	jc.Custom((*map[string]any)(nil), api.UploadSettings{})
+
 	// decode patch
 	var patch map[string]any
 	if jc.Decode(&patch) != nil {
@@ -1425,8 +1434,11 @@ func (b *Bus) settingsUploadHandlerPATCH(jc jape.Context) {
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if gs, ok := update.(api.UploadSettings); !ok {
+		panic("unexpected setting") // developer error
+	} else {
+		jc.Encode(gs)
 	}
-	jc.Encode(update)
 }
 
 func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
@@ -1454,6 +1466,8 @@ func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) settingsS3HandlerPATCH(jc jape.Context) {
+	jc.Custom((*map[string]any)(nil), api.S3Settings{})
+
 	// decode patch
 	var patch map[string]any
 	if jc.Decode(&patch) != nil {
@@ -1468,8 +1482,11 @@ func (b *Bus) settingsS3HandlerPATCH(jc jape.Context) {
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
+	} else if gs, ok := update.(api.S3Settings); !ok {
+		panic("unexpected setting") // developer error
+	} else {
+		jc.Encode(gs)
 	}
-	jc.Encode(update)
 }
 
 func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
