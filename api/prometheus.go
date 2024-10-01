@@ -26,6 +26,10 @@ func (c ConsensusState) PrometheusMetric() (metrics []prometheus.Metric) {
 			Value: boolToFloat(c.Synced),
 		},
 		{
+			Name:  "renterd_consensus_state_last_block_time",
+			Value: float64(time.Time(c.LastBlockTime).Unix()),
+		},
+		{
 			Name:  "renterd_consensus_state_chain_index_height",
 			Value: float64(c.BlockHeight),
 		},
@@ -410,18 +414,6 @@ func (host Host) PrometheusMetric() (metrics []prometheus.Metric) {
 		}}
 }
 
-func (host HostAddress) PrometheusMetric() (metrics []prometheus.Metric) {
-	return []prometheus.Metric{
-		{
-			Name: "renterd_hosts_scanning",
-			Labels: map[string]any{
-				"net_address": host.NetAddress,
-				"host_key":    host.PublicKey.String(),
-			},
-			Value: 1,
-		}}
-}
-
 func (c ContractMetadata) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
@@ -433,7 +425,7 @@ func (c ContractMetadata) PrometheusMetric() (metrics []prometheus.Metric) {
 				"siamux_addr":    c.SiamuxAddr,
 				"contract_price": c.ContractPrice.Siacoins(),
 			},
-			Value: c.TotalCost.Siacoins(),
+			Value: c.InitialRenterFunds.Siacoins(),
 		}}
 }
 
@@ -510,10 +502,6 @@ func formatSettingsMetricName(gp GougingParams, name string) (metrics []promethe
 	metrics = append(metrics, prometheus.Metric{
 		Name:  fmt.Sprintf("renterd_%s_redundancy_settings_totalshards", name),
 		Value: float64(gp.RedundancySettings.TotalShards),
-	})
-	metrics = append(metrics, prometheus.Metric{
-		Name:  fmt.Sprintf("renterd_%s_transactionfee", name),
-		Value: gp.TransactionFee.Siacoins(),
 	})
 	return
 }
