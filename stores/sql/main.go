@@ -518,25 +518,6 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 }
 
 func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root types.Hash256) (int, error) {
-	// update the latest_host field of the sector
-	_, err := tx.Exec(ctx, `
-		UPDATE sectors
-		SET latest_host = COALESCE((
-			SELECT * FROM (
-				SELECT c.host_key
-				FROM contracts c
-				INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-				INNER JOIN sectors s ON s.id = cs.db_sector_id
-				WHERE s.root = ? AND c.host_key != ? AND c.archival_reason IS NULL
-				LIMIT 1
-			) AS _
-		), ?)
-		WHERE root = ? AND latest_host = ?
-	`, Hash256(root), PublicKey(hk), PublicKey{}, Hash256(root), PublicKey(hk))
-	if err != nil {
-		return 0, fmt.Errorf("failed to update sector: %w", err)
-	}
-
 	// remove potential links between the host's contracts and the sector
 	res, err := tx.Exec(ctx, `
 		DELETE FROM contract_sectors
@@ -1924,7 +1905,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 
 	// fetch sectors
 	rows, err := tx.Query(ctx, `
-		SELECT id, latest_host, root
+		SELECT id, root
 		FROM sectors s
 		WHERE s.db_slab_id = ?
 		ORDER BY s.slab_index
@@ -1938,7 +1919,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	for rows.Next() {
 		var sectorID int64
 		var sector object.Sector
-		if err := rows.Scan(&sectorID, (*PublicKey)(&sector.LatestHost), (*Hash256)(&sector.Root)); err != nil {
+		if err := rows.Scan(&sectorID, (*Hash256)(&sector.Root)); err != nil {
 			return object.Slab{}, fmt.Errorf("failed to scan sector: %w", err)
 		}
 		slab.Shards = append(slab.Shards, sector)
@@ -2334,7 +2315,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	}
 
 	// stmt to add sector
-	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?)")
+	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?)")
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare statement to insert sectors: %w", err)
 	}
@@ -2350,7 +2331,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	// insert shards
 	for i := range slab.Shards {
 		// insert shard
-		res, err := sectorStmt.Exec(ctx, slabID, i+1, PublicKey(slab.Shards[i].LatestHost), slab.Shards[i].Root[:])
+		res, err := sectorStmt.Exec(ctx, slabID, i+1, slab.Shards[i].Root[:])
 		if err != nil {
 			return "", fmt.Errorf("failed to insert sector: %w", err)
 		}
@@ -2451,7 +2432,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(sec.latest_host, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
+		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
 		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
@@ -2459,7 +2440,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		LEFT JOIN contracts c ON c.id = csec.db_contract_id
 		WHERE sli.db_object_id = ?
 		ORDER BY sli.object_index ASC, sec.slab_index ASC
-	`, Hash256{}, PublicKey{}, FileContractID{}, PublicKey{}, objID)
+	`, Hash256{}, FileContractID{}, PublicKey{}, objID)
 	if err != nil {
 		return api.Object{}, fmt.Errorf("failed to fetch slabs: %w", err)
 	}
@@ -2479,7 +2460,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
 			&objectIndex, &ss.Offset, &ss.Length, // slice info
 			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
-			&slabIndex, (*Hash256)(&sector.Root), (*PublicKey)(&sector.LatestHost), // sector info
+			&slabIndex, (*Hash256)(&sector.Root), // sector info
 			(*PublicKey)(&fcid), // contract info
 			(*PublicKey)(&hk),   // host info
 		); err != nil {

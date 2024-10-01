@@ -13,9 +13,8 @@ import (
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Contracts  map[types.PublicKey][]types.FileContractID `json:"contracts"`
-	LatestHost types.PublicKey                            `json:"latestHost"`
-	Root       types.Hash256                              `json:"root"`
+	Contracts map[types.PublicKey][]types.FileContractID `json:"contracts"`
+	Root      types.Hash256                              `json:"root"`
 }
 
 // A Slab is raw data that has been erasure-encoded into sector-sized shards,

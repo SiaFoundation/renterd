@@ -1169,7 +1169,6 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 		upsertSectors = append(upsertSectors, upsertSector{
 			slabID,
 			i + 1,
-			s.Shards[i].LatestHost,
 			s.Shards[i].Root,
 		})
 	}
@@ -1195,7 +1194,6 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 					tx.log.Named("UpdateSlab").Warn("missing contract for shard",
 						"contract", fcid,
 						"root", shard.Root,
-						"latest_host", shard.LatestHost,
 					)
 				}
 			}
@@ -1340,7 +1338,6 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			upsertSectors = append(upsertSectors, upsertSector{
 				slabIDs[i],
 				j + 1,
-				ss.Shards[j].LatestHost,
 				ss.Shards[j].Root,
 			})
 		}
@@ -1366,7 +1363,6 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 						tx.log.Named("InsertObject").Warn("missing contract for shard",
 							"contract", fcid,
 							"root", shard.Root,
-							"latest_host", shard.LatestHost,
 						)
 					}
 				}
@@ -1411,10 +1407,9 @@ func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSec
 }
 
 type upsertSector struct {
-	slabID     int64
-	slabIndex  int
-	latestHost types.PublicKey
-	root       types.Hash256
+	slabID    int64
+	slabIndex int
+	root      types.Hash256
 }
 
 func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSector) ([]int64, error) {
@@ -1424,8 +1419,8 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 
 	// insert sectors - make sure to update last_insert_id in case of a
 	// duplicate key to be able to retrieve the id
-	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
-								VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE latest_host = VALUES(latest_host), id = last_insert_id(id)`)
+	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, root)
+								VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -1444,7 +1439,6 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 			time.Now(),
 			s.slabID,
 			s.slabIndex,
-			ssql.PublicKey(s.latestHost),
 			s.root[:],
 		)
 		if err != nil {

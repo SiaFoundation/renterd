@@ -645,11 +645,7 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shard
 
 	// overwrite the shards with the newly uploaded ones
 	for i, si := range shardIndices {
-		s.Shards[si].LatestHost = uploaded[i].LatestHost
-		s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
-		for hk, fcids := range uploaded[i].Contracts {
-			s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcids...)
-		}
+		s.Shards[si].Contracts = mergeContracts(s.Shards[si].Contracts, uploaded[i].Contracts)
 	}
 
 	// update the slab
@@ -1075,9 +1071,8 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 
 	// store the sector
 	sector.finish(object.Sector{
-		Contracts:  map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
-		LatestHost: req.hk,
-		Root:       req.sector.root,
+		Contracts: map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
+		Root:      req.sector.root,
 	})
 
 	// update uploaded sectors
@@ -1125,4 +1120,31 @@ func (req *sectorUploadReq) finish(err error) {
 		err: err,
 	}:
 	}
+}
+
+func mergeContracts(x, y map[types.PublicKey][]types.FileContractID) map[types.PublicKey][]types.FileContractID {
+	deduped := make(map[types.PublicKey]map[types.FileContractID]struct{})
+	for hk, contracts := range x {
+		if _, ok := deduped[hk]; !ok {
+			deduped[hk] = make(map[types.FileContractID]struct{})
+		}
+		for _, fcid := range contracts {
+			deduped[hk][fcid] = struct{}{}
+		}
+	}
+	for hk, contracts := range y {
+		if _, ok := deduped[hk]; !ok {
+			deduped[hk] = make(map[types.FileContractID]struct{})
+		}
+		for _, fcid := range contracts {
+			deduped[hk][fcid] = struct{}{}
+		}
+	}
+	out := make(map[types.PublicKey][]types.FileContractID)
+	for hk, fcids := range deduped {
+		for fcid := range fcids {
+			out[hk] = append(out[hk], fcid)
+		}
+	}
+	return out
 }

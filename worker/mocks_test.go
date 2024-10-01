@@ -502,9 +502,6 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 			// update slab
 			shards := os.objects[bucket][objKey].Slabs[i].Slab.Shards
 			for sI := range shards {
-				// overwrite latest host
-				shards[sI].LatestHost = s.Shards[sI].LatestHost
-
 				// merge contracts for each shard
 				existingContracts := make(map[types.FileContractID]struct{})
 				for _, fcids := range shards[sI].Contracts {

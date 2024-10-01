@@ -92,7 +92,7 @@ INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.Encr
 
 	// insert sectors
 	insertSectorStmt, err := db.Prepare(context.Background(), `
-INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?) RETURNING id`)
+INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?) RETURNING id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -101,7 +101,7 @@ INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?,
 	for i := 0; i < n; i++ {
 		var sectorID int64
 		roots = append(roots, frand.Entropy256())
-		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.PublicKey(hk), sql.Hash256(roots[i])).Scan(&sectorID)
+		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.Hash256(roots[i])).Scan(&sectorID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert sector: %w", err)
 		}

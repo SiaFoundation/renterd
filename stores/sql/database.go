@@ -141,8 +141,7 @@ type (
 
 		// DeleteHostSector deletes all contract sector links that a host has
 		// with the given root incrementing the lost sector count in the
-		// process. If another contract with a different host exists that
-		// contains the root, latest_host is updated to that host.
+		// process.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		// DeleteObject deletes an object from the database and returns true if
@@ -356,7 +355,6 @@ type (
 		// UpdateSlab updates the slab in the database. That includes the following:
 		// - Optimistically set health to 100%
 		// - Invalidate health_valid_until
-		// - Update LatestHost for every shard
 		// The operation is not allowed to update the number of shards
 		// associated with a slab or the root/slabIndex of any shard.
 		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
