@@ -544,14 +544,10 @@ func (sb SlabBuffersResp) PrometheusMetric() (metrics []prometheus.Metric) {
 		}}
 }
 
-// SlabBuffersResp represents multiple `ObjectMetadata`s.  Its prometheus encoding
-// is a summary of the count and average health of slab buffers.
-type SearchObjectsResp []ObjectMetadata
-
-func (so SearchObjectsResp) PrometheusMetric() (metrics []prometheus.Metric) {
+func (or ObjectsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	unavailableObjs := 0
 	avgHealth := float64(0.0)
-	for _, obj := range so {
+	for _, obj := range or.Objects {
 		if obj.Health == 0 {
 			unavailableObjs += 1
 		}

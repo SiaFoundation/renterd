@@ -15,6 +15,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
+	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/stores/sql"
 
@@ -138,7 +139,7 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 }
 
 func (b *Bus) syncerAddrHandler(jc jape.Context) {
-	jc.Encode(b.s.Addr())
+	api.WriteResponse(jc, api.SyncerAddrResp(b.s.Addr()))
 }
 
 func (b *Bus) syncerPeersHandler(jc jape.Context) {
@@ -146,7 +147,7 @@ func (b *Bus) syncerPeersHandler(jc jape.Context) {
 	for _, p := range b.s.Peers() {
 		peers = append(peers, p.String())
 	}
-	jc.Encode(peers)
+	api.WriteResponse(jc, api.SyncerPeersResp(peers))
 }
 
 func (b *Bus) syncerConnectHandler(jc jape.Context) {
@@ -162,7 +163,7 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch consensus state", err) != nil {
 		return
 	}
-	jc.Encode(cs)
+	api.WriteResponse(jc, cs)
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
@@ -172,11 +173,11 @@ func (b *Bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *Bus) txpoolFeeHandler(jc jape.Context) {
-	jc.Encode(b.cm.RecommendedFee())
+	api.WriteResponse(jc, api.TxPoolFeeResp{b.cm.RecommendedFee()})
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
-	jc.Encode(b.cm.PoolTransactions())
+	api.WriteResponse(jc, api.TxPoolTxResp(b.cm.PoolTransactions()))
 }
 
 func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
@@ -198,7 +199,7 @@ func (b *Bus) bucketsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
 	}
-	jc.Encode(resp)
+	api.WriteResponse(jc, prometheus.Slice(resp))
 }
 
 func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
@@ -262,7 +263,7 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(api.WalletResponse{
+	api.WriteResponse(jc, api.WalletResponse{
 		Balance:    balance,
 		Address:    address,
 		ScanHeight: b.w.Tip().Height,
@@ -522,7 +523,7 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	api.WriteResponse(jc, prometheus.Slice(hosts))
 }
 
 func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
@@ -600,7 +601,7 @@ func (b *Bus) contractsSpendingHandlerPOST(jc jape.Context) {
 func (b *Bus) hostsAllowlistHandlerGET(jc jape.Context) {
 	allowlist, err := b.hs.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
-		jc.Encode(allowlist)
+		api.WriteResponse(jc, api.AllowListResp(allowlist))
 	}
 }
 
@@ -620,7 +621,7 @@ func (b *Bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 func (b *Bus) hostsBlocklistHandlerGET(jc jape.Context) {
 	blocklist, err := b.hs.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
-		jc.Encode(blocklist)
+		api.WriteResponse(jc, api.BlockListResp(blocklist))
 	}
 }
 
@@ -661,7 +662,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 		FilterMode:  filterMode,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(contracts)
+		api.WriteResponse(jc, prometheus.Slice(contracts))
 	}
 }
 
@@ -919,7 +920,7 @@ func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		return contracts[i].Prunable > contracts[j].Prunable
 	})
 
-	jc.Encode(api.ContractsPrunableDataResponse{
+	api.WriteResponse(jc, api.ContractsPrunableDataResponse{
 		Contracts:     contracts,
 		TotalPrunable: totalPrunable,
 		TotalSize:     totalSize,
@@ -1171,7 +1172,7 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	} else if jc.Check("failed to query objects", err) != nil {
 		return
 	}
-	jc.Encode(resp)
+	api.WriteResponse(jc, resp)
 }
 
 func (b *Bus) objectHandlerPUT(jc jape.Context) {
@@ -1269,7 +1270,7 @@ func (b *Bus) slabbuffersHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't get slab buffers info", err) != nil {
 		return
 	}
-	jc.Encode(buffers)
+	api.WriteResponse(jc, api.SlabBuffersResp(buffers))
 }
 
 func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
@@ -1628,7 +1629,7 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 		uploadPacking = us.Packing.Enabled
 	}
 
-	jc.Encode(api.UploadParams{
+	api.WriteResponse(jc, api.UploadParams{
 		ContractSet:   contractSet,
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
@@ -1660,7 +1661,7 @@ func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	jc.Encode(gp)
+	api.WriteResponse(jc, gp)
 }
 
 func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
@@ -1720,7 +1721,7 @@ func (b *Bus) handleGETAlerts(jc jape.Context) {
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}
-	jc.Encode(ar)
+	api.WriteResponse(jc, ar)
 }
 
 func (b *Bus) handlePOSTAlertsDismiss(jc jape.Context) {
@@ -1855,7 +1856,7 @@ func (b *Bus) contractTaxHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) stateHandlerGET(jc jape.Context) {
-	jc.Encode(api.BusStateResponse{
+	api.WriteResponse(jc, api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
 			Version:   build.Version(),

@@ -445,7 +445,7 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 	})
 
 	// encode response
-	jc.Encode(api.DownloadStatsResponse{
+	api.WriteResponse(jc, api.DownloadStatsResponse{
 		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyDownloaders:   healthy,
@@ -470,7 +470,7 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 
 	// encode response
-	jc.Encode(api.UploadStatsResponse{
+	api.WriteResponse(jc, api.UploadStatsResponse{
 		AvgSlabUploadSpeedMBPS: math.Ceil(stats.avgSlabUploadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:        math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyUploaders:       stats.healthyUploaders,
@@ -829,7 +829,7 @@ func (w *Worker) idHandlerGET(jc jape.Context) {
 }
 
 func (w *Worker) memoryGET(jc jape.Context) {
-	jc.Encode(api.MemoryResponse{
+	api.WriteResponse(jc, api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
 		Upload:   w.uploadManager.mm.Status(),
 	})
