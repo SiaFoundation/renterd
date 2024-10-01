@@ -253,7 +253,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 			// check if we have enough downloaders
 			var available uint8
 			for _, s := range next.Shards {
-				if _, exists := hosts[s.LatestHost]; exists {
+				if isSectorAvailable(s, hosts) {
 					available++
 				}
 			}
@@ -375,7 +375,7 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	// count how many shards we can download (best-case)
 	var availableShards uint8
 	for _, shard := range slab.Shards {
-		if _, exists := available[shard.LatestHost]; exists {
+		if isSectorAvailable(shard, available) {
 			availableShards++
 		}
 	}
@@ -514,7 +514,10 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bo
 	// build sector info
 	hostToSectors := make(map[types.PublicKey][]sectorInfo)
 	for sI, s := range slice.Shards {
-		hostToSectors[s.LatestHost] = append(hostToSectors[s.LatestHost], sectorInfo{s, sI})
+		si := sectorInfo{s, sI}
+		for hk := range s.Contracts {
+			hostToSectors[hk] = append(hostToSectors[hk], si)
+		}
 	}
 
 	// create slab download
@@ -649,6 +652,9 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 				s.unusedHostSectors[host] = sectors
 			}
 		}
+		// TODO: track which sectors are being downloaded and prefer
+		// scheduling one that isn't downloading right now
+
 		// remove host if no sectors are left
 		if len(sectors) == 0 {
 			delete(s.unusedHostSectors, host)
@@ -981,4 +987,15 @@ func (sr *sectorResponses) Next() *sectorDownloadResp {
 	resp := sr.responses[0]
 	sr.responses = sr.responses[1:]
 	return resp
+}
+
+func isSectorAvailable(s object.Sector, hosts map[types.PublicKey]struct{}) bool {
+	// if any of the other hosts that store the sector are
+	// available, the sector is also considered available
+	for hk := range s.Contracts {
+		if _, available := hosts[hk]; available {
+			return true
+		}
+	}
+	return false
 }
