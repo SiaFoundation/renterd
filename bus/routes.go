@@ -173,7 +173,7 @@ func (b *Bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *Bus) txpoolFeeHandler(jc jape.Context) {
-	api.WriteResponse(jc, api.TxPoolFeeResp{b.cm.RecommendedFee()})
+	api.WriteResponse(jc, api.TxPoolFeeResp{Currency: b.cm.RecommendedFee()})
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
