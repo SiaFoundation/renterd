@@ -79,7 +79,7 @@ INSERT INTO contracts (fcid, host_key, start_height) VALUES (?, ?, ?)`, sql.Publ
 	}
 
 	// insert slab
-	key := object.GenerateEncryptionKey()
+	key := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	res, err = db.Exec(context.Background(), `
 INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
 	if err != nil {

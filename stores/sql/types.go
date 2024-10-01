@@ -472,7 +472,13 @@ func (i *NullableInt64) Scan(value interface{}) error {
 	}
 
 	switch value := value.(type) {
+	case uint64:
+		*i = NullableInt64(value)
+	case uint:
+		*i = NullableInt64(value)
 	case int64:
+		*i = NullableInt64(value)
+	case int:
 		*i = NullableInt64(value)
 	default:
 		return fmt.Errorf("failed to unmarshal NullableInt64 value: %v %T", value, value)

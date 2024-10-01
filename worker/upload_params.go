@@ -30,8 +30,8 @@ func defaultParameters(bucket, key string, rs api.RedundancySettings) uploadPara
 		bucket: bucket,
 		key:    key,
 
-		ec:               object.GenerateEncryptionKey(), // random key
-		encryptionOffset: 0,                              // from the beginning
+		ec:               object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted), // random key
+		encryptionOffset: 0,                                                            // from the beginning
 
 		rs: rs,
 	}

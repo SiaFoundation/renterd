@@ -250,9 +250,15 @@ var (
 				},
 			},
 			{
-				ID: "00023_contract_v2",
+				ID: "00023_key_prefix",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00023_contract_v2", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00023_key_prefix", log)
+				},
+			},
+			{
+				ID: "00024_contract_v2",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00024_contract_v2", log)
 				},
 			},
 		}

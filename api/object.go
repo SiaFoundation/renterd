@@ -261,7 +261,7 @@ func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 
 func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	if opts.EncryptionOffset != nil {
-		values.Set("offset", fmt.Sprint(*opts.EncryptionOffset))
+		values.Set("encryptionoffset", fmt.Sprint(*opts.EncryptionOffset))
 	}
 	if opts.MinShards != 0 {
 		values.Set("minshards", fmt.Sprint(opts.MinShards))
@@ -298,7 +298,7 @@ func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
 
 func (opts GetObjectOptions) Apply(values url.Values) {
 	if opts.OnlyMetadata {
-		values.Set("onlyMetadata", "true")
+		values.Set("onlymetadata", "true")
 	}
 }
 
@@ -316,16 +316,16 @@ func (opts ListObjectOptions) Apply(values url.Values) {
 		values.Set("marker", opts.Marker)
 	}
 	if opts.SortBy != "" {
-		values.Set("sortBy", opts.SortBy)
+		values.Set("sortby", opts.SortBy)
 	}
 	if opts.SortDir != "" {
-		values.Set("sortDir", opts.SortDir)
+		values.Set("sortdir", opts.SortDir)
 	}
 	if opts.Substring != "" {
 		values.Set("substring", opts.Substring)
 	}
 	if opts.SlabEncryptionKey != (object.EncryptionKey{}) {
-		values.Set("slabEncryptionKey", opts.SlabEncryptionKey.String())
+		values.Set("slabencryptionkey", opts.SlabEncryptionKey.String())
 	}
 }
 
