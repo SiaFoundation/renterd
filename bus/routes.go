@@ -551,7 +551,10 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 		return
 	}
 	host, err := b.hs.Host(jc.Request.Context(), hostKey)
-	if jc.Check("couldn't load host", err) == nil {
+	if errors.Is(err, api.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
 }
