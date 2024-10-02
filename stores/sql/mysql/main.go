@@ -1131,56 +1131,45 @@ func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contrac
 	}
 
 	// find shards of slab
-	var roots []types.Hash256
-	rows, err := tx.Query(ctx, "SELECT root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
+	type sector struct {
+		id   int64
+		root ssql.Hash256
+	}
+	var sectors []sector
+	rows, err := tx.Query(ctx, "SELECT id, root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch sectors: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var root ssql.Hash256
-		if err := rows.Scan(&root); err != nil {
+		var s sector
+		if err := rows.Scan(&s.id, (*ssql.Hash256)(&s.root)); err != nil {
 			return fmt.Errorf("failed to scan sector id: %w", err)
 		}
-		roots = append(roots, types.Hash256(root))
+		sectors = append(sectors, s)
 	}
-	nSectors := len(roots)
 
 	// make sure the number of shards doesn't change.
 	// NOTE: check both the slice as well as the TotalShards field to be
 	// safe.
 	if len(s.Shards) != int(totalShards) {
 		return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", sql.ErrInvalidNumberOfShards, totalShards, len(s.Shards))
-	} else if len(s.Shards) != nSectors {
-		return fmt.Errorf("%w: expected %v shards (Shards) but got %v", sql.ErrInvalidNumberOfShards, nSectors, len(s.Shards))
+	} else if len(s.Shards) != len(sectors) {
+		return fmt.Errorf("%w: expected %v shards (Shards) but got %v", sql.ErrInvalidNumberOfShards, len(sectors), len(s.Shards))
 	}
 
 	// make sure the roots stay the same.
-	for i, root := range roots {
-		if root != types.Hash256(s.Shards[i].Root) {
-			return fmt.Errorf("%w: shard %v has changed root from %v to %v", sql.ErrShardRootChanged, i, s.Shards[i].Root, root[:])
+	for i, sector := range sectors {
+		if types.Hash256(sector.root) != s.Shards[i].Root {
+			return fmt.Errorf("%w: shard %v wants to update root from %v to %v", sql.ErrShardRootChanged, i, types.Hash256(sector.root), s.Shards[i].Root)
 		}
-	}
-
-	// update sectors
-	var upsertSectors []upsertSector
-	for i := range s.Shards {
-		upsertSectors = append(upsertSectors, upsertSector{
-			slabID,
-			i + 1,
-			s.Shards[i].Root,
-		})
-	}
-	sectorIDs, err := tx.upsertSectors(ctx, upsertSectors)
-	if err != nil {
-		return fmt.Errorf("failed to insert sectors: %w", err)
 	}
 
 	// build contract <-> sector links
 	var upsertContractSectors []upsertContractSector
 	for i, shard := range s.Shards {
-		sectorID := sectorIDs[i]
+		sectorID := sectors[i].id
 
 		// ensure the associations are updated
 		for _, fcids := range shard.Contracts {

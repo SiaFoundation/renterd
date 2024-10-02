@@ -669,20 +669,18 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 		return s.pending[i].selected < s.pending[j].selected
 	})
 
-	// select unique hosts
+	// select potential sectors
 	exhausted := true
-	var hosts []types.PublicKey
 	sectors := make(map[types.PublicKey]*sectorDownloadInfo)
 loop:
 	for _, sector := range s.pending {
 		if sector.selected > minSelected {
 			exhausted = false
-			continue
+			break
 		}
 		for _, hk := range sector.hks {
 			if _, ok := sectors[hk]; !ok {
 				sectors[hk] = sector
-				hosts = append(hosts, hk)
 				break
 			}
 		}
@@ -690,14 +688,20 @@ loop:
 
 	// no more sectors to download - we don't know if the download failed at
 	// this point so we register an error that gets propagated in case it did
-	if len(hosts) == 0 {
+	if len(sectors) == 0 {
 		if !exhausted {
 			exhausted = true // reset
-			minSelected++    // TODO: could calc how much to incr here
+			minSelected++    // TODO: could jump instead of incrementing here
 			goto loop
 		}
 		s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
 		return nil
+	}
+
+	// build list of host keys
+	var hosts []types.PublicKey
+	for hk := range sectors {
+		hosts = append(hosts, hk)
 	}
 
 	// select the fastest host
