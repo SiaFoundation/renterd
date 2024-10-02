@@ -552,7 +552,10 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 		return
 	}
 	host, err := b.hs.Host(jc.Request.Context(), hostKey)
-	if jc.Check("couldn't load host", err) == nil {
+	if errors.Is(err, api.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
 }
@@ -1019,12 +1022,13 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	// validate the request
 	if rrr.EndHeight == 0 {
 		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.ExpectedNewStorage == 0 {
 		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.MaxFundAmount.IsZero() {
 		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
-	} else if rrr.MinNewCollateral.IsZero() {
-		http.Error(jc.ResponseWriter, "MinNewCollateral can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
