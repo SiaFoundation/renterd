@@ -116,12 +116,6 @@ func (host Host) PrometheusMetric() (metrics []prometheus.Metric) {
 	}
 
 	return []prometheus.Metric{
-		{
-			Name:   "renterd_host_scanned",
-			Labels: netAddressLabel,
-			Value:  1,
-		},
-
 		// price table
 		{
 			Name:   "renterd_host_pricetable_validity",
@@ -372,6 +366,11 @@ func (host Host) PrometheusMetric() (metrics []prometheus.Metric) {
 		},
 
 		// interactions
+		{
+			Name:   "renterd_host_scanned",
+			Labels: netAddressLabel,
+			Value:  1,
+		},
 		{
 			Name:   "renterd_host_interactions_totalscans",
 			Labels: netAddressLabel,
