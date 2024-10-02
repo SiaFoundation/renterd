@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -21,6 +22,10 @@ func (s marshallerSlice[M]) PrometheusMetric() []Metric {
 		metrics = append(metrics, m.PrometheusMetric()...)
 	}
 	return metrics
+}
+
+func (s marshallerSlice[M]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.slice)
 }
 
 // Slice converts a slice of Prometheus marshallable objects into a

@@ -19,8 +19,6 @@ func (a Alert) PrometheusMetric() (metrics []prometheus.Metric) {
 
 // PrometheusMetric implements prometheus.Marshaller.
 func (a AlertsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
-	for _, alert := range a.Alerts {
-		metrics = append(metrics, alert.PrometheusMetric()...)
-	}
+	metrics = prometheus.Slice(a.Alerts).PrometheusMetric()
 	return
 }
