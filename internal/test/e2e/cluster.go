@@ -210,8 +210,6 @@ type testClusterOptions struct {
 	skipRunningAutopilot bool
 	walletKey            *types.PrivateKey
 
-	network *consensus.Network
-
 	autopilotCfg      *config.Autopilot
 	autopilotSettings *api.AutopilotConfig
 	busCfg            *config.Bus
@@ -263,10 +261,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	wk := types.GeneratePrivateKey()
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
-	}
-	network, genesis := testNetwork()
-	if opts.network != nil {
-		network = opts.network
 	}
 
 	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
@@ -358,6 +352,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
+	network, genesis := testNetwork()
 	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, network, genesis, logger)
 	tt.OK(err)
 

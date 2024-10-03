@@ -488,10 +488,6 @@ func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract ap
 }
 
 func (c *Contractor) shouldArchive(contract api.Contract, bh uint64, n consensus.Network) (err error) {
-	defer func() {
-		fmt.Println("DEBUG PJ: should archive", bh, contract.EndHeight(), n.HardforkV2.RequireHeight, err)
-	}()
-
 	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
 		return errContractExpired
 	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
