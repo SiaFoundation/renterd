@@ -8,7 +8,7 @@ CREATE INDEX `idx_hosts_public_key` ON `hosts`(`public_key`);
 CREATE INDEX `idx_hosts_net_address` ON `hosts`(`net_address`);
 
 -- dbContract
-CREATE TABLE contracts (`id` integer PRIMARY KEY AUTOINCREMENT, `created_at` datetime, `fcid` blob NOT NULL UNIQUE, `host_id` integer, `host_key` blob NOT NULL, `archival_reason` text DEFAULT NULL, `proof_height` integer DEFAULT 0, `renewed_from` blob, `renewed_to` blob, `revision_height` integer DEFAULT 0, `revision_number` text NOT NULL DEFAULT "0", `size` integer, `start_height` integer NOT NULL, `state` integer NOT NULL DEFAULT 0, `window_start` integer NOT NULL DEFAULT 0, `window_end` integer NOT NULL DEFAULT 0, `contract_price` text, `initial_renter_funds` text, `delete_spending` text, `fund_account_spending` text, `sector_roots_spending` text, `upload_spending` text, CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts`(`id`));
+CREATE TABLE contracts (`id` integer PRIMARY KEY AUTOINCREMENT, `created_at` datetime, `fcid` blob NOT NULL UNIQUE, `host_id` integer, `host_key` blob NOT NULL,`v2` INTEGER NOT NULL DEFAULT 0, `archival_reason` text DEFAULT NULL, `proof_height` integer DEFAULT 0, `renewed_from` blob, `renewed_to` blob, `revision_height` integer DEFAULT 0, `revision_number` text NOT NULL DEFAULT "0", `size` integer, `start_height` integer NOT NULL, `state` integer NOT NULL DEFAULT 0, `window_start` integer NOT NULL DEFAULT 0, `window_end` integer NOT NULL DEFAULT 0, `contract_price` text, `initial_renter_funds` text, `delete_spending` text, `fund_account_spending` text, `sector_roots_spending` text, `upload_spending` text, CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts`(`id`));
 CREATE INDEX `idx_contracts_archival_reason` ON `contracts`(`archival_reason`);
 CREATE INDEX `idx_contracts_fcid` ON `contracts`(`fcid`);
 CREATE INDEX `idx_contracts_host_id` ON `contracts`(`host_id`);
@@ -21,6 +21,7 @@ CREATE INDEX `idx_contracts_start_height` ON `contracts`(`start_height`);
 CREATE INDEX `idx_contracts_state` ON `contracts`(`state`);
 CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
 CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);
+CREATE INDEX `idx_contracts_v2` ON `contracts`(`v2`);
 
 -- dbContractSet
 CREATE TABLE `contract_sets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`name` text UNIQUE);

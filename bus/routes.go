@@ -167,9 +167,7 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
-	jc.Encode(api.ConsensusNetwork{
-		Name: b.cm.TipState().Network.Name,
-	})
+	jc.Encode(*b.cm.TipState().Network)
 }
 
 func (b *Bus) txpoolFeeHandler(jc jape.Context) {

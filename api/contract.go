@@ -52,6 +52,7 @@ type (
 	ContractMetadata struct {
 		ID      types.FileContractID `json:"id"`
 		HostKey types.PublicKey      `json:"hostKey"`
+		V2      bool                 `json:"v2"`
 
 		ProofHeight    uint64               `json:"proofHeight"`
 		RenewedFrom    types.FileContractID `json:"renewedFrom"`

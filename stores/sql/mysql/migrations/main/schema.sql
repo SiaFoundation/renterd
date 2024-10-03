@@ -77,6 +77,7 @@ CREATE TABLE `contracts` (
   `fcid` varbinary(32) NOT NULL,
   `host_id` bigint unsigned DEFAULT NULL,
   `host_key` varbinary(32),
+  `v2` boolean NOT NULL DEFAULT FALSE,
 
   `archival_reason` varchar(191) DEFAULT NULL,
   `proof_height` bigint unsigned DEFAULT '0',
@@ -111,6 +112,7 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_state` (`state`),
   KEY `idx_contracts_window_start` (`window_start`),
   KEY `idx_contracts_window_end` (`window_end`),
+  KEY `idx_contracts_v2` (`v2`),
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
