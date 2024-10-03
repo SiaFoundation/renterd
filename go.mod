@@ -18,7 +18,7 @@ require (
 	go.sia.tech/hostd v1.1.3-0.20240903081107-6e044db95238
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.3.0
-	go.sia.tech/web/renterd v0.61.0
+	go.sia.tech/web/renterd v0.63.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.27.0
 	golang.org/x/sys v0.25.0

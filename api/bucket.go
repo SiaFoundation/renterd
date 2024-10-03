@@ -4,10 +4,6 @@ import (
 	"errors"
 )
 
-const (
-	DefaultBucketName = "default"
-)
-
 var (
 	// ErrBucketExists is returned when trying to create a bucket that already
 	// exists.

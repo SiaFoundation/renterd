@@ -336,7 +336,7 @@ func (a *AccountMgr) refillAccounts() {
 				defer cancel()
 
 				// refill
-				err := a.refillAccount(rCtx, c, cs.BlockHeight, a.revisionSubmissionBuffer)
+				refilled, err := a.refillAccount(rCtx, c, cs.BlockHeight, a.revisionSubmissionBuffer)
 
 				// determine whether to log something
 				shouldLog := true
@@ -351,7 +351,7 @@ func (a *AccountMgr) refillAccounts() {
 
 				if err != nil && shouldLog {
 					a.logger.Error("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
-				} else {
+				} else if refilled {
 					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				}
 			}(c)
@@ -359,7 +359,7 @@ func (a *AccountMgr) refillAccounts() {
 	}
 }
 
-func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMetadata, bh, revisionSubmissionBuffer uint64) error {
+func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMetadata, bh, revisionSubmissionBuffer uint64) (bool, error) {
 	// fetch the account
 	account := a.Account(contract.HostKey)
 
@@ -367,7 +367,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	// trying to refill the account would result in the host not returning the
 	// revision and returning an obfuscated error
 	if (bh + revisionSubmissionBuffer) > contract.WindowStart {
-		return fmt.Errorf("contract %v is too close to the proof window to be revised", contract.ID)
+		return false, fmt.Errorf("contract %v is too close to the proof window to be revised", contract.ID)
 	}
 
 	// check if a host is potentially cheating before refilling.
@@ -382,7 +382,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 			"drift", account.Drift.String(),
 		)
 		_ = a.alerts.RegisterAlert(a.shutdownCtx, alert)
-		return fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
+		return false, fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
 	} else {
 		_ = a.alerts.DismissAlerts(a.shutdownCtx, alerts.IDForAccount(alertAccountRefillID, account.ID))
 	}
@@ -392,7 +392,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 		// sync the account
 		err := a.syncer.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
 		if err != nil {
-			return fmt.Errorf("failed to sync account's balance: %w", err)
+			return false, fmt.Errorf("failed to sync account's balance: %w", err)
 		}
 
 		// refetch the account after syncing
@@ -401,15 +401,15 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 
 	// check if refill is needed
 	if account.Balance.Cmp(minBalance) >= 0 {
-		return nil
+		return false, nil
 	}
 
 	// fund the account
 	err := a.funder.FundAccount(ctx, contract.ID, contract.HostKey, maxBalance)
 	if err != nil {
-		return fmt.Errorf("failed to fund account: %w", err)
+		return false, fmt.Errorf("failed to fund account: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is

@@ -118,10 +118,9 @@ func TestContractMetrics(t *testing.T) {
 				RemainingFunds:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				RevisionNumber:      math.MaxUint64,
 				UploadSpending:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
-				DownloadSpending:    types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				FundAccountSpending: types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
 				DeleteSpending:      types.NewCurrency(frand.Uint64n(math.MaxUint64), frand.Uint64n(math.MaxUint64)),
-				ListSpending:        types.NewCurrency64(1),
+				SectorRootsSpending: types.NewCurrency64(1),
 			}
 			fcid2Metric[metric.ContractID] = metric
 			metricsTimeAsc = append(metricsTimeAsc, metric)
@@ -189,10 +188,9 @@ func TestContractMetrics(t *testing.T) {
 		expectedMetric.RemainingFunds, _ = metricsTimeAsc[2*i].RemainingFunds.AddWithOverflow(metricsTimeAsc[2*i+1].RemainingFunds)
 		expectedMetric.RevisionNumber = 0
 		expectedMetric.UploadSpending, _ = metricsTimeAsc[2*i].UploadSpending.AddWithOverflow(metricsTimeAsc[2*i+1].UploadSpending)
-		expectedMetric.DownloadSpending, _ = metricsTimeAsc[2*i].DownloadSpending.AddWithOverflow(metricsTimeAsc[2*i+1].DownloadSpending)
 		expectedMetric.FundAccountSpending, _ = metricsTimeAsc[2*i].FundAccountSpending.AddWithOverflow(metricsTimeAsc[2*i+1].FundAccountSpending)
 		expectedMetric.DeleteSpending, _ = metricsTimeAsc[2*i].DeleteSpending.AddWithOverflow(metricsTimeAsc[2*i+1].DeleteSpending)
-		expectedMetric.ListSpending, _ = metricsTimeAsc[2*i].ListSpending.AddWithOverflow(metricsTimeAsc[2*i+1].ListSpending)
+		expectedMetric.SectorRootsSpending, _ = metricsTimeAsc[2*i].SectorRootsSpending.AddWithOverflow(metricsTimeAsc[2*i+1].SectorRootsSpending)
 		if !cmp.Equal(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)) {
 			t.Fatal(i, "unexpected metric", cmp.Diff(m, expectedMetric, cmp.Comparer(api.CompareTimeRFC3339)))
 		}

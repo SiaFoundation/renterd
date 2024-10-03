@@ -23,8 +23,8 @@ const (
 	ObjectSortByName   = "name"
 	ObjectSortBySize   = "size"
 
-	ObjectSortDirAsc  = "asc"
-	ObjectSortDirDesc = "desc"
+	SortDirAsc  = "asc"
+	SortDirDesc = "desc"
 )
 
 var (
@@ -47,6 +47,10 @@ var (
 	// ErrSlabNotFound is returned when a slab can't be retrieved from the
 	// database.
 	ErrSlabNotFound = errors.New("slab not found")
+
+	// ErrUnsupportedDelimiter is returned when an unsupported delimiter is
+	// provided.
+	ErrUnsupportedDelimiter = errors.New("unsupported delimiter")
 )
 
 type (
@@ -59,10 +63,11 @@ type (
 
 	// ObjectMetadata contains various metadata about an object.
 	ObjectMetadata struct {
+		Bucket   string      `json:"bucket"`
 		ETag     string      `json:"eTag,omitempty"`
 		Health   float64     `json:"health"`
 		ModTime  TimeRFC3339 `json:"modTime"`
-		Name     string      `json:"name"`
+		Key      string      `json:"key"`
 		Size     int64       `json:"size"`
 		MimeType string      `json:"mimeType,omitempty"`
 	}
@@ -75,13 +80,6 @@ type (
 	// using Amazon headers and find the metadata will be persisted in Sia as
 	// well
 	ObjectUserMetadata map[string]string
-
-	// ObjectsResponse is the response type for the /bus/objects endpoint.
-	ObjectsResponse struct {
-		HasMore bool             `json:"hasMore"`
-		Entries []ObjectMetadata `json:"entries,omitempty"`
-		Object  *Object          `json:"object,omitempty"`
-	}
 
 	// GetObjectResponse is the response type for the GET /worker/object endpoint.
 	GetObjectResponse struct {
@@ -99,21 +97,17 @@ type (
 		Metadata     ObjectUserMetadata
 	}
 
-	// ObjectsDeleteRequest is the request type for the /bus/objects/list endpoint.
-	ObjectsListRequest struct {
-		Bucket  string `json:"bucket"`
-		Limit   int    `json:"limit"`
-		SortBy  string `json:"sortBy"`
-		SortDir string `json:"sortDir"`
-		Prefix  string `json:"prefix"`
-		Marker  string `json:"marker"`
-	}
-
-	// ObjectsListResponse is the response type for the /bus/objects/list endpoint.
-	ObjectsListResponse struct {
+	// ObjectsResponse is the response type for the /bus/objects endpoint.
+	ObjectsResponse struct {
 		HasMore    bool             `json:"hasMore"`
 		NextMarker string           `json:"nextMarker"`
 		Objects    []ObjectMetadata `json:"objects"`
+	}
+
+	// ObjectsRemoveRequest is the request type for the /bus/objects/remove endpoint.
+	ObjectsRemoveRequest struct {
+		Bucket string `json:"bucket"`
+		Prefix string `json:"prefix"`
 	}
 
 	// ObjectsRenameRequest is the request type for the /bus/objects/rename endpoint.
@@ -159,7 +153,7 @@ func (o ObjectMetadata) ContentType() string {
 		return o.MimeType
 	}
 
-	if ext := filepath.Ext(o.Name); ext != "" {
+	if ext := filepath.Ext(o.Key); ext != "" {
 		return mime.TypeByExtension(ext)
 	}
 
@@ -193,52 +187,36 @@ type (
 	// CopyObjectsRequest is the request type for the /bus/objects/copy endpoint.
 	CopyObjectsRequest struct {
 		SourceBucket string `json:"sourceBucket"`
-		SourcePath   string `json:"sourcePath"`
+		SourceKey    string `json:"sourcePath"`
 
 		DestinationBucket string `json:"destinationBucket"`
-		DestinationPath   string `json:"destinationPath"`
+		DestinationKey    string `json:"destinationPath"`
 
 		MimeType string             `json:"mimeType"`
 		Metadata ObjectUserMetadata `json:"metadata"`
 	}
 
-	DeleteObjectOptions struct {
-		Batch bool
-	}
-
 	HeadObjectOptions struct {
-		IgnoreDelim bool
-		Range       *DownloadRange
+		Range *DownloadRange
 	}
 
 	DownloadObjectOptions struct {
-		GetObjectOptions
 		Range *DownloadRange
 	}
 
 	GetObjectOptions struct {
-		Prefix       string
-		Offset       int
-		Limit        int
-		IgnoreDelim  bool
-		Marker       string
 		OnlyMetadata bool
-		SortBy       string
-		SortDir      string
 	}
 
 	ListObjectOptions struct {
-		Prefix  string
-		Marker  string
-		Limit   int
-		SortBy  string
-		SortDir string
-	}
-
-	SearchObjectOptions struct {
-		Key    string
-		Offset int
-		Limit  int
+		Bucket            string
+		Delimiter         string
+		Limit             int
+		Marker            string
+		SortBy            string
+		SortDir           string
+		Substring         string
+		SlabEncryptionKey object.EncryptionKey
 	}
 
 	// UploadObjectOptions is the options type for the worker client.
@@ -283,7 +261,7 @@ func (opts UploadObjectOptions) ApplyHeaders(h http.Header) {
 
 func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	if opts.EncryptionOffset != nil {
-		values.Set("offset", fmt.Sprint(*opts.EncryptionOffset))
+		values.Set("encryptionoffset", fmt.Sprint(*opts.EncryptionOffset))
 	}
 	if opts.MinShards != 0 {
 		values.Set("minshards", fmt.Sprint(opts.MinShards))
@@ -295,11 +273,6 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 		values.Set("contractset", opts.ContractSet)
 	}
 }
-
-func (opts DownloadObjectOptions) ApplyValues(values url.Values) {
-	opts.GetObjectOptions.Apply(values)
-}
-
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 	if opts.Range != nil {
 		if opts.Range.Length == -1 {
@@ -310,16 +283,7 @@ func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 	}
 }
 
-func (opts DeleteObjectOptions) Apply(values url.Values) {
-	if opts.Batch {
-		values.Set("batch", "true")
-	}
-}
-
 func (opts HeadObjectOptions) Apply(values url.Values) {
-	if opts.IgnoreDelim {
-		values.Set("ignoreDelim", "true")
-	}
 }
 
 func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
@@ -333,41 +297,35 @@ func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {
 }
 
 func (opts GetObjectOptions) Apply(values url.Values) {
-	if opts.Prefix != "" {
-		values.Set("prefix", opts.Prefix)
+	if opts.OnlyMetadata {
+		values.Set("onlymetadata", "true")
 	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
+}
+
+func (opts ListObjectOptions) Apply(values url.Values) {
+	if opts.Bucket != "" {
+		values.Set("bucket", opts.Bucket)
+	}
+	if opts.Delimiter != "" {
+		values.Set("delimiter", opts.Delimiter)
 	}
 	if opts.Limit != 0 {
 		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if opts.IgnoreDelim {
-		values.Set("ignoreDelim", "true")
 	}
 	if opts.Marker != "" {
 		values.Set("marker", opts.Marker)
 	}
-	if opts.OnlyMetadata {
-		values.Set("onlymetadata", "true")
-	}
 	if opts.SortBy != "" {
-		values.Set("sortBy", opts.SortBy)
+		values.Set("sortby", opts.SortBy)
 	}
 	if opts.SortDir != "" {
-		values.Set("sortDir", opts.SortDir)
+		values.Set("sortdir", opts.SortDir)
 	}
-}
-
-func (opts SearchObjectOptions) Apply(values url.Values) {
-	if opts.Key != "" {
-		values.Set("key", opts.Key)
+	if opts.Substring != "" {
+		values.Set("substring", opts.Substring)
 	}
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
+	if opts.SlabEncryptionKey != (object.EncryptionKey{}) {
+		values.Set("slabencryptionkey", opts.SlabEncryptionKey.String())
 	}
 }
 
@@ -375,6 +333,6 @@ func FormatETag(eTag string) string {
 	return fmt.Sprintf("%q", eTag)
 }
 
-func ObjectPathEscape(path string) string {
-	return url.PathEscape(strings.TrimPrefix(path, "/"))
+func ObjectKeyEscape(key string) string {
+	return url.PathEscape(strings.TrimPrefix(key, "/"))
 }

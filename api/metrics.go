@@ -66,11 +66,10 @@ type (
 		RemainingFunds      types.Currency `json:"remainingFunds"`
 		RevisionNumber      uint64         `json:"revisionNumber"`
 
-		UploadSpending      types.Currency `json:"uploadSpending"`
-		DownloadSpending    types.Currency `json:"downloadSpending"`
-		FundAccountSpending types.Currency `json:"fundAccountSpending"`
 		DeleteSpending      types.Currency `json:"deleteSpending"`
-		ListSpending        types.Currency `json:"listSpending"`
+		FundAccountSpending types.Currency `json:"fundAccountSpending"`
+		SectorRootsSpending types.Currency `json:"sectorRootsSpending"`
+		UploadSpending      types.Currency `json:"uploadSpending"`
 	}
 
 	ContractMetricsQueryOpts struct {

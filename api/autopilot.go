@@ -86,6 +86,7 @@ type (
 	// AutopilotStateResponse is the response type for the /autopilot/state
 	// endpoint.
 	AutopilotStateResponse struct {
+		ID                 string      `json:"id"`
 		Configured         bool        `json:"configured"`
 		Migrating          bool        `json:"migrating"`
 		MigratingLastStart TimeRFC3339 `json:"migratingLastStart"`

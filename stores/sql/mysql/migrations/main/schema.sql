@@ -1,41 +1,3 @@
--- dbArchivedContract
-CREATE TABLE `archived_contracts` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `fcid` varbinary(32) NOT NULL,
-  `renewed_from` varbinary(32) DEFAULT NULL,
-  `contract_price` longtext,
-  `state` tinyint unsigned NOT NULL DEFAULT '0',
-  `total_cost` longtext,
-  `proof_height` bigint unsigned DEFAULT '0',
-  `revision_height` bigint unsigned DEFAULT '0',
-  `revision_number` varchar(191) NOT NULL DEFAULT '0',
-  `size` bigint unsigned DEFAULT NULL,
-  `start_height` bigint unsigned NOT NULL,
-  `window_start` bigint unsigned NOT NULL DEFAULT '0',
-  `window_end` bigint unsigned NOT NULL DEFAULT '0',
-  `upload_spending` longtext,
-  `download_spending` longtext,
-  `fund_account_spending` longtext,
-  `delete_spending` longtext,
-  `list_spending` longtext,
-  `renewed_to` varbinary(32) DEFAULT NULL,
-  `host` varbinary(32) NOT NULL,
-  `reason` longtext,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `fcid` (`fcid`),
-  KEY `idx_archived_contracts_renewed_from` (`renewed_from`),
-  KEY `idx_archived_contracts_proof_height` (`proof_height`),
-  KEY `idx_archived_contracts_revision_height` (`revision_height`),
-  KEY `idx_archived_contracts_start_height` (`start_height`),
-  KEY `idx_archived_contracts_host` (`host`),
-  KEY `idx_archived_contracts_fc_id` (`fcid`),
-  KEY `idx_archived_contracts_state` (`state`),
-  KEY `idx_archived_contracts_window_start` (`window_start`),
-  KEY `idx_archived_contracts_window_end` (`window_end`),
-  KEY `idx_archived_contracts_renewed_to` (`renewed_to`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbAutopilot
 CREATE TABLE `autopilots` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -113,34 +75,42 @@ CREATE TABLE `contracts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
   `fcid` varbinary(32) NOT NULL,
-  `renewed_from` varbinary(32) DEFAULT NULL,
-  `contract_price` longtext,
-  `state` tinyint unsigned NOT NULL DEFAULT '0',
-  `total_cost` longtext,
+  `host_id` bigint unsigned DEFAULT NULL,
+  `host_key` varbinary(32),
+
+  `archival_reason` varchar(191) DEFAULT NULL,
   `proof_height` bigint unsigned DEFAULT '0',
+  `renewed_from` varbinary(32) DEFAULT NULL,
+  `renewed_to` varbinary(32) DEFAULT NULL,
   `revision_height` bigint unsigned DEFAULT '0',
   `revision_number` varchar(191) NOT NULL DEFAULT '0',
   `size` bigint unsigned DEFAULT NULL,
   `start_height` bigint unsigned NOT NULL,
+  `state` tinyint unsigned NOT NULL DEFAULT '0',
   `window_start` bigint unsigned NOT NULL DEFAULT '0',
   `window_end` bigint unsigned NOT NULL DEFAULT '0',
-  `upload_spending` longtext,
-  `download_spending` longtext,
-  `fund_account_spending` longtext,
+
+  `contract_price` longtext,
+  `initial_renter_funds` longtext,
+
   `delete_spending` longtext,
-  `list_spending` longtext,
-  `host_id` bigint unsigned DEFAULT NULL,
+  `fund_account_spending` longtext,
+  `sector_roots_spending` longtext,
+  `upload_spending` longtext,
   PRIMARY KEY (`id`),
   UNIQUE KEY `fcid` (`fcid`),
-  KEY `idx_contracts_window_end` (`window_end`),
+  KEY `idx_contracts_archival_reason` (`archival_reason`),
+  KEY `idx_contracts_fcid` (`fcid`),
   KEY `idx_contracts_host_id` (`host_id`),
-  KEY `idx_contracts_renewed_from` (`renewed_from`),
-  KEY `idx_contracts_state` (`state`),
+  KEY `idx_contracts_host_key` (`host_key`),
   KEY `idx_contracts_proof_height` (`proof_height`),
-  KEY `idx_contracts_start_height` (`start_height`),
-  KEY `idx_contracts_fc_id` (`fcid`),
+  KEY `idx_contracts_renewed_from` (`renewed_from`),
+  KEY `idx_contracts_renewed_to` (`renewed_to`),
   KEY `idx_contracts_revision_height` (`revision_height`),
+  KEY `idx_contracts_start_height` (`start_height`),
+  KEY `idx_contracts_state` (`state`),
   KEY `idx_contracts_window_start` (`window_start`),
+  KEY `idx_contracts_window_end` (`window_end`),
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -162,7 +132,7 @@ CREATE TABLE `slabs` (
   `db_buffered_slab_id` bigint unsigned DEFAULT NULL,
   `health` double NOT NULL DEFAULT '1',
   `health_valid_until` bigint NOT NULL DEFAULT '0',
-  `key` varbinary(32) NOT NULL,
+  `key` binary(33) NOT NULL,
   `min_shards` tinyint unsigned DEFAULT NULL,
   `total_shards` tinyint unsigned DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -334,7 +304,7 @@ CREATE TABLE `objects` (
   `db_bucket_id` bigint unsigned NOT NULL,
   `db_directory_id` bigint unsigned NOT NULL,
   `object_id` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
-  `key` longblob,
+  `key` binary(33) NOT NULL,
   `health` double NOT NULL DEFAULT '1',
   `size` bigint DEFAULT NULL,
   `mime_type` longtext,
@@ -462,40 +432,6 @@ CREATE TABLE `host_checks` (
   CONSTRAINT `fk_host_checks_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbObject trigger to delete from slices
-CREATE TRIGGER before_delete_on_objects_delete_slices
-BEFORE DELETE
-ON objects FOR EACH ROW
-DELETE FROM slices
-WHERE slices.db_object_id = OLD.id;
-
--- dbMultipartUpload trigger to delete from dbMultipartPart
-CREATE TRIGGER before_delete_on_multipart_uploads_delete_multipart_parts
-BEFORE DELETE
-ON multipart_uploads FOR EACH ROW
-DELETE FROM multipart_parts
-WHERE multipart_parts.db_multipart_upload_id = OLD.id;
-
--- dbMultipartPart trigger to delete from slices
-CREATE TRIGGER before_delete_on_multipart_parts_delete_slices
-BEFORE DELETE
-ON multipart_parts FOR EACH ROW
-DELETE FROM slices
-WHERE slices.db_multipart_part_id = OLD.id;
-
--- dbSlices trigger to prune slabs
-CREATE TRIGGER after_delete_on_slices_delete_slabs
-AFTER DELETE
-ON slices FOR EACH ROW
-DELETE FROM slabs
-WHERE slabs.id = OLD.db_slab_id
-AND slabs.db_buffered_slab_id IS NULL
-AND NOT EXISTS (
-    SELECT 1
-    FROM slices
-    WHERE slices.db_slab_id = OLD.db_slab_id
-);
-
 -- dbSyncerPeer
 CREATE TABLE `syncer_peers` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -556,6 +492,3 @@ CREATE TABLE `wallet_outputs` (
   UNIQUE KEY `output_id` (`output_id`),
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- create default bucket
-INSERT INTO buckets (created_at, name) VALUES (CURRENT_TIMESTAMP, 'default');

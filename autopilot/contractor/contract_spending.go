@@ -10,7 +10,7 @@ import (
 func currentPeriodSpending(contracts []api.ContractMetadata, currentPeriod uint64) types.Currency {
 	totalCosts := make(map[types.FileContractID]types.Currency)
 	for _, c := range contracts {
-		totalCosts[c.ID] = c.TotalCost
+		totalCosts[c.ID] = c.InitialRenterFunds
 	}
 
 	// filter contracts in the current period
@@ -24,7 +24,7 @@ func currentPeriodSpending(contracts []api.ContractMetadata, currentPeriod uint6
 	// calculate the money allocated
 	var totalAllocated types.Currency
 	for _, contract := range filtered {
-		totalAllocated = totalAllocated.Add(contract.TotalCost)
+		totalAllocated = totalAllocated.Add(contract.InitialRenterFunds)
 	}
 	return totalAllocated
 }

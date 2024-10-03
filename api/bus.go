@@ -8,8 +8,12 @@ import (
 )
 
 var (
+	ErrInvalidOffset         = errors.New("offset must be non-negative")
+	ErrInvalidLength         = errors.New("length must be positive")
+	ErrInvalidLimit          = errors.New("limit must be -1 or bigger")
 	ErrMarkerNotFound        = errors.New("marker not found")
 	ErrMaxFundAmountExceeded = errors.New("renewal exceeds max fund amount")
+	ErrExplorerDisabled      = errors.New("explorer is disabled")
 )
 
 type (
@@ -64,6 +68,13 @@ type (
 		StartTime TimeRFC3339 `json:"startTime"`
 		Network   string      `json:"network"`
 		BuildState
+		Explorer ExplorerState `json:"explorer"`
+	}
+
+	// ExplorerState contains static information about explorer data sources.
+	ExplorerState struct {
+		Enabled bool   `json:"enabled"`
+		URL     string `json:"url,omitempty"`
 	}
 
 	ContractSetUpdateRequest struct {

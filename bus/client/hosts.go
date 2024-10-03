@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -16,6 +15,21 @@ func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h api.Host,
 	return
 }
 
+// Hosts returns all hosts that match certain search criteria.
+func (c *Client) Hosts(ctx context.Context, opts api.HostOptions) (hosts []api.Host, err error) {
+	err = c.c.WithContext(ctx).POST("/hosts", api.HostsRequest{
+		AutopilotID:     opts.AutopilotID,
+		Offset:          opts.Offset,
+		Limit:           opts.Limit,
+		FilterMode:      opts.FilterMode,
+		UsabilityMode:   opts.UsabilityMode,
+		AddressContains: opts.AddressContains,
+		KeyIn:           opts.KeyIn,
+		MaxLastScan:     opts.MaxLastScan,
+	}, &hosts)
+	return
+}
+
 // HostAllowlist returns the allowlist.
 func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey, err error) {
 	err = c.c.WithContext(ctx).GET("/hosts/allowlist", &allowlist)
@@ -25,23 +39,6 @@ func (c *Client) HostAllowlist(ctx context.Context) (allowlist []types.PublicKey
 // HostBlocklist returns a host blocklist.
 func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err error) {
 	err = c.c.WithContext(ctx).GET("/hosts/blocklist", &blocklist)
-	return
-}
-
-// Hosts returns 'limit' hosts at given 'offset'.
-func (c *Client) Hosts(ctx context.Context, opts api.GetHostsOptions) (hosts []api.Host, err error) {
-	values := url.Values{}
-	opts.Apply(values)
-	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
-	return
-}
-
-// HostsForScanning returns 'limit' host addresses at given 'offset' which
-// haven't been scanned after lastScan.
-func (c *Client) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) (hosts []api.HostAddress, err error) {
-	values := url.Values{}
-	opts.Apply(values)
-	err = c.c.WithContext(ctx).GET("/hosts/scanning?"+values.Encode(), &hosts)
 	return
 }
 
@@ -73,20 +70,6 @@ func (c *Client) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailu
 // ResetLostSectors resets the lost sector count for a host.
 func (c *Client) ResetLostSectors(ctx context.Context, hostKey types.PublicKey) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/host/%s/resetlostsectors", hostKey), nil, nil)
-	return
-}
-
-// SearchHosts returns all hosts that match certain search criteria.
-func (c *Client) SearchHosts(ctx context.Context, opts api.SearchHostOptions) (hosts []api.Host, err error) {
-	err = c.c.WithContext(ctx).POST("/search/hosts", api.SearchHostsRequest{
-		AutopilotID:     opts.AutopilotID,
-		Offset:          opts.Offset,
-		Limit:           opts.Limit,
-		FilterMode:      opts.FilterMode,
-		UsabilityMode:   opts.UsabilityMode,
-		AddressContains: opts.AddressContains,
-		KeyIn:           opts.KeyIn,
-	}, &hosts)
 	return
 }
 

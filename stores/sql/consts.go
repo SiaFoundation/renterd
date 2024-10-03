@@ -1,9 +1,14 @@
 package sql
 
 import (
+	"errors"
 	"strings"
 
 	"go.sia.tech/renterd/api"
+)
+
+var (
+	ErrInvalidContractState = errors.New("invalid contract state")
 )
 
 type ContractState uint8
@@ -47,6 +52,7 @@ func (s *ContractState) LoadString(state string) error {
 		*s = contractStateFailed
 	default:
 		*s = contractStateInvalid
+		return ErrInvalidContractState
 	}
 	return nil
 }

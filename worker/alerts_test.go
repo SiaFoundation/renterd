@@ -11,7 +11,9 @@ import (
 	"go.sia.tech/renterd/alerts"
 )
 
-// TestUploadFailedAlertErrorSet is a test to verify that an upload failing with a HostErrorSet error registers an alert with all the individual errors of any host in the payload.
+// TestUploadFailedAlertErrorSet is a test to verify that an upload failing with
+// a HostErrorSet error registers an alert with all the individual errors of any
+// host in the payload.
 func TestUploadFailedAlertErrorSet(t *testing.T) {
 	hostErrSet := HostErrorSet{
 		types.PublicKey{1, 1, 1}: errors.New("test"),

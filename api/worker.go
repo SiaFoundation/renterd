@@ -15,6 +15,10 @@ import (
 )
 
 var (
+	// ErrBucketMissing is returned by the worker API by endpoints that need a
+	// bucket when it wasn't specified.
+	ErrBucketMissing = errors.New("'bucket' parameter is required")
+
 	// ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
 	// consensus and the consensus is not synced.
 	ErrConsensusNotSynced = errors.New("consensus is not synced")
@@ -58,9 +62,6 @@ type (
 	ContractsResponse struct {
 		Contracts []Contract                 `json:"contracts"`
 		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
-
-		// deprecated
-		Error string `json:"error,omitempty"`
 	}
 
 	MemoryResponse struct {
@@ -71,13 +72,6 @@ type (
 	MemoryStatus struct {
 		Available uint64 `json:"available"`
 		Total     uint64 `json:"total"`
-	}
-
-	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
-	MigrateSlabResponse struct {
-		NumShardsMigrated int    `json:"numShardsMigrated"`
-		SurchargeApplied  bool   `json:"surchargeApplied,omitempty"`
-		Error             string `json:"error,omitempty"`
 	}
 
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
