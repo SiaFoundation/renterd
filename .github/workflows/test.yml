@@ -82,3 +82,20 @@ jobs:
           args: "-failfast;-race;-timeout=60m"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
+      - name: Test Integration V2
+        uses: n8maninger/action-golang-test@v1
+        with:
+          package: "./internal/test/e2e/..."
+          args: "-failfast;-race;-tags=testing,v2;-timeout=30m"
+      - name: Test Integration V2 - MySQL
+        if: matrix.os == 'ubuntu-latest'
+        uses: n8maninger/action-golang-test@v1
+        env:
+          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_USER: root
+          RENTERD_DB_PASSWORD: test
+        with:
+          package: "./internal/test/e2e/..."
+          args: "-failfast;-race;-tags=testing,v2;-timeout=30m"
+      - name: Build
+        run: go build -o bin/ ./cmd/renterd

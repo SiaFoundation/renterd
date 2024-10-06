@@ -103,6 +103,8 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - refresh -> should be refreshed
 // - renew -> should be renewed
 func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract api.Contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
+	// TODO: check if a v1 contract has an end height beyond the v2 require
+	// height. If so we need to renew it.
 	usable = true
 	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())

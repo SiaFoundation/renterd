@@ -517,11 +517,13 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	if nHosts > 0 {
-		cluster.AddHostsBlocking(nHosts)
+		cluster.AddHosts(nHosts)
 		cluster.WaitForPeers()
-		cluster.WaitForContracts()
-		cluster.WaitForContractSet(test.ContractSet, nHosts)
-		cluster.WaitForAccounts()
+		if !opts.skipRunningAutopilot && !opts.skipSettingAutopilot {
+			cluster.WaitForContracts()
+			cluster.WaitForContractSet(test.ContractSet, nHosts)
+			cluster.WaitForAccounts()
+		}
 	}
 
 	// Ping the UI
@@ -1066,8 +1068,8 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkOak.Height = 1
 	n.HardforkASIC.Height = 1
 	n.HardforkFoundation.Height = 1
-	n.HardforkV2.AllowHeight = 1000
-	n.HardforkV2.RequireHeight = 1020
+	n.HardforkV2.AllowHeight = HardforkV2AllowHeight
+	n.HardforkV2.RequireHeight = HardforkV2RequireHeight
 
 	return n, genesis
 }
