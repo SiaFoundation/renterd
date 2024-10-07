@@ -15,6 +15,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
+	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/stores/sql"
 
@@ -138,7 +139,7 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 }
 
 func (b *Bus) syncerAddrHandler(jc jape.Context) {
-	jc.Encode(b.s.Addr())
+	api.WriteResponse(jc, api.SyncerAddrResp(b.s.Addr()))
 }
 
 func (b *Bus) syncerPeersHandler(jc jape.Context) {
@@ -146,7 +147,7 @@ func (b *Bus) syncerPeersHandler(jc jape.Context) {
 	for _, p := range b.s.Peers() {
 		peers = append(peers, p.String())
 	}
-	jc.Encode(peers)
+	api.WriteResponse(jc, api.SyncerPeersResp(peers))
 }
 
 func (b *Bus) syncerConnectHandler(jc jape.Context) {
@@ -162,7 +163,7 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch consensus state", err) != nil {
 		return
 	}
-	jc.Encode(cs)
+	api.WriteResponse(jc, cs)
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
@@ -172,11 +173,11 @@ func (b *Bus) consensusNetworkHandler(jc jape.Context) {
 }
 
 func (b *Bus) txpoolFeeHandler(jc jape.Context) {
-	jc.Encode(b.cm.RecommendedFee())
+	api.WriteResponse(jc, api.TxPoolFeeResp{Currency: b.cm.RecommendedFee()})
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
-	jc.Encode(b.cm.PoolTransactions())
+	api.WriteResponse(jc, api.TxPoolTxResp(b.cm.PoolTransactions()))
 }
 
 func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
@@ -198,7 +199,7 @@ func (b *Bus) bucketsHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
 	}
-	jc.Encode(resp)
+	api.WriteResponse(jc, prometheus.Slice(resp))
 }
 
 func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
@@ -262,7 +263,7 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(api.WalletResponse{
+	api.WriteResponse(jc, api.WalletResponse{
 		Balance:    balance,
 		Address:    address,
 		ScanHeight: b.w.Tip().Height,
@@ -270,10 +271,19 @@ func (b *Bus) walletHandler(jc jape.Context) {
 }
 
 func (b *Bus) walletEventsHandler(jc jape.Context) {
-	offset := 0
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
+	}
+
 	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil ||
-		jc.DecodeForm("limit", &limit) != nil {
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
 		return
 	}
 
@@ -513,7 +523,7 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	api.WriteResponse(jc, prometheus.Slice(hosts))
 }
 
 func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
@@ -542,7 +552,10 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 		return
 	}
 	host, err := b.hs.Host(jc.Request.Context(), hostKey)
-	if jc.Check("couldn't load host", err) == nil {
+	if errors.Is(err, api.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
 }
@@ -591,7 +604,7 @@ func (b *Bus) contractsSpendingHandlerPOST(jc jape.Context) {
 func (b *Bus) hostsAllowlistHandlerGET(jc jape.Context) {
 	allowlist, err := b.hs.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
-		jc.Encode(allowlist)
+		api.WriteResponse(jc, api.AllowListResp(allowlist))
 	}
 }
 
@@ -611,7 +624,7 @@ func (b *Bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 func (b *Bus) hostsBlocklistHandlerGET(jc jape.Context) {
 	blocklist, err := b.hs.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
-		jc.Encode(blocklist)
+		api.WriteResponse(jc, api.BlockListResp(blocklist))
 	}
 }
 
@@ -652,7 +665,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 		FilterMode:  filterMode,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(contracts)
+		api.WriteResponse(jc, prometheus.Slice(contracts))
 	}
 }
 
@@ -910,7 +923,7 @@ func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		return contracts[i].Prunable > contracts[j].Prunable
 	})
 
-	jc.Encode(api.ContractsPrunableDataResponse{
+	api.WriteResponse(jc, api.ContractsPrunableDataResponse{
 		Contracts:     contracts,
 		TotalPrunable: totalPrunable,
 		TotalSize:     totalSize,
@@ -1009,12 +1022,13 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	// validate the request
 	if rrr.EndHeight == 0 {
 		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.ExpectedNewStorage == 0 {
 		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.MaxFundAmount.IsZero() {
 		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
-	} else if rrr.MinNewCollateral.IsZero() {
-		http.Error(jc.ResponseWriter, "MinNewCollateral can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
@@ -1141,17 +1155,17 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
 	}
-	if jc.DecodeForm("sortBy", &sortBy) != nil {
+	if jc.DecodeForm("sortby", &sortBy) != nil {
 		return
 	}
-	if jc.DecodeForm("sortDir", &sortDir) != nil {
+	if jc.DecodeForm("sortdir", &sortDir) != nil {
 		return
 	}
 	if jc.DecodeForm("substring", &substring) != nil {
 		return
 	}
 	var slabEncryptionKey object.EncryptionKey
-	if jc.DecodeForm("slabEncryptionKey", &slabEncryptionKey) != nil {
+	if jc.DecodeForm("slabencryptionkey", &slabEncryptionKey) != nil {
 		return
 	}
 
@@ -1162,7 +1176,7 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	} else if jc.Check("failed to query objects", err) != nil {
 		return
 	}
-	jc.Encode(resp)
+	api.WriteResponse(jc, resp)
 }
 
 func (b *Bus) objectHandlerPUT(jc jape.Context) {
@@ -1260,7 +1274,7 @@ func (b *Bus) slabbuffersHandlerGET(jc jape.Context) {
 	if jc.Check("couldn't get slab buffers info", err) != nil {
 		return
 	}
-	jc.Encode(buffers)
+	api.WriteResponse(jc, api.SlabBuffersResp(buffers))
 }
 
 func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
@@ -1505,18 +1519,23 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
+
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
 	}
+
 	var length int
 	if jc.DecodeForm("length", &length) != nil {
 		return
-	}
-	if length <= 0 || offset < 0 {
-		jc.Error(fmt.Errorf("length must be positive and offset must be non-negative"), http.StatusBadRequest)
+	} else if length <= 0 {
+		jc.Error(api.ErrInvalidLength, http.StatusBadRequest)
 		return
 	}
+
 	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1530,15 +1549,15 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 
 func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	var minShards int
-	if jc.DecodeForm("minShards", &minShards) != nil {
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
 	var totalShards int
-	if jc.DecodeForm("totalShards", &totalShards) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
 	var contractSet string
-	if jc.DecodeForm("contractSet", &contractSet) != nil {
+	if jc.DecodeForm("contractset", &contractSet) != nil {
 		return
 	}
 	if minShards <= 0 || totalShards <= minShards {
@@ -1578,7 +1597,7 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	var minStartHeight uint64
-	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
+	if jc.DecodeForm("minstartheight", &minStartHeight) != nil {
 		return
 	}
 	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
@@ -1614,7 +1633,7 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 		uploadPacking = us.Packing.Enabled
 	}
 
-	jc.Encode(api.UploadParams{
+	api.WriteResponse(jc, api.UploadParams{
 		ContractSet:   contractSet,
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
@@ -1646,7 +1665,7 @@ func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	jc.Encode(gp)
+	api.WriteResponse(jc, gp)
 }
 
 func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
@@ -1677,18 +1696,27 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 }
 
 func (b *Bus) handleGETAlerts(jc jape.Context) {
-	offset, limit := 0, -1
 	var severity alerts.Severity
-	if jc.DecodeForm("offset", &offset) != nil {
-		return
-	} else if jc.DecodeForm("limit", &limit) != nil {
-		return
-	} else if offset < 0 {
-		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
-		return
-	} else if jc.DecodeForm("severity", &severity) != nil {
+	if jc.DecodeForm("severity", &severity) != nil {
 		return
 	}
+
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
+	}
+
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+		return
+	}
+
 	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
 		Offset:   offset,
 		Limit:    limit,
@@ -1697,7 +1725,7 @@ func (b *Bus) handleGETAlerts(jc jape.Context) {
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}
-	jc.Encode(ar)
+	api.WriteResponse(jc, ar)
 }
 
 func (b *Bus) handlePOSTAlertsDismiss(jc jape.Context) {
@@ -1832,7 +1860,7 @@ func (b *Bus) contractTaxHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) stateHandlerGET(jc jape.Context) {
-	jc.Encode(api.BusStateResponse{
+	api.WriteResponse(jc, api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
 			Version:   build.Version(),
@@ -2009,19 +2037,19 @@ func (b *Bus) metricsHandlerGET(jc jape.Context) {
 	switch key {
 	case api.MetricContract:
 		var opts api.ContractMetricsQueryOpts
-		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractid", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostkey", &opts.HostKey) != nil {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricContractPrune:
 		var opts api.ContractPruneMetricsQueryOpts
-		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractid", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostkey", &opts.HostKey) != nil {
 			return
-		} else if jc.DecodeForm("hostVersion", &opts.HostVersion) != nil {
+		} else if jc.DecodeForm("hostversion", &opts.HostVersion) != nil {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
@@ -2083,7 +2111,7 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 	if req.DisableClientSideEncryption {
 		key = object.NoOpKey
 	} else {
-		key = object.GenerateEncryptionKey()
+		key = object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	}
 
 	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, key, req.MimeType, req.Metadata)

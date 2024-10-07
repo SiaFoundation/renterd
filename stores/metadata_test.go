@@ -31,7 +31,7 @@ const testBucket = "testbucket"
 func (s *testSQLStore) InsertSlab(slab object.Slab) {
 	s.t.Helper()
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: object.SlabSlices{
 			object.SlabSlice{
 				Slab: slab,
@@ -134,11 +134,11 @@ func TestPrunableContractRoots(t *testing.T) {
 	// add 4 objects
 	for i := 1; i <= 4; i++ {
 		if _, err := ss.addTestObject(fmt.Sprintf("%s_%d", t.Name(), i), object.Object{
-			Key: object.GenerateEncryptionKey(),
+			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						EncryptionKey: object.GenerateEncryptionKey(),
+						EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 						MinShards:     1,
 						Shards:        newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
 					},
@@ -214,12 +214,12 @@ func TestObjectBasic(t *testing.T) {
 
 	// create an object
 	want := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
 					Health:        1.0,
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
@@ -229,7 +229,7 @@ func TestObjectBasic(t *testing.T) {
 			{
 				Slab: object.Slab{
 					Health:        1.0,
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     2,
 					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
@@ -262,7 +262,7 @@ func TestObjectBasic(t *testing.T) {
 
 	// create an object without slabs
 	want2 := object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{},
 	}
 
@@ -296,12 +296,12 @@ func TestObjectMetadata(t *testing.T) {
 
 	// create an object
 	want := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
 					Health:        1.0,
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
@@ -311,7 +311,7 @@ func TestObjectMetadata(t *testing.T) {
 			{
 				Slab: object.Slab{
 					Health:        1.0,
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     2,
 					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
@@ -501,11 +501,11 @@ func TestContractRoots(t *testing.T) {
 	// add an object
 	root := types.Hash256{1}
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hks[0], fcids[0], types.Hash256{1}),
 				},
@@ -684,12 +684,12 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
 					Health:        1,
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
@@ -699,7 +699,7 @@ func TestSQLMetadataStore(t *testing.T) {
 			{
 				Slab: object.Slab{
 					Health:        1,
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     2,
 					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
@@ -969,11 +969,11 @@ func TestObjectHealth(t *testing.T) {
 
 	// add an object with 2 slabs
 	add := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[0], fcids[0], types.Hash256{1}),
@@ -985,7 +985,7 @@ func TestObjectHealth(t *testing.T) {
 			},
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[1], fcids[1], types.Hash256{5}),
@@ -1076,7 +1076,7 @@ func TestObjectHealth(t *testing.T) {
 
 	// add an empty object and assert health is 1
 	if obj, err := ss.addTestObject("/bar", object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: nil,
 	}); err != nil {
 		t.Fatal(err)
@@ -1334,14 +1334,14 @@ func TestListObjectsSlabEncryptionKey(t *testing.T) {
 	// create a slab.
 	slab := object.Slab{
 		Health:        1.0,
-		EncryptionKey: object.GenerateEncryptionKey(),
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		MinShards:     1,
 		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 	}
 
 	// add 3 objects that all reference the slab
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab:   slab,
@@ -1479,12 +1479,12 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			// good slab
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
@@ -1496,7 +1496,7 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (1/3)
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{4}),
@@ -1508,7 +1508,7 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (2/3)
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{7}),
@@ -1520,7 +1520,7 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk5 is deleted (1/3)
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{10}),
@@ -1532,7 +1532,7 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - h1 is reused
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{13}),
@@ -1544,7 +1544,7 @@ func TestUnhealthySlabs(t *testing.T) {
 			// lost slab - no good pieces (0/3)
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{16}),
@@ -1645,11 +1645,11 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
@@ -1704,11 +1704,11 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
@@ -1784,12 +1784,12 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 
 	// add an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			// hk1 is good so this slab should have full health.
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
@@ -1797,7 +1797,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 			// hk4 is bad so this slab should have no health.
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -1912,11 +1912,11 @@ func TestUpdateSlab(t *testing.T) {
 
 	// add an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
@@ -2079,14 +2079,14 @@ func newTestObject(slabs int) object.Object {
 	obj := object.Object{}
 
 	obj.Slabs = make([]object.SlabSlice, slabs)
-	obj.Key = object.GenerateEncryptionKey()
+	obj.Key = object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	for i := range obj.Slabs {
 		n := uint8(frand.Uint64n(10) + 1)
 		offset := uint32(frand.Uint64n(1 << 22))
 		length := offset + uint32(frand.Uint64n(1<<22))
 		obj.Slabs[i] = object.SlabSlice{
 			Slab: object.Slab{
-				EncryptionKey: object.GenerateEncryptionKey(),
+				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 				MinShards:     n,
 				Shards:        make([]object.Sector, n*2),
 			},
@@ -2557,12 +2557,12 @@ func TestPartialSlab(t *testing.T) {
 	// Use the added partial slab to create an object.
 	testObject := func(partialSlabs []object.SlabSlice) object.Object {
 		obj := object.Object{
-			Key: object.GenerateEncryptionKey(),
+			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
 						Health:        1.0,
-						EncryptionKey: object.GenerateEncryptionKey(),
+						EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 						MinShards:     1,
 						Shards: []object.Sector{
 							newTestShard(hk1, fcid1, frand.Entropy256()),
@@ -2724,7 +2724,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Associate them with an object.
 	if _, err := ss.addTestObject(t.Name(), object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: append(slices1, slices2...),
 	}); err != nil {
 		t.Fatal(err)
@@ -2805,11 +2805,11 @@ func TestContractSizes(t *testing.T) {
 	// add an object to both contracts
 	for i := 0; i < 2; i++ {
 		if _, err := ss.addTestObject(fmt.Sprintf("obj_%d", i+1), object.Object{
-			Key: object.GenerateEncryptionKey(),
+			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						EncryptionKey: object.GenerateEncryptionKey(),
+						EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 						MinShards:     1,
 						Shards:        newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
 					},
@@ -3182,7 +3182,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// add it to an object to prevent it from getting pruned.
 	_, err = ss.addTestObject(t.Name(), object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: slabs,
 	})
 	if err != nil {
@@ -3349,7 +3349,7 @@ func TestDeleteHostSector(t *testing.T) {
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	root := types.Hash256{1, 2, 3}
 	ss.InsertSlab(object.Slab{
-		EncryptionKey: object.GenerateEncryptionKey(),
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		MinShards:     1,
 		Shards: []object.Sector{
 			{
@@ -3517,14 +3517,14 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		shards = append(shards, newTestShard(hks[i], contracts[i].ID, types.Hash256{byte(i + 1)}))
 	}
 	slab := object.Slab{
-		EncryptionKey: object.GenerateEncryptionKey(),
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Shards:        shards,
 		Health:        1,
 	}
 
 	// set slab.
 	_, err = ss.addTestObject(t.Name(), object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: slab}},
 	})
 	if err != nil {
@@ -3605,9 +3605,9 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// prepare a slab with pieces on h1 and h2
-	s1 := object.GenerateEncryptionKey()
+	s1 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	_, err = ss.addTestObject("o1", object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			EncryptionKey: s1,
 			Shards: []object.Sector{
@@ -3621,9 +3621,9 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// prepare a slab with pieces on h3 and h4
-	s2 := object.GenerateEncryptionKey()
+	s2 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	err = ss.UpdateObject(context.Background(), testBucket, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			EncryptionKey: s2,
 			Shards: []object.Sector{
@@ -3763,11 +3763,11 @@ func TestRenewedContract(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					EncryptionKey: object.GenerateEncryptionKey(),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 					MinShards:     1,
 					Shards:        newTestShards(hk, fcid, types.Hash256{1}),
 				},
@@ -3916,10 +3916,10 @@ func TestRefreshHealth(t *testing.T) {
 	// add two test objects
 	o1 := t.Name() + "1"
 	if added, err := ss.addTestObject(o1, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			MinShards:     2,
-			EncryptionKey: object.GenerateEncryptionKey(),
+			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -3935,10 +3935,10 @@ func TestRefreshHealth(t *testing.T) {
 
 	o2 := t.Name() + "2"
 	if added, err := ss.addTestObject(o2, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			MinShards:     2,
-			EncryptionKey: object.GenerateEncryptionKey(),
+			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Shards: []object.Sector{
 				newTestShard(hks[4], fcids[4], types.Hash256{4}),
 				newTestShard(hks[5], fcids[5], types.Hash256{5}),
@@ -3986,7 +3986,7 @@ func TestRefreshHealth(t *testing.T) {
 	// add another object that is empty
 	o3 := t.Name() + "3"
 	if added, err := ss.addTestObject(o3, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}); err != nil {
 		t.Fatal(err)
 	} else if added.Health != 1 {
@@ -4031,18 +4031,23 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// create objects
-	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health) VALUES (?, ?, ?, ?);")
+	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health, `key`) VALUES (?, ?, ?, ?, ?);")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer insertObjStmt.Close()
 
+	randomKey := func() sql.EncryptionKey {
+		return sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted))
+	}
+
 	var obj1ID, obj2ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1); err != nil {
+	obj1Key, obj2Key := randomKey(), randomKey()
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
 		t.Fatal(err)
 	} else if obj1ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1); err != nil {
+	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
 		t.Fatal(err)
 	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4050,7 +4055,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create a slab
 	var slabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
 		t.Fatal(err)
 	} else if slabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4091,14 +4096,15 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create another slab referencing the buffered slab
 	var bufferedSlabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
 		t.Fatal(err)
 	} else if bufferedSlabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
 	}
 
 	var obj3ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1); err != nil {
+	obj3Key := randomKey()
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1, obj3Key); err != nil {
 		t.Fatal(err)
 	} else if obj3ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4138,7 +4144,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}
 	// add 2 slabs
 	for i := 0; i < 2; i++ {
@@ -4146,7 +4152,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			Offset: 0,
 			Length: uint32(minShards) * rhpv2.SectorSize,
 			Slab: object.Slab{
-				EncryptionKey: object.GenerateEncryptionKey(),
+				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 				MinShards:     uint8(minShards),
 			},
 		})
@@ -4321,14 +4327,14 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	obj2 := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}
 	// add 1 slab with 30 shards
 	obj2.Slabs = append(obj2.Slabs, object.SlabSlice{
 		Offset: 0,
 		Length: uint32(minShards) * rhpv2.SectorSize,
 		Slab: object.Slab{
-			EncryptionKey: object.GenerateEncryptionKey(),
+			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			MinShards:     uint8(minShards),
 		},
 	})
@@ -4499,12 +4505,12 @@ func TestUpdateObjectParallel(t *testing.T) {
 		for name := range c {
 			// create an object
 			obj := object.Object{
-				Key: object.GenerateEncryptionKey(),
+				Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 				Slabs: []object.SlabSlice{
 					{
 						Slab: object.Slab{
 							Health:        1.0,
-							EncryptionKey: object.GenerateEncryptionKey(),
+							EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 							MinShards:     1,
 							Shards:        newTestShards(hk1, fcid1, frand.Entropy256()),
 						},
@@ -4514,7 +4520,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 					{
 						Slab: object.Slab{
 							Health:        1.0,
-							EncryptionKey: object.GenerateEncryptionKey(),
+							EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 							MinShards:     2,
 							Shards:        newTestShards(hk2, fcid2, frand.Entropy256()),
 						},
