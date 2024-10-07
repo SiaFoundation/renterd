@@ -55,7 +55,9 @@ func TestUpload(t *testing.T) {
 	// build used hosts
 	used := make(map[types.PublicKey]struct{})
 	for _, shard := range o.Object.Slabs[0].Shards {
-		used[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			used[hk] = struct{}{}
+		}
 	}
 
 	// download the data and assert it matches
@@ -302,11 +304,17 @@ func TestMigrateLostSector(t *testing.T) {
 	// build usedHosts hosts
 	usedHosts := make(map[types.PublicKey]struct{})
 	for _, shard := range slab.Shards {
-		usedHosts[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			usedHosts[hk] = struct{}{}
+		}
 	}
 
 	// assume the host of the first shard lost its sector
-	badHost := slab.Shards[0].LatestHost
+	var badHost types.PublicKey
+	for hk := range slab.Shards[0].Contracts {
+		badHost = hk
+		break
+	}
 	badContract := slab.Shards[0].Contracts[badHost][0]
 	err = os.DeleteHostSector(context.Background(), badHost, slab.Shards[0].Root)
 	if err != nil {
@@ -334,6 +342,12 @@ func TestMigrateLostSector(t *testing.T) {
 		}
 	}
 
+	// re-grab the slab
+	o, err = os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// migrate the shard away from the bad host
 	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
 	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
@@ -352,10 +366,13 @@ func TestMigrateLostSector(t *testing.T) {
 
 	// assert the bad shard is on a good host now
 	shard := slab.Shards[0]
-	if shard.LatestHost == badHost {
-		t.Fatal("latest host is bad")
-	} else if len(shard.Contracts) != 1 {
+	if len(shard.Contracts) != 1 {
 		t.Fatal("expected 1 contract")
+	}
+	for hk := range shard.Contracts {
+		if hk == badHost {
+			t.Fatal("shard is on bad host")
+		}
 	}
 	for _, fcids := range shard.Contracts {
 		for _, fcid := range fcids {
@@ -403,7 +420,9 @@ func TestUploadShards(t *testing.T) {
 	// build usedHosts hosts
 	usedHosts := make(map[types.PublicKey]struct{})
 	for _, shard := range slab.Shards {
-		usedHosts[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			usedHosts[hk] = struct{}{}
+		}
 	}
 
 	// mark odd shards as bad
@@ -412,7 +431,9 @@ func TestUploadShards(t *testing.T) {
 	for i, shard := range slab.Shards {
 		if i%2 != 0 {
 			badIndices = append(badIndices, i)
-			badHosts[shard.LatestHost] = struct{}{}
+			for hk := range shard.Contracts {
+				badHosts[hk] = struct{}{}
+			}
 		}
 	}
 
@@ -457,15 +478,23 @@ func TestUploadShards(t *testing.T) {
 	}
 	slab = o.Object.Slabs[0]
 
-	// assert none of the shards are on bad hosts
+	// assert every shard that was on a bad host was migrated
 	for i, shard := range slab.Shards {
 		if i%2 == 0 && len(shard.Contracts) != 1 {
 			t.Fatalf("expected 1 contract, got %v", len(shard.Contracts))
 		} else if i%2 != 0 && len(shard.Contracts) != 2 {
 			t.Fatalf("expected 2 contracts, got %v", len(shard.Contracts))
 		}
-		if _, bad := badHosts[shard.LatestHost]; bad {
-			t.Fatal("shard is on bad host", shard.LatestHost)
+		var bc, gc int
+		for hk := range shard.Contracts {
+			if _, bad := badHosts[hk]; bad {
+				bc++
+			} else {
+				gc++
+			}
+		}
+		if bc > 0 && gc == 0 {
+			t.Fatal("shard is on exclusively bad hosts")
 		}
 	}
 

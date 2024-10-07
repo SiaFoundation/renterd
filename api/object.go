@@ -48,6 +48,10 @@ var (
 	// database.
 	ErrSlabNotFound = errors.New("slab not found")
 
+	// ErrUnknownSector is returned when a slab is being updated with an unknown
+	// sector.
+	ErrUnknownSector = errors.New("unknown sector")
+
 	// ErrUnsupportedDelimiter is returned when an unsupported delimiter is
 	// provided.
 	ErrUnsupportedDelimiter = errors.New("unsupported delimiter")
