@@ -171,12 +171,19 @@ func newContractStoreMock() *contractStoreMock {
 	}
 }
 
-func (*contractStoreMock) RenewedContract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
-	return api.ContractMetadata{}, nil
+func (cs *contractStoreMock) RenewedContract(ctx context.Context, fcid types.FileContractID) (api.ContractMetadata, error) {
+	return cs.Contract(ctx, fcid)
 }
 
-func (*contractStoreMock) Contract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
-	return api.ContractMetadata{}, nil
+func (cs *contractStoreMock) Contract(_ context.Context, fcid types.FileContractID) (api.ContractMetadata, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	contract, ok := cs.contracts[fcid]
+	if !ok {
+		return api.ContractMetadata{}, api.ErrContractNotFound
+	}
+	return contract.metadata, nil
 }
 
 func (*contractStoreMock) ContractSize(context.Context, types.FileContractID) (api.ContractSize, error) {
@@ -497,22 +504,29 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, key object.Encryption
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
+	updated := make(map[types.Hash256]types.FileContractID)
+	for _, sector := range sectors {
+		updated[sector.Root] = sector.ContractID
+	}
+
 	var err error
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
 			if slab.EncryptionKey.String() != key.String() {
 				continue
 			}
-			// update slab
+
 			shards := os.objects[bucket][objKey].Slabs[i].Slab.Shards
-			for sI := range shards {
-				for _, sector := range sectors {
+			for _, shard := range shards {
+				if contract, ok := updated[shard.Root]; !ok {
+					continue // not updated
+				} else {
 					var hk types.PublicKey
-					hk, err = os.hostForContract(ctx, sector.ContractID)
+					hk, err = os.hostForContract(ctx, contract)
 					if err != nil {
 						return
 					}
-					shards[sI].Contracts[hk] = append(shards[sI].Contracts[hk], sector.ContractID)
+					shard.Contracts[hk] = append(shard.Contracts[hk], contract)
 				}
 			}
 			os.objects[bucket][objKey].Slabs[i].Slab.Shards = shards
@@ -581,7 +595,7 @@ func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 			})
 		}
 		key := bufferIDToKey[slab.BufferID]
-		slabKeyToSlab[key].Shards = []object.Sector{}
+		slabKeyToSlab[key].Shards = sectors
 		delete(os.partials, key)
 	}
 
