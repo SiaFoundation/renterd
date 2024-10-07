@@ -28,7 +28,12 @@ type (
 
 	UploadedPackedSlab struct {
 		BufferID uint
-		Shards   []object.Sector
+		Shards   []UploadedSector
+	}
+
+	UploadedSector struct {
+		ContractID types.FileContractID `json:"contractID"`
+		Root       types.Hash256        `json:"root"`
 	}
 )
 
@@ -67,13 +72,18 @@ type (
 		Slabs []UnhealthySlab `json:"slabs"`
 	}
 
-	// UpdateSlabRequest is the request type for the /slab endpoint.
-	UpdateSlabRequest struct {
-		ContractSet string      `json:"contractSet"`
-		Slab        object.Slab `json:"slab"`
-	}
+	// UpdateSlabRequest is the request type for the PUT /slab/:key endpoint.
+	UpdateSlabRequest []UploadedSector
 )
 
-func (s UploadedPackedSlab) Contracts() []types.FileContractID {
-	return object.ContractsFromShards(s.Shards)
+func (s UploadedPackedSlab) Contracts() (fcids []types.FileContractID) {
+	seen := make(map[types.FileContractID]struct{})
+	for _, sector := range s.Shards {
+		_, ok := seen[sector.ContractID]
+		if !ok {
+			seen[sector.ContractID] = struct{}{}
+			fcids = append(fcids, sector.ContractID)
+		}
+	}
+	return
 }

@@ -1925,12 +1925,6 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// extract the slab key
-	key, err := obj.Slabs[0].EncryptionKey.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// helper to fetch a slab from the database
 	fetchSlab := func() (slab object.Slab) {
 		t.Helper()
@@ -2001,11 +1995,10 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// migrate the sector from h2 to h3
-	slab := obj.Slabs[0].Slab
-	slab.Shards[1] = newTestShard(hk3, fcid3, types.Hash256{2})
+	sectors := []api.UploadedSector{{ContractID: fcid3, Root: types.Hash256{2}}}
 
 	// update the slab to reflect the migration
-	err = ss.UpdateSlab(ctx, slab, testContractSet)
+	err = ss.UpdateSlab(ctx, obj.Slabs[0].Slab.EncryptionKey, sectors)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2052,22 +2045,6 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
 	} else if obj.Slabs[0].EncryptionKey.String() != updated.EncryptionKey.String() {
 		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].EncryptionKey, updated.EncryptionKey)
-	}
-
-	// update the slab to change its contract set.
-	if err := ss.UpdateContractSet(ctx, "other", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	err = ss.UpdateSlab(ctx, slab, "other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var csID int64
-	if err := ss.DB().QueryRow(context.Background(), "SELECT db_contract_set_id FROM slabs WHERE `key` = ?", key).
-		Scan(&csID); err != nil {
-		t.Fatal(err)
-	} else if csID != ss.ContractSetID("other") {
-		t.Fatal("contract set was not updated")
 	}
 }
 
@@ -2673,9 +2650,9 @@ func TestPartialSlab(t *testing.T) {
 	err = ss.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
 		{
 			BufferID: buffer.ID,
-			Shards: []object.Sector{
-				newTestShard(hk1, fcid1, types.Hash256{3}),
-				newTestShard(hk2, fcid2, types.Hash256{4}),
+			Shards: []api.UploadedSector{
+				{ContractID: fcid1, Root: types.Hash256{3}},
+				{ContractID: fcid2, Root: types.Hash256{4}},
 			},
 		},
 	})
@@ -3205,7 +3182,9 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	err = ss.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
 		{
 			BufferID: packedSlabs[0].BufferID,
-			Shards:   newTestShards(hk, fcid, types.Hash256{1}),
+			Shards: []api.UploadedSector{
+				{ContractID: fcid, Root: types.Hash256{1}},
+			},
 		},
 	})
 	if err != nil {
@@ -3526,25 +3505,13 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
-	// change the length to fail the update.
-	if err := ss.UpdateSlab(context.Background(), object.Slab{
-		EncryptionKey: slab.EncryptionKey,
-		Shards:        shards[:len(shards)-1],
-	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
+	// assert root checks
+	sectors := []api.UploadedSector{{ContractID: contracts[0].ID}}
+	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
 	}
-
-	// reverse the order of the shards to fail the update.
-	reversedShards := append([]object.Sector{}, shards...)
-	for i := 0; i < len(reversedShards)/2; i++ {
-		j := len(reversedShards) - i - 1
-		reversedShards[i], reversedShards[j] = reversedShards[j], reversedShards[i]
-	}
-	reversedSlab := object.Slab{
-		EncryptionKey: slab.EncryptionKey,
-		Shards:        reversedShards,
-	}
-	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
+	sectors = []api.UploadedSector{{ContractID: contracts[0].ID, Root: types.Hash256{6}}}
+	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
 	}
 }

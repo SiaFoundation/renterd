@@ -50,24 +50,6 @@ func NewPartialSlab(ec EncryptionKey, minShards uint8) Slab {
 	}
 }
 
-// ContractsFromShards is a helper to extract all contracts used by a set of
-// shards.
-func ContractsFromShards(shards []Sector) []types.FileContractID {
-	var usedContracts []types.FileContractID
-	usedMap := make(map[types.FileContractID]struct{})
-	for _, shard := range shards {
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, exists := usedMap[fcid]; !exists {
-					usedContracts = append(usedContracts, fcid)
-				}
-				usedMap[fcid] = struct{}{}
-			}
-		}
-	}
-	return usedContracts
-}
-
 func (s Slab) Contracts() []types.FileContractID {
 	var usedContracts []types.FileContractID
 	added := make(map[types.FileContractID]struct{})

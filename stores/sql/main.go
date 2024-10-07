@@ -2102,6 +2102,72 @@ func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer
 	return nil
 }
 
+func UpdateSlab(ctx context.Context, tx sql.Tx, key object.EncryptionKey, updated []api.UploadedSector, upsertSectorsFn func(context.Context, []ContractSector) error) error {
+	// update slab
+	res, err := tx.Exec(ctx, `
+		UPDATE slabs
+		SET health_valid_until = ?, health = ?
+		WHERE `+"`key`"+` = ?
+	`, time.Now().Unix(), 1, EncryptionKey(key))
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return api.ErrSlabNotFound
+	}
+
+	// fetch sectors
+	rows, err := tx.Query(ctx, "SELECT s.id, s.root FROM sectors s INNER JOIN slabs sl ON s.db_slab_id = sl.id WHERE sl.key = ? ORDER BY s.slab_index ASC", EncryptionKey(key))
+	if err != nil {
+		return fmt.Errorf("failed to fetch sectors: %w", err)
+	}
+	defer rows.Close()
+
+	sectors := make(map[types.Hash256]int64)
+	for rows.Next() {
+		var id int64
+		var root Hash256
+		if err := rows.Scan(&id, &root); err != nil {
+			return fmt.Errorf("failed to scan sector id: %w", err)
+		}
+		sectors[types.Hash256(root)] = id
+	}
+
+	// check sectors
+	var fcids []types.FileContractID
+	for _, s := range updated {
+		if _, ok := sectors[s.Root]; !ok {
+			return api.ErrUnknownSector
+		}
+		fcids = append(fcids, s.ContractID)
+	}
+
+	// fetch contracts
+	contracts, err := FetchUsedContracts(ctx, tx, fcids)
+	if err != nil {
+		return err
+	}
+
+	// build contract <-> sector links
+	var upsert []ContractSector
+	for _, sector := range updated {
+		contract, ok := contracts[sector.ContractID]
+		if !ok {
+			return api.ErrContractNotFound
+		}
+		sectorID, ok := sectors[sector.Root]
+		if !ok {
+			panic("sector not found") // developer error (already asserted)
+		}
+		upsert = append(upsert, ContractSector{
+			ContractID: contract.ID,
+			SectorID:   sectorID,
+		})
+	}
+	return upsertSectorsFn(ctx, upsert)
+}
+
 func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
 	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
 	if err != nil {
@@ -2340,17 +2406,15 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 			return "", fmt.Errorf("failed to get sector id: %w", err)
 		}
 
-		// insert contracts for shard
-		for _, fcids := range slab.Shards[i].Contracts {
-			for _, fcid := range fcids {
-				uc, ok := usedContracts[fcid]
-				if !ok {
-					continue
-				}
-				// insert contract sector
-				if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
-					return "", fmt.Errorf("failed to insert contract sector: %w", err)
-				}
+		// insert contract sector links
+		for _, sector := range slab.Shards {
+			uc, ok := usedContracts[sector.ContractID]
+			if !ok {
+				continue
+			}
+
+			if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
+				return "", fmt.Errorf("failed to insert contract sector: %w", err)
 			}
 		}
 	}

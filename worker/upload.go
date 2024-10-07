@@ -81,6 +81,12 @@ type (
 		shutdownCtx context.Context
 	}
 
+	uploadedSector struct {
+		hk   types.PublicKey
+		fcid types.FileContractID
+		root types.Hash256
+	}
+
 	slabUpload struct {
 		uploadID             api.UploadID
 		contractLockPriority int
@@ -122,7 +128,7 @@ type (
 		cancel context.CancelCauseFunc
 
 		mu       sync.Mutex
-		uploaded object.Sector
+		uploaded uploadedSector
 		data     *[rhpv2.SectorSize]byte
 	}
 
@@ -146,6 +152,13 @@ type (
 		err error
 	}
 )
+
+func (us uploadedSector) toObjectSector() object.Sector {
+	return object.Sector{
+		Contracts: map[types.PublicKey][]types.FileContractID{us.hk: {us.fcid}},
+		Root:      us.root,
+	}
+}
 
 func (w *Worker) initUploadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.uploadManager != nil {
@@ -589,9 +602,18 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	}()
 
 	// upload the shards
-	sectors, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
 	if err != nil {
 		return err
+	}
+
+	// build sectors
+	var sectors []api.UploadedSector
+	for _, sector := range uploaded {
+		sectors = append(sectors, api.UploadedSector{
+			ContractID: sector.fcid,
+			Root:       sector.root,
+		})
 	}
 
 	// track stats
@@ -639,17 +661,21 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shard
 		return err
 	}
 
+	// build sectors
+	var sectors []api.UploadedSector
+	for _, sector := range uploaded {
+		sectors = append(sectors, api.UploadedSector{
+			ContractID: sector.fcid,
+			Root:       sector.root,
+		})
+	}
+
 	// track stats
 	mgr.statsOverdrivePct.Track(overdrivePct)
 	mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
 
-	// overwrite the shards with the newly uploaded ones
-	for i, si := range shardIndices {
-		s.Shards[si].Contracts = mergeContracts(s.Shards[si].Contracts, uploaded[i].Contracts)
-	}
-
 	// update the slab
-	return mgr.os.UpdateSlab(ctx, s, contractSet)
+	return mgr.os.UpdateSlab(ctx, s.EncryptionKey, sectors)
 }
 
 func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader) {
@@ -797,7 +823,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	}, responseChan
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (uploadSpeed int64, overdrivePct float64) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (int64, float64) {
 	// create the response
 	resp := slabUploadResponse{
 		slab: object.SlabSlice{
@@ -814,7 +840,17 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	resp.slab.Slab.Encrypt(shards)
 
 	// upload the shards
-	resp.slab.Slab.Shards, uploadSpeed, overdrivePct, resp.err = u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout)
+
+	// build the sectors
+	var sectors []object.Sector
+	for _, sector := range uploaded {
+		sectors = append(sectors, sector.toObjectSector())
+	}
+
+	// decorate the response
+	resp.err = err
+	resp.slab.Shards = sectors
 
 	// send the response
 	select {
@@ -822,10 +858,10 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	case respChan <- resp:
 	}
 
-	return
+	return uploadSpeed, overdrivePct
 }
 
-func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1070,10 +1106,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 
 	// store the sector
-	sector.finish(object.Sector{
-		Contracts: map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
-		Root:      req.sector.root,
-	})
+	sector.finish(req)
 
 	// update uploaded sectors
 	s.numUploaded++
@@ -1084,17 +1117,21 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	return true, s.numUploaded == s.numSectors
 }
 
-func (s *sectorUpload) finish(sector object.Sector) {
+func (s *sectorUpload) finish(req *sectorUploadReq) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.cancel(errSectorUploadFinished)
-	s.uploaded = sector
+	s.uploaded = uploadedSector{
+		hk:   req.hk,
+		fcid: req.fcid,
+		root: req.sector.root,
+	}
 	s.data = nil
 }
 
 func (s *sectorUpload) isUploaded() bool {
-	return s.uploaded.Root != (types.Hash256{})
+	return s.uploaded.root != (types.Hash256{})
 }
 
 func (s *sectorUpload) sectorData() *[rhpv2.SectorSize]byte {
@@ -1120,31 +1157,4 @@ func (req *sectorUploadReq) finish(err error) {
 		err: err,
 	}:
 	}
-}
-
-func mergeContracts(x, y map[types.PublicKey][]types.FileContractID) map[types.PublicKey][]types.FileContractID {
-	deduped := make(map[types.PublicKey]map[types.FileContractID]struct{})
-	for hk, contracts := range x {
-		if _, ok := deduped[hk]; !ok {
-			deduped[hk] = make(map[types.FileContractID]struct{})
-		}
-		for _, fcid := range contracts {
-			deduped[hk][fcid] = struct{}{}
-		}
-	}
-	for hk, contracts := range y {
-		if _, ok := deduped[hk]; !ok {
-			deduped[hk] = make(map[types.FileContractID]struct{})
-		}
-		for _, fcid := range contracts {
-			deduped[hk][fcid] = struct{}{}
-		}
-	}
-	out := make(map[types.PublicKey][]types.FileContractID)
-	for hk, fcids := range deduped {
-		for fcid := range fcids {
-			out[hk] = append(out[hk], fcid)
-		}
-	}
-	return out
 }

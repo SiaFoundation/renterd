@@ -353,11 +353,10 @@ type (
 		UpdateSetting(ctx context.Context, key, value string) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
-		// - Optimistically set health to 100%
-		// - Invalidate health_valid_until
-		// The operation is not allowed to update the number of shards
-		// associated with a slab or the root/slabIndex of any shard.
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
+		// - optimistically set health to 100%
+		// - invalidate health_valid_until
+		// - adds a contract<->sector link for the given sectors
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 
 		// UpdateSlabHealth updates the health of up to 'limit' slab in the
 		// database if their health is not valid anymore. A random interval
@@ -442,5 +441,10 @@ type (
 		ID          int64
 		FCID        FileContractID
 		RenewedFrom FileContractID
+	}
+
+	ContractSector struct {
+		ContractID int64
+		SectorID   int64
 	}
 )

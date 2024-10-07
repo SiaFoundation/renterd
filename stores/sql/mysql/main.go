@@ -1099,100 +1099,8 @@ func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) 
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
-	// find all used contracts
-	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
-	if err != nil {
-		return fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// update slab
-	res, err := tx.Exec(ctx, `
-		UPDATE slabs
-		SET db_contract_set_id = (SELECT id FROM contract_sets WHERE name = ?),
-		health_valid_until = ?,
-		health = ?
-		WHERE `+"`key`"+` = ?
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.EncryptionKey))
-	if err != nil {
-		return err
-	} else if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n == 0 {
-		return api.ErrSlabNotFound
-	}
-
-	// fetch slab id and total shards
-	var slabID, totalShards int64
-	err = tx.QueryRow(ctx, "SELECT id, total_shards FROM slabs WHERE `key` = ?", ssql.EncryptionKey(s.EncryptionKey)).
-		Scan(&slabID, &totalShards)
-	if err != nil {
-		return err
-	}
-
-	// find shards of slab
-	type sector struct {
-		id   int64
-		root ssql.Hash256
-	}
-	var sectors []sector
-	rows, err := tx.Query(ctx, "SELECT id, root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch sectors: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var s sector
-		if err := rows.Scan(&s.id, (*ssql.Hash256)(&s.root)); err != nil {
-			return fmt.Errorf("failed to scan sector id: %w", err)
-		}
-		sectors = append(sectors, s)
-	}
-
-	// make sure the number of shards doesn't change.
-	// NOTE: check both the slice as well as the TotalShards field to be
-	// safe.
-	if len(s.Shards) != int(totalShards) {
-		return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", sql.ErrInvalidNumberOfShards, totalShards, len(s.Shards))
-	} else if len(s.Shards) != len(sectors) {
-		return fmt.Errorf("%w: expected %v shards (Shards) but got %v", sql.ErrInvalidNumberOfShards, len(sectors), len(s.Shards))
-	}
-
-	// make sure the roots stay the same.
-	for i, sector := range sectors {
-		if types.Hash256(sector.root) != s.Shards[i].Root {
-			return fmt.Errorf("%w: shard %v wants to update root from %v to %v", sql.ErrShardRootChanged, i, types.Hash256(sector.root), s.Shards[i].Root)
-		}
-	}
-
-	// build contract <-> sector links
-	var upsertContractSectors []upsertContractSector
-	for i, shard := range s.Shards {
-		sectorID := sectors[i].id
-
-		// ensure the associations are updated
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, ok := usedContracts[fcid]; ok {
-					upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-						sectorID,
-						usedContracts[fcid].ID,
-					})
-				} else {
-					tx.log.Named("UpdateSlab").Warn("missing contract for shard",
-						"contract", fcid,
-						"root", shard.Root,
-					)
-				}
-			}
-		}
-	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
-		return err
-	}
-
-	return nil
+func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
+	return ssql.UpdateSlab(ctx, tx, key, sectors, tx.upsertContractSectors)
 }
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
@@ -1338,15 +1246,15 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 
 	// insert contract <-> sector links
 	sectorIdx := 0
-	var upsertContractSectors []upsertContractSector
+	var upsertContractSectors []ssql.ContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := usedContracts[fcid]; ok {
-						upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-							sectorIDs[sectorIdx],
-							usedContracts[fcid].ID,
+						upsertContractSectors = append(upsertContractSectors, ssql.ContractSector{
+							ContractID: usedContracts[fcid].ID,
+							SectorID:   sectorIDs[sectorIdx],
 						})
 					} else {
 						tx.log.Named("InsertObject").Warn("missing contract for shard",
@@ -1365,12 +1273,7 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 	return nil
 }
 
-type upsertContractSector struct {
-	sectorID   int64
-	contractID int64
-}
-
-func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSectors []upsertContractSector) error {
+func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
 	if len(contractSectors) == 0 {
 		return nil
 	}
@@ -1385,8 +1288,8 @@ func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSec
 
 	for _, cs := range contractSectors {
 		_, err := insertContractSectorStmt.Exec(ctx,
-			cs.sectorID,
-			cs.contractID,
+			cs.SectorID,
+			cs.ContractID,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert contract sector link: %w", err)

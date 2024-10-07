@@ -569,24 +569,9 @@ func (s *SQLStore) Slab(ctx context.Context, key object.EncryptionKey) (slab obj
 	return
 }
 
-func (s *SQLStore) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string) error {
-	// sanity check the shards don't contain an empty root
-	for _, shard := range slab.Shards {
-		if shard.Root == (types.Hash256{}) {
-			return errors.New("shard root can never be the empty root")
-		}
-	}
-	// Sanity check input.
-	for i, shard := range slab.Shards {
-		// Verify that all hosts have a contract.
-		if len(shard.Contracts) == 0 {
-			return fmt.Errorf("missing hosts for slab %d", i)
-		}
-	}
-
-	// Update slab.
+func (s *SQLStore) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateSlab(ctx, slab, contractSet, slab.Contracts())
+		return tx.UpdateSlab(ctx, key, sectors)
 	})
 }
 
@@ -654,12 +639,13 @@ func (s *SQLStore) PrunableContractRoots(ctx context.Context, fcid types.FileCon
 // MarkPackedSlabsUploaded marks the given slabs as uploaded and deletes them
 // from the buffer.
 func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
-	// Sanity check input.
+	// sanity check input
 	for i, ss := range slabs {
 		for _, shard := range ss.Shards {
-			// Verify that all hosts have a contract.
-			if len(shard.Contracts) == 0 {
-				return fmt.Errorf("missing hosts for slab %d", i)
+			if shard.ContractID == (types.FileContractID{}) {
+				return fmt.Errorf("slab %d is invalid, ContractID can not be empty", i)
+			} else if shard.Root == (types.Hash256{}) {
+				return fmt.Errorf("slab %d is invalid, Root can not be empty", i)
 			}
 		}
 	}
