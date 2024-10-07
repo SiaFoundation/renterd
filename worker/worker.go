@@ -445,7 +445,7 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 	})
 
 	// encode response
-	jc.Encode(api.DownloadStatsResponse{
+	api.WriteResponse(jc, api.DownloadStatsResponse{
 		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyDownloaders:   healthy,
@@ -470,7 +470,7 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 	})
 
 	// encode response
-	jc.Encode(api.UploadStatsResponse{
+	api.WriteResponse(jc, api.UploadStatsResponse{
 		AvgSlabUploadSpeedMBPS: math.Ceil(stats.avgSlabUploadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:        math.Floor(stats.avgOverdrivePct*100*100) / 100,
 		HealthyUploaders:       stats.healthyUploaders,
@@ -489,18 +489,7 @@ func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 		return
 	}
 
-	// parse key
-	path := jc.PathParam("key")
-
-	var off int
-	if jc.DecodeForm("offset", &off) != nil {
-		return
-	}
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
-
+	// parse range
 	dr, err := api.ParseDownloadRange(jc.Request)
 	if errors.Is(err, http_range.ErrInvalid) || errors.Is(err, api.ErrMultiRangeNotSupported) {
 		jc.Error(err, http.StatusBadRequest)
@@ -512,6 +501,9 @@ func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+
+	// parse key
+	path := jc.PathParam("key")
 
 	// fetch object metadata
 	hor, err := w.HeadObject(jc.Request.Context(), bucket, path, api.HeadObjectOptions{
@@ -550,27 +542,19 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 		return
 	}
 	var sortBy string
-	if jc.DecodeForm("sortBy", &sortBy) != nil {
+	if jc.DecodeForm("sortby", &sortBy) != nil {
 		return
 	}
 	var sortDir string
-	if jc.DecodeForm("sortDir", &sortDir) != nil {
+	if jc.DecodeForm("sortdir", &sortDir) != nil {
 		return
 	}
 	var marker string
 	if jc.DecodeForm("marker", &marker) != nil {
 		return
 	}
-	var off int
-	if jc.DecodeForm("offset", &off) != nil {
-		return
-	}
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	}
 	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
+	if jc.DecodeForm("ignoredelim", &ignoreDelim) != nil {
 		return
 	}
 
@@ -739,12 +723,12 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 		ContentLength:    jc.Request.ContentLength,
 	}
 
-	// get the offset
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
+	// get the encryption offset
+	var encryptionOffset int
+	if jc.DecodeForm("encryptionoffset", &encryptionOffset) != nil {
 		return
-	} else if jc.Request.FormValue("offset") != "" {
-		opts.EncryptionOffset = &offset
+	} else if jc.Request.FormValue("encryptionoffset") != "" {
+		opts.EncryptionOffset = &encryptionOffset
 	}
 
 	// upload the multipart
@@ -845,7 +829,7 @@ func (w *Worker) idHandlerGET(jc jape.Context) {
 }
 
 func (w *Worker) memoryGET(jc jape.Context) {
-	jc.Encode(api.MemoryResponse{
+	api.WriteResponse(jc, api.MemoryResponse{
 		Download: w.downloadManager.mm.Status(),
 		Upload:   w.uploadManager.mm.Status(),
 	})
@@ -958,8 +942,9 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	}
 	w.initPriceTables()
 
-	w.initDownloadManager(cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
-	w.initUploadManager(cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	uploadKey := w.masterKey.DeriveUploadKey()
+	w.initDownloadManager(&uploadKey, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
+	w.initUploadManager(&uploadKey, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil
@@ -1144,8 +1129,6 @@ func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadat
 	})
 	if err != nil {
 		return nil, api.Object{}, fmt.Errorf("couldn't fetch object: %w", err)
-	} else if res.Object == nil {
-		return nil, api.Object{}, errors.New("object is a directory")
 	}
 
 	// adjust length

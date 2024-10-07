@@ -354,6 +354,13 @@ func TestNewTestCluster(t *testing.T) {
 	} else if !state.Configured {
 		t.Fatal("autopilot should be configured")
 	}
+
+	// Fetch host
+	if _, err := b.Host(context.Background(), cluster.hosts[0].PublicKey()); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if _, err := b.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
+		t.Fatal("unexpected error", err)
+	}
 }
 
 // TestObjectsBucket is a test that verifies whether we properly escape bucket

@@ -412,7 +412,7 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 	}
 
 	// create slab
-	ec := object.GenerateEncryptionKey()
+	ec := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	ss := object.SlabSlice{
 		Slab:   object.NewPartialSlab(ec, minShards),
 		Offset: 0,

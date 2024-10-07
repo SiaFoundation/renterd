@@ -71,7 +71,7 @@ func defaultConfig() config.Config {
 			Level: "",
 			File: config.LogFile{
 				Enabled: true,
-				Format:  "json",
+				Format:  "human",
 				Path:    os.Getenv("RENTERD_LOG_FILE"),
 			},
 			StdOut: config.StdOut{
