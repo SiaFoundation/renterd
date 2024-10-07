@@ -1,6 +1,7 @@
 module go.sia.tech/renterd
 
-go 1.23.0
+go 1.23.1
+
 toolchain go1.23.2
 
 require (
@@ -13,10 +14,10 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.4.7
+	go.sia.tech/core v0.4.8-0.20240926222149-2c8b541119dc
 	go.sia.tech/coreutils v0.4.1
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/hostd v1.1.3-0.20240903081107-6e044db95238
+	go.sia.tech/hostd v1.1.3-0.20241007200428-58d2cc50a7cd
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.3.0
 	go.sia.tech/web/renterd v0.64.0
@@ -30,7 +31,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/cloudflare/cloudflare-go v0.103.0 // indirect
+	github.com/cloudflare/cloudflare-go v0.104.0 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
@@ -42,7 +43,7 @@ require (
 	go.etcd.io/bbolt v1.3.11 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.28.0 // indirect
+	golang.org/x/net v0.29.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
 	golang.org/x/tools v0.23.0 // indirect
