@@ -356,9 +356,9 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Fetch host
-	if _, err := b.Host(context.Background(), cluster.hosts[0].PublicKey()); err != nil {
+	if _, err := cluster.Bus.Host(context.Background(), cluster.hosts[0].PublicKey()); err != nil {
 		t.Fatal("unexpected error", err)
-	} else if _, err := b.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
+	} else if _, err := cluster.Bus.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
 		t.Fatal("unexpected error", err)
 	}
 }
