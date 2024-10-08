@@ -275,7 +275,7 @@ type (
 		// under the new directory specified by dirID. If the object with keyOld
 		// does not exist, api.ErrObjectNotFound is returned. If the object with
 		// keyNew already exists, api.ErrObjectExists is returned unless the
-		// rename is done by force in which case the existing object will be
+		// rename is done by force, in which case the existing object will be
 		// deleted.
 		RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error
 

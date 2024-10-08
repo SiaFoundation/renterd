@@ -2184,6 +2184,10 @@ func TestRecordContractSpending(t *testing.T) {
 		t.Fatalf("unexpected size or revision number, %v %v", cm2.Size, cm2.RevisionNumber)
 	}
 }
+
+// TestRenameDirectory is a regression test that ensures renaming directories
+// doesn't orphan its children and properly updates the directory entry in the
+// database.
 func TestRenameDirectory(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
