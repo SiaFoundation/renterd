@@ -272,10 +272,10 @@ type (
 		RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error)
 
 		// RenameObject renames an object in the database from keyOld to keyNew
-		// and the new directory dirID. returns api.ErrObjectExists if the an
-		// object already exists at the target location or api.ErrObjectNotFound
-		// if the object at keyOld doesn't exist. If force is true, the instead
-		// of returning api.ErrObjectExists, the existing object will be
+		// under the new directory specified by dirID. If the object with keyOld
+		// does not exist, api.ErrObjectNotFound is returned. If the object with
+		// keyNew already exists, api.ErrObjectExists is returned unless the
+		// rename is done by force in which case the existing object will be
 		// deleted.
 		RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error
 

@@ -747,6 +747,21 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	} else if n == 0 {
 		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
 	}
+
+	resp, err = tx.Exec(ctx, `UPDATE directories SET name = ? WHERE name = ?`, keyNew, keyOld)
+	if err != nil {
+		return err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return err
+	} else if n == 1 {
+		var dirID int64
+		err = tx.QueryRow(ctx, `SELECT id FROM directories WHERE name = ?`, keyNew).Scan(&dirID)
+		if err != nil {
+			return err
+		}
+		return tx.RenameObjects(ctx, bucket, keyOld, keyNew, dirID, force)
+	}
+
 	return nil
 }
 

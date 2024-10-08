@@ -2184,6 +2184,68 @@ func TestRecordContractSpending(t *testing.T) {
 		t.Fatalf("unexpected size or revision number, %v %v", cm2.Size, cm2.RevisionNumber)
 	}
 }
+func TestRenameDirectory(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	objects := []string{
+		"/a/",
+		"/a/1.txt",
+		"/b/",
+		"/b/2.txt",
+	}
+	for _, path := range objects {
+		if _, err := ss.addTestObject(path, newTestObject(1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert contents of the root directory
+	res, err := ss.Objects(context.Background(), testBucket, "", "", "/", "name", "asc", "", -1, object.EncryptionKey{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Objects) != 2 {
+		t.Fatal("unexpected length", res.Objects)
+	} else if res.Objects[0].Key != "/a/" || res.Objects[1].Key != "/b/" {
+		t.Fatal("unexpected objects", res.Objects)
+	}
+
+	// rename directory
+	err = ss.RenameObjectBlocking(context.Background(), testBucket, "/a/", "/aa/", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert contents of the root directory again
+	res, err = ss.Objects(context.Background(), testBucket, "", "", "/", "name", "asc", "", -1, object.EncryptionKey{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Objects) != 2 {
+		t.Fatal("unexpected length", res.Objects)
+	} else if res.Objects[0].Key != "/aa/" || res.Objects[1].Key != "/b/" {
+		t.Fatal("unexpected objects", res.Objects)
+	}
+
+	// assert contents of the renamed directory
+	res, err = ss.Objects(context.Background(), testBucket, "/aa/", "", "/", "name", "asc", "", -1, object.EncryptionKey{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Objects) != 1 {
+		t.Fatal("unexpected length", res.Objects)
+	} else if res.Objects[0].Key != "/aa/1.txt" {
+		t.Fatal("unexpected objects", res.Objects)
+	}
+
+	// assert contents of the other directory
+	res, err = ss.Objects(context.Background(), testBucket, "/b/", "", "/", "name", "asc", "", -1, object.EncryptionKey{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Objects) != 1 {
+		t.Fatal("unexpected length", res.Objects)
+	} else if res.Objects[0].Key != "/b/2.txt" {
+		t.Fatal("unexpected objects", res.Objects)
+	}
+}
 
 // TestRenameObjects is a unit test for RenameObject and RenameObjects.
 func TestRenameObjects(t *testing.T) {

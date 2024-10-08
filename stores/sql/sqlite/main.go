@@ -749,6 +749,7 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 			return api.ErrObjectExists
 		}
 	}
+
 	resp, err := tx.Exec(ctx, `UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
 	if err != nil {
 		return err
@@ -757,6 +758,21 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	} else if n == 0 {
 		return fmt.Errorf("%w: key %v", api.ErrObjectNotFound, keyOld)
 	}
+
+	resp, err = tx.Exec(ctx, `UPDATE directories SET name = ? WHERE name = ?`, keyNew, keyOld)
+	if err != nil {
+		return err
+	} else if n, err := resp.RowsAffected(); err != nil {
+		return err
+	} else if n == 1 {
+		var dirID int64
+		err = tx.QueryRow(ctx, `SELECT id FROM directories WHERE name = ?`, keyNew).Scan(&dirID)
+		if err != nil {
+			return err
+		}
+		return tx.RenameObjects(ctx, bucket, keyOld, keyNew, dirID, force)
+	}
+
 	return nil
 }
 
