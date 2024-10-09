@@ -31,6 +31,7 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -2721,7 +2722,7 @@ func TestDownloadAllHosts(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		logger:        zap.NewNop(), // newTestLoggerCustom(zapcore.ErrorLevel),
+		logger:        newTestLoggerCustom(zapcore.ErrorLevel),
 		hosts:         rs.TotalShards,
 		uploadPacking: false, // make sure data is uploaded
 	})

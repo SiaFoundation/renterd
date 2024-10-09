@@ -129,6 +129,16 @@ type (
 	}
 )
 
+func (s *sectorDownloadInfo) selectHost(h types.PublicKey) {
+	s.selected++
+	for i, hk := range s.hks {
+		if hk == h {
+			s.hks = append(s.hks[:i], s.hks[i+1:]...) // remove the host
+			break
+		}
+	}
+}
+
 func (w *Worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
@@ -658,7 +668,8 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	}
 
 	// select potential sectors, give preference to sectors that weren't
-	// selected and launched before
+	// selected and launched before by only considering 'minSelected' sectors
+	// and working our way up
 	exhausted := true
 	minSelected := s.pending[0].selected
 	candidates := make(map[types.PublicKey]*sectorDownloadInfo)
@@ -678,9 +689,7 @@ loop:
 
 	// no more sectors to download
 	if len(candidates) == 0 {
-		// if we're not exhausted, try looking for sectors with higher
-		// 'selected' counts, this mechanism gives preference to sectors that
-		// haven't been selected yet
+		// if we're not exhausted, look at sectors that were selected before
 		if !exhausted {
 			exhausted = true
 			minSelected++
@@ -706,15 +715,9 @@ loop:
 		return nil
 	}
 
-	// grab the sector info
-	next := candidates[fastest.PublicKey()]
-	next.selected++
-	for i, hk := range next.hks {
-		if hk == fastest.PublicKey() {
-			next.hks = append(next.hks[:i], next.hks[i+1:]...) // remove the host
-			break
-		}
-	}
+	// update the sector info
+	hk := fastest.PublicKey()
+	candidates[hk].selectHost(hk)
 
 	// build the request
 	return &sectorDownloadReq{
@@ -722,7 +725,7 @@ loop:
 
 		offset: s.offset,
 		length: s.length,
-		root:   next.root,
+		root:   candidates[hk].root,
 		host:   fastest,
 
 		// overpay is set to 'true' when a request is retried after the slab
@@ -733,7 +736,7 @@ loop:
 		overpay: false,
 
 		overdrive:   overdrive,
-		sectorIndex: next.index,
+		sectorIndex: candidates[hk].index,
 		resps:       resps,
 	}
 }
