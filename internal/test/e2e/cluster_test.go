@@ -2708,22 +2708,31 @@ func TestHostScan(t *testing.T) {
 	}
 }
 
-// TestDownloadAllHosts makes sure we try to download sectors,
-// from all hosts that a sector is stored on and not just the latestHost.
+// TestDownloadAllHosts makes sure we try to download sectors, from all hosts
+// that a sector is stored on.
 func TestDownloadAllHosts(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
 
+	// get rid of redundancy
+	rs := test.RedundancySettings
+	rs.MinShards = rs.TotalShards
+
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         test.RedundancySettings.TotalShards,
+		logger:        zap.NewNop(), // newTestLoggerCustom(zapcore.ErrorLevel),
+		hosts:         rs.TotalShards,
 		uploadPacking: false, // make sure data is uploaded
 	})
 	defer cluster.Shutdown()
 
+	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
+
+	// update redundancy settings
+	tt.OK(b.UpdateSetting(context.Background(), api.SettingRedundancy, rs))
 
 	// prepare a file
 	data := make([]byte, 128)
@@ -2737,17 +2746,77 @@ func TestDownloadAllHosts(t *testing.T) {
 	obj, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
 	tt.OK(err)
 
-	// update the LatestHost field to hosts we don't have
-	// contracts with
-	for i, slab := range obj.Object.Slabs {
-		for j := range slab.Shards {
-			frand.Read(obj.Object.Slabs[i].Shards[j].LatestHost[:])
+	// build used hosts
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, s := range obj.Object.Slabs {
+		for _, ss := range s.Shards {
+			for hk := range ss.Contracts {
+				usedHosts[hk] = struct{}{}
+			}
 		}
 	}
-	tt.OK(cluster.Bus.AddObject(context.Background(), api.DefaultBucketName, path, test.ContractSet, *obj.Object.Object, api.AddObjectOptions{}))
+	if len(usedHosts) != rs.TotalShards {
+		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
+	}
+
+	// add a host
+	cluster.AddHosts(1)
+
+	// grab random used host
+	var randomHost string
+	for _, host := range cluster.hosts {
+		if _, used := usedHosts[host.PublicKey()]; used {
+			randomHost = host.settings.Settings().NetAddress
+			break
+		}
+	}
+
+	// add it to the blocklist
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+
+	// wait until we migrated away from that host
+	var newHost types.PublicKey
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		obj, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+		tt.OK(err)
+		for _, s := range obj.Object.Slabs {
+			for _, ss := range s.Shards {
+				for hk := range ss.Contracts {
+					if _, used := usedHosts[hk]; !used {
+						newHost = hk
+						return nil
+					}
+				}
+			}
+		}
+		return errors.New("no migration took place")
+	})
 
 	// download the object
 	dst := new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
+	if !bytes.Equal(dst.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	// block the new host but unblock the old one
+	for _, host := range cluster.hosts {
+		if host.PublicKey() == newHost {
+			tt.OK(b.UpdateHostBlocklist(context.Background(), []string{host.settings.Settings().NetAddress}, []string{randomHost}, false))
+		}
+	}
+
+	// gouge prices on the new host
+	for _, host := range cluster.hosts {
+		if host.PublicKey() == newHost {
+			settings := host.settings.Settings()
+			settings.StoragePrice = types.Siacoins(1e3)
+			tt.OK(host.UpdateSettings(settings))
+		}
+	}
+
+	// download the object
+	dst = new(bytes.Buffer)
 	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
 	if !bytes.Equal(dst.Bytes(), data) {
 		t.Fatal("data mismatch")
