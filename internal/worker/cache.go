@@ -177,6 +177,9 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventContractRenew:
 		log = log.With("fcid", e.Renewal.ID, "renewedFrom", e.Renewal.RenewedFrom, "ts", e.Timestamp)
 		c.handleContractRenew(e)
+	case api.EventACLUpdate:
+		log = log.With("ts", e.Timestamp)
+		c.handleHostAllowlistBlocklistUpdate(e)
 	case api.EventHostUpdate:
 		log = log.With("hk", e.HostKey, "ts", e.Timestamp)
 		c.handleHostUpdate(e)
@@ -307,6 +310,10 @@ func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
 	}
 
 	c.cache.Set(cacheKeyDownloadContracts, contracts)
+}
+
+func (c *cache) handleHostAllowlistBlocklistUpdate(_ api.EventACLUpdate) {
+	c.cache.Invalidate(cacheKeyDownloadContracts)
 }
 
 func (c *cache) handleSettingDelete(e api.EventSettingDelete) {

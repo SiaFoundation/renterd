@@ -21,6 +21,7 @@ import (
 func TestEvents(t *testing.T) {
 	// list all webhooks
 	allEvents := []func(string, map[string]string) webhooks.Webhook{
+		api.WebhookACLUpdate,
 		api.WebhookConsensusUpdate,
 		api.WebhookContractArchive,
 		api.WebhookContractRenew,
@@ -135,6 +136,9 @@ func TestEvents(t *testing.T) {
 	settings := h.settings.Settings()
 	settings.NetAddress = "127.0.0.1:0"
 	tt.OK(h.UpdateSettings(settings))
+
+	// update ACL
+	tt.OK(b.UpdateHostAllowlist(context.TODO(), []types.PublicKey{h.PublicKey()}, nil, false))
 
 	// wait until we received the events
 	tt.Retry(10, time.Second, func() error {
