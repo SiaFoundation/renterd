@@ -647,22 +647,21 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	}
 	s.pending = filtered
 
-	// find min selected
-	minSelected := math.MaxInt
-	for _, sector := range s.pending {
-		if sector.selected < minSelected {
-			minSelected = sector.selected
-		}
-	}
-
 	// sort pending sectors
 	sort.Slice(s.pending, func(i, j int) bool {
 		return s.pending[i].selected < s.pending[j].selected
 	})
 
-	// select potential sectors
+	// sanity check
+	if len(s.pending) == 0 {
+		return nil
+	}
+
+	// select potential sectors, give preference to sectors that weren't
+	// selected and launched before
 	exhausted := true
-	sectors := make(map[types.PublicKey]*sectorDownloadInfo)
+	minSelected := s.pending[0].selected
+	candidates := make(map[types.PublicKey]*sectorDownloadInfo)
 loop:
 	for _, sector := range s.pending {
 		if sector.selected > minSelected {
@@ -670,28 +669,33 @@ loop:
 			break
 		}
 		for _, hk := range sector.hks {
-			if _, ok := sectors[hk]; !ok {
-				sectors[hk] = sector
+			if _, ok := candidates[hk]; !ok {
+				candidates[hk] = sector
 				break
 			}
 		}
 	}
 
-	// no more sectors to download - we don't know if the download failed at
-	// this point so we register an error that gets propagated in case it did
-	if len(sectors) == 0 {
+	// no more sectors to download
+	if len(candidates) == 0 {
+		// if we're not exhausted, try looking for sectors with higher
+		// 'selected' counts, this mechanism gives preference to sectors that
+		// haven't been selected yet
 		if !exhausted {
-			exhausted = true // reset
-			minSelected++    // TODO: could jump instead of incrementing here
+			exhausted = true
+			minSelected++
 			goto loop
 		}
+
+		// we don't know if the download failed at this point so we register an
+		// error that gets propagated in case it did
 		s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
 		return nil
 	}
 
 	// build list of host keys
 	var hosts []types.PublicKey
-	for hk := range sectors {
+	for hk := range candidates {
 		hosts = append(hosts, hk)
 	}
 
@@ -703,11 +707,11 @@ loop:
 	}
 
 	// grab the sector info
-	next := sectors[fastest.PublicKey()]
+	next := candidates[fastest.PublicKey()]
 	next.selected++
 	for i, hk := range next.hks {
 		if hk == fastest.PublicKey() {
-			next.hks = append(next.hks[:i], next.hks[i+1:]...)
+			next.hks = append(next.hks[:i], next.hks[i+1:]...) // remove the host
 			break
 		}
 	}
