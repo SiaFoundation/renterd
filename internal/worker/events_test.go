@@ -156,8 +156,8 @@ func TestEventSubscriber(t *testing.T) {
 	time.Sleep(testRegisterInterval)
 
 	// assert webhook was registered
-	if webhooks := w.Webhooks(); len(webhooks) != 6 {
-		t.Fatal("expected 6 webhooks, got", len(webhooks))
+	if webhooks := w.Webhooks(); len(webhooks) != 7 {
+		t.Fatal("expected 7 webhooks, got", len(webhooks))
 	}
 
 	// send the same event again
