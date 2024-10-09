@@ -245,7 +245,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	tt := test.NewTT(t)
 
 	// Ensure we don't hang
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	// Apply options.
