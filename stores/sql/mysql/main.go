@@ -73,7 +73,7 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPath(ctx, path)
+	return mtx.InsertDirectories(ctx, object.Directories(path))
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -231,7 +231,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, key)
+	dirID, err := tx.InsertDirectories(ctx, object.Directories(key))
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -474,33 +474,21 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
-	// Create root dir.
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, dirs []string) (int64, error) {
+	// create root dir
 	dirID := int64(sql.DirectoriesRootID)
 	if _, err := tx.Exec(ctx, "INSERT IGNORE INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL)", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-
-	// Create remaining directories.
+	// reate remaining directories
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
 	}
 	defer insertDirStmt.Close()
 
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
+	for _, dir := range dirs {
 		if res, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		} else if dirID, err = res.LastInsertId(); err != nil {

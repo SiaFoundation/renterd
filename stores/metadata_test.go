@@ -4009,7 +4009,7 @@ func TestSlabCleanup(t *testing.T) {
 	var dirID int64
 	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
+		dirID, err = tx.InsertDirectories(context.Background(), object.Directories("1"))
 		return err
 	})
 	if err != nil {
@@ -4550,20 +4550,20 @@ func TestDirectories(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	objects := []string{
+	paths := []string{
 		"/foo",
-		"/bar/baz",
+		"/fileś/baz",
 		"///somefile",
 		"/dir/fakedir/",
 		"/",
-		"/bar/fileinsamedirasbefore",
+		"/fileś/fileinsamedirasbefore",
 	}
 
-	for _, o := range objects {
+	for _, o := range paths {
 		var dirID int64
 		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.MakeDirsForPath(context.Background(), o)
+			dirID, err = tx.InsertDirectories(context.Background(), object.Directories(o))
 			return err
 		})
 		if err != nil {
@@ -4584,7 +4584,7 @@ func TestDirectories(t *testing.T) {
 			parentID: 0,
 		},
 		{
-			name:     "/bar/",
+			name:     "/fileś/",
 			id:       2,
 			parentID: 1,
 		},
@@ -4602,6 +4602,11 @@ func TestDirectories(t *testing.T) {
 			name:     "/dir/",
 			id:       5,
 			parentID: 1,
+		},
+		{
+			name:     "/dir/fakedir/",
+			id:       6,
+			parentID: 5,
 		},
 	}
 

@@ -72,7 +72,7 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPath(ctx, path)
+	return mtx.InsertDirectories(ctx, object.Directories(path))
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -230,7 +230,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, key)
+	dirID, err := tx.InsertDirectories(ctx, object.Directories(key))
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -460,7 +460,7 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, dirs []string) (int64, error) {
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
@@ -473,25 +473,14 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	}
 	defer queryDirStmt.Close()
 
-	// Create root dir.
+	// create root directory
 	dirID := int64(sql.DirectoriesRootID)
 	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
-	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
+	// create remaining directories
+	for _, dir := range dirs {
 		if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		}

@@ -188,8 +188,9 @@ type (
 		// are associated with any of the provided contracts.
 		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
-		// MakeDirsForPath creates all directories for a given object's path.
-		MakeDirsForPath(ctx context.Context, path string) (int64, error)
+		// InsertDirectories inserts the given directories and returns the ID of
+		// the child directory.
+		InsertDirectories(ctx context.Context, dirs []string) (int64, error)
 
 		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
 		// database, causing the provided shards to be associated with the slab.
