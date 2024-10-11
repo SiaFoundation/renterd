@@ -1289,9 +1289,9 @@ func TestObjectsExplicitDir(t *testing.T) {
 	}{
 		{"/", "", "", "", []api.ObjectMetadata{
 			{Key: "/dir/", Size: 1, Health: 0.5},
-			{ETag: "d34db33f", Key: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
+			{Key: "/dir2/", Size: 2, Health: 1},
 		}},
-		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
+		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}}, // has MimeType and ETag since it's a file
 	}
 	// set common fields
 	for i := range tests {
@@ -2335,6 +2335,78 @@ func TestRenameObjects(t *testing.T) {
 	if len(expectedDirs) != i {
 		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), i)
 	}
+}
+
+func TestRenameObjectsRegression(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// define directory structure
+	objects := []string{
+		"/firefly/s1/",
+		"/firefly/s2/",
+		"/suits/s1/",
+		"/lost/",
+		"/movie",
+
+		"/firefly/trailer",
+		"/firefly/s1/ep1",
+		"/firefly/s1/ep2",
+		"/firefly/s2/ep1",
+	}
+
+	// define a helper to assert the number of objects with given prefix
+	ctx := context.Background()
+	assertNumObjects := func(prefix, delimiter string, n int) {
+		t.Helper()
+		if resp, err := ss.Objects(ctx, testBucket, prefix, "", delimiter, "", "", "", -1, object.EncryptionKey{}); err != nil {
+			t.Fatal(err)
+		} else if len(resp.Objects) != n {
+			t.Fatalf("unexpected number of objects %d != %d, objects:\n%+v", len(resp.Objects), n, resp.Objects)
+		}
+	}
+
+	// persist the structure
+	for _, path := range objects {
+		if _, err := ss.addTestObject(path, newTestObject(1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert the structure
+	assertNumObjects("/", "/", 4)
+	assertNumObjects("/firefly", "", 6)
+	assertNumObjects("/firefly/", "/", 3)
+	assertNumObjects("/firefly/s1/", "/", 2)
+	assertNumObjects("/firefly/s2/", "/", 1)
+	assertNumObjects("/suits/", "/", 1)
+	assertNumObjects("/lost/", "/", 0)
+
+	// assert we can't rename to an already existing directory without force
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal("unexpected error", err)
+	}
+	// assert we can forcefully rename it
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", true); err != nil {
+		t.Fatal(err)
+	}
+	assertNumObjects("/firefly/s2/", "/", 2)
+
+	// assert we can rename it and its children still point to the right directory
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s2/", "/firefly/s02/", false); err != nil {
+		t.Fatal(err)
+	}
+	assertNumObjects("/firefly/s2/", "/", 0)
+	assertNumObjects("/firefly/s02/", "/", 2)
+
+	// assert we rename a grand parent and all children remain intact
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/", "/gotham/", true); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumObjects("/gotham/", "/", 2)
+	assertNumObjects("/gotham/s02/", "/", 2)
+	assertNumObjects("/", "/", 4)
 }
 
 // TestObjectsStats is a unit test for ObjectsStats.

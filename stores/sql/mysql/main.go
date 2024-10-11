@@ -498,6 +498,10 @@ func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, dirs []string) 
 	return dirID, nil
 }
 
+func (tx *MainDatabaseTx) InsertDirectoriesForRename(ctx context.Context, prefixOld, prefixNew string) (int64, []int64, error) {
+	panic("TODO")
+}
+
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
 	return ssql.MarkPackedSlabUploaded(ctx, tx, slab)
 }
@@ -738,7 +742,7 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	return nil
 }
 
-func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
+func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, renamedIDs []int64, force bool) error {
 	if force {
 		_, err := tx.Exec(ctx, `
 		DELETE

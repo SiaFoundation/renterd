@@ -177,6 +177,16 @@ type (
 		// that was created.
 		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
+		// InsertDirectories inserts the given directories and returns the ID of
+		// the child directory.
+		InsertDirectories(ctx context.Context, dirs []string) (int64, error)
+
+		// InsertDirectoriesForRename will insert directories for the new prefix
+		// and return the ID of the child directory as well as a mapping for the
+		// old directories to the new. This is necessary so the corresponding
+		// directory IDs on the objects can be updated accordingly.
+		InsertDirectoriesForRename(ctx context.Context, prefixOld, prefixNew string) (int64, []int64, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
@@ -187,10 +197,6 @@ type (
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.
 		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
-
-		// InsertDirectories inserts the given directories and returns the ID of
-		// the child directory.
-		InsertDirectories(ctx context.Context, dirs []string) (int64, error)
 
 		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
 		// database, causing the provided shards to be associated with the slab.
@@ -286,7 +292,7 @@ type (
 		// `api.ErrOBjectNotFound` is returned. If 'force' is false and an
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
-		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
+		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, renamedIDs []int64, force bool) error
 
 		// RenewedContract returns the metadata of the contract that was renewed
 		// from the specified contract or ErrContractNotFound otherwise.
