@@ -2200,6 +2200,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/dir/1b",
 		"/fileś/dir/2b",
 		"/fileś/dir/3b",
+		"/folder/file1",
+		"/folder/foo/file2",
 		"/foo",
 		"/bar",
 		"/baz",
@@ -2222,6 +2224,9 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Perform some renames.
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/folder/", "/fileś/", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
@@ -2250,6 +2255,8 @@ func TestRenameObjects(t *testing.T) {
 
 	// Paths after.
 	objectsAfter := []string{
+		"/fileś/file1",
+		"/fileś/foo/file2",
 		"/fileś/1a",
 		"/fileś/2a",
 		"/fileś/3a",
@@ -2267,20 +2274,35 @@ func TestRenameObjects(t *testing.T) {
 		objectsAfterMap[path] = struct{}{}
 	}
 
-	// Assert that number of objects matches.
-	resp, err := ss.Objects(ctx, testBucket, "", "/", "", "", "", "", 100, object.EncryptionKey{})
-	if err != nil {
+	// Assert that number of objects matches and paths are correct.
+	if resp, err := ss.Objects(ctx, testBucket, "", "", "", "", "", "", 100, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	}
-	if len(resp.Objects) != len(objectsAfter) {
+	} else if len(resp.Objects) != len(objectsAfter) {
 		t.Fatal("unexpected number of objects", len(resp.Objects), len(objectsAfter))
+	} else {
+		for _, obj := range resp.Objects {
+			if _, exists := objectsAfterMap[obj.Key]; !exists {
+				t.Fatal("unexpected path", obj.Key)
+			}
+		}
 	}
 
-	// Assert paths are correct.
-	for _, obj := range resp.Objects {
-		if _, exists := objectsAfterMap[obj.Key]; !exists {
-			t.Fatal("unexpected path", obj.Key)
-		}
+	// Assert everything is under one folder in the root directory
+	if resp, err := ss.Objects(ctx, testBucket, "", "", "/", "", "", "", 100, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if len(resp.Objects) != 1 {
+		t.Fatal("unexpected number of objects", len(resp.Objects))
+	} else if resp.Objects[0].Key != "/fileś/" {
+		t.Fatal("unexpected folder", resp.Objects[0])
+	}
+
+	// Assert file2 's parent dir id has not been updated and is still under the foo directory
+	if resp, err := ss.Objects(ctx, testBucket, "/fileś/foo/", "", "/", "", "", "", 100, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if len(resp.Objects) != 1 {
+		t.Fatal("unexpected number of objects", len(resp.Objects))
+	} else if resp.Objects[0].Key != "/fileś/foo/file2" {
+		t.Fatal("unexpected folder", resp.Objects[0])
 	}
 
 	// Assert directories are correct
@@ -2298,6 +2320,11 @@ func TestRenameObjects(t *testing.T) {
 			id:       2,
 			parentID: 1,
 			name:     "/fileś/",
+		},
+		{
+			id:       18,
+			parentID: 2,
+			name:     "/fileś/foo/",
 		},
 	}
 
