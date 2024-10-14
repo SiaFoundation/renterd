@@ -554,7 +554,7 @@ func (tx *MainDatabaseTx) InsertDirectoriesForRename(ctx context.Context, prefix
 		mapping = append(mapping, dirID, renamedDirID)
 	}
 
-	// create remaining directories
+	// create directories for the new prefix
 	childID, err := insertDirectories(prefixNew)
 	if err != nil {
 		return 0, nil, err
@@ -838,38 +838,29 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 			return err
 		}
 	}
-	args := []any{
-		prefixNew, utf8.RuneCountInString(prefixOld) + 1,
-	}
 
-	// TODO PJ: build case expr or split up and use prep stmt
-	var updateDirStr string
-	if len(renamedIDs) > 0 {
-		updateDirStr = "db_directory_id = CASE "
-		for i := 0; i < len(renamedIDs); i += 2 {
-			updateDirStr += fmt.Sprintf("WHEN db_directory_id = ? THEN ? ")
-			args = append(args, renamedIDs[i], renamedIDs[i+1])
-		}
-		updateDirStr += "ELSE db_directory_id = ? END"
-	} else {
-		updateDirStr = "db_directory_id = ?"
-	}
+	// build query
+	query := fmt.Sprintf(`
+UPDATE objects
+SET object_id = ? || SUBSTR(object_id, ?),
+%s
+WHERE object_id LIKE ?
+AND SUBSTR(object_id, 1, ?) = ?
+AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, ssql.UpdateObjectDirectorIdExpr(renamedIDs))
 
+	// build arguments
+	args := []any{prefixNew, utf8.RuneCountInString(prefixOld) + 1}
+	for _, id := range renamedIDs {
+		args = append(args, id)
+	}
 	args = append(args,
 		dirID,
 		prefixOld+"%",
 		utf8.RuneCountInString(prefixOld), prefixOld,
 		bucket,
 	)
-	resp, err := tx.Exec(ctx, fmt.Sprintf(`
-		UPDATE objects
-		SET object_id = ? || SUBSTR(object_id, ?),
-		%s
-		WHERE object_id LIKE ?
-		AND SUBSTR(object_id, 1, ?) = ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, updateDirStr),
-		args...,
-	)
+
+	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return api.ErrObjectExists
 	} else if err != nil {

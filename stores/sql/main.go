@@ -2097,6 +2097,19 @@ WHERE fcid = ?`,
 	return nil
 }
 
+func UpdateObjectDirectorIdExpr(dirIds []int64) string {
+	if len(dirIds) == 0 {
+		return "db_directory_id = ?"
+	}
+
+	expr := "db_directory_id = CASE "
+	for i := 0; i < len(dirIds); i += 2 {
+		expr += fmt.Sprintf("WHEN db_directory_id = ? THEN ? ")
+	}
+	expr += "ELSE db_directory_id = ? END"
+	return expr
+}
+
 func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer.PeerInfo)) error {
 	info, err := PeerInfo(ctx, tx, addr)
 	if err != nil {

@@ -481,7 +481,7 @@ func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, dirs []string) 
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
-	// reate remaining directories
+	// create remaining directories
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
@@ -499,7 +499,61 @@ func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, dirs []string) 
 }
 
 func (tx *MainDatabaseTx) InsertDirectoriesForRename(ctx context.Context, prefixOld, prefixNew string) (int64, []int64, error) {
-	panic("TODO")
+	// prepare statement
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	// prepare a helper that inserts all directories for given path
+	insertDirectories := func(path string) (int64, error) {
+		dirID := int64(sql.DirectoriesRootID)
+		for _, dir := range object.Directories(path) {
+			if res, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
+				return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+			} else if childID, err := res.LastInsertId(); err != nil {
+				return 0, fmt.Errorf("failed to fetch last inserted dir id %v: %w", dir, err)
+			} else {
+				dirID = childID
+			}
+		}
+		return dirID, nil
+	}
+
+	// create root dir
+	dirID := int64(sql.DirectoriesRootID)
+	if _, err := tx.Exec(ctx, "INSERT IGNORE INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL)", dirID); err != nil {
+		return 0, nil, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	// create a mapping of existing directories to renamed directories
+	var mapping []int64
+	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ?", prefixOld+"%")
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to fetch existing directories: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dirID int64
+		var dirName string
+		if err := rows.Scan(&dirID, &dirName); err != nil {
+			return 0, nil, fmt.Errorf("failed to scan directory: %w", err)
+		}
+		renamedDirID, err := insertDirectories(strings.Replace(dirName, prefixOld, prefixNew, 1))
+		if err != nil {
+			return 0, nil, err
+		}
+		mapping = append(mapping, dirID, renamedDirID)
+	}
+
+	// create directories for the new prefix
+	childID, err := insertDirectories(prefixNew)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return childID, mapping, nil
 }
 
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
@@ -764,16 +818,26 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 			return err
 		}
 	}
-	resp, err := tx.Exec(ctx, `
+
+	// build query
+	query := fmt.Sprintf(`
 		UPDATE objects
 		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
-		db_directory_id = ?
+		%s
 		WHERE object_id LIKE ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
-		prefixNew, utf8.RuneCountInString(prefixOld)+1,
+		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, ssql.UpdateObjectDirectorIdExpr(renamedIDs))
+
+	// build arguments
+	args := []any{prefixNew, utf8.RuneCountInString(prefixOld) + 1}
+	for _, id := range renamedIDs {
+		args = append(args, id)
+	}
+	args = append(args,
 		dirID,
 		prefixOld+"%",
-		bucket)
+		bucket,
+	)
+	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
 		return api.ErrObjectExists
 	} else if err != nil {
