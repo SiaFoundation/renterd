@@ -79,6 +79,10 @@ func (b *MainDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
 }
 
+func (b *MainDatabase) ObjectsWithCorruptedDirectoryID(ctx context.Context, tx sql.Tx) ([]sql.Object, error) {
+	return ssql.ObjectsWithCorruptedDirectoryID(ctx, tx)
+}
+
 func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.DatabaseTx) error) error {
 	return b.db.Transaction(ctx, func(tx sql.Tx) error {
 		return fn(b.wrapTxn(tx))

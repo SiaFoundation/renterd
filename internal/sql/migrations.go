@@ -13,11 +13,6 @@ import (
 )
 
 type (
-	Migration struct {
-		ID      string
-		Migrate func(tx Tx) error
-	}
-
 	// Migrator is an interface for defining database-specific helper methods
 	// required during migrations
 	Migrator interface {
@@ -29,7 +24,18 @@ type (
 	MainMigrator interface {
 		Migrator
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		ObjectsWithCorruptedDirectoryID(ctx context.Context, tx Tx) ([]Object, error)
 		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
+	}
+
+	Migration struct {
+		ID      string
+		Migrate func(tx Tx) error
+	}
+
+	Object struct {
+		ID       uint
+		ObjectID string
 	}
 )
 
@@ -253,6 +259,46 @@ var (
 				ID: "00023_key_prefix",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00023_key_prefix", log)
+				},
+			},
+			{
+				ID: "00024_fix_directories",
+				Migrate: func(tx Tx) error {
+					log.Info("performing main migration '00024_fix_directories'")
+
+					// fetch corrupted objects
+					objects, err := m.ObjectsWithCorruptedDirectoryID(ctx, tx)
+					if err != nil {
+						return err
+					}
+					log.Infof("found %d objects with a corrupted path", len(objects))
+
+					// prepare update stmt
+					updateStmt, err := tx.Prepare(ctx, "UPDATE objects SET db_directory_id = ? WHERE id = ?")
+					if err != nil {
+						return fmt.Errorf("failed to prepare update statement, %w", err)
+					}
+					defer updateStmt.Close()
+
+					// loop every object and re-insert its directory
+					for _, o := range objects {
+						log.Debugf("re-inserting directory for object %v (%v)", o.ObjectID, o.ID)
+
+						// recreate dirs
+						dirID, err := m.MakeDirsForPath(ctx, tx, o.ObjectID)
+						if err != nil {
+							return fmt.Errorf("failed to create directory %s: %w", o.ObjectID, err)
+						}
+
+						// update object
+						_, err = updateStmt.Exec(ctx, dirID, o.ID)
+						if err != nil {
+							return fmt.Errorf("failed to execute update statement, %w", err)
+						}
+					}
+
+					log.Info("migration '00024_fix_directories' complete")
+					return nil
 				},
 			},
 		}

@@ -1603,6 +1603,28 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 	}, nil
 }
 
+func ObjectsWithCorruptedDirectoryID(ctx context.Context, tx sql.Tx) ([]sql.Object, error) {
+	rows, err := tx.Query(ctx, `
+SELECT o.id, o.object_id
+FROM objects o
+INNER JOIN directories d ON o.db_directory_id = d.id
+WHERE INSTR(REPLACE(o.object_id, d.name, ""), "/") > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch corrupted objects, %w", err)
+	}
+	defer rows.Close()
+
+	var objects []sql.Object
+	for rows.Next() {
+		var o sql.Object
+		if err := rows.Scan(&o.ID, &o.ObjectID); err != nil {
+			return nil, fmt.Errorf("failed to scan object row, %w", err)
+		}
+		objects = append(objects, o)
+	}
+	return objects, nil
+}
+
 func PeerBanned(ctx context.Context, tx sql.Tx, addr string) (bool, error) {
 	// normalize the address to a CIDR
 	netCIDR, err := NormalizePeer(addr)
