@@ -538,24 +538,31 @@ func (tx *MainDatabaseTx) InsertDirectoriesForRename(ctx context.Context, prefix
 		return 0, nil, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
-	// create a mapping of existing directories to renamed directories
-	var mapping []int64
+	// fetch directories with given prefix
 	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ?", prefixOld+"%")
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to fetch existing directories: %w", err)
 	}
 	defer rows.Close()
+
+	dirs := make(map[string]int64)
 	for rows.Next() {
-		var dirID int64
-		var dirName string
-		if err := rows.Scan(&dirID, &dirName); err != nil {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
 			return 0, nil, fmt.Errorf("failed to scan directory: %w", err)
 		}
-		renamedDirID, err := insertDirectories(strings.Replace(dirName, prefixOld, prefixNew, 1))
+		dirs[name] = id
+	}
+
+	// create a mapping of existing directories to renamed directories
+	var mapping []int64
+	for name, id := range dirs {
+		renamedDirID, err := insertDirectories(strings.Replace(name, prefixOld, prefixNew, 1))
 		if err != nil {
 			return 0, nil, err
 		}
-		mapping = append(mapping, dirID, renamedDirID)
+		mapping = append(mapping, id, renamedDirID)
 	}
 
 	// create directories for the new prefix
