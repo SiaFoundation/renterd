@@ -72,11 +72,15 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPath(ctx, path)
+	return mtx.InsertDirectories(ctx, object.Directories(path, true))
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
+}
+
+func (b *MainDatabase) ObjectsWithCorruptedDirectoryID(ctx context.Context, tx sql.Tx) ([]sql.Object, error) {
+	return ssql.ObjectsWithCorruptedDirectoryID(ctx, tx)
 }
 
 func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.DatabaseTx) error) error {
@@ -230,7 +234,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, key)
+	dirID, err := tx.InsertDirectories(ctx, object.Directories(key, true))
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -460,7 +464,8 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, dirs []string) (int64, error) {
+	// prepare statements
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
@@ -473,25 +478,14 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	}
 	defer queryDirStmt.Close()
 
-	// Create root dir.
+	// create root directory
 	dirID := int64(sql.DirectoriesRootID)
 	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
 
-	// Create remaining directories.
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
-	}
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
-			continue
-		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
+	// create remaining directories
+	for _, dir := range dirs {
 		if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 		}
@@ -504,6 +498,80 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 		dirID = childID
 	}
 	return dirID, nil
+}
+
+func (tx *MainDatabaseTx) InsertDirectoriesForRename(ctx context.Context, prefixOld, prefixNew string) (int64, []int64, error) {
+	// prepare statements
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ?")
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer queryDirStmt.Close()
+
+	// prepare a helper that inserts all directories for given path
+	insertDirectories := func(path string) (int64, error) {
+		dirID := int64(sql.DirectoriesRootID)
+		for _, dir := range object.Directories(path, false) {
+			if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
+				return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+			}
+			var childID int64
+			if err := queryDirStmt.QueryRow(ctx, dir).Scan(&childID); err != nil {
+				return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+			} else if childID == 0 {
+				return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+			}
+			dirID = childID
+		}
+		return dirID, nil
+	}
+
+	// create root directory
+	dirID := int64(sql.DirectoriesRootID)
+	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
+		return 0, nil, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	// fetch directories with given prefix
+	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ?", prefixOld+"%")
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to fetch existing directories: %w", err)
+	}
+	defer rows.Close()
+
+	dirs := make(map[string]int64)
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return 0, nil, fmt.Errorf("failed to scan directory: %w", err)
+		}
+		dirs[name] = id
+	}
+
+	// create a mapping of existing directories to renamed directories
+	var mapping []int64
+	for name, id := range dirs {
+		renamedDirID, err := insertDirectories(strings.Replace(name, prefixOld, prefixNew, 1))
+		if err != nil {
+			return 0, nil, err
+		}
+		mapping = append(mapping, id, renamedDirID)
+	}
+
+	// create directories for the new prefix
+	childID, err := insertDirectories(prefixNew)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return childID, mapping, nil
 }
 
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
@@ -760,39 +828,51 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	return nil
 }
 
-func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
+func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, renamedIDs []int64, force bool) error {
 	if force {
 		_, err := tx.Exec(ctx, `
 		DELETE
 		FROM objects
 		WHERE object_id IN (
-			SELECT CONCAT(?, SUBSTR(object_id, ?))
+			SELECT ? || SUBSTR(object_id, ?)
 			FROM objects
 			WHERE object_id LIKE ?
 			AND SUBSTR(object_id, 1, ?) = ?
 			AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
-		)`,
+		) OR (object_id = ? AND size = 0)`,
 			prefixNew,
 			utf8.RuneCountInString(prefixOld)+1,
 			prefixOld+"%",
 			utf8.RuneCountInString(prefixOld), prefixOld,
-			bucket)
+			bucket,
+			prefixNew)
 		if err != nil {
 			return err
 		}
 	}
-	resp, err := tx.Exec(ctx, `
-		UPDATE objects
-		SET object_id = ? || SUBSTR(object_id, ?),
-		db_directory_id = ?
-		WHERE object_id LIKE ?
-		AND SUBSTR(object_id, 1, ?) = ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
-		prefixNew, utf8.RuneCountInString(prefixOld)+1,
+
+	// build query
+	query := fmt.Sprintf(`
+UPDATE objects
+SET object_id = ? || SUBSTR(object_id, ?),
+%s
+WHERE object_id LIKE ?
+AND SUBSTR(object_id, 1, ?) = ?
+AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, ssql.UpdateObjectDirectorIdExpr(renamedIDs))
+
+	// build arguments
+	args := []any{prefixNew, utf8.RuneCountInString(prefixOld) + 1}
+	for _, id := range renamedIDs {
+		args = append(args, id)
+	}
+	args = append(args,
 		dirID,
 		prefixOld+"%",
 		utf8.RuneCountInString(prefixOld), prefixOld,
-		bucket)
+		bucket,
+	)
+
+	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return api.ErrObjectExists
 	} else if err != nil {

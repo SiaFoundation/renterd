@@ -454,7 +454,7 @@ func TestObjectsWithDelimiterSlash(t *testing.T) {
 			// assert mime type
 			isDir := strings.HasSuffix(entries[i].Key, "/") && entries[i].Key != "//double/" // double is a file
 			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType == "") {
-				t.Fatal("unexpected mime type", entries[i].MimeType)
+				t.Fatal("unexpected mime type", entries[i], entries[i].MimeType)
 			}
 			entries[i].MimeType = ""
 

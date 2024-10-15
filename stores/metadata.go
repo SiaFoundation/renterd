@@ -400,7 +400,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
-		dirID, err := tx.MakeDirsForPath(ctx, keyNew)
+		dirID, err := tx.InsertDirectories(ctx, object.Directories(keyNew, true))
 		if err != nil {
 			return err
 		}
@@ -418,10 +418,10 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
-		dirID, err := tx.MakeDirsForPath(ctx, prefixNew)
+		dirID, renamedIDs, err := tx.InsertDirectoriesForRename(ctx, prefixOld, prefixNew)
 		if err != nil {
 			return fmt.Errorf("RenameObjects: failed to create new directory: %w", err)
-		} else if err := tx.RenameObjects(ctx, bucket, prefixOld, prefixNew, dirID, force); err != nil {
+		} else if err := tx.RenameObjects(ctx, bucket, prefixOld, prefixNew, dirID, renamedIDs, force); err != nil {
 			return err
 		}
 		// prune old dirs
@@ -491,7 +491,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, key, contractSet, e
 		}
 
 		// create the dir
-		dirID, err := tx.MakeDirsForPath(ctx, key)
+		dirID, err := tx.InsertDirectories(ctx, object.Directories(key, true))
 		if err != nil {
 			return fmt.Errorf("failed to create directories for key '%s': %w", key, err)
 		}
