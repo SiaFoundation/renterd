@@ -72,7 +72,7 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.InsertDirectories(ctx, object.Directories(path))
+	return mtx.InsertDirectories(ctx, object.Directories(path, true))
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -234,7 +234,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.InsertDirectories(ctx, object.Directories(key))
+	dirID, err := tx.InsertDirectories(ctx, object.Directories(key, true))
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -517,7 +517,7 @@ func (tx *MainDatabaseTx) InsertDirectoriesForRename(ctx context.Context, prefix
 	// prepare a helper that inserts all directories for given path
 	insertDirectories := func(path string) (int64, error) {
 		dirID := int64(sql.DirectoriesRootID)
-		for _, dir := range object.Directories(path) {
+		for _, dir := range object.Directories(path, false) {
 			if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
 				return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
 			}
@@ -834,17 +834,18 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		DELETE
 		FROM objects
 		WHERE object_id IN (
-			SELECT CONCAT(?, SUBSTR(object_id, ?))
+			SELECT ? || SUBSTR(object_id, ?)
 			FROM objects
 			WHERE object_id LIKE ?
 			AND SUBSTR(object_id, 1, ?) = ?
 			AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
-		)`,
+		) OR (object_id = ? AND size = 0)`,
 			prefixNew,
 			utf8.RuneCountInString(prefixOld)+1,
 			prefixOld+"%",
 			utf8.RuneCountInString(prefixOld), prefixOld,
-			bucket)
+			bucket,
+			prefixNew)
 		if err != nil {
 			return err
 		}

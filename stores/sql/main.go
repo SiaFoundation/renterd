@@ -2128,7 +2128,7 @@ func UpdateObjectDirectorIdExpr(dirIds []int64) string {
 	for i := 0; i < len(dirIds); i += 2 {
 		expr += fmt.Sprintf("WHEN db_directory_id = ? THEN ? ")
 	}
-	expr += "ELSE db_directory_id = ? END"
+	expr += "ELSE CASE WHEN size = 0 THEN db_directory_id ELSE ? END END"
 	return expr
 }
 

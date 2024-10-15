@@ -1289,9 +1289,9 @@ func TestObjectsExplicitDir(t *testing.T) {
 	}{
 		{"/", "", "", "", []api.ObjectMetadata{
 			{Key: "/dir/", Size: 1, Health: 0.5},
-			{Key: "/dir2/", Size: 2, Health: 1},
+			{Key: "/dir2/", Size: 2, Health: 1, ETag: "d34db33f", MimeType: testMimeType}, // has MimeType and ETag since it's a file
 		}},
-		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}}, // has MimeType and ETag since it's a file
+		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
 	// set common fields
 	for i := range tests {
@@ -2365,7 +2365,11 @@ func TestRenameObjectsRegression(t *testing.T) {
 
 	// persist the structure
 	for _, path := range objects {
-		if _, err := ss.addTestObject(path, newTestObject(1)); err != nil {
+		var s int
+		if !strings.HasSuffix(path, "/") {
+			s = 1
+		}
+		if _, err := ss.addTestObject(path, newTestObject(s)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2383,6 +2387,7 @@ func TestRenameObjectsRegression(t *testing.T) {
 	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal("unexpected error", err)
 	}
+
 	// assert we can forcefully rename it
 	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", true); err != nil {
 		t.Fatal(err)
@@ -4078,7 +4083,7 @@ func TestSlabCleanup(t *testing.T) {
 	var dirID int64
 	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.InsertDirectories(context.Background(), object.Directories("1"))
+		dirID, err = tx.InsertDirectories(context.Background(), object.Directories("1", true))
 		return err
 	})
 	if err != nil {
@@ -4632,7 +4637,7 @@ func TestDirectories(t *testing.T) {
 		var dirID int64
 		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.InsertDirectories(context.Background(), object.Directories(o))
+			dirID, err = tx.InsertDirectories(context.Background(), object.Directories(o, true))
 			return err
 		})
 		if err != nil {
@@ -4671,11 +4676,6 @@ func TestDirectories(t *testing.T) {
 			name:     "/dir/",
 			id:       5,
 			parentID: 1,
-		},
-		{
-			name:     "/dir/fakedir/",
-			id:       6,
-			parentID: 5,
 		},
 	}
 

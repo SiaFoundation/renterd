@@ -4,20 +4,22 @@ import "strings"
 
 // Directories returns the directories for the given path, excluding the root
 // directory.
-func Directories(path string) (dirs []string) {
-	lsc := 1
-	for {
-		path = strings.TrimPrefix(path, "/")
-		if !strings.HasPrefix(path, "/") {
-			break
-		}
-		lsc++
-		dirs = append(dirs, strings.Repeat("/", lsc))
+func Directories(path string, explicit bool) (dirs []string) {
+	if explicit {
+		path = strings.TrimSuffix(path, "/")
 	}
-
-	parts := strings.Split(path, "/")
-	for i := 1; i < len(parts); i++ {
-		dirs = append(dirs, strings.Repeat("/", lsc)+strings.Join(parts[:i], "/")+"/")
+	if path == "/" {
+		return nil
+	}
+	for i, r := range path {
+		if r != '/' {
+			continue
+		}
+		dir := path[:i+1]
+		if dir == "/" {
+			continue
+		}
+		dirs = append(dirs, dir)
 	}
 	return
 }

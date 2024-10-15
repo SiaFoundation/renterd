@@ -400,7 +400,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// create new dir
-		dirID, err := tx.InsertDirectories(ctx, object.Directories(keyNew))
+		dirID, err := tx.InsertDirectories(ctx, object.Directories(keyNew, true))
 		if err != nil {
 			return err
 		}
@@ -491,7 +491,7 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, key, contractSet, e
 		}
 
 		// create the dir
-		dirID, err := tx.InsertDirectories(ctx, object.Directories(key))
+		dirID, err := tx.InsertDirectories(ctx, object.Directories(key, true))
 		if err != nil {
 			return fmt.Errorf("failed to create directories for key '%s': %w", key, err)
 		}
