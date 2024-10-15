@@ -25,5 +25,4 @@ func TestDirectories(t *testing.T) {
 			t.Fatalf("unexpected dirs for path %v (explicit %t), %v != %v", c.path, c.explicit, got, c.dirs)
 		}
 	}
-
 }
