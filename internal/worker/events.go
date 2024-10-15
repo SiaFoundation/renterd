@@ -111,6 +111,7 @@ func (e *eventSubscriber) Register(ctx context.Context, eventsURL string, opts .
 
 	// prepare webhooks
 	webhooks := []webhooks.Webhook{
+		api.WebhookACLUpdate(eventsURL, headers),
 		api.WebhookConsensusUpdate(eventsURL, headers),
 		api.WebhookContractAdd(eventsURL, headers),
 		api.WebhookContractArchive(eventsURL, headers),
