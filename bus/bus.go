@@ -33,6 +33,7 @@ import (
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -657,7 +658,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error) {
 	switch key {
-	case "gouging":
+	case stores.SettingGouging:
 		gs, err := b.ss.GougingSettings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			return api.DefaultGougingSettings, nil
@@ -665,7 +666,7 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 			return nil, err
 		}
 		return gs, nil
-	case "pinned":
+	case stores.SettingPinned:
 		ps, err := b.ss.PinnedSettings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			ps = api.DefaultPinnedSettings
@@ -687,7 +688,7 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 			}
 		}
 		return ps, nil
-	case "upload":
+	case stores.SettingUpload:
 		us, err := b.ss.UploadSettings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			return api.DefaultUploadSettings(b.cm.TipState().Network.Name), nil
@@ -695,7 +696,7 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 			return nil, err
 		}
 		return us, nil
-	case "s3":
+	case stores.SettingS3:
 		s3s, err := b.ss.S3Settings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			return api.DefaultS3Settings, nil
@@ -756,7 +757,7 @@ func (b *Bus) isPassedV2AllowHeight() bool {
 	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
 }
 
-func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any) (interface{}, error) {
+func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any) (any, error) {
 	var curr map[string]any
 
 	// fetch current setting
@@ -787,7 +788,7 @@ func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any
 
 	// update the patched setting
 	switch key {
-	case "gouging":
+	case stores.SettingGouging:
 		var update api.GougingSettings
 		if err := json.Unmarshal(buf, &update); err != nil {
 			return nil, err
@@ -795,7 +796,7 @@ func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any
 			return nil, err
 		}
 		return update, nil
-	case "pinned":
+	case stores.SettingPinned:
 		var update api.PinnedSettings
 		if err := json.Unmarshal(buf, &update); err != nil {
 			return nil, err
@@ -803,7 +804,7 @@ func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any
 			return nil, err
 		}
 		return update, nil
-	case "upload":
+	case stores.SettingUpload:
 		var update api.UploadSettings
 		if err := json.Unmarshal(buf, &update); err != nil {
 			return nil, err
@@ -811,7 +812,7 @@ func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any
 			return nil, err
 		}
 		return update, nil
-	case "s3":
+	case stores.SettingS3:
 		var update api.S3Settings
 		if err := json.Unmarshal(buf, &update); err != nil {
 			return nil, err
@@ -911,7 +912,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 	var updatePinMgr bool
 
 	switch key {
-	case "gouging":
+	case stores.SettingGouging:
 		_, ok := value.(api.GougingSettings)
 		if !ok {
 			panic("invalid type") // developer error
@@ -925,7 +926,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			Timestamp:       time.Now().UTC(),
 		}
 		updatePinMgr = true
-	case "pinned":
+	case stores.SettingPinned:
 		_, ok := value.(api.PinnedSettings)
 		if !ok {
 			panic("invalid type") // developer error
@@ -939,7 +940,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			Timestamp:      time.Now().UTC(),
 		}
 		updatePinMgr = true
-	case "upload":
+	case stores.SettingUpload:
 		_, ok := value.(api.UploadSettings)
 		if !ok {
 			panic("invalid type") // developer error
@@ -952,7 +953,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			UploadSettings: &us,
 			Timestamp:      time.Now().UTC(),
 		}
-	case "s3":
+	case stores.SettingS3:
 		_, ok := value.(api.S3Settings)
 		if !ok {
 			panic("invalid type") // developer error

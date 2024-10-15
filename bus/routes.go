@@ -17,6 +17,7 @@ import (
 
 	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/gouging"
@@ -1324,7 +1325,7 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
-	if gs, err := b.fetchSetting(jc.Request.Context(), "gouging"); err != nil {
+	if gs, err := b.fetchSetting(jc.Request.Context(), stores.SettingGouging); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	} else if gsc, ok := gs.(api.GougingSettings); !ok {
@@ -1344,7 +1345,7 @@ func (b *Bus) settingsGougingHandlerPATCH(jc jape.Context) {
 	}
 
 	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), "gouging", patch)
+	update, err := b.patchSetting(jc.Request.Context(), stores.SettingGouging, patch)
 	if errors.Is(err, ErrSettingFieldNotFound) {
 		jc.Error(err, http.StatusBadRequest)
 	} else if err != nil {
@@ -1364,14 +1365,14 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 	} else if err := gs.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), "gouging", gs); err != nil {
+	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingGouging, gs); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	if ps, err := b.fetchSetting(jc.Request.Context(), "pinned"); err != nil {
+	if ps, err := b.fetchSetting(jc.Request.Context(), stores.SettingPinned); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	} else if psc, ok := ps.(api.PinnedSettings); !ok {
@@ -1391,7 +1392,7 @@ func (b *Bus) settingsPinnedHandlerPATCH(jc jape.Context) {
 	}
 
 	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), "pinned", patch)
+	update, err := b.patchSetting(jc.Request.Context(), stores.SettingPinned, patch)
 	if errors.Is(err, ErrSettingFieldNotFound) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1415,13 +1416,13 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 	} else if ps.Enabled() && !b.explorer.Enabled() {
 		jc.Error(fmt.Errorf("can't enable price pinning, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), "pinned", ps); err != nil {
+	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingPinned, ps); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 	}
 }
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
-	if us, err := b.fetchSetting(jc.Request.Context(), "upload"); err != nil {
+	if us, err := b.fetchSetting(jc.Request.Context(), stores.SettingUpload); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	} else if usc, ok := us.(api.UploadSettings); !ok {
@@ -1441,7 +1442,7 @@ func (b *Bus) settingsUploadHandlerPATCH(jc jape.Context) {
 	}
 
 	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), "upload", patch)
+	update, err := b.patchSetting(jc.Request.Context(), stores.SettingUpload, patch)
 	if errors.Is(err, ErrSettingFieldNotFound) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1462,14 +1463,14 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 	} else if err := us.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update upload settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), "upload", us); err != nil {
+	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingUpload, us); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
-	if s3s, err := b.fetchSetting(jc.Request.Context(), "s3"); err != nil {
+	if s3s, err := b.fetchSetting(jc.Request.Context(), stores.SettingS3); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	} else if s3sc, ok := s3s.(api.S3Settings); !ok {
@@ -1489,7 +1490,7 @@ func (b *Bus) settingsS3HandlerPATCH(jc jape.Context) {
 	}
 
 	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), "s3", patch)
+	update, err := b.patchSetting(jc.Request.Context(), stores.SettingS3, patch)
 	if errors.Is(err, ErrSettingFieldNotFound) {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1510,7 +1511,7 @@ func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
 	} else if err := s3s.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update S3 settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), "s3", s3s); err != nil {
+	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingS3, s3s); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
