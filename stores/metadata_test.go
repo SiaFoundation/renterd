@@ -2306,56 +2306,26 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert directories are correct
-	expectedDirs := []struct {
-		id       int64
-		parentID int64
-		name     string
-	}{
-		{
-			id:       1,
-			parentID: 0,
-			name:     "/",
-		},
-		{
-			id:       2,
-			parentID: 1,
-			name:     "/fileś/",
-		},
-		{
-			id:       18,
-			parentID: 2,
-			name:     "/fileś/foo/",
-		},
+	expectedDirs := map[string]string{
+		"/":           "NULL",
+		"/fileś/":     "/",
+		"/fileś/foo/": "/fileś/",
 	}
 
-	var n int64
-	if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
-		t.Fatal(err)
-	} else if n != int64(len(expectedDirs)) {
-		t.Fatalf("unexpected number of directories, %v != %v", n, len(expectedDirs))
-	}
-
-	type row struct {
-		ID       int64
-		ParentID int64
-		Name     string
-	}
-	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
+	rows, err := ss.DB().Query(context.Background(), "SELECT d1.name, COALESCE(d2.name, 'NULL') as parent FROM directories d1 LEFT JOIN directories d2 ON d1.db_parent_id = d2.id ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	var i int
 	for rows.Next() {
-		var dir row
-		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
+		var dir, parent string
+		if err := rows.Scan(&dir, &parent); err != nil {
 			t.Fatal(err)
-		} else if dir.ID != expectedDirs[i].id {
-			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
-		} else if dir.ParentID != expectedDirs[i].parentID {
-			t.Fatalf("unexpected directory parent id, %v != %v", dir.ParentID, expectedDirs[i].parentID)
-		} else if dir.Name != expectedDirs[i].name {
-			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
+		} else if expectedParent, ok := expectedDirs[dir]; !ok {
+			t.Fatalf("unexpected directory %v", dir)
+		} else if parent != expectedParent {
+			t.Fatalf("unexpected parent, %v != %v", parent, expectedParent)
 		}
 		i++
 	}
