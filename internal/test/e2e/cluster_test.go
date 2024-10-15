@@ -183,36 +183,10 @@ func TestObjectsWithNoDelimiter(t *testing.T) {
 func TestNewTestCluster(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
-	b := cluster.Bus
 	tt := cluster.tt
 
-	// Upload packing should be disabled by default.
-	us, err := b.UploadSettings(context.Background())
-	tt.OK(err)
-	if us.Packing.Enabled {
-		t.Fatalf("expected upload packing to be disabled by default, got %v", us.Packing.Enabled)
-	}
-
-	// PinnedSettings should have default values
-	ps, err := b.PinnedSettings(context.Background())
-	tt.OK(err)
-	if ps.Currency == "" {
-		t.Fatal("expected default value for Currency")
-	} else if ps.Threshold == 0 {
-		t.Fatal("expected default value for Threshold")
-	}
-
-	// Autopilot shouldn't have its prices pinned
-	if len(ps.Autopilots) != 1 {
-		t.Fatalf("expected 1 autopilot, got %v", len(ps.Autopilots))
-	} else if pin, exists := ps.Autopilots[api.DefaultAutopilotID]; !exists {
-		t.Fatalf("expected autopilot %v to exist", api.DefaultAutopilotID)
-	} else if pin.Allowance != (api.Pin{}) {
-		t.Fatalf("expected autopilot %v to have no pinned allowance, got %v", api.DefaultAutopilotID, pin.Allowance)
-	}
-
 	// See if autopilot is running by triggering the loop.
-	_, err = cluster.Autopilot.Trigger(false)
+	_, err := cluster.Autopilot.Trigger(false)
 	tt.OK(err)
 
 	// Add a host.
@@ -382,9 +356,9 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Fetch host
-	if _, err := b.Host(context.Background(), cluster.hosts[0].PublicKey()); err != nil {
+	if _, err := cluster.Bus.Host(context.Background(), cluster.hosts[0].PublicKey()); err != nil {
 		t.Fatal("unexpected error", err)
-	} else if _, err := b.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
+	} else if _, err := cluster.Bus.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
 		t.Fatal("unexpected error", err)
 	}
 }

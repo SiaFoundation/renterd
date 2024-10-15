@@ -5,11 +5,13 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net"
 	"net/http"
+	"reflect"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -31,6 +33,7 @@ import (
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -471,12 +474,16 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
 
 		"GET    /settings/gouging": b.settingsGougingHandlerGET,
+		"PATCH  /settings/gouging": b.settingsGougingHandlerPATCH,
 		"PUT    /settings/gouging": b.settingsGougingHandlerPUT,
 		"GET    /settings/pinned":  b.settingsPinnedHandlerGET,
+		"PATCH  /settings/pinned":  b.settingsPinnedHandlerPATCH,
 		"PUT    /settings/pinned":  b.settingsPinnedHandlerPUT,
 		"GET    /settings/s3":      b.settingsS3HandlerGET,
+		"PATCH  /settings/s3":      b.settingsS3HandlerPATCH,
 		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
 		"GET    /settings/upload":  b.settingsUploadHandlerGET,
+		"PATCH  /settings/upload":  b.settingsUploadHandlerPATCH,
 		"PUT    /settings/upload":  b.settingsUploadHandlerPUT,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
@@ -649,6 +656,59 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	return
 }
 
+func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error) {
+	switch key {
+	case stores.SettingGouging:
+		gs, err := b.ss.GougingSettings(ctx)
+		if errors.Is(err, sql.ErrSettingNotFound) {
+			return api.DefaultGougingSettings, nil
+		} else if err != nil {
+			return nil, err
+		}
+		return gs, nil
+	case stores.SettingPinned:
+		ps, err := b.ss.PinnedSettings(ctx)
+		if errors.Is(err, sql.ErrSettingNotFound) {
+			ps = api.DefaultPinnedSettings
+		} else if err != nil {
+			return nil, err
+		}
+
+		// populate the Autopilots map with the current autopilots
+		aps, err := b.as.Autopilots(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch autopilots: %w", err)
+		}
+		if ps.Autopilots == nil {
+			ps.Autopilots = make(map[string]api.AutopilotPins)
+		}
+		for _, ap := range aps {
+			if _, exists := ps.Autopilots[ap.ID]; !exists {
+				ps.Autopilots[ap.ID] = api.AutopilotPins{}
+			}
+		}
+		return ps, nil
+	case stores.SettingUpload:
+		us, err := b.ss.UploadSettings(ctx)
+		if errors.Is(err, sql.ErrSettingNotFound) {
+			return api.DefaultUploadSettings(b.cm.TipState().Network.Name), nil
+		} else if err != nil {
+			return nil, err
+		}
+		return us, nil
+	case stores.SettingS3:
+		s3s, err := b.ss.S3Settings(ctx)
+		if errors.Is(err, sql.ErrSettingNotFound) {
+			return api.DefaultS3Settings, nil
+		} else if err != nil {
+			return nil, err
+		}
+		return s3s, nil
+	default:
+		panic("unknown setting") // developer error
+	}
+}
+
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(hostKey)
@@ -695,6 +755,74 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 func (b *Bus) isPassedV2AllowHeight() bool {
 	cs := b.cm.TipState()
 	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
+}
+
+func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any) (any, error) {
+	var curr map[string]any
+
+	// fetch current setting
+	gs, err := b.fetchSetting(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// turn it into a map
+	buf, err := json.Marshal(gs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal %v settings: %w", key, err)
+	} else if err := json.Unmarshal(buf, &curr); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %v settings: %w", key, err)
+	}
+
+	// apply patch
+	err = patchSettings(curr, patch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to patch %v settings: %w", key, err)
+	}
+
+	// marshal the patched setting
+	buf, err = json.Marshal(curr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal patched %v settings: %w", key, err)
+	}
+
+	// update the patched setting
+	switch key {
+	case stores.SettingGouging:
+		var update api.GougingSettings
+		if err := json.Unmarshal(buf, &update); err != nil {
+			return nil, err
+		} else if err := b.updateSetting(ctx, key, update); err != nil {
+			return nil, err
+		}
+		return update, nil
+	case stores.SettingPinned:
+		var update api.PinnedSettings
+		if err := json.Unmarshal(buf, &update); err != nil {
+			return nil, err
+		} else if err := b.updateSetting(ctx, key, update); err != nil {
+			return nil, err
+		}
+		return update, nil
+	case stores.SettingUpload:
+		var update api.UploadSettings
+		if err := json.Unmarshal(buf, &update); err != nil {
+			return nil, err
+		} else if err := b.updateSetting(ctx, key, update); err != nil {
+			return nil, err
+		}
+		return update, nil
+	case stores.SettingS3:
+		var update api.S3Settings
+		if err := json.Unmarshal(buf, &update); err != nil {
+			return nil, err
+		} else if err := b.updateSetting(ctx, key, update); err != nil {
+			return nil, err
+		}
+		return update, nil
+	default:
+		panic("unknown setting") // developer error
+	}
 }
 
 func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
@@ -777,4 +905,123 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	b.s.BroadcastTransactionSet(txnSet)
 
 	return newRevision, contractPrice, fundAmount, nil
+}
+
+func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
+	var payload interface{}
+	var updatePinMgr bool
+
+	switch key {
+	case stores.SettingGouging:
+		_, ok := value.(api.GougingSettings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		gs := value.(api.GougingSettings)
+		if err := b.ss.UpdateGougingSettings(ctx, gs); err != nil {
+			return fmt.Errorf("failed to update gouging settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			GougingSettings: &gs,
+			Timestamp:       time.Now().UTC(),
+		}
+		updatePinMgr = true
+	case stores.SettingPinned:
+		_, ok := value.(api.PinnedSettings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		ps := value.(api.PinnedSettings)
+		if err := b.ss.UpdatePinnedSettings(ctx, ps); err != nil {
+			return fmt.Errorf("failed to update pinned settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			PinnedSettings: &ps,
+			Timestamp:      time.Now().UTC(),
+		}
+		updatePinMgr = true
+	case stores.SettingUpload:
+		_, ok := value.(api.UploadSettings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		us := value.(api.UploadSettings)
+		if err := b.ss.UpdateUploadSettings(ctx, us); err != nil {
+			return fmt.Errorf("failed to update upload settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			UploadSettings: &us,
+			Timestamp:      time.Now().UTC(),
+		}
+	case stores.SettingS3:
+		_, ok := value.(api.S3Settings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		s3s := value.(api.S3Settings)
+		if err := b.ss.UpdateS3Settings(ctx, s3s); err != nil {
+			return fmt.Errorf("failed to update S3 settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			S3Settings: &s3s,
+			Timestamp:  time.Now().UTC(),
+		}
+	default:
+		panic("unknown setting") // developer error
+	}
+
+	// broadcast update
+	b.broadcastAction(webhooks.Event{
+		Module:  api.ModuleSetting,
+		Event:   api.EventUpdate,
+		Payload: payload,
+	})
+
+	// update pin manager if necessary
+	if updatePinMgr {
+		b.pinMgr.TriggerUpdate()
+	}
+
+	return nil
+}
+
+// patchSettings merges two settings maps. returns an error if the two maps are
+// not compatible.
+func patchSettings(a, b map[string]any) error {
+	for k, vb := range b {
+		va, ok := a[k]
+		if !ok || va == nil {
+			return fmt.Errorf("field '%q' not found in settings, %w", k, ErrSettingFieldNotFound)
+		} else if vb != nil && reflect.TypeOf(va) != reflect.TypeOf(vb) {
+			return fmt.Errorf("invalid type for setting %q: expected %T, got %T", k, va, vb)
+		}
+
+		switch vb := vb.(type) {
+		case json.RawMessage:
+			vaf, vbf := make(map[string]any), make(map[string]any)
+			if err := json.Unmarshal(vb, &vbf); err != nil {
+				return fmt.Errorf("failed to unmarshal fields %q: %w", k, err)
+			} else if err := json.Unmarshal(va.(json.RawMessage), &vaf); err != nil {
+				return fmt.Errorf("failed to unmarshal current fields %q: %w", k, err)
+			}
+			if err := patchSettings(vaf, vbf); err != nil {
+				return fmt.Errorf("failed to patch fields %q: %w", k, err)
+			}
+
+			buf, err := json.Marshal(vaf)
+			if err != nil {
+				return fmt.Errorf("failed to marshal patched fields %q: %w", k, err)
+			}
+			a[k] = json.RawMessage(buf)
+		case map[string]any:
+			var err error
+			err = patchSettings(a[k].(map[string]any), vb)
+			if err != nil {
+				return fmt.Errorf("invalid value for setting %q: %w", k, err)
+			}
+		default:
+			a[k] = vb
+		}
+	}
+	return nil
 }
