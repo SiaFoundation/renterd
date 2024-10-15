@@ -1289,7 +1289,7 @@ func TestObjectsExplicitDir(t *testing.T) {
 	}{
 		{"/", "", "", "", []api.ObjectMetadata{
 			{Key: "/dir/", Size: 1, Health: 0.5},
-			{Key: "/dir2/", Size: 2, Health: 1, ETag: "d34db33f", MimeType: testMimeType}, // has MimeType and ETag since it's a file
+			{ETag: "d34db33f", Key: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
 		}},
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}

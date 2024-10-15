@@ -2,8 +2,9 @@ package object
 
 import "strings"
 
-// Directories returns the directories for the given path, excluding the root
-// directory.
+// Directories returns the directories for the given path. When explicit is
+// true, the returned directories do not include the path itself should it be a
+// directory. The root path ('/') is always excluded.
 func Directories(path string, explicit bool) (dirs []string) {
 	if explicit {
 		path = strings.TrimSuffix(path, "/")
