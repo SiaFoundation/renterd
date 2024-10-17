@@ -418,9 +418,7 @@ func parseEnvironmentVariables(cfg *config.Config) {
 func readPasswordInput(context string) string {
 	fmt.Printf("%s: ", context)
 	input, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		stdoutFatalError("Could not read input: " + err.Error())
-	}
+	checkFatalError("Could not read input", err)
 	fmt.Println("")
 	return string(input)
 }
@@ -429,9 +427,7 @@ func readInput(context string) string {
 	fmt.Printf("%s: ", context)
 	r := bufio.NewReader(os.Stdin)
 	input, err := r.ReadString('\n')
-	if err != nil {
-		stdoutFatalError("Could not read input: " + err.Error())
-	}
+	checkFatalError("Could not read input", err)
 	return strings.TrimSpace(input)
 }
 
@@ -485,9 +481,12 @@ func promptYesNo(question string) bool {
 	return strings.EqualFold(answer, "yes")
 }
 
-// stdoutFatalError prints an error message to stdout and exits with a 1 exit code.
-func stdoutFatalError(msg string) {
-	stdoutError(msg)
+// checkFatalError prints an error message to stderr and exits with a 1 exit code. If err is nil, this is a no-op.
+func checkFatalError(context string, err error) {
+	if err == nil {
+		return
+	}
+	os.Stderr.WriteString(fmt.Sprintf("%s: %s\n", context, err))
 	os.Exit(1)
 }
 

@@ -38,9 +38,7 @@ func main() {
 
 	// load the config
 	cfg, network, genesis, err := loadConfig()
-	if err != nil {
-		stdoutFatalError("failed to load config: " + err.Error())
-	}
+	checkFatalError("failed to load config", err)
 
 	// NOTE: update the usage header when adding new commands
 	if flag.Arg(0) == "version" {
@@ -58,21 +56,14 @@ func main() {
 	}
 
 	// sanitize the config
-	if err := sanitizeConfig(&cfg); err != nil {
-		stdoutFatalError("failed to sanitize config: " + err.Error())
-	}
+	checkFatalError("failed to sanitize config", sanitizeConfig(&cfg))
 
 	// create node
 	node, err := newNode(cfg, network, genesis)
-	if err != nil {
-		stdoutFatalError("failed to create node: " + err.Error())
-	}
+	checkFatalError("failed to create node", err)
 
 	// start node
-	err = node.Run()
-	if err != nil {
-		stdoutFatalError("failed to run node: " + err.Error())
-	}
+	checkFatalError("failed to run node", node.Run())
 
 	// wait for interrupt signal
 	signalCh := make(chan os.Signal, 1)
