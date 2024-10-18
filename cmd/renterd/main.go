@@ -71,11 +71,7 @@ func main() {
 	<-signalCh
 
 	// shut down the node
-	err = node.Shutdown()
-	if err != nil {
-		os.Exit(1)
-		return
-	}
+	checkFatalError("failed to shut down", node.Shutdown())
 
 	os.Exit(0)
 }

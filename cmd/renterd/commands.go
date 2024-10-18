@@ -64,10 +64,7 @@ func cmdBuildConfig(cfg *config.Config) {
 func cmdSeed() {
 	var seed [32]byte
 	phrase := wallet.NewSeedPhrase()
-	if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
-		println(err.Error())
-		os.Exit(1)
-	}
+	checkFatalError("failed to derive seed from phrase", wallet.SeedFromPhrase(&seed, phrase))
 	key := wallet.KeyFromSeed(&seed, 0)
 	fmt.Println("Recovery Phrase:", phrase)
 	fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
