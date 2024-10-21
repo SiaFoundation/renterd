@@ -250,7 +250,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 		fmt.Printf("DEBUG PJ: THREAD %v FETCHING PACKED SLABS\n", key)
 		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
 		if err != nil {
-			panic(err)
+			fmt.Printf("DEBUG PJ: PANIC %v\n", err)
 			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			mem.Release()
 			break
@@ -277,7 +277,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
 			fmt.Printf("DEBUG PJ: THREAD %v UPLOADING PACKED SLAB\n", key)
 			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
-				panic(err)
+				fmt.Printf("DEBUG PJ: PANIC %v\n", err)
 				w.logger.Error(err)
 				interruptCancel() // prevent new uploads from being launched
 			}
