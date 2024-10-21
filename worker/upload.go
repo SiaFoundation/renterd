@@ -160,7 +160,6 @@ func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.Redunda
 	for _, opt := range opts {
 		opt(&up)
 	}
-	// fmt.Println("DEBUG PJ: upload params", up)
 
 	// if not given, try decide on a mime type using the file extension
 	if !up.multipart && up.mimeType == "" {
@@ -180,12 +179,10 @@ func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.Redunda
 	if err != nil {
 		return "", err
 	}
-	fmt.Printf("DEBUG PJ: UPLOAD %v succeeded, limit reached %v\n", up.path, bufferSizeLimitReached)
 
 	// return early if worker was shut down or if we don't have to consider
 	// packed uploads
 	if w.isStopped() || !up.packing {
-		fmt.Println("DEBUG PJ: upload packing disabled, upload done")
 		return eTag, nil
 	}
 
@@ -200,12 +197,10 @@ func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.Redunda
 			if err != nil {
 				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
 			} else if len(packedSlabs) > 0 {
-				fmt.Println("DEBUG PJ: FOUND PACKED SLAB for upload, uploading synchronously")
 				// upload packed slab
 				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
 					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
-				fmt.Println("DEBUG PJ: uploaded packed slab, err: ", err)
 			}
 		}
 	}
@@ -220,7 +215,6 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
 	w.uploadsMu.Lock()
 	if _, ok := w.uploadingPackedSlabs[key]; ok {
-		fmt.Printf("DEBUG PJ: THREAD %v ALREADY RUNNING\n", key)
 		w.uploadsMu.Unlock()
 		return
 	}
@@ -248,10 +242,8 @@ loop:
 		}
 
 		// fetch packed slab to upload
-		fmt.Printf("DEBUG PJ: THREAD %v FETCHING PACKED SLABS\n", key)
 		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
 		if err != nil {
-			fmt.Printf("DEBUG PJ: PANIC %v\n", err)
 			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			mem.Release()
 			break
@@ -259,7 +251,6 @@ loop:
 
 		// no more packed slabs to upload
 		if len(packedSlabs) == 0 {
-			fmt.Printf("DEBUG PJ: THREAD %v no packed slabs found\n", key)
 			mem.Release()
 			break
 		}
@@ -276,9 +267,7 @@ loop:
 			defer cancel()
 
 			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
-			fmt.Printf("DEBUG PJ: THREAD %v UPLOADING PACKED SLAB\n", key)
 			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
-				fmt.Printf("DEBUG PJ: PANIC %v\n", err)
 				w.logger.Error(err)
 				interruptCancel() // prevent new uploads from being launched
 			}
@@ -295,8 +284,6 @@ loop:
 	} else if len(packedSlabs) > 0 {
 		goto loop
 	}
-
-	fmt.Printf("DEBUG PJ: THREAD %v DONE\n", key)
 }
 
 func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {

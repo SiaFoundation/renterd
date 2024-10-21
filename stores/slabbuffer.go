@@ -148,8 +148,6 @@ func (mgr *SlabBufferManager) Close() error {
 }
 
 func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.SlabSlice, int64, error) {
-	fmt.Println("DEBUG PJ: BUS: add partial slab", len(data))
-	defer fmt.Println("DEBUG PJ: BUS: done adding partial slab", len(data))
 	var set int64
 	err := mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
 		set, err = tx.ContractSetID(ctx, contractSet)
