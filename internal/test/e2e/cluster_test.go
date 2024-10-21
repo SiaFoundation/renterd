@@ -1770,12 +1770,31 @@ func TestUploadPacking(t *testing.T) {
 	}
 
 	// upload 2 more files which are half a slab each to test filling up a slab
-	// exactly.
+	// exactly, before uploading file 5 we wait until all buffers are
+	// complete/unlocked and there are no more packed slabs left
 	data4 := make([]byte, slabSize/2)
-	data5 := make([]byte, slabSize/2)
 	uploadDownload("file4", data4)
-	uploadDownload("file5", data5)
 	download("file4", data4, 0, int64(len(data4)))
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buffers, err := b.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, buffer := range buffers {
+			if buffer.Locked {
+				return errors.New("buffer locked")
+			}
+		}
+		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), test.ContractSet, 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) > 0 {
+			return errors.New("packed slabs left")
+		}
+		return nil
+	})
+	data5 := make([]byte, slabSize/2)
+	uploadDownload("file5", data5)
 
 	// assert number of objects
 	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
@@ -1786,7 +1805,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
-	tt.Retry(60, time.Second, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)

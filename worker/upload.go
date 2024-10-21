@@ -232,7 +232,6 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	interruptCtx, interruptCancel := context.WithCancel(w.shutdownCtx)
 	defer interruptCancel()
 
-loop:
 	var wg sync.WaitGroup
 	for {
 		// block until we have memory
@@ -276,14 +275,6 @@ loop:
 
 	// wait for all threads to finish
 	wg.Wait()
-
-	// no need to close out the thread if there's new packed slabs for upload
-	packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
-	if err != nil {
-		w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
-	} else if len(packedSlabs) > 0 {
-		goto loop
-	}
 }
 
 func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
