@@ -44,9 +44,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
-      # - name: Configure Windows
-      #   if: matrix.os == 'windows-latest'
-      #   run: git config --global core.autocrlf false # fixes go lint fmt error
+      - name: Configure Windows
+        if: matrix.os == 'windows-latest'
+        run: git config --global core.autocrlf false # fixes go lint fmt error
       - name: Configure MySQL
         if: matrix.os == 'ubuntu-latest'
         uses: mirromutth/mysql-action@v1.1
