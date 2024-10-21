@@ -4,8 +4,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"strings"
-	"unicode/utf8"
 
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
@@ -27,7 +25,7 @@ type (
 
 	MainMigrator interface {
 		Migrator
-		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		MakeDirsForPathWithMemos(ctx context.Context, tx Tx, bucket, path string, bucketMemo, dirMemo map[string]int64) (int64, error)
 	}
 )
 
@@ -88,78 +86,9 @@ var (
 			{
 				ID: "00008_directories",
 				Migrate: func(tx Tx) error {
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00008_directories_1", log); err != nil {
-						return fmt.Errorf("failed to migrate: %v", err)
-					}
-					// helper type
-					type obj struct {
-						ID       uint
-						ObjectID string
-					}
-					// loop over all objects and deduplicate dirs to create
-					log.Info("beginning post-migration directory creation, this might take a while")
-					batchSize := 10000
-					processedDirs := make(map[string]struct{})
-					for offset := 0; ; offset += batchSize {
-						if offset > 0 && offset%batchSize == 0 {
-							log.Infof("processed %v objects", offset)
-						}
-						var objBatch []obj
-						rows, err := tx.Query(ctx, "SELECT id, object_id FROM objects ORDER BY id LIMIT ? OFFSET ?", batchSize, offset)
-						if err != nil {
-							return fmt.Errorf("failed to fetch objects: %v", err)
-						}
-						for rows.Next() {
-							var o obj
-							if err := rows.Scan(&o.ID, &o.ObjectID); err != nil {
-								_ = rows.Close()
-								return fmt.Errorf("failed to scan object: %v", err)
-							}
-							objBatch = append(objBatch, o)
-						}
-						if err := rows.Close(); err != nil {
-							return fmt.Errorf("failed to close rows: %v", err)
-						}
-						if len(objBatch) == 0 {
-							break // done
-						}
-						for _, obj := range objBatch {
-							// check if dir was processed
-							dir := "" // root
-							if i := strings.LastIndex(obj.ObjectID, "/"); i > -1 {
-								dir = obj.ObjectID[:i+1]
-							}
-							_, exists := processedDirs[dir]
-							if exists {
-								continue // already processed
-							}
-							processedDirs[dir] = struct{}{}
-
-							// process
-							dirID, err := m.MakeDirsForPath(ctx, tx, obj.ObjectID)
-							if err != nil {
-								return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
-							}
-
-							if _, err := tx.Exec(ctx, `
-							UPDATE objects
-							SET db_directory_id = ?
-							WHERE object_id LIKE ? AND
-							SUBSTR(object_id, 1, ?) = ? AND
-							INSTR(SUBSTR(object_id, ?), '/') = 0
-						`,
-								dirID,
-								dir+"%",
-								utf8.RuneCountInString(dir), dir,
-								utf8.RuneCountInString(dir)+1); err != nil {
-								return fmt.Errorf("failed to update object %s: %w", obj.ObjectID, err)
-							}
-						}
-					}
-					log.Info("post-migration directory creation complete")
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00008_directories_2", log); err != nil {
-						return fmt.Errorf("failed to migrate: %v", err)
-					}
+					// TODO: alternative is to keep an old version of the
+					// MakeDirsForPath around
+					log.Infof("skipping main migration '00008_directories' in favour of '00018_directory_buckets'")
 					return nil
 				},
 			},
@@ -214,6 +143,64 @@ var (
 			{
 				ID: "00017_unix_ms",
 				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+				},
+			},
+			{
+				ID: "00018_directory_buckets",
+				Migrate: func(tx Tx) error {
+					// recreate directories table
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_recreate_directories", log); err != nil {
+						return fmt.Errorf("failed to migrate: %v", err)
+					}
+
+					// helper type
+					type obj struct {
+						ID       int64
+						Bucket   string
+						ObjectID string
+					}
+
+					// query all objects
+					rows, err := tx.Query(ctx, "SELECT o.id, b.name, o.object_id FROM objects o INNER JOIN buckets b ON o.bucket_id = b.id")
+					if err != nil {
+						return fmt.Errorf("failed to fetch objects: %w", err)
+					}
+					defer rows.Close()
+
+					// gather all necessary data to update the directory id of every object
+					objectToDir := make(map[int64]int64)
+					bucketMemo := make(map[string]int64)
+					dirMemos := make(map[string]map[string]int64)
+					for rows.Next() {
+						var o obj
+						if err := rows.Scan(&o.ID, &o.Bucket, &o.ObjectID); err != nil {
+							return fmt.Errorf("failed to scan object: %w", err)
+						} else if _, ok := dirMemos[o.Bucket]; !ok {
+							dirMemos[o.Bucket] = make(map[string]int64)
+						}
+
+						dirID, err := m.MakeDirsForPathWithMemos(ctx, tx, o.Bucket, o.ObjectID, bucketMemo, dirMemos[o.Bucket])
+						if err != nil {
+							return fmt.Errorf("failed to create directory %s: %w", o.ObjectID, err)
+						}
+						objectToDir[o.ID] = dirID
+					}
+
+					// prepare an update statement
+					stmt, err := tx.Prepare(ctx, "UPDATE objects SET db_directory_id = ? WHERE id = ?")
+					if err != nil {
+						return fmt.Errorf("failed to prepare update statement: %w", err)
+					}
+					defer stmt.Close()
+
+					// update all objects
+					for id, dirID := range objectToDir {
+						if _, err := stmt.Exec(ctx, dirID, id); err != nil {
+							return fmt.Errorf("failed to update object %d: %w", id, err)
+						}
+					}
+
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
 				},
 			},

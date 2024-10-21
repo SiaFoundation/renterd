@@ -4274,7 +4274,7 @@ func TestSlabCleanup(t *testing.T) {
 	var dirID int64
 	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
+		dirID, err = tx.MakeDirsForPath(context.Background(), api.DefaultBucketName, "/")
 		return err
 	})
 	if err != nil {
@@ -4289,11 +4289,11 @@ func TestSlabCleanup(t *testing.T) {
 	defer insertObjStmt.Close()
 
 	var obj1ID, obj2ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1); err != nil {
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "/1", ss.DefaultBucketID(), 1); err != nil {
 		t.Fatal(err)
 	} else if obj1ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1); err != nil {
+	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "/2", ss.DefaultBucketID(), 1); err != nil {
 		t.Fatal(err)
 	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4322,7 +4322,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "1")
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4333,7 +4333,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete second object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "2")
+	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "/2")
 	if err != nil {
 		t.Fatal(err)
 	} else if slabCntr := ss.Count("slabs"); slabCntr != 0 {
@@ -4822,7 +4822,7 @@ func TestDirectories(t *testing.T) {
 		var dirID int64
 		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.MakeDirsForPath(context.Background(), o)
+			dirID, err = tx.MakeDirsForPath(context.Background(), api.DefaultBucketName, o)
 			return err
 		})
 		if err != nil {

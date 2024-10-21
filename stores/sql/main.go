@@ -465,6 +465,10 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 	} else if !empty {
 		return api.ErrBucketNotEmpty
 	}
+	_, err = tx.Exec(ctx, "DELETE FROM directories WHERE db_bucket_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete bucket: %w", err)
+	}
 	_, err = tx.Exec(ctx, "DELETE FROM buckets WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete bucket: %w", err)

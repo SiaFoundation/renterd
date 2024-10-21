@@ -72,9 +72,9 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
-func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
+func (b *MainDatabase) MakeDirsForPathWithMemos(ctx context.Context, tx sql.Tx, bucket, path string, bucketMemo, dirMemo map[string]int64) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPath(ctx, path)
+	return mtx.MakeDirsForPathWithMemos(ctx, bucket, path, bucketMemo, dirMemo)
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -223,7 +223,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, key)
+	dirID, err := tx.MakeDirsForPath(ctx, bucket, key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -478,40 +478,55 @@ func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortB
 	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
-	// Create root dir.
-	dirID := int64(sql.DirectoriesRootID)
-	if _, err := tx.Exec(ctx, "INSERT IGNORE INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL)", dirID); err != nil {
-		return 0, fmt.Errorf("failed to create root directory: %w", err)
+func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, bucket, path string) (int64, error) {
+	return tx.MakeDirsForPathWithMemos(ctx, bucket, path, make(map[string]int64), make(map[string]int64))
+}
+
+func (tx *MainDatabaseTx) MakeDirsForPathWithMemos(ctx context.Context, bucket, path string, bucketMemo, dirMemo map[string]int64) (int64, error) {
+	// sanity check input (ensures we can dereference the parent)
+	if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
+	} else if path == "" {
+		return 0, errors.New("path cannot be empty")
 	}
 
-	path = strings.TrimSuffix(path, "/")
-	if path == "/" {
-		return dirID, nil
+	// fetch bucket id
+	bucketID := bucketMemo[bucket]
+	if bucketID == 0 {
+		err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).
+			Scan(&bucketID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
+		} else if err != nil {
+			return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+		}
 	}
 
-	// Create remaining directories.
-	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+	// prepare insert statement
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (db_bucket_id, db_parent_id, name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
 	}
 	defer insertDirStmt.Close()
 
-	for i := 0; i < utf8.RuneCountInString(path); i++ {
-		if path[i] != '/' {
+	// insert directories for given path
+	var dirID *int64
+	for _, dir := range object.Directories(path) {
+		if val, ok := dirMemo[dir]; ok {
+			dirID = &val
 			continue
 		}
-		dir := path[:i+1]
-		if dir == "/" {
-			continue
-		}
-		if res, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
+
+		if res, err := insertDirStmt.Exec(ctx, bucketID, dirID, dir); err != nil {
 			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		} else if dirID, err = res.LastInsertId(); err != nil {
+		} else if insertedID, err := res.LastInsertId(); err != nil {
 			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else {
+			dirMemo[dir] = insertedID
+			dirID = &insertedID
 		}
 	}
-	return dirID, nil
+	return *dirID, nil
 }
 
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
