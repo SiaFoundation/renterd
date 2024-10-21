@@ -25,15 +25,13 @@ jobs:
             autopilot
             bus bus/client
             worker worker/client
-          flags: |
-            -japecheck.types=false
   test:
     needs: analyze
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ["1.22", "1.23"]
+        os: [ ubuntu-latest , macos-latest, windows-latest ]
+        go-version: [ '1.22', '1.23' ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,6 +39,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+      - uses: docker/login-action@v3 # helps with rate limit issues
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
       - name: Configure Windows
         if: matrix.os == 'windows-latest'
         run: git config --global core.autocrlf false # fixes go lint fmt error
@@ -49,7 +52,7 @@ jobs:
         uses: mirromutth/mysql-action@v1.1
         with:
           host port: 3800
-          mysql version: "8"
+          mysql version: '8'
           mysql root password: test
       - name: Test Stores
         uses: n8maninger/action-golang-test@v1
