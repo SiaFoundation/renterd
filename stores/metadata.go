@@ -664,7 +664,9 @@ func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj
 func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error) {
 	packed, err := s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, set, limit)
 	if len(packed) > 0 {
-		fmt.Println("DEBUG PJ: bus returning packed slab")
+		for _, p := range packed {
+			fmt.Println("DEBUG PJ: BUS returning packed slab", p.BufferID)
+		}
 	}
 	return packed, err
 }
@@ -690,6 +692,7 @@ func (s *SQLStore) PrunableContractRoots(ctx context.Context, fcid types.FileCon
 func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error {
 	// Sanity check input.
 	for i, ss := range slabs {
+		fmt.Println("DEBUG PJ: BUS: MarkPackedSlabsUploaded", ss.BufferID)
 		for _, shard := range ss.Shards {
 			// Verify that all hosts have a contract.
 			if len(shard.Contracts) == 0 {

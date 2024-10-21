@@ -72,7 +72,7 @@ jobs:
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
+          args: "-failfast;-race;-timeout=60m;-count=20;-run=^TestUploadPacking$"
       - name: Test Integration - MySQL
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1
@@ -82,6 +82,6 @@ jobs:
           RENTERD_DB_PASSWORD: test
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
+          args: "-failfast;-race;-timeout=60m;-count=20;-run=^TestUploadPacking$"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
