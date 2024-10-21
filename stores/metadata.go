@@ -662,7 +662,11 @@ func (s *SQLStore) ObjectMetadata(ctx context.Context, bucket, path string) (obj
 // uploading. They are locked for 'lockingDuration' time before being handed out
 // again.
 func (s *SQLStore) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error) {
-	return s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, set, limit)
+	packed, err := s.slabBufferMgr.SlabsForUpload(ctx, lockingDuration, minShards, totalShards, set, limit)
+	if len(packed) > 0 {
+		fmt.Println("DEBUG PJ: bus returning packed slab")
+	}
+	return packed, err
 }
 
 func (s *SQLStore) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {

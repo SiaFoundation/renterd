@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"fmt"
+
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
@@ -23,6 +25,11 @@ type uploadParameters struct {
 	mimeType    string
 
 	metadata api.ObjectUserMetadata
+}
+
+func (up uploadParameters) String() string {
+	return fmt.Sprintf("bucket: %s, path: %s, multipart: %t, uploadID: %s, partNumber: %d, ec: %v, encryptionOffset: %d, rs: %v, bh: %d, contractSet: %s, packing: %t, mimeType: %s, metadata: %v",
+		up.bucket, up.path, up.multipart, up.uploadID, up.partNumber, up.ec, up.encryptionOffset, up.rs, up.bh, up.contractSet, up.packing, up.mimeType, up.metadata)
 }
 
 func defaultParameters(bucket, path string, rs api.RedundancySettings) uploadParameters {

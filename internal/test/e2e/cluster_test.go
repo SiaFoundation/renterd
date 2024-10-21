@@ -1667,7 +1667,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		logger:        newTestLoggerCustom(zapcore.DebugLevel),
+		logger:        zap.NewNop(),
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
