@@ -2717,7 +2717,7 @@ func TestBackup(t *testing.T) {
 	// test that backup fails for MySQL
 	isSqlite := config.MySQLConfigFromEnv().URI == ""
 	if !isSqlite {
-		err := bus.Backup(context.Background(), "", "")
+		err := bus.Backup(context.Background(), "main", "backup.sql")
 		cluster.tt.AssertIs(err, api.ErrBackupNotSupported)
 		return
 	}
