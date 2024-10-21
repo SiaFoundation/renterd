@@ -3867,6 +3867,20 @@ func TestRenewedContract(t *testing.T) {
 	} else if cs[0].ID != fcidR {
 		t.Fatal("unexpected contract", cs[0])
 	}
+
+	// archive the renewal
+	err = ss.ArchiveContract(context.Background(), renewal.ID, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we can fetch archived contracts
+	archived, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(archived) != 2 {
+		t.Fatal("unexpected two archived contracts", len(cs))
+	}
 }
 
 func TestRefreshHealth(t *testing.T) {
