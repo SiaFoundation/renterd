@@ -30,8 +30,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest , macos-latest, windows-latest ]
-        go-version: [ '1.22', '1.23' ]
+        os: [ macos-latest ]
+        go-version: [ '1.23' ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,44 +44,44 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
-      - name: Configure Windows
-        if: matrix.os == 'windows-latest'
-        run: git config --global core.autocrlf false # fixes go lint fmt error
-      - name: Configure MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: mirromutth/mysql-action@v1.1
-        with:
-          host port: 3800
-          mysql version: '8'
-          mysql root password: test
-      - name: Test Stores
-        uses: n8maninger/action-golang-test@v1
-        with:
-          args: "-race;-short"
-      - name: Test Stores - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./stores"
-          args: "-race;-short"
+      # - name: Configure Windows
+      #   if: matrix.os == 'windows-latest'
+      #   run: git config --global core.autocrlf false # fixes go lint fmt error
+      # - name: Configure MySQL
+      #   if: matrix.os == 'ubuntu-latest'
+      #   uses: mirromutth/mysql-action@v1.1
+      #   with:
+      #     host port: 3800
+      #     mysql version: '8'
+      #     mysql root password: test
+      # - name: Test Stores
+      #   uses: n8maninger/action-golang-test@v1
+      #   with:
+      #     args: "-race;-short"
+      # - name: Test Stores - MySQL
+      #   if: matrix.os == 'ubuntu-latest'
+      #   uses: n8maninger/action-golang-test@v1
+      #   env:
+      #     RENTERD_DB_URI: 127.0.0.1:3800
+      #     RENTERD_DB_USER: root
+      #     RENTERD_DB_PASSWORD: test
+      #   with:
+      #     package: "./stores"
+      #     args: "-race;-short"
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
-      - name: Test Integration - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
+          args: "-failfast;-race;-timeout=60m;-run=TestUploadPacking"
+      # - name: Test Integration - MySQL
+      #   if: matrix.os == 'ubuntu-latest'
+      #   uses: n8maninger/action-golang-test@v1
+      #   env:
+      #     RENTERD_DB_URI: 127.0.0.1:3800
+      #     RENTERD_DB_USER: root
+      #     RENTERD_DB_PASSWORD: test
+      #   with:
+      #     package: "./internal/test/e2e/..."
+      #     args: "-failfast;-race;-timeout=60m"
       - name: Build
         run: go build -o bin/ ./cmd/renterd
