@@ -25,7 +25,7 @@ type (
 
 	MainMigrator interface {
 		Migrator
-		MakeDirsForPathWithMemos(ctx context.Context, tx Tx, bucket, path string, bucketMemo, dirMemo map[string]int64) (int64, error)
+		InsertDirectoriesMemoized(ctx context.Context, tx Tx, bucketID int64, path string, memo map[string]int64) (int64, error)
 	}
 )
 
@@ -86,8 +86,7 @@ var (
 			{
 				ID: "00008_directories",
 				Migrate: func(tx Tx) error {
-					// TODO: alternative is to keep an old version of the
-					// MakeDirsForPath around
+					// TODO: alternative to tweak old version of MakeDirsForPath
 					log.Infof("skipping main migration '00008_directories' in favour of '00018_directory_buckets'")
 					return nil
 				},
@@ -154,37 +153,28 @@ var (
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
-					// helper type
-					type obj struct {
-						ID       int64
-						Bucket   string
-						ObjectID string
-					}
-
-					// query all objects
-					rows, err := tx.Query(ctx, "SELECT o.id, b.name, o.object_id FROM objects o INNER JOIN buckets b ON o.bucket_id = b.id")
+					// fetch all objects
+					rows, err := tx.Query(ctx, "SELECT o.id, o.db_bucket_id, o.object_id FROM objects o")
 					if err != nil {
 						return fmt.Errorf("failed to fetch objects: %w", err)
 					}
 					defer rows.Close()
 
 					// gather all necessary data to update the directory id of every object
-					objectToDir := make(map[int64]int64)
-					bucketMemo := make(map[string]int64)
-					dirMemos := make(map[string]map[string]int64)
+					updates := make(map[int64]int64)
+					memo := make(map[string]int64)
 					for rows.Next() {
-						var o obj
-						if err := rows.Scan(&o.ID, &o.Bucket, &o.ObjectID); err != nil {
+						var oID, bID int64
+						var path string
+						if err := rows.Scan(&oID, &bID, &path); err != nil {
 							return fmt.Errorf("failed to scan object: %w", err)
-						} else if _, ok := dirMemos[o.Bucket]; !ok {
-							dirMemos[o.Bucket] = make(map[string]int64)
 						}
 
-						dirID, err := m.MakeDirsForPathWithMemos(ctx, tx, o.Bucket, o.ObjectID, bucketMemo, dirMemos[o.Bucket])
+						dirID, err := m.InsertDirectoriesMemoized(ctx, tx, bID, path, memo)
 						if err != nil {
-							return fmt.Errorf("failed to create directory %s: %w", o.ObjectID, err)
+							return fmt.Errorf("failed to create directory %s: %w", path, err)
 						}
-						objectToDir[o.ID] = dirID
+						updates[oID] = dirID
 					}
 
 					// prepare an update statement
@@ -195,7 +185,7 @@ var (
 					defer stmt.Close()
 
 					// update all objects
-					for id, dirID := range objectToDir {
+					for id, dirID := range updates {
 						if _, err := stmt.Exec(ctx, dirID, id); err != nil {
 							return fmt.Errorf("failed to update object %d: %w", id, err)
 						}

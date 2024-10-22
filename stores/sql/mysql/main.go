@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -37,6 +38,7 @@ type (
 	}
 
 	MainDatabaseTx struct {
+		mu sync.Mutex
 		sql.Tx
 		log *zap.SugaredLogger
 	}
@@ -72,9 +74,9 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
-func (b *MainDatabase) MakeDirsForPathWithMemos(ctx context.Context, tx sql.Tx, bucket, path string, bucketMemo, dirMemo map[string]int64) (int64, error) {
+func (b *MainDatabase) InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx, bucketID int64, path string, memo map[string]int64) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPathWithMemos(ctx, bucket, path, bucketMemo, dirMemo)
+	return mtx.InsertDirectoriesMemoized(ctx, bucketID, object.Directories(path), memo)
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -92,7 +94,7 @@ func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 }
 
 func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
-	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
+	return &MainDatabaseTx{sync.Mutex{}, tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
 func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
@@ -223,7 +225,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, bucket, key)
+	dirID, err := tx.InsertDirectories(ctx, bucket, object.Directories(key))
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -308,7 +310,11 @@ func (tx *MainDatabaseTx) ContractSizes(ctx context.Context) (map[types.FileCont
 }
 
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
-	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
+	dstDirID, err := tx.InsertDirectories(ctx, dstBucket, object.Directories(dstKey))
+	if err != nil {
+		return api.ObjectMetadata{}, err
+	}
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata, dstDirID)
 }
 
 func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
@@ -330,18 +336,6 @@ func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp ap
 
 func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error) {
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
-}
-
-func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
-	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
-}
-
-func (tx *MainDatabaseTx) InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	return ssql.InsertContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
-}
-
-func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
-	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
@@ -411,6 +405,87 @@ func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time
 	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
 }
 
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
+}
+
+func (tx *MainDatabaseTx) InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
+	return ssql.InsertContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
+}
+
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket string, dirs []string) (int64, error) {
+	// fetch bucket
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// insert directories
+	return tx.InsertDirectoriesMemoized(ctx, bucketID, dirs, make(map[string]int64))
+}
+
+func (tx *MainDatabaseTx) InsertDirectoriesMemoized(ctx context.Context, bucketID int64, dirs []string, memo map[string]int64) (int64, error) {
+	// sanity check input (ensures we can dereference the parent)
+	if len(dirs) == 0 {
+		return 0, errors.New("dirs cannot be empty")
+	}
+
+	// prepare statements
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE db_bucket_id = ? AND name = ?")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer queryDirStmt.Close()
+
+	// insert directories for give path
+	var dirID *int64
+	for _, dir := range dirs {
+		// check if we have a memoized dir id
+		if v, ok := memo[dir]; ok {
+			dirID = &v
+			continue
+		}
+
+		// query existing directory
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, err
+		} else if existingID > 0 {
+			dirID = &existingID
+			memo[dir] = existingID
+			continue
+		}
+		fmt.Println(err)
+
+		// insert directory
+		var insertedID int64
+		if _, err := insertDirStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		} else if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&insertedID); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if insertedID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		} else {
+			memo[dir] = insertedID
+		}
+		dirID = &insertedID
+	}
+	return *dirID, nil
+}
+
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
+}
+
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// get bucket id
 	var bucketID int64
@@ -476,57 +551,6 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
 	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
-}
-
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, bucket, path string) (int64, error) {
-	return tx.MakeDirsForPathWithMemos(ctx, bucket, path, make(map[string]int64), make(map[string]int64))
-}
-
-func (tx *MainDatabaseTx) MakeDirsForPathWithMemos(ctx context.Context, bucket, path string, bucketMemo, dirMemo map[string]int64) (int64, error) {
-	// sanity check input (ensures we can dereference the parent)
-	if bucket == "" {
-		return 0, errors.New("bucket cannot be empty")
-	} else if path == "" {
-		return 0, errors.New("path cannot be empty")
-	}
-
-	// fetch bucket id
-	bucketID := bucketMemo[bucket]
-	if bucketID == 0 {
-		err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).
-			Scan(&bucketID)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return 0, fmt.Errorf("bucket %v not found: %w", bucket, api.ErrBucketNotFound)
-		} else if err != nil {
-			return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
-		}
-	}
-
-	// prepare insert statement
-	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (db_bucket_id, db_parent_id, name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
-	}
-	defer insertDirStmt.Close()
-
-	// insert directories for given path
-	var dirID *int64
-	for _, dir := range object.Directories(path) {
-		if val, ok := dirMemo[dir]; ok {
-			dirID = &val
-			continue
-		}
-
-		if res, err := insertDirStmt.Exec(ctx, bucketID, dirID, dir); err != nil {
-			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		} else if insertedID, err := res.LastInsertId(); err != nil {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else {
-			dirMemo[dir] = insertedID
-			dirID = &insertedID
-		}
-	}
-	return *dirID, nil
 }
 
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
@@ -706,6 +730,70 @@ func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailu
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
 
+// RenameDirectories renames all directories in the database with the
+// given prefix to the new prefix.
+func (tx *MainDatabaseTx) RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error) {
+	// prepare statements
+	updateNameStmt, err := tx.Prepare(ctx, "UPDATE directories SET name = ? WHERE id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateNameStmt.Close()
+
+	updateParentStmt, err := tx.Prepare(ctx, "UPDATE directories SET db_parent_id = ? WHERE db_parent_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateParentStmt.Close()
+
+	existsStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)")
+	if err != nil {
+		return 0, err
+	}
+	defer existsStmt.Close()
+
+	// fetch directories
+	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)", prefixOld+"%", bucket)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	// rename directories
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return 0, err
+		}
+
+		// check if the new directory already exists
+		name = strings.Replace(name, prefixOld, prefixNew, 1)
+		var existingID int64
+		if err := existsStmt.QueryRow(ctx, name, bucket).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, err
+		} else if existingID > 0 {
+			_, err := updateParentStmt.Exec(ctx, existingID, id)
+			if err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		// update directory
+		if _, err := updateNameStmt.Exec(ctx, name, id); err != nil {
+			return 0, err
+		}
+	}
+
+	dirs := object.Directories(prefixNew)
+	if strings.HasSuffix(prefixNew, "/") {
+		dirs = append(dirs, prefixNew)
+	}
+
+	return tx.InsertDirectories(ctx, bucket, dirs)
+}
+
 func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error {
 	if force {
 		// delete potentially existing object at destination
@@ -733,7 +821,7 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 
 func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
 	if force {
-		_, err := tx.Exec(ctx, `
+		query := `
 		DELETE
 		FROM objects
 		WHERE object_id IN (
@@ -743,26 +831,34 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 				FROM objects
 				WHERE object_id LIKE ?
 				AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
-			) as i
-		)`,
+				) as i
+				)`
+		args := []any{
 			prefixNew,
-			utf8.RuneCountInString(prefixOld)+1,
-			prefixOld+"%",
-			bucket)
+			utf8.RuneCountInString(prefixOld) + 1,
+			prefixOld + "%",
+			bucket,
+		}
+		_, err := tx.Exec(ctx, query, args)
 		if err != nil {
 			return err
 		}
 	}
-	resp, err := tx.Exec(ctx, `
+
+	query := `
 		UPDATE objects
 		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
 		db_directory_id = ?
-		WHERE object_id LIKE ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
-		prefixNew, utf8.RuneCountInString(prefixOld)+1,
+		WHERE object_id LIKE ? AND object_id != ?
+		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`
+	args := []any{
+		prefixNew, utf8.RuneCountInString(prefixOld) + 1,
 		dirID,
-		prefixOld+"%",
-		bucket)
+		prefixOld + "%",
+		prefixNew,
+		bucket,
+	}
+	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
 		return api.ErrObjectExists
 	} else if err != nil {
