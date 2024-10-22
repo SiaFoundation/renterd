@@ -189,7 +189,7 @@ func (b *Bus) postSystemSQLite3BackupHandler(jc jape.Context) {
 	switch req.Database {
 	case "main", "metrics":
 	default:
-		jc.Error(api.ErrInvalidDatabase, http.StatusBadRequest)
+		jc.Error(fmt.Errorf("%w: valid values are 'main' and 'metrics'", api.ErrInvalidDatabase), http.StatusBadRequest)
 		return
 	}
 	err := b.store.Backup(jc.Request.Context(), req.Database, req.Path)
