@@ -362,7 +362,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	return sizes, nil
 }
 
-func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata, dstDirID int64) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
 	if err != nil {
@@ -421,9 +421,9 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 
 	// copy object
 	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
-						SELECT ?, ?, db_directory_id, ?, `+"`key`"+`, size, ?, etag
+						SELECT ?, ?, ?, ?, `+"`key`"+`, size, ?, etag
 						FROM objects
-						WHERE id = ?`, time.Now(), dstKey, dstBID, mimeType, srcObjID)
+						WHERE id = ?`, time.Now(), dstKey, dstDirID, dstBID, mimeType, srcObjID)
 	if err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -1339,19 +1339,17 @@ func NormalizePeer(peer string) (string, error) {
 	return normalized.String(), nil
 }
 
-func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
-	if !strings.HasPrefix(dirPath, "/") {
+func dirID(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
+	if bucket == "" {
+		return 0, fmt.Errorf("bucket must be set")
+	} else if !strings.HasPrefix(path, "/") {
 		return 0, fmt.Errorf("path must start with /")
-	} else if !strings.HasSuffix(dirPath, "/") {
+	} else if !strings.HasSuffix(path, "/") {
 		return 0, fmt.Errorf("path must end with /")
 	}
 
-	if dirPath == "/" {
-		return 1, nil // root dir returned
-	}
-
 	var id int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE name = ?", dirPath).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE db_bucket_id = (SELECT id FROM buckets WHERE name = ?) AND name = ?", bucket, path).Scan(&id); err != nil {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
@@ -1386,7 +1384,7 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	}
 
 	// fetch directory id
-	dirID, err := dirID(ctx, tx, path)
+	dirID, err := dirID(ctx, tx, bucket, path)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return []api.ObjectMetadata{}, false, nil
 	} else if err != nil {
@@ -1466,27 +1464,27 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	// 1. fetch all objects in requested directory
 	// 2. fetch all sub-directories
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM (
-			SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
-			FROM objects o
-			LEFT JOIN directories d ON d.name = o.object_id
-			WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-				AND d.id IS NULL
-			UNION ALL
-			SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
-			FROM objects o
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-			WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-			AND o.object_id LIKE ?
-			AND SUBSTR(o.object_id, 1, ?) = ?
-			AND d.db_parent_id = ?
-			GROUP BY d.id
-		) AS o
-		%s
-		ORDER BY %s
-		LIMIT ? OFFSET ?
-	`,
+	SELECT %s
+	FROM (
+		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		FROM objects o
+		LEFT JOIN directories d ON d.name = o.object_id
+		WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
+			AND d.id IS NULL
+		UNION ALL
+		SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+		FROM objects o
+		INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
+		WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
+		AND o.object_id LIKE ?
+		AND SUBSTR(o.object_id, 1, ?) = ?
+		AND d.db_parent_id = ?
+		GROUP BY d.id
+	) AS o
+	%s
+	ORDER BY %s
+	LIMIT ? OFFSET ?
+`,
 		tx.SelectObjectMetadataExpr(),
 		prefixExpr,
 		tx.CharLengthExpr(),
