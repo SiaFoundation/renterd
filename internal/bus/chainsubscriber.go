@@ -159,9 +159,9 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	b := cau.Block
 	if time.Since(b.Timestamp) <= s.announcementMaxAge {
 		hus := make(map[types.PublicKey]chain.HostAnnouncement)
-		chain.ForEachHostAnnouncement(b, func(hk types.PublicKey, ha chain.HostAnnouncement) {
+		chain.ForEachHostAnnouncement(b, func(ha chain.HostAnnouncement) {
 			if ha.NetAddress != "" {
-				hus[hk] = ha
+				hus[ha.PublicKey] = ha
 			}
 		})
 		for hk, ha := range hus {
