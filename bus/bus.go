@@ -189,7 +189,7 @@ type (
 
 	// BackupStore is the interface of a store that can be backed up.
 	BackupStore interface {
-		Backup(ctx context.Context, dbID, destPath string) error
+		Backup(ctx context.Context, dbID, dst string) error
 	}
 
 	// A ChainStore stores information about the chain.
@@ -492,7 +492,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /syncer/connect": b.syncerConnectHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 
-		"POST /system/database/backup": b.postSystemSQLite3BackupHandler,
+		"POST /system/sqlite3/backup": b.postSystemSQLite3BackupHandler,
 
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,

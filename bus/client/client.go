@@ -23,7 +23,7 @@ func New(addr, password string) *Client {
 }
 
 func (c *Client) Backup(ctx context.Context, database, dstPath string) (err error) {
-	err = c.c.WithContext(ctx).POST("/system/database/backup", api.BackupRequest{
+	err = c.c.WithContext(ctx).POST("/system/sqlite3/backup", api.BackupRequest{
 		Database: database,
 		Path:     dstPath,
 	}, nil)
