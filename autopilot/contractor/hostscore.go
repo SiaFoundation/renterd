@@ -9,6 +9,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/utils"
 )
 
@@ -22,7 +23,7 @@ const (
 	minValidScore = math.SmallestNonzeroFloat64
 )
 
-func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) (sb api.HostScoreBreakdown) {
+func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expectedRedundancy float64) (sb api.HostScoreBreakdown) {
 	cCfg := cfg.Contracts
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
@@ -37,13 +38,11 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) 
 	// NOTE: assume that data is not spread evenly and the host with the most
 	// data will store twice the expectation
 	allocationPerHost := idealDataPerHost * 2
-	// hostPeriodCost is the amount of money we expect to spend on a host in a period.
-	hostPeriodCost := hostPeriodCostForScore(h, cCfg, expectedRedundancy)
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h),
 		Collateral:       collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
-		Prices:           priceAdjustmentScore(hostPeriodCost, cCfg),
+		Prices:           priceAdjustmentScore(h.PriceTable, gs),
 		StorageRemaining: storageRemainingScore(h.Settings, h.StoredData, allocationPerHost),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
@@ -61,34 +60,49 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) 
 //   - If the host is more expensive than expected, an exponential malus is applied.
 //     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
 //     it to drop to 0.05.
-func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.ContractsConfig) float64 {
-	// return early if the allowance or amount of hosts is zero, avoiding a
-	// division by zero panic below.
-	//	if cfg.Allowance.IsZero() || cfg.Amount == 0 {
-	//		return math.SmallestNonzeroFloat64
-	//	}
-	//
-	//	hostPeriodBudget := cfg.Allowance.Div64(cfg.Amount)
-	//
-	//	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())
-	//	fRatio, _ := ratio.Float64()
-	//	switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
-	//	case 0:
-	//		return 0.5 // ratio is exactly 1 -> score is 0.5
-	//	case 1:
-	//		// cost is greater than budget -> score is in range (0; 0.5)
-	//		//
-	//		return 1.5 / math.Pow(3, fRatio)
-	//	case -1:
-	//		// cost < budget -> score is (0.5; 1]
-	//		s := 0.44 + 0.06*(1/fRatio)
-	//		if s > 1.0 {
-	//			s = 1.0
-	//		}
-	//		return s
-	//	}
-	//	panic("unreachable")
-	return 1 // TODO: implement
+func priceAdjustmentScore(pt api.HostPriceTable, gs api.GougingSettings) float64 {
+	// combine the upload and download prices to get a threshold
+	dppb, overflow := gouging.DownloadPricePerByte(pt.HostPriceTable)
+	if overflow {
+		return math.SmallestNonzeroFloat64
+	}
+	uppb, overflow := gouging.UploadPricePerByte(pt.HostPriceTable)
+	if overflow {
+		return math.SmallestNonzeroFloat64
+	}
+	sppb := pt.WriteStoreCost
+
+	priceScore := func(actual, max types.Currency) float64 {
+		if max.IsZero() {
+			return 1.0 // no gouging settings defined
+		}
+		threshold := max.Div64(2)
+
+		ratio := new(big.Rat).SetFrac(actual.Big(), threshold.Big())
+		fRatio, _ := ratio.Float64()
+		switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
+		case 0:
+			return 0.5 // ratio is exactly 1 -> score is 0.5
+		case 1:
+			// actual is greater than threshold -> score is in range (0; 0.5)
+			//
+			return 1.5 / math.Pow(3, fRatio)
+		case -1:
+			// actual < threshold -> score is (0.5; 1]
+			s := 0.44 + 0.06*(1/fRatio)
+			if s > 1.0 {
+				s = 1.0
+			}
+			return s
+		}
+		panic("unreachable")
+	}
+
+	// compute scores for download, upload and storage and combine them
+	downloadScore := priceScore(dppb, gs.MaxDownloadPrice)
+	uploadScore := priceScore(uppb, gs.MaxUploadPrice)
+	storageScore := priceScore(sppb, gs.MaxStoragePrice)
+	return (downloadScore + uploadScore + storageScore) / 3.0
 }
 
 func storageRemainingScore(h rhpv2.HostSettings, storedData uint64, allocationPerHost float64) float64 {

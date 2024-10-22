@@ -13,7 +13,7 @@ var ErrMissingRequiredFields = errors.New("missing required fields in configurat
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
+		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore)
 		if hc.UsabilityBreakdown.IsUsable() {
 			usables++
 		}
@@ -36,7 +36,7 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	resp.Hosts = uint64(len(hosts))
 	for i, host := range hosts {
 		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight // ignore block height
-		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
+		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore)
 		if hc.UsabilityBreakdown.IsUsable() {
 			resp.Usable++
 			continue

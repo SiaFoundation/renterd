@@ -81,7 +81,7 @@ func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
 			err = errors.New("panic while scoring host")
 		}
 	}()
-	return hostScore(ctx.state.AP.Config, h, ctx.state.RS.Redundancy()), nil
+	return hostScore(ctx.state.AP.Config, ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
 }
 
 func (ctx *mCtx) Period() uint64 {
