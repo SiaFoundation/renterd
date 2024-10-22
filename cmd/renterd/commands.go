@@ -54,26 +54,17 @@ func cmdBuildConfig(cfg *config.Config) {
 	}
 
 	f, err := os.Create(configPath)
-	if err != nil {
-		stdoutFatalError("Failed to create config file: " + err.Error())
-		return
-	}
+	checkFatalError("Failed to create config file", err)
 	defer f.Close()
 
 	enc := yaml.NewEncoder(f)
-	if err := enc.Encode(cfg); err != nil {
-		stdoutFatalError("Failed to encode config file: " + err.Error())
-		return
-	}
+	checkFatalError("Failed to encode config file", enc.Encode(cfg))
 }
 
 func cmdSeed() {
 	var seed [32]byte
 	phrase := wallet.NewSeedPhrase()
-	if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
-		println(err.Error())
-		os.Exit(1)
-	}
+	checkFatalError("failed to derive seed from phrase", wallet.SeedFromPhrase(&seed, phrase))
 	key := wallet.KeyFromSeed(&seed, 0)
 	fmt.Println("Recovery Phrase:", phrase)
 	fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
