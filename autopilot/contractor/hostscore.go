@@ -295,17 +295,6 @@ func versionScore(settings rhpv2.HostSettings, minVersion string) float64 {
 	return weight
 }
 
-// contractPriceForScore returns the contract price of the host used for
-// scoring. Since we don't know whether rhpv2 or rhpv3 are used, we return the
-// bigger one for a pesimistic score.
-func contractPriceForScore(h api.Host) types.Currency {
-	cp := h.Settings.ContractPrice
-	if cp.Cmp(h.PriceTable.ContractPrice) > 0 {
-		cp = h.PriceTable.ContractPrice
-	}
-	return cp
-}
-
 func bytesToSectors(bytes uint64) uint64 {
 	numSectors := bytes / rhpv2.SectorSize
 	if bytes%rhpv2.SectorSize != 0 {
@@ -314,61 +303,8 @@ func bytesToSectors(bytes uint64) uint64 {
 	return numSectors
 }
 
-func sectorStorageCost(pt rhpv3.HostPriceTable, duration uint64) types.Currency {
-	asc := pt.BaseCost().Add(pt.AppendSectorCost(duration))
-	return asc.Storage
-}
-
 func sectorUploadCost(pt rhpv3.HostPriceTable, duration uint64) types.Currency {
 	asc := pt.BaseCost().Add(pt.AppendSectorCost(duration))
 	uploadSectorCostRHPv3, _ := asc.Total()
 	return uploadSectorCostRHPv3
-}
-
-func uploadCostForScore(cfg api.ContractsConfig, h api.Host, bytes uint64) types.Currency {
-	uploadSectorCostRHPv3 := sectorUploadCost(h.PriceTable.HostPriceTable, cfg.Period)
-	numSectors := bytesToSectors(bytes)
-	return uploadSectorCostRHPv3.Mul64(numSectors)
-}
-
-func downloadCostForScore(h api.Host, bytes uint64) types.Currency {
-	rsc := h.PriceTable.BaseCost().Add(h.PriceTable.ReadSectorCost(rhpv2.SectorSize))
-	downloadSectorCostRHPv3, _ := rsc.Total()
-	numSectors := bytesToSectors(bytes)
-	return downloadSectorCostRHPv3.Mul64(numSectors)
-}
-
-func storageCostForScore(cfg api.ContractsConfig, h api.Host, bytes uint64) types.Currency {
-	storeSectorCostRHPv3 := sectorStorageCost(h.PriceTable.HostPriceTable, cfg.Period)
-	numSectors := bytesToSectors(bytes)
-	return storeSectorCostRHPv3.Mul64(numSectors)
-}
-
-func hostPeriodCostForScore(h api.Host, cfg api.ContractsConfig, expectedRedundancy float64) types.Currency {
-	// compute how much data we upload, download and store.
-	uploadPerHost := uint64(float64(cfg.Upload) * expectedRedundancy / float64(cfg.Amount))
-	downloadPerHost := uint64(float64(cfg.Download) * expectedRedundancy / float64(cfg.Amount))
-	storagePerHost := uint64(float64(cfg.Storage) * expectedRedundancy / float64(cfg.Amount))
-
-	// compute the individual costs.
-	hostCollateral := rhpv2.ContractFormationCollateral(cfg.Period, storagePerHost, h.Settings)
-	hostContractPrice := contractPriceForScore(h)
-	hostUploadCost := uploadCostForScore(cfg, h, uploadPerHost)
-	hostDownloadCost := downloadCostForScore(h, downloadPerHost)
-	hostStorageCost := storageCostForScore(cfg, h, storagePerHost)
-	siafundFee := hostCollateral.
-		Add(hostContractPrice).
-		Add(hostUploadCost).
-		Add(hostDownloadCost).
-		Add(hostStorageCost).
-		Mul64(39).
-		Div64(1000)
-
-	// add it all up. We multiply the contract price here since we might refresh
-	// a contract multiple times.
-	return hostContractPrice.Mul64(3).
-		Add(hostUploadCost).
-		Add(hostDownloadCost).
-		Add(hostStorageCost).
-		Add(siafundFee)
 }
