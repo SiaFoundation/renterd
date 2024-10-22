@@ -43,15 +43,15 @@ type (
 
 	// ContractsConfig contains all contract settings used in the autopilot.
 	ContractsConfig struct {
-		Set         string         `json:"set"`
-		Amount      uint64         `json:"amount"`
-		Allowance   types.Currency `json:"allowance"`
-		Period      uint64         `json:"period"`
-		RenewWindow uint64         `json:"renewWindow"`
-		Download    uint64         `json:"download"`
-		Upload      uint64         `json:"upload"`
-		Storage     uint64         `json:"storage"`
-		Prune       bool           `json:"prune"`
+		Set            string         `json:"set"`
+		Amount         uint64         `json:"amount"`
+		InitialFunding types.Currency `json:"initialFunding"`
+		Period         uint64         `json:"period"`
+		RenewWindow    uint64         `json:"renewWindow"`
+		Download       uint64         `json:"download"`
+		Upload         uint64         `json:"upload"`
+		Storage        uint64         `json:"storage"`
+		Prune          bool           `json:"prune"`
 	}
 
 	// HostsConfig contains all hosts settings used in the autopilot.

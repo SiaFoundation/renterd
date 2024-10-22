@@ -64,30 +64,31 @@ func hostScore(cfg api.AutopilotConfig, h api.Host, expectedRedundancy float64) 
 func priceAdjustmentScore(hostCostPerPeriod types.Currency, cfg api.ContractsConfig) float64 {
 	// return early if the allowance or amount of hosts is zero, avoiding a
 	// division by zero panic below.
-	if cfg.Allowance.IsZero() || cfg.Amount == 0 {
-		return math.SmallestNonzeroFloat64
-	}
-
-	hostPeriodBudget := cfg.Allowance.Div64(cfg.Amount)
-
-	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())
-	fRatio, _ := ratio.Float64()
-	switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
-	case 0:
-		return 0.5 // ratio is exactly 1 -> score is 0.5
-	case 1:
-		// cost is greater than budget -> score is in range (0; 0.5)
-		//
-		return 1.5 / math.Pow(3, fRatio)
-	case -1:
-		// cost < budget -> score is (0.5; 1]
-		s := 0.44 + 0.06*(1/fRatio)
-		if s > 1.0 {
-			s = 1.0
-		}
-		return s
-	}
-	panic("unreachable")
+	//	if cfg.Allowance.IsZero() || cfg.Amount == 0 {
+	//		return math.SmallestNonzeroFloat64
+	//	}
+	//
+	//	hostPeriodBudget := cfg.Allowance.Div64(cfg.Amount)
+	//
+	//	ratio := new(big.Rat).SetFrac(hostCostPerPeriod.Big(), hostPeriodBudget.Big())
+	//	fRatio, _ := ratio.Float64()
+	//	switch ratio.Cmp(new(big.Rat).SetUint64(1)) {
+	//	case 0:
+	//		return 0.5 // ratio is exactly 1 -> score is 0.5
+	//	case 1:
+	//		// cost is greater than budget -> score is in range (0; 0.5)
+	//		//
+	//		return 1.5 / math.Pow(3, fRatio)
+	//	case -1:
+	//		// cost < budget -> score is (0.5; 1]
+	//		s := 0.44 + 0.06*(1/fRatio)
+	//		if s > 1.0 {
+	//			s = 1.0
+	//		}
+	//		return s
+	//	}
+	//	panic("unreachable")
+	return 1 // TODO: implement
 }
 
 func storageRemainingScore(h rhpv2.HostSettings, storedData uint64, allocationPerHost float64) float64 {

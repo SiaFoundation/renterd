@@ -673,20 +673,6 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 		} else if err != nil {
 			return nil, err
 		}
-
-		// populate the Autopilots map with the current autopilots
-		aps, err := b.as.Autopilots(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch autopilots: %w", err)
-		}
-		if ps.Autopilots == nil {
-			ps.Autopilots = make(map[string]api.AutopilotPins)
-		}
-		for _, ap := range aps {
-			if _, exists := ps.Autopilots[ap.ID]; !exists {
-				ps.Autopilots[ap.ID] = api.AutopilotPins{}
-			}
-		}
 		return ps, nil
 	case stores.SettingUpload:
 		us, err := b.ss.UploadSettings(ctx)
@@ -825,7 +811,7 @@ func (b *Bus) patchSetting(ctx context.Context, key string, patch map[string]any
 	}
 }
 
-func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
+func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
 	return func(pt rhpv3.HostPriceTable) ([]types.Hash256, []types.Transaction, types.Currency, rhp3.DiscardTxnFn, error) {
 		// create the final revision from the provided revision
 		finalRevision := revision
@@ -850,11 +836,6 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 		// compute how much renter funds to put into the new contract
 		fundAmount := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
 
-		// make sure we don't exceed the max fund amount.
-		if maxFundAmount.Cmp(fundAmount) < 0 {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, fundAmount, maxFundAmount)
-		}
-
 		// fund the transaction, we are not signing it yet since it's not
 		// complete. The host still needs to complete it and the revision +
 		// contract are signed with the renter key by the worker.
@@ -872,7 +853,7 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 	}
 }
 
-func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
@@ -895,7 +876,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
-	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, maxFundAmount, endHeight, expectedNewStorage)
+	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
 	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {
 		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)

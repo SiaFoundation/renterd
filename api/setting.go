@@ -134,9 +134,6 @@ type (
 		// pinned settings are updated based on the exchange rate at the time.
 		Threshold float64 `json:"threshold"`
 
-		// Autopilots contains the pinned settings for every autopilot.
-		Autopilots map[string]AutopilotPins `json:"autopilots"`
-
 		// GougingSettingsPins contains the pinned settings for the gouging
 		// settings.
 		GougingSettingsPins GougingSettingsPins `json:"gougingSettingsPins"`
@@ -157,12 +154,6 @@ type (
 	RedundancySettings struct {
 		MinShards   int `json:"minShards"`
 		TotalShards int `json:"totalShards"`
-	}
-
-	// AutopilotPins contains the available autopilot settings that can be
-	// pinned.
-	AutopilotPins struct {
-		Allowance Pin `json:"allowance"`
 	}
 
 	// GougingSettingsPins contains the available gouging settings that can be
@@ -202,13 +193,6 @@ func (ps PinnedSettings) Enabled() bool {
 		ps.GougingSettingsPins.MaxUpload.Pinned {
 		return true
 	}
-
-	for _, pin := range ps.Autopilots {
-		if pin.Allowance.Pinned {
-			return true
-		}
-	}
-
 	return false
 }
 

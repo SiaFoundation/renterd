@@ -25,10 +25,10 @@ func TestAutopilotStore(t *testing.T) {
 	// create a cfg
 	cfg := api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance:   types.Siacoins(1).Mul64(1e3),
-			Amount:      3,
-			Period:      144,
-			RenewWindow: 72,
+			Amount:         3,
+			InitialFunding: types.Siacoins(1),
+			Period:         144,
+			RenewWindow:    72,
 
 			Download: rhpv2.SectorSize * 500,
 			Upload:   rhpv2.SectorSize * 500,

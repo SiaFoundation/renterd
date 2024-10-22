@@ -26,7 +26,7 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uin
 // a recommendation on how to loosen it.
 func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse, _ error) {
 	// we need an allowance and a target amount of contracts to evaluate
-	if cfg.Contracts.Allowance.IsZero() || cfg.Contracts.Amount == 0 {
+	if cfg.Contracts.Amount == 0 {
 		return api.ConfigEvaluationResponse{}, ErrMissingRequiredFields
 	}
 

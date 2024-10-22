@@ -41,10 +41,6 @@ func (ctx *mCtx) ApID() string {
 	return ctx.state.AP.ID
 }
 
-func (ctx *mCtx) Allowance() types.Currency {
-	return ctx.state.Allowance()
-}
-
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
 	return ctx.state.AP.Config
 }
@@ -116,8 +112,8 @@ func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {
 	ctx.state.ContractsConfig().SortContractsForMaintenance(contracts)
 }
 
-func (state *MaintenanceState) Allowance() types.Currency {
-	return state.AP.Config.Contracts.Allowance
+func (ctx *mCtx) InitialContractFunding() types.Currency {
+	return ctx.state.AP.Config.Contracts.InitialFunding
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
