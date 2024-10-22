@@ -21,6 +21,7 @@ import (
 func TestEvents(t *testing.T) {
 	// list all webhooks
 	allEvents := []func(string, map[string]string) webhooks.Webhook{
+		api.WebhookACLUpdate,
 		api.WebhookConsensusUpdate,
 		api.WebhookContractArchive,
 		api.WebhookContractRenew,
@@ -122,6 +123,10 @@ func TestEvents(t *testing.T) {
 	gp, err := b.GougingParams(context.Background())
 	tt.OK(err)
 
+	// update ACL
+	h := cluster.hosts[0]
+	tt.OK(b.UpdateHostAllowlist(context.Background(), []types.PublicKey{h.PublicKey()}, nil, false))
+
 	// update settings
 	gs := gp.GougingSettings
 	gs.HostBlockHeightLeeway = 100
@@ -131,7 +136,6 @@ func TestEvents(t *testing.T) {
 	tt.OK(b.DeleteSetting(context.Background(), api.SettingRedundancy))
 
 	// update host setting
-	h := cluster.hosts[0]
 	settings := h.settings.Settings()
 	settings.NetAddress = "127.0.0.1:0"
 	tt.OK(h.UpdateSettings(settings))
