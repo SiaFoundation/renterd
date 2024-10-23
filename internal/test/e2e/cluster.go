@@ -204,7 +204,6 @@ type testClusterOptions struct {
 	funding              *bool
 	hosts                int
 	logger               *zap.Logger
-	network              *consensus.Network
 	uploadPacking        bool
 	skipSettingAutopilot bool
 	skipRunningAutopilot bool
@@ -290,10 +289,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 	if opts.dbName != "" {
 		dbCfg.Database.MySQL.Database = opts.dbName
-	}
-	network, genesis := testNetwork()
-	if opts.network != nil {
-		network = opts.network
 	}
 
 	// Check if we are testing against an external database. If so, we create a
@@ -405,6 +400,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
+	network, genesis := testNetwork()
 	cluster := &TestCluster{
 		apID:         apCfg.ID,
 		dir:          dir,
