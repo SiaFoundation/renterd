@@ -42,7 +42,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 		Age:              ageScore(h),
 		Collateral:       collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
 		Interactions:     interactionScore(h),
-		Prices:           priceAdjustmentScore(h.PriceTable, gs),
+		Prices:           priceAdjustmentScore(h.PriceTable.HostPriceTable, gs),
 		StorageRemaining: storageRemainingScore(h.Settings, h.StoredData, allocationPerHost),
 		Uptime:           uptimeScore(h),
 		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
@@ -60,23 +60,23 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 //   - If the host is more expensive than expected, an exponential malus is applied.
 //     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
 //     it to drop to 0.05.
-func priceAdjustmentScore(pt api.HostPriceTable, gs api.GougingSettings) float64 {
+func priceAdjustmentScore(pt rhpv3.HostPriceTable, gs api.GougingSettings) float64 {
 	// combine the upload and download prices to get a threshold
-	dppb, overflow := gouging.DownloadPricePerByte(pt.HostPriceTable)
+	dppb, overflow := gouging.DownloadPricePerByte(pt)
 	if overflow {
 		return math.SmallestNonzeroFloat64
 	}
-	uppb, overflow := gouging.UploadPricePerByte(pt.HostPriceTable)
+	uppb, overflow := gouging.UploadPricePerByte(pt)
 	if overflow {
 		return math.SmallestNonzeroFloat64
 	}
 	sppb := pt.WriteStoreCost
 
 	priceScore := func(actual, max types.Currency) float64 {
-		if max.IsZero() {
+		threshold := max.Div64(2)
+		if threshold.IsZero() {
 			return 1.0 // no gouging settings defined
 		}
-		threshold := max.Div64(2)
 
 		ratio := new(big.Rat).SetFrac(actual.Big(), threshold.Big())
 		fRatio, _ := ratio.Float64()
@@ -89,7 +89,7 @@ func priceAdjustmentScore(pt api.HostPriceTable, gs api.GougingSettings) float64
 			return 1.5 / math.Pow(3, fRatio)
 		case -1:
 			// actual < threshold -> score is (0.5; 1]
-			s := 0.44 + 0.06*(1/fRatio)
+			s := 0.5 * (1 / fRatio)
 			if s > 1.0 {
 				s = 1.0
 			}
