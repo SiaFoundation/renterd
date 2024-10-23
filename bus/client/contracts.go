@@ -6,40 +6,20 @@ import (
 	"net/url"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
-// AddContract adds the provided contract to the metadata store.
-func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
-		Contract:      contract,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &added)
-	return
-}
-
-// AddRenewedContract adds the provided contract to the metadata store.
-func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractRenewedRequest{
-		Contract:      contract,
-		RenewedFrom:   renewedFrom,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &renewed)
-	return
+// AddContract adds the provided contract to the metadata store, if the contract
+// already exists it will be replaced.
+func (c *Client) AddContract(ctx context.Context, contract api.ContractMetadata) error {
+	return c.c.WithContext(ctx).PUT("/contracts", contract)
 }
 
 // AncestorContracts returns any ancestors of a given contract.
-func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
+func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
-	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
+	values.Set("minstartheight", fmt.Sprint(minStartHeight))
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), contractID), &contracts)
 	return
 }
@@ -103,6 +83,9 @@ func (c *Client) Contracts(ctx context.Context, opts api.ContractsOpts) (contrac
 	if opts.ContractSet != "" {
 		values.Set("contractset", opts.ContractSet)
 	}
+	if opts.FilterMode != "" {
+		values.Set("filtermode", opts.FilterMode)
+	}
 	err = c.c.WithContext(ctx).GET("/contracts?"+values.Encode(), &contracts)
 	return
 }
@@ -138,7 +121,7 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 
 // FormContract forms a contract with a host and adds it to the bus.
 func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST("/contracts", api.ContractFormRequest{
+	err = c.c.WithContext(ctx).POST("/contracts/form", api.ContractFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
 		HostKey:        hostKey,

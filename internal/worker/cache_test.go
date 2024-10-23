@@ -165,7 +165,6 @@ func TestWorkerCache(t *testing.T) {
 		{Module: api.ModuleContract, Event: api.EventRenew, Payload: nil},
 		{Module: api.ModuleHost, Event: api.EventUpdate, Payload: nil},
 		{Module: api.ModuleSetting, Event: api.EventUpdate, Payload: nil},
-		{Module: api.ModuleSetting, Event: api.EventDelete, Payload: nil},
 	} {
 		if err := c.HandleEvent(event); err != nil {
 			t.Fatal(err)

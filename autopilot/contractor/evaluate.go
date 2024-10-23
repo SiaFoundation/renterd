@@ -14,7 +14,7 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uin
 	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
 		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
-		if hc.Usability.IsUsable() {
+		if hc.UsabilityBreakdown.IsUsable() {
 			usables++
 		}
 	}
@@ -37,32 +37,32 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	for i, host := range hosts {
 		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight // ignore block height
 		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
-		if hc.Usability.IsUsable() {
+		if hc.UsabilityBreakdown.IsUsable() {
 			resp.Usable++
 			continue
 		}
-		if hc.Usability.Blocked {
+		if hc.UsabilityBreakdown.Blocked {
 			resp.Unusable.Blocked++
 		}
-		if hc.Usability.NotAcceptingContracts {
+		if hc.UsabilityBreakdown.NotAcceptingContracts {
 			resp.Unusable.NotAcceptingContracts++
 		}
-		if hc.Usability.NotCompletingScan {
+		if hc.UsabilityBreakdown.NotCompletingScan {
 			resp.Unusable.NotScanned++
 		}
-		if hc.Gouging.ContractErr != "" {
+		if hc.GougingBreakdown.ContractErr != "" {
 			resp.Unusable.Gouging.Contract++
 		}
-		if hc.Gouging.DownloadErr != "" {
+		if hc.GougingBreakdown.DownloadErr != "" {
 			resp.Unusable.Gouging.Download++
 		}
-		if hc.Gouging.GougingErr != "" {
+		if hc.GougingBreakdown.GougingErr != "" {
 			resp.Unusable.Gouging.Gouging++
 		}
-		if hc.Gouging.PruneErr != "" {
+		if hc.GougingBreakdown.PruneErr != "" {
 			resp.Unusable.Gouging.Pruning++
 		}
-		if hc.Gouging.UploadErr != "" {
+		if hc.GougingBreakdown.UploadErr != "" {
 			resp.Unusable.Gouging.Upload++
 		}
 	}

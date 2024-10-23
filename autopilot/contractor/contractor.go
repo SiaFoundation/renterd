@@ -81,7 +81,7 @@ const (
 )
 
 type Bus interface {
-	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
@@ -91,8 +91,8 @@ type Bus interface {
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-	SearchHosts(ctx context.Context, opts api.SearchHostOptions) ([]api.Host, error)
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
@@ -325,7 +325,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	}
 
 	// update the budget
-	*budget = budget.Sub(renewal.TotalCost)
+	*budget = budget.Sub(renewal.InitialRenterFunds)
 
 	// add to renewed set
 	logger.Infow("refresh succeeded",
@@ -357,7 +357,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
 	minRenterFunds, _ := initialContractFundingMinMax(ctx.AutopilotConfig())
-	renterFunds := renewFundingEstimate(minRenterFunds, contract.TotalCost, contract.RenterFunds(), logger)
+	renterFunds := renewFundingEstimate(minRenterFunds, contract.InitialRenterFunds, contract.RenterFunds(), logger)
 
 	// check our budget
 	if budget.Cmp(renterFunds) < 0 {
@@ -392,7 +392,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 	}
 
 	// update the budget
-	*budget = budget.Sub(renewal.TotalCost)
+	*budget = budget.Sub(renewal.InitialRenterFunds)
 
 	logger.Infow(
 		"renewal succeeded",
@@ -465,7 +465,7 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, w Worker, contracts
 
 func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, host api.Host, fee types.Currency, logger *zap.SugaredLogger) types.Currency {
 	// refresh with 1.2x the funds
-	refreshAmount := contract.TotalCost.Mul64(6).Div64(5)
+	refreshAmount := contract.InitialRenterFunds.Mul64(6).Div64(5)
 
 	// estimate the txn fee
 	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
@@ -964,8 +964,8 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		}
 
 		// check usability
-		if !check.Usability.IsUsable() {
-			reasons := strings.Join(check.Usability.UnusableReasons(), ",")
+		if !check.UsabilityBreakdown.IsUsable() {
+			reasons := strings.Join(check.UsabilityBreakdown.UnusableReasons(), ",")
 			logger.With("reasons", reasons).Info("unusable host")
 			churnReasons[c.ID] = reasons
 			continue
@@ -1096,11 +1096,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 	for _, c := range contracts {
 		usedHosts[c.HostKey] = struct{}{}
 	}
-	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-		Limit:         -1,
-		FilterMode:    api.HostFilterModeAllowed,
-		UsabilityMode: api.UsabilityFilterModeAll,
-	})
+	allHosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch usable hosts: %w", err)
 	}
@@ -1116,11 +1112,11 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		} else if _, used := usedHosts[host.PublicKey]; used {
 			logger.Debug("host already used")
 			continue
-		} else if score := hc.Score.Score(); score == 0 {
+		} else if score := hc.ScoreBreakdown.Score(); score == 0 {
 			logger.Error("host has a score of 0")
 			continue
 		}
-		candidates = append(candidates, newScoredHost(host, hc.Score))
+		candidates = append(candidates, newScoredHost(host, hc.ScoreBreakdown))
 	}
 	logger = logger.With("candidates", len(candidates))
 
@@ -1199,7 +1195,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 	var usabilityBreakdown unusableHostsBreakdown
 	// fetch all hosts that are not blocked
-	hosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{Limit: -1, FilterMode: api.HostFilterModeAllowed})
+	hosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to fetch all hosts: %w", err)
 	}
@@ -1229,11 +1225,11 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 		if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
 			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
 		}
-		usabilityBreakdown.track(hc.Usability)
+		usabilityBreakdown.track(hc.UsabilityBreakdown)
 
-		if !hc.Usability.IsUsable() {
+		if !hc.UsabilityBreakdown.IsUsable() {
 			logger.With("hostKey", h.host.PublicKey).
-				With("reasons", strings.Join(hc.Usability.UnusableReasons(), ",")).
+				With("reasons", strings.Join(hc.UsabilityBreakdown.UnusableReasons(), ",")).
 				Debug("host is not usable")
 		}
 	}
@@ -1252,11 +1248,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, w Worker, alerter alerts.Al
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
-	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
-		Limit:         -1,
-		FilterMode:    api.HostFilterModeAllowed,
-		UsabilityMode: api.UsabilityFilterModeAll,
-	})
+	allHosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to fetch all hosts: %w", err)
 	}

@@ -31,10 +31,11 @@ var (
 
 type (
 	downloadManager struct {
-		hm     HostManager
-		mm     MemoryManager
-		os     ObjectStore
-		logger *zap.SugaredLogger
+		hm        HostManager
+		mm        MemoryManager
+		os        ObjectStore
+		uploadKey *utils.UploadKey
+		logger    *zap.SugaredLogger
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
@@ -127,20 +128,21 @@ type (
 	}
 )
 
-func (w *Worker) initDownloadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (w *Worker) initDownloadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.downloadManager != nil {
 		panic("download manager already initialized") // developer error
 	}
-	w.downloadManager = newDownloadManager(w.shutdownCtx, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
+	w.downloadManager = newDownloadManager(w.shutdownCtx, uploadKey, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
 }
 
-func newDownloadManager(ctx context.Context, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
+func newDownloadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
 	logger = logger.Named("downloadmanager")
 	return &downloadManager{
-		hm:     hm,
-		mm:     newMemoryManager(maxMemory, logger),
-		os:     os,
-		logger: logger.Sugar(),
+		hm:        hm,
+		mm:        newMemoryManager(maxMemory, logger),
+		os:        os,
+		uploadKey: uploadKey,
+		logger:    logger.Sugar(),
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
@@ -173,7 +175,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 		if !slabs[i].PartialSlab {
 			continue
 		}
-		data, slab, err := mgr.fetchPartialSlab(ctx, slabs[i].SlabSlice.Key, slabs[i].SlabSlice.Offset, slabs[i].SlabSlice.Length)
+		data, slab, err := mgr.fetchPartialSlab(ctx, slabs[i].SlabSlice.EncryptionKey, slabs[i].SlabSlice.Offset, slabs[i].SlabSlice.Length)
 		if err != nil {
 			return fmt.Errorf("failed to fetch partial slab data: %w", err)
 		}
@@ -195,7 +197,13 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	}
 
 	// create the cipher writer
-	cw := o.Key.Decrypt(w, offset)
+	cw, err := o.Key.Decrypt(w, object.EncryptionOptions{
+		Offset: offset,
+		Key:    mgr.uploadKey,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create cipher writer: %w", err)
+	}
 
 	// buffer the writer we recover to making sure that we don't hammer the
 	// response writer with tiny writes
@@ -302,10 +310,11 @@ outer:
 			}
 
 			if resp.err != nil {
-				mgr.logger.Errorf("download slab %v failed, overpaid %v: %v", resp.index, resp.surchargeApplied, resp.err)
+				mgr.logger.Errorw("slab download failed",
+					zap.Int("index", resp.index),
+					zap.Error(err),
+				)
 				return resp.err
-			} else if resp.surchargeApplied {
-				mgr.logger.Warnf("download for slab %v had to overpay to succeed", resp.index)
 			}
 
 			responses[resp.index] = resp
