@@ -10,6 +10,6 @@ CREATE TABLE `directories` (
   KEY `idx_directories_parent_id` (`db_parent_id`),
   KEY `idx_directories_name` (`name`),
   UNIQUE KEY `idx_directories_bucket_name` (`db_bucket_id`,`name`),
-  CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories` (`id`),
   CONSTRAINT `fk_directories_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

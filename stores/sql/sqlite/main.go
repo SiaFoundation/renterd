@@ -311,11 +311,7 @@ func (tx *MainDatabaseTx) ContractSizes(ctx context.Context) (map[types.FileCont
 }
 
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
-	dstDirID, err := tx.InsertDirectories(ctx, dstBucket, object.Directories(dstKey))
-	if err != nil {
-		return api.ObjectMetadata{}, err
-	}
-	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata, dstDirID)
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {

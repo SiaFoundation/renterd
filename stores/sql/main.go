@@ -362,7 +362,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	return sizes, nil
 }
 
-func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata, dstDirID int64) (api.ObjectMetadata, error) {
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
 	if err != nil {
@@ -417,6 +417,12 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 		return api.ObjectMetadata{}, fmt.Errorf("%w: destination bucket", api.ErrBucketNotFound)
 	} else if err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch dest bucket id: %w", err)
+	}
+
+	// insert destination directory
+	dstDirID, err := InsertDirectories(ctx, tx, dstBucket, object.Directories(dstKey))
+	if err != nil {
+		return api.ObjectMetadata{}, err
 	}
 
 	// copy object
@@ -1936,7 +1942,13 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 
 // RenameDirectories renames all directories in the database with the given
 // prefix to the new prefix.
-func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefixNew string) (id int64, err error) {
+func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefixNew string) (int64, error) {
+	// prepare new directories
+	dirs := object.Directories(prefixNew)
+	if strings.HasSuffix(prefixNew, "/") {
+		dirs = append(dirs, prefixNew) // TODO: only tests pass prefixes without trailing slash so probably can assert this and error out
+	}
+
 	// fetch target directories
 	directories := make(map[int64]string)
 	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucket)
@@ -1953,17 +1965,10 @@ func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefix
 		directories[id] = strings.Replace(name, prefixOld, prefixNew, 1)
 	}
 
-	// defer insert of new directory
-	defer func() {
-		if err == nil {
-			dirs := object.Directories(prefixNew)
-			if strings.HasSuffix(prefixNew, "/") {
-				dirs = append(dirs, prefixNew) // TODO: only tests pass prefixes without trailing slash so probably can assert this and error out
-			}
-			id, err = InsertDirectories(ctx, tx, bucket, dirs)
-			return
-		}
-	}()
+	// return early if we don't need to rename existing diretories
+	if len(directories) == 0 {
+		return InsertDirectories(ctx, tx, bucket, dirs)
+	}
 
 	// prepare statements
 	existsStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)")
@@ -2000,7 +2005,7 @@ func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefix
 		}
 	}
 
-	return
+	return InsertDirectories(ctx, tx, bucket, dirs)
 }
 
 func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
