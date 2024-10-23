@@ -749,6 +749,9 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 
 func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
 	if force {
+		// delete where bucket matches, where object_id is prefixed by the old
+		// prefix (case sensitive) and directories that exactly match the new
+		// prefix, otherwise the update conflicts
 		query := `
 		DELETE
 		FROM objects
@@ -775,6 +778,10 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 		}
 	}
 
+	// update objects where bucket matches, where the object_id is prefixed by
+	// the old prefix (case sensitive) and it doesn't exactly match the new
+	// prefix, we update the object_id at all times but only update directory_id
+	// only when the object is an immediate child (no slash in suffix)
 	query := `
 		UPDATE objects
 		SET object_id = ? || SUBSTR(object_id, ?),
