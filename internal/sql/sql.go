@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -35,7 +34,7 @@ var (
 type (
 	// A DB is a wrapper around a *sql.DB that provides additional utility
 	DB struct {
-		dbLockedMsgs      []string
+		dbLockConditions  func(string) bool
 		db                *sql.DB
 		log               *zap.Logger
 		longQueryDuration time.Duration
@@ -64,12 +63,12 @@ type (
 	}
 )
 
-func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) (*DB, error) {
+func NewDB(db *sql.DB, log *zap.Logger, dbLockCondition func(string) bool, longQueryDuration, longTxDuration time.Duration) (*DB, error) {
 	if longQueryDuration == 0 || longTxDuration == 0 {
 		return nil, fmt.Errorf("longQueryDuration and longTxDuration must be non-zero: %d %d", longQueryDuration, longTxDuration)
 	}
 	return &DB{
-		dbLockedMsgs:      dbLockedMsgs,
+		dbLockConditions:  dbLockCondition,
 		db:                db,
 		log:               log,
 		longQueryDuration: longQueryDuration,
@@ -157,13 +156,7 @@ LOOP:
 		}
 
 		// return immediately if the error is not a busy error
-		var locked bool
-		for _, msg := range s.dbLockedMsgs {
-			if strings.Contains(err.Error(), msg) {
-				locked = true
-				break
-			}
-		}
+		locked := s.dbLockConditions(err.Error())
 		if !locked {
 			break LOOP
 		}

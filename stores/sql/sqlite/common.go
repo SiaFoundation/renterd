@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -13,9 +14,9 @@ import (
 	"go.uber.org/zap"
 )
 
-var deadlockMsgs = []string{
-	"database is locked",
-	"database table is locked",
+var dbLockCondition = func(msg string) bool {
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked")
 }
 
 //go:embed all:migrations/*

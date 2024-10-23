@@ -148,7 +148,7 @@ var (
 			{
 				ID: "00018_directory_buckets",
 				Migrate: func(tx Tx) error {
-					// recreate directories table
+					// recreate the table, erasing all its contents
 					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_recreate_directories", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
@@ -160,9 +160,11 @@ var (
 					}
 					defer rows.Close()
 
-					// gather all necessary data to update the directory id of every object
-					updates := make(map[int64]int64)
+					// memoize directory creation
 					memo := make(map[string]int64)
+
+					// iterate over every object and track its directory
+					updates := make(map[int64]int64)
 					for rows.Next() {
 						var oID, bID int64
 						var path string
@@ -191,7 +193,7 @@ var (
 						}
 					}
 
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+					return nil
 				},
 			},
 		}
