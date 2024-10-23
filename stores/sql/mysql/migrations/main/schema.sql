@@ -153,7 +153,6 @@ CREATE TABLE `sectors` (
   `created_at` datetime(3) DEFAULT NULL,
   `db_slab_id` bigint unsigned NOT NULL,
   `slab_index` bigint NOT NULL,
-  `latest_host` longblob NOT NULL,
   `root` varbinary(32) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `root` (`root`),
