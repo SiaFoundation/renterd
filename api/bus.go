@@ -13,6 +13,8 @@ var (
 	ErrInvalidLimit          = errors.New("limit must be -1 or bigger")
 	ErrMarkerNotFound        = errors.New("marker not found")
 	ErrMaxFundAmountExceeded = errors.New("renewal exceeds max fund amount")
+	ErrInvalidDatabase       = errors.New("invalid database type")
+	ErrBackupNotSupported    = errors.New("backups not supported for used database")
 	ErrExplorerDisabled      = errors.New("explorer is disabled")
 )
 
@@ -61,6 +63,11 @@ type (
 
 	AccountsSaveRequest struct {
 		Accounts []Account `json:"accounts"`
+	}
+
+	BackupRequest struct {
+		Database string `json:"database"`
+		Path     string `json:"path"`
 	}
 
 	// BusStateResponse is the response type for the /bus/state endpoint.

@@ -164,6 +164,7 @@ type (
 	Store interface {
 		AccountStore
 		AutopilotStore
+		BackupStore
 		ChainStore
 		HostStore
 		MetadataStore
@@ -184,6 +185,11 @@ type (
 		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
 		Autopilots(ctx context.Context) ([]api.Autopilot, error)
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+	}
+
+	// BackupStore is the interface of a store that can be backed up.
+	BackupStore interface {
+		Backup(ctx context.Context, dbID, dst string) error
 	}
 
 	// A ChainStore stores information about the chain.
@@ -317,13 +323,7 @@ type Bus struct {
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
-
-	accounts AccountStore
-	as       AutopilotStore
-	hs       HostStore
-	ms       MetadataStore
-	mtrcs    MetricsStore
-	ss       SettingStore
+	store       Store
 
 	rhp2 *rhp2.Client
 	rhp3 *rhp3.Client
@@ -344,16 +344,11 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		startTime: time.Now(),
 		masterKey: masterKey,
 
-		accounts: store,
-		explorer: ibus.NewExplorer(explorerURL),
 		s:        s,
 		cm:       cm,
 		w:        w,
-		hs:       store,
-		as:       store,
-		ms:       store,
-		mtrcs:    store,
-		ss:       store,
+		explorer: ibus.NewExplorer(explorerURL),
+		store:    store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
@@ -500,6 +495,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /syncer/connect": b.syncerConnectHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
 
+		"POST /system/sqlite3/backup": b.postSystemSQLite3BackupHandler,
+
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
 		"POST   /txpool/broadcast":      b.txpoolBroadcastHandler,
@@ -532,7 +529,7 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 }
 
 func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.ms.PutContract(ctx, api.ContractMetadata{
+	if err := b.store.PutContract(ctx, api.ContractMetadata{
 		ID:                 rev.ID(),
 		HostKey:            rev.HostKey(),
 		StartHeight:        startHeight,
@@ -545,7 +542,7 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 		return api.ContractMetadata{}, err
 	}
 
-	added, err := b.ms.Contract(ctx, rev.ID())
+	added, err := b.store.Contract(ctx, rev.ID())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -563,7 +560,7 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 }
 
 func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.ms.AddRenewal(ctx, api.ContractMetadata{
+	if err := b.store.AddRenewal(ctx, api.ContractMetadata{
 		ID:                 rev.ID(),
 		HostKey:            rev.HostKey(),
 		RenewedFrom:        renewedFrom,
@@ -577,7 +574,7 @@ func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, 
 		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
 	}
 
-	renewal, err := b.ms.Contract(ctx, rev.ID())
+	renewal, err := b.store.Contract(ctx, rev.ID())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -608,7 +605,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}()
 
 	// fetch contract
-	c, err := b.ms.Contract(ctx, fcid)
+	c, err := b.store.Contract(ctx, fcid)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
@@ -659,7 +656,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error) {
 	switch key {
 	case stores.SettingGouging:
-		gs, err := b.ss.GougingSettings(ctx)
+		gs, err := b.store.GougingSettings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			return api.DefaultGougingSettings, nil
 		} else if err != nil {
@@ -667,7 +664,7 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 		}
 		return gs, nil
 	case stores.SettingPinned:
-		ps, err := b.ss.PinnedSettings(ctx)
+		ps, err := b.store.PinnedSettings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			ps = api.DefaultPinnedSettings
 		} else if err != nil {
@@ -675,7 +672,7 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 		}
 		return ps, nil
 	case stores.SettingUpload:
-		us, err := b.ss.UploadSettings(ctx)
+		us, err := b.store.UploadSettings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			return api.DefaultUploadSettings(b.cm.TipState().Network.Name), nil
 		} else if err != nil {
@@ -683,7 +680,7 @@ func (b *Bus) fetchSetting(ctx context.Context, key string) (interface{}, error)
 		}
 		return us, nil
 	case stores.SettingS3:
-		s3s, err := b.ss.S3Settings(ctx)
+		s3s, err := b.store.S3Settings(ctx)
 		if errors.Is(err, sql.ErrSettingNotFound) {
 			return api.DefaultS3Settings, nil
 		} else if err != nil {
@@ -899,7 +896,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			panic("invalid type") // developer error
 		}
 		gs := value.(api.GougingSettings)
-		if err := b.ss.UpdateGougingSettings(ctx, gs); err != nil {
+		if err := b.store.UpdateGougingSettings(ctx, gs); err != nil {
 			return fmt.Errorf("failed to update gouging settings: %w", err)
 		}
 		payload = api.EventSettingUpdate{
@@ -913,7 +910,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			panic("invalid type") // developer error
 		}
 		ps := value.(api.PinnedSettings)
-		if err := b.ss.UpdatePinnedSettings(ctx, ps); err != nil {
+		if err := b.store.UpdatePinnedSettings(ctx, ps); err != nil {
 			return fmt.Errorf("failed to update pinned settings: %w", err)
 		}
 		payload = api.EventSettingUpdate{
@@ -927,7 +924,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			panic("invalid type") // developer error
 		}
 		us := value.(api.UploadSettings)
-		if err := b.ss.UpdateUploadSettings(ctx, us); err != nil {
+		if err := b.store.UpdateUploadSettings(ctx, us); err != nil {
 			return fmt.Errorf("failed to update upload settings: %w", err)
 		}
 		payload = api.EventSettingUpdate{
@@ -940,7 +937,7 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 			panic("invalid type") // developer error
 		}
 		s3s := value.(api.S3Settings)
-		if err := b.ss.UpdateS3Settings(ctx, s3s); err != nil {
+		if err := b.store.UpdateS3Settings(ctx, s3s); err != nil {
 			return fmt.Errorf("failed to update S3 settings: %w", err)
 		}
 		payload = api.EventSettingUpdate{

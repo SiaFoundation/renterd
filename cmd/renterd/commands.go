@@ -1,15 +1,26 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"gopkg.in/yaml.v3"
 )
+
+func cmdBackup() {
+	err := sqlite.Backup(context.Background(), flag.Arg(2), flag.Arg(3))
+	if err != nil {
+		log.Fatal("failed to create backup", err)
+	}
+}
 
 func cmdBuildConfig(cfg *config.Config) {
 	if _, err := os.Stat("renterd.yml"); err == nil {
