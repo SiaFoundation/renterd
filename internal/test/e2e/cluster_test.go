@@ -1770,14 +1770,13 @@ func TestUploadPacking(t *testing.T) {
 	}
 
 	// upload 2 more files which are half a slab each to test filling up a slab
-	// exactly, before uploading file 5 we wait until all buffers are
-	// complete/unlocked and there are no more packed slabs left
+	// exactly.
 	data4 := make([]byte, slabSize/2)
 	uploadDownload("file4", data4)
-	download("file4", data4, 0, int64(len(data4)))
 	time.Sleep(time.Second) // avoid NDF (race in async packed slab upload)
 	data5 := make([]byte, slabSize/2)
 	uploadDownload("file5", data5)
+	download("file4", data4, 0, int64(len(data4)))
 
 	// assert number of objects
 	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
