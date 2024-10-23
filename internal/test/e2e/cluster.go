@@ -253,7 +253,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.dir != "" {
 		dir = opts.dir
 	}
-	logger := newTestLogger()
+	logger := zap.NewNop()
 	if opts.logger != nil {
 		logger = opts.logger
 	}
