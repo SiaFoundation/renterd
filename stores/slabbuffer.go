@@ -334,9 +334,9 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 			return nil, err
 		}
 		slabs = append(slabs, api.PackedSlab{
-			BufferID: buffer.dbID,
-			Data:     data,
-			Key:      buffer.slabKey,
+			BufferID:      buffer.dbID,
+			Data:          data,
+			EncryptionKey: buffer.slabKey,
 		})
 		if len(slabs) == limit {
 			break
@@ -481,7 +481,7 @@ func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, contractSetID uint
 		return nil, err
 	}
 
-	ec := object.GenerateEncryptionKey()
+	ec := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	bufferedSlabID, err := tx.InsertBufferedSlab(ctx, fileName, int64(contractSetID), ec, minShards, totalShards)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert buffered slab: %w", err)

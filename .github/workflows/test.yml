@@ -25,13 +25,15 @@ jobs:
             autopilot
             bus bus/client
             worker worker/client
+          flags: |
+            -japecheck.types=false
   test:
     needs: analyze
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest , macos-latest, windows-latest ]
-        go-version: [ '1.22', '1.23' ]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ["1.22", "1.23"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,12 +54,12 @@ jobs:
         uses: mirromutth/mysql-action@v1.1
         with:
           host port: 3800
-          mysql version: '8'
+          mysql version: "8"
           mysql root password: test
       - name: Test Stores
         uses: n8maninger/action-golang-test@v1
         with:
-          args: "-race;-short"
+          args: "-race;-short;-tags=netgo"
       - name: Test Stores - MySQL
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1
@@ -67,12 +69,12 @@ jobs:
           RENTERD_DB_PASSWORD: test
         with:
           package: "./stores"
-          args: "-race;-short"
+          args: "-race;-short;-tags=netgo"
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
+          args: "-failfast;-race;-timeout=60m;-tags=netgo"
       - name: Test Integration - MySQL
         if: matrix.os == 'ubuntu-latest'
         uses: n8maninger/action-golang-test@v1
@@ -82,6 +84,6 @@ jobs:
           RENTERD_DB_PASSWORD: test
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
+          args: "-failfast;-race;-timeout=60m;-tags=netgo"
       - name: Build
-        run: go build -o bin/ ./cmd/renterd
+        run: go build -o bin/ -tags='netgo timetzdata' ./cmd/renterd

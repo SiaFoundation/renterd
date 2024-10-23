@@ -26,29 +26,30 @@ type mockHostStore struct {
 	removals []string
 }
 
-func (hs *mockHostStore) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error) {
+func (hs *mockHostStore) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	hs.scans = append(hs.scans, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
 
+	var hosts []api.Host
+	for _, host := range hs.hosts {
+		if !opts.MaxLastScan.IsZero() && opts.MaxLastScan.Std().Before(host.Interactions.LastScan) {
+			continue
+		}
+		hosts = append(hosts, host)
+	}
+
 	start := opts.Offset
-	if start > len(hs.hosts) {
+	if start > len(hosts) {
 		return nil, nil
 	}
 
 	end := opts.Offset + opts.Limit
-	if end > len(hs.hosts) {
-		end = len(hs.hosts)
+	if end > len(hosts) {
+		end = len(hosts)
 	}
 
-	var hostAddresses []api.HostAddress
-	for _, h := range hs.hosts[start:end] {
-		hostAddresses = append(hostAddresses, api.HostAddress{
-			NetAddress: h.NetAddress,
-			PublicKey:  h.PublicKey,
-		})
-	}
-	return hostAddresses, nil
+	return hosts[start:end], nil
 }
 
 func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
@@ -56,6 +57,18 @@ func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, maxConsecutiveS
 	defer hs.mu.Unlock()
 	hs.removals = append(hs.removals, fmt.Sprintf("%d-%d", maxConsecutiveScanFailures, maxDowntime))
 	return 0, nil
+}
+
+func (hs *mockHostStore) recordScan(hk types.PublicKey) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	for i, host := range hs.hosts {
+		if host.PublicKey == hk {
+			hs.hosts[i].Interactions.LastScan = time.Now().UTC()
+			return
+		}
+	}
+	panic("unknown host")
 }
 
 func (hs *mockHostStore) state() ([]string, []string) {
@@ -66,6 +79,7 @@ func (hs *mockHostStore) state() ([]string, []string) {
 
 type mockWorker struct {
 	blockChan chan struct{}
+	hs        *mockHostStore
 
 	mu        sync.Mutex
 	scanCount int
@@ -75,6 +89,8 @@ func (w *mockWorker) RHPScan(ctx context.Context, hostKey types.PublicKey, hostI
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
+
+	w.hs.recordScan(hostKey)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -101,7 +117,10 @@ func TestScanner(t *testing.T) {
 	}
 
 	// initiate a host scan using a worker that blocks
-	w := &mockWorker{blockChan: make(chan struct{})}
+	w := &mockWorker{
+		blockChan: make(chan struct{}),
+		hs:        hs,
+	}
 	s.Scan(context.Background(), w, false)
 
 	// assert it's scanning
@@ -128,7 +147,7 @@ func TestScanner(t *testing.T) {
 	// assert the scanner made 3 batch reqs
 	if scans, _ := hs.state(); len(scans) != 3 {
 		t.Fatalf("unexpected number of requests, %v != 3", len(scans))
-	} else if scans[0] != "0-40" || scans[1] != "40-80" || scans[2] != "80-120" {
+	} else if scans[0] != "0-40" || scans[1] != "0-40" || scans[2] != "0-40" {
 		t.Fatalf("unexpected requests, %v", scans)
 	}
 

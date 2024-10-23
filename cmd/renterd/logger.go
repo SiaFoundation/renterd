@@ -14,10 +14,6 @@ import (
 func NewLogger(dir, filename string, cfg config.Log) (*zap.Logger, func(context.Context) error, error) {
 	// path
 	path := filepath.Join(dir, filename)
-	if cfg.Path != "" {
-		path = filepath.Join(cfg.Path, filename)
-	}
-
 	if cfg.File.Path != "" {
 		path = cfg.File.Path
 	}
@@ -61,10 +57,10 @@ func NewLogger(dir, filename string, cfg config.Log) (*zap.Logger, func(context.
 
 		var encoder zapcore.Encoder
 		switch cfg.File.Format {
-		case "human":
-			encoder = humanEncoder(false) // disable colors in file log
-		default: // log file defaults to json
+		case "json":
 			encoder = jsonEncoder()
+		default: // log file defaults to 'human'
+			encoder = humanEncoder(false) // disable colors in file log
 		}
 		cores = append(cores, zapcore.NewCore(encoder, writer, fileLevel))
 	}
