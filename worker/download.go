@@ -75,9 +75,8 @@ type (
 		numOverpaid    uint64
 		numRelaunched  uint64
 
-		pending   []*sectorDownloadInfo
-		completed [][]byte
-		errs      HostErrorSet
+		sectors []*sectorInfo
+		errs    HostErrorSet
 	}
 
 	slabDownloadResponse struct {
@@ -115,8 +114,9 @@ type (
 		c         chan struct{} // signal that a new response is available
 	}
 
-	sectorDownloadInfo struct {
+	sectorInfo struct {
 		root     types.Hash256
+		data     []byte
 		hks      []types.PublicKey
 		index    int
 		selected int
@@ -129,11 +129,11 @@ type (
 	}
 )
 
-func (s *sectorDownloadInfo) selectHost(h types.PublicKey) {
-	s.selected++
+func (s *sectorInfo) selectHost(h types.PublicKey) {
 	for i, hk := range s.hks {
 		if hk == h {
 			s.hks = append(s.hks[:i], s.hks[i+1:]...) // remove the host
+			s.selected++
 			break
 		}
 	}
@@ -514,14 +514,14 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bo
 	// calculate the offset and length
 	offset, length := slice.SectorRegion()
 
-	// build pending sectors
-	var pending []*sectorDownloadInfo
+	// build sectors
+	var sectors []*sectorInfo
 	for sI, s := range slice.Shards {
 		hks := make([]types.PublicKey, 0, len(s.Contracts))
 		for hk := range s.Contracts {
 			hks = append(hks, hk)
 		}
-		pending = append(pending, &sectorDownloadInfo{
+		sectors = append(sectors, &sectorInfo{
 			root:  s.Root,
 			index: sI,
 			hks:   hks,
@@ -539,9 +539,8 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bo
 		created: time.Now(),
 		overpay: migration && slice.Health <= downloadOverpayHealthThreshold,
 
-		pending:   pending,
-		completed: make([][]byte, len(slice.Shards)),
-		errs:      make(HostErrorSet),
+		sectors: sectors,
+		errs:    make(HostErrorSet),
 	}
 }
 
@@ -649,96 +648,50 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	defer s.mu.Unlock()
 
 	// update pending sectors
-	filtered := s.pending[:0]
-	for _, sector := range s.pending {
-		if len(s.completed[sector.index]) == 0 && len(sector.hks) > 0 {
-			filtered = append(filtered, sector)
+	var pending []*sectorInfo
+	for _, sector := range s.sectors {
+		if len(sector.data) == 0 && len(sector.hks) > 0 {
+			pending = append(pending, sector)
 		}
 	}
-	s.pending = filtered
-
-	// sort pending sectors
-	sort.Slice(s.pending, func(i, j int) bool {
-		return s.pending[i].selected < s.pending[j].selected
-	})
-
-	// sanity check
-	if len(s.pending) == 0 {
+	if len(pending) == 0 {
 		return nil
 	}
 
-	// select potential sectors, give preference to sectors that weren't
-	// selected and launched before by only considering 'minSelected' sectors
-	// and working our way up
-	exhausted := true
-	minSelected := s.pending[0].selected
-	candidates := make(map[types.PublicKey]*sectorDownloadInfo)
-loop:
-	for _, sector := range s.pending {
-		if sector.selected > minSelected {
-			exhausted = false
-			break
-		}
-		for _, hk := range sector.hks {
-			if _, ok := candidates[hk]; !ok {
-				candidates[hk] = sector
-				break
+	// sort pending sectors
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].selected < pending[j].selected
+	})
+
+	for _, next := range pending {
+		if fastest := s.mgr.fastest(next.hks); fastest != nil {
+			next.selectHost(fastest.PublicKey())
+			return &sectorDownloadReq{
+				ctx: ctx,
+
+				offset: s.offset,
+				length: s.length,
+				root:   next.root,
+				host:   fastest,
+
+				// overpay is set to 'true' when a request is retried after the slab
+				// download failed and we realise that it might have succeeded if we
+				// allowed overpaying for certain sectors, we only do this when trying
+				// to migrate a critically low-health slab that might otherwise be
+				// unrecoverable
+				overpay: false,
+
+				overdrive:   overdrive,
+				sectorIndex: next.index,
+				resps:       resps,
 			}
 		}
 	}
 
-	// no more sectors to download
-	if len(candidates) == 0 {
-		// if we're not exhausted, look at sectors that were selected before
-		if !exhausted {
-			exhausted = true
-			minSelected++
-			goto loop
-		}
-
-		// we don't know if the download failed at this point so we register an
-		// error that gets propagated in case it did
-		s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
-		return nil
-	}
-
-	// build list of host keys
-	var hosts []types.PublicKey
-	for hk := range candidates {
-		hosts = append(hosts, hk)
-	}
-
-	// select the fastest host
-	fastest := s.mgr.fastest(hosts)
-	if fastest == nil {
-		s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more downloaders", errDownloadNotEnoughHosts)
-		return nil
-	}
-
-	// update the sector info
-	hk := fastest.PublicKey()
-	candidates[hk].selectHost(hk)
-
-	// build the request
-	return &sectorDownloadReq{
-		ctx: ctx,
-
-		offset: s.offset,
-		length: s.length,
-		root:   candidates[hk].root,
-		host:   fastest,
-
-		// overpay is set to 'true' when a request is retried after the slab
-		// download failed and we realise that it might have succeeded if we
-		// allowed overpaying for certain sectors, we only do this when trying
-		// to migrate a critically low-health slab that might otherwise be
-		// unrecoverable
-		overpay: false,
-
-		overdrive:   overdrive,
-		sectorIndex: candidates[hk].index,
-		resps:       resps,
-	}
+	// we don't know if the download failed at this point so we register an
+	// error that gets propagated in case it did
+	s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
+	return nil
 }
 
 func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
@@ -843,8 +796,7 @@ func (s *slabDownload) overdrivePct() float64 {
 func (s *slabDownload) downloadSpeed() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	completedShards := len(s.completed)
-	bytes := completedShards * rhpv2.SectorSize
+	bytes := s.numCompleted * rhpv2.SectorSize
 	ms := time.Since(s.created).Milliseconds()
 	if ms == 0 {
 		ms = 1 // avoid division by zero
@@ -856,9 +808,14 @@ func (s *slabDownload) finish() ([][]byte, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.numCompleted < s.minShards {
-		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d pending=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), len(s.pending), len(s.errs), s.errs)
+		return nil, s.numOverpaid > 0, fmt.Errorf("failed to download slab: completed=%d inflight=%d launched=%d relaunched=%d overpaid=%d downloaders=%d pending=%d errors=%d %v", s.numCompleted, s.numInflight, s.numLaunched, s.numRelaunched, s.numOverpaid, s.mgr.numDownloaders(), len(s.sectors), len(s.errs), s.errs)
 	}
-	return s.completed, s.numOverpaid > 0, nil
+
+	data := make([][]byte, len(s.sectors))
+	for i, sector := range s.sectors {
+		data[i] = sector.data
+	}
+	return data, s.numOverpaid > 0, nil
 }
 
 func (s *slabDownload) missing() int {
@@ -917,8 +874,8 @@ func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool) {
 	}
 
 	// store the sector
-	if len(s.completed[resp.req.sectorIndex]) == 0 {
-		s.completed[resp.req.sectorIndex] = resp.sector
+	if len(s.sectors[resp.req.sectorIndex].data) == 0 {
+		s.sectors[resp.req.sectorIndex].data = resp.sector
 		s.numCompleted++
 	}
 
