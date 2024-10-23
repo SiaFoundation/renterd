@@ -673,9 +673,10 @@ func setStoreConfig(cfg *config.Config) {
 }
 
 func setS3Config(cfg *config.Config) {
-	configure := promptYesNo("Would you like to configure S3 settings?")
-	cfg.S3.Enabled = promptYesNo("Would you like to enable the S3 gateway?")
-	if !configure {
+	if !promptYesNo("Would you like to configure S3 settings?") {
+		return
+	} else if !promptYesNo("Would you like to enable the S3 gateway?") {
+		cfg.S3.Enabled = false
 		return
 	}
 
