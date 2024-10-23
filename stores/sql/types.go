@@ -37,7 +37,6 @@ type (
 	FileContractID  types.FileContractID
 	Hash256         types.Hash256
 	MerkleProof     struct{ Hashes []types.Hash256 }
-	NullableInt64   int64
 	NullableString  string
 	HostSettings    rhpv2.HostSettings
 	PriceTable      rhpv3.HostPriceTable
@@ -63,7 +62,6 @@ var (
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
 	_ scannerValuer = (*MerkleProof)(nil)
-	_ scannerValuer = (*NullableInt64)(nil)
 	_ scannerValuer = (*NullableString)(nil)
 	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
@@ -462,36 +460,6 @@ func (u *Unsigned64) Scan(value interface{}) error {
 // Value returns an Unsigned64 value, implements driver.Valuer interface.
 func (u Unsigned64) Value() (driver.Value, error) {
 	return int64(u), nil
-}
-
-// Scan scan value into NullableInt64, implements sql.Scanner interface.
-func (i *NullableInt64) Scan(value interface{}) error {
-	if value == nil {
-		*i = 0
-		return nil
-	}
-
-	switch value := value.(type) {
-	case uint64:
-		*i = NullableInt64(value)
-	case uint:
-		*i = NullableInt64(value)
-	case int64:
-		*i = NullableInt64(value)
-	case int:
-		*i = NullableInt64(value)
-	default:
-		return fmt.Errorf("failed to unmarshal NullableInt64 value: %v %T", value, value)
-	}
-	return nil
-}
-
-// Value returns a NullableString value, implements driver.Valuer interface.
-func (i NullableInt64) Value() (driver.Value, error) {
-	if i == 0 {
-		return nil, nil
-	}
-	return int64(i), nil
 }
 
 // Scan scan value into NullableString, implements sql.Scanner interface.

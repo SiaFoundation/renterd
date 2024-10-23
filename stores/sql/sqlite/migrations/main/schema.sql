@@ -21,7 +21,6 @@ CREATE INDEX `idx_contracts_start_height` ON `contracts`(`start_height`);
 CREATE INDEX `idx_contracts_state` ON `contracts`(`state`);
 CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
 CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);
-CREATE INDEX `idx_contracts_v2` ON `contracts`(`v2`);
 
 -- dbContractSet
 CREATE TABLE `contract_sets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`name` text UNIQUE);

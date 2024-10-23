@@ -112,7 +112,6 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_state` (`state`),
   KEY `idx_contracts_window_start` (`window_start`),
   KEY `idx_contracts_window_end` (`window_end`),
-  KEY `idx_contracts_v2` (`v2`),
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
