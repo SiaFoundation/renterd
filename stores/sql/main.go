@@ -420,7 +420,7 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	}
 
 	// insert destination directory
-	dstDirID, err := InsertDirectories(ctx, tx, dstBucket, object.Directories(dstKey))
+	dstDirID, err := InsertDirectories(ctx, tx, dstBucket, dstKey)
 	if err != nil {
 		return api.ObjectMetadata{}, err
 	}
@@ -755,10 +755,10 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 	return contracts[0], nil
 }
 
-func InsertDirectories(ctx context.Context, tx sql.Tx, bucket string, dirs []string) (int64, error) {
+func InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	// sanity check input
-	if len(dirs) == 0 {
-		return 0, errors.New("dirs cannot be empty")
+	if !strings.HasPrefix(path, "/") {
+		return 0, errors.New("path has to have a leading slash")
 	} else if bucket == "" {
 		return 0, errors.New("bucket cannot be empty")
 	}
@@ -787,7 +787,7 @@ func InsertDirectories(ctx context.Context, tx sql.Tx, bucket string, dirs []str
 
 	// insert directories for give path
 	var dirID *int64
-	for _, dir := range dirs {
+	for _, dir := range object.Directories(path) {
 		// check if the directory exists
 		var existingID int64
 		if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
@@ -1925,13 +1925,48 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 // RenameDirectories renames all directories in the database with the given
 // prefix to the new prefix.
 func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefixNew string) (int64, error) {
-	// prepare new directories
-	dirs := object.Directories(prefixNew)
-	if strings.HasSuffix(prefixNew, "/") {
-		dirs = append(dirs, prefixNew) // TODO: only tests pass prefixes without trailing slash so probably can assert this and error out
+	// sanity check input
+	if !strings.HasPrefix(prefixNew, "/") {
+		return 0, errors.New("paths has to have a leading slash")
+	} else if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
 	}
 
-	// fetch target directories
+	// prepare statements
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer queryDirStmt.Close()
+
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertStmt.Close()
+
+	updateNameStmt, err := tx.Prepare(ctx, "UPDATE directories SET name = ? WHERE id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateNameStmt.Close()
+
+	updateParentStmt, err := tx.Prepare(ctx, "UPDATE directories SET db_parent_id = ? WHERE db_parent_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateParentStmt.Close()
+
+	// fetch bucket id
+	var bucketID int64
+	err = tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// fetch destination directories
 	directories := make(map[int64]string)
 	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucket)
 	if err != nil {
@@ -1947,34 +1982,10 @@ func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefix
 		directories[id] = strings.Replace(name, prefixOld, prefixNew, 1)
 	}
 
-	// return early if we don't need to rename existing diretories
-	if len(directories) == 0 {
-		return InsertDirectories(ctx, tx, bucket, dirs)
-	}
-
-	// prepare statements
-	existsStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)")
-	if err != nil {
-		return 0, err
-	}
-	defer existsStmt.Close()
-
-	updateNameStmt, err := tx.Prepare(ctx, "UPDATE directories SET name = ? WHERE id = ?")
-	if err != nil {
-		return 0, err
-	}
-	defer updateNameStmt.Close()
-
-	updateParentStmt, err := tx.Prepare(ctx, "UPDATE directories SET db_parent_id = ? WHERE db_parent_id = ?")
-	if err != nil {
-		return 0, err
-	}
-	defer updateParentStmt.Close()
-
-	// rename directories
+	// update existing directories
 	for id, name := range directories {
 		var existingID int64
-		if err := existsStmt.QueryRow(ctx, name, bucket).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+		if err := queryDirStmt.QueryRow(ctx, name, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
 			return 0, err
 		} else if existingID > 0 {
 			if _, err := updateParentStmt.Exec(ctx, existingID, id); err != nil {
@@ -1987,7 +1998,34 @@ func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefix
 		}
 	}
 
-	return InsertDirectories(ctx, tx, bucket, dirs)
+	// insert new directories
+	var dirID *int64
+	dirs := object.Directories(prefixNew)
+	if strings.HasSuffix(prefixNew, "/") {
+		dirs = append(dirs, prefixNew)
+	}
+	for _, dir := range dirs {
+		// check if the directory exists
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, dir, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if existingID > 0 {
+			dirID = &existingID
+			continue
+		}
+
+		// insert directory
+		var insertedID int64
+		if _, err := insertStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		} else if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&insertedID); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if insertedID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		}
+		dirID = &insertedID
+	}
+	return *dirID, nil
 }
 
 func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {

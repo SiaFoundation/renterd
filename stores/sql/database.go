@@ -182,10 +182,9 @@ type (
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
 
-		// InsertDirectories inserts the given directories and returns the ID of
-		// the last one. Note that the directories are expected to be given from
-		// parent to child. The ID of the last directory is returned.
-		InsertDirectories(ctx context.Context, bucket string, dirs []string) (int64, error)
+		// InsertDirectories inserts the directories for the given path and
+		// returns the ID of the immediate parent directory.
+		InsertDirectories(ctx context.Context, bucket, path string) (int64, error)
 
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error

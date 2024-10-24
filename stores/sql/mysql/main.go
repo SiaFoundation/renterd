@@ -74,7 +74,7 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.InsertDirectories(ctx, bucket, object.Directories(path))
+	return mtx.InsertDirectories(ctx, bucket, path)
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
@@ -228,7 +228,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.InsertDirectories(ctx, bucket, object.Directories(key))
+	dirID, err := tx.InsertDirectories(ctx, bucket, key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -412,8 +412,8 @@ func (tx *MainDatabaseTx) InsertContract(ctx context.Context, rev rhpv2.Contract
 	return ssql.InsertContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
 }
 
-func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket string, dirs []string) (int64, error) {
-	return ssql.InsertDirectories(ctx, tx, bucket, dirs)
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
+	return ssql.InsertDirectories(ctx, tx, bucket, path)
 }
 
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {

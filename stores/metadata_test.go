@@ -4375,7 +4375,7 @@ func TestSlabCleanup(t *testing.T) {
 	var dirID int64
 	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.InsertDirectories(context.Background(), api.DefaultBucketName, object.Directories("/"))
+		dirID, err = tx.InsertDirectories(context.Background(), api.DefaultBucketName, "/")
 		return err
 	})
 	if err != nil {
@@ -4923,7 +4923,7 @@ func TestDirectories(t *testing.T) {
 		var dirID int64
 		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.InsertDirectories(context.Background(), api.DefaultBucketName, object.Directories(p))
+			dirID, err = tx.InsertDirectories(context.Background(), api.DefaultBucketName, p)
 			return err
 		})
 		if err != nil {
