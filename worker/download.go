@@ -669,7 +669,24 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 
 	// sort pending sectors
 	sort.Slice(pending, func(i, j int) bool {
-		return pending[i].selected < pending[j].selected
+		// get fastest download for each sector
+		iFastest := s.mgr.fastest(pending[i].hks)
+		jFastest := s.mgr.fastest(pending[j].hks)
+
+		// check edge case where a sector doesn't have a downloader
+		if iFastest != nil && jFastest == nil {
+			return true // prefer i
+		} else if iFastest == nil && jFastest != nil {
+			return false // prefer j
+		} else if iFastest == nil && jFastest == nil {
+			return false // doesn't matter
+		}
+		// both have a downloader, sort by number of selections next
+		if pending[i].selected != pending[j].selected {
+			return pending[i].selected < pending[j].selected
+		}
+		// both have been selected the same number of times, pick the faster one
+		return iFastest.estimate() < jFastest.estimate()
 	})
 
 	for _, next := range pending {
