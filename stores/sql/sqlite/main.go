@@ -71,8 +71,9 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
-func (b *MainDatabase) InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx, bucketID int64, path string, memo map[string]int64) (int64, error) {
-	return ssql.InsertDirectoriesMemoized(ctx, tx, bucketID, object.Directories(path), memo)
+func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
+	mtx := b.wrapTxn(tx)
+	return mtx.InsertDirectories(ctx, bucket, object.Directories(path))
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {

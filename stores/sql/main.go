@@ -756,6 +756,13 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 }
 
 func InsertDirectories(ctx context.Context, tx sql.Tx, bucket string, dirs []string) (int64, error) {
+	// sanity check input
+	if len(dirs) == 0 {
+		return 0, errors.New("dirs cannot be empty")
+	} else if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
+	}
+
 	// fetch bucket
 	var bucketID int64
 	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
@@ -763,33 +770,6 @@ func InsertDirectories(ctx context.Context, tx sql.Tx, bucket string, dirs []str
 		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
 	} else if err != nil {
 		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
-	}
-
-	// insert directories
-	return InsertDirectoriesMemoized(ctx, tx, bucketID, dirs, make(map[string]int64))
-}
-
-func InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx, bucketID int64, dirs []string, memo map[string]int64) (int64, error) {
-	// sanity check input
-	if len(dirs) == 0 {
-		return 0, errors.New("dirs cannot be empty")
-	} else if bucketID == 0 {
-		return 0, errors.New("bucketID cannot be 0")
-	}
-
-	// loop through dirs and memoize existing directories
-	stmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE db_bucket_id = ? AND name = ?")
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer stmt.Close()
-	for _, dir := range dirs {
-		var dirID int64
-		if err := stmt.QueryRow(ctx, bucketID, dir).Scan(&dirID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
-			return 0, err
-		} else if dirID > 0 {
-			memo[dir] = dirID
-		}
 	}
 
 	// prepare statements
@@ -808,9 +788,12 @@ func InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx, bucketID int64, d
 	// insert directories for give path
 	var dirID *int64
 	for _, dir := range dirs {
-		// check if we have a memoized dir id
-		if v, ok := memo[dir]; ok {
-			dirID = &v
+		// check if the directory exists
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if existingID > 0 {
+			dirID = &existingID
 			continue
 		}
 
@@ -823,7 +806,6 @@ func InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx, bucketID int64, d
 		} else if insertedID == 0 {
 			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
 		}
-		memo[dir] = insertedID
 		dirID = &insertedID
 	}
 	return *dirID, nil

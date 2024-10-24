@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +28,7 @@ type (
 
 	MainMigrator interface {
 		Migrator
-		InsertDirectoriesMemoized(ctx context.Context, tx Tx, bucketID int64, path string, memo map[string]int64) (int64, error)
+		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
 	}
 )
@@ -227,29 +228,46 @@ var (
 					}
 
 					// fetch all objects
-					rows, err := tx.Query(ctx, "SELECT o.id, o.db_bucket_id, o.object_id FROM objects o")
+					type obj struct {
+						ID     int64
+						Path   string
+						Bucket string
+					}
+
+					rows, err := tx.Query(ctx, "SELECT o.id, o.object_id, b.name FROM objects o INNER JOIN buckets b ON o.db_bucket_id = b.id")
 					if err != nil {
 						return fmt.Errorf("failed to fetch objects: %w", err)
 					}
 					defer rows.Close()
 
-					// memoize directory creation
-					memo := make(map[string]int64)
-
-					// iterate over every object and track its directory
-					updates := make(map[int64]int64)
+					var objects []obj
 					for rows.Next() {
-						var oID, bID int64
-						var path string
-						if err := rows.Scan(&oID, &bID, &path); err != nil {
+						var o obj
+						if err := rows.Scan(&o.ID, &o.Path, &o.Bucket); err != nil {
 							return fmt.Errorf("failed to scan object: %w", err)
 						}
+						objects = append(objects, o)
+					}
 
-						dirID, err := m.InsertDirectoriesMemoized(ctx, tx, bID, path, memo)
-						if err != nil {
-							return fmt.Errorf("failed to create directory %s: %w", path, err)
+					// re-insert directories and collect object updates
+					memo := make(map[string]int64)
+					updates := make(map[int64]int64)
+					for _, o := range objects {
+						// build path directories
+						dirs := object.Directories(o.Path)
+						last := dirs[len(dirs)-1]
+						if _, ok := memo[last]; ok {
+							updates[o.ID] = memo[last]
+							continue
 						}
-						updates[oID] = dirID
+
+						// insert directories
+						dirID, err := m.InsertDirectories(ctx, tx, o.Bucket, o.Path)
+						if err != nil {
+							return fmt.Errorf("failed to create directory %s in bucket %s: %w", o.Path, o.Bucket, err)
+						}
+						updates[o.ID] = dirID
+						memo[last] = dirID
 					}
 
 					// prepare an update statement
