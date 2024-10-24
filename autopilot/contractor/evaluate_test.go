@@ -47,8 +47,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	// prepare settings that result in all hosts being usable
 	cfg := api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance: types.Siacoins(100000),
-			Amount:    10,
+			Amount: 10,
 		},
 	}
 	cs := api.ConsensusState{

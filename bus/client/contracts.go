@@ -156,11 +156,10 @@ func (c *Client) PruneContract(ctx context.Context, contractID types.FileContrac
 }
 
 // RenewContract renews an existing contract with a host and adds it to the bus.
-func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
+func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
 	req := api.ContractRenewRequest{
 		EndHeight:          endHeight,
 		ExpectedNewStorage: expectedStorage,
-		MaxFundAmount:      maxFundAmount,
 		MinNewCollateral:   minNewCollateral,
 		RenterFunds:        renterFunds,
 	}

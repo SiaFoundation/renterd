@@ -123,9 +123,7 @@ func newTestStore() *mockPinStore {
 	s.autopilots[testAutopilotID] = api.Autopilot{
 		ID: testAutopilotID,
 		Config: api.AutopilotConfig{
-			Contracts: api.ContractsConfig{
-				Allowance: types.Siacoins(1),
-			},
+			Contracts: api.ContractsConfig{},
 		},
 	}
 
@@ -259,36 +257,6 @@ func TestPinManager(t *testing.T) {
 
 	// increase rate so average isn't catching up to us
 	e.setRate(3)
-
-	// fetch autopilot
-	ap, _ := s.Autopilot(context.Background(), testAutopilotID)
-
-	// add autopilot pin, but disable it
-	pins := api.AutopilotPins{
-		Allowance: api.Pin{
-			Pinned: false,
-			Value:  2,
-		},
-	}
-	ps.Autopilots = map[string]api.AutopilotPins{testAutopilotID: pins}
-	s.UpdatePinnedSettings(context.Background(), ps)
-	waitForUpdate()
-
-	// assert autopilot was not updated
-	if app, _ := s.Autopilot(context.Background(), testAutopilotID); !app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
-		t.Fatalf("expected autopilot to not be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
-	}
-
-	// enable the pin
-	pins.Allowance.Pinned = true
-	ps.Autopilots[testAutopilotID] = pins
-	s.UpdatePinnedSettings(context.Background(), ps)
-	waitForUpdate()
-
-	// assert autopilot was updated
-	if app, _ := s.Autopilot(context.Background(), testAutopilotID); app.Config.Contracts.Allowance.Equals(ap.Config.Contracts.Allowance) {
-		t.Fatalf("expected autopilot to be updated, got %v = %v", app.Config.Contracts.Allowance, ap.Config.Contracts.Allowance)
-	}
 
 	// make explorer return an error
 	e.setUnreachable(true)
