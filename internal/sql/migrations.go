@@ -4,6 +4,8 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
@@ -26,6 +28,7 @@ type (
 	MainMigrator interface {
 		Migrator
 		InsertDirectoriesMemoized(ctx context.Context, tx Tx, bucketID int64, path string, memo map[string]int64) (int64, error)
+		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
 	}
 )
 
@@ -86,8 +89,78 @@ var (
 			{
 				ID: "00008_directories",
 				Migrate: func(tx Tx) error {
-					// TODO: alternative to tweak old version of MakeDirsForPath
-					log.Infof("skipping main migration '00008_directories' in favour of '00018_directory_buckets'")
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00008_directories_1", log); err != nil {
+						return fmt.Errorf("failed to migrate: %v", err)
+					}
+					// helper type
+					type obj struct {
+						ID       uint
+						ObjectID string
+					}
+					// loop over all objects and deduplicate dirs to create
+					log.Info("beginning post-migration directory creation, this might take a while")
+					batchSize := 10000
+					processedDirs := make(map[string]struct{})
+					for offset := 0; ; offset += batchSize {
+						if offset > 0 && offset%batchSize == 0 {
+							log.Infof("processed %v objects", offset)
+						}
+						var objBatch []obj
+						rows, err := tx.Query(ctx, "SELECT id, object_id FROM objects ORDER BY id LIMIT ? OFFSET ?", batchSize, offset)
+						if err != nil {
+							return fmt.Errorf("failed to fetch objects: %v", err)
+						}
+						for rows.Next() {
+							var o obj
+							if err := rows.Scan(&o.ID, &o.ObjectID); err != nil {
+								_ = rows.Close()
+								return fmt.Errorf("failed to scan object: %v", err)
+							}
+							objBatch = append(objBatch, o)
+						}
+						if err := rows.Close(); err != nil {
+							return fmt.Errorf("failed to close rows: %v", err)
+						}
+						if len(objBatch) == 0 {
+							break // done
+						}
+						for _, obj := range objBatch {
+							// check if dir was processed
+							dir := "" // root
+							if i := strings.LastIndex(obj.ObjectID, "/"); i > -1 {
+								dir = obj.ObjectID[:i+1]
+							}
+							_, exists := processedDirs[dir]
+							if exists {
+								continue // already processed
+							}
+							processedDirs[dir] = struct{}{}
+
+							// process
+							dirID, err := m.MakeDirsForPath(ctx, tx, obj.ObjectID)
+							if err != nil {
+								return fmt.Errorf("failed to create directory %s: %w", obj.ObjectID, err)
+							}
+
+							if _, err := tx.Exec(ctx, `
+							UPDATE objects
+							SET db_directory_id = ?
+							WHERE object_id LIKE ? AND
+							SUBSTR(object_id, 1, ?) = ? AND
+							INSTR(SUBSTR(object_id, ?), '/') = 0
+						`,
+								dirID,
+								dir+"%",
+								utf8.RuneCountInString(dir), dir,
+								utf8.RuneCountInString(dir)+1); err != nil {
+								return fmt.Errorf("failed to update object %s: %w", obj.ObjectID, err)
+							}
+						}
+					}
+					log.Info("post-migration directory creation complete")
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00008_directories_2", log); err != nil {
+						return fmt.Errorf("failed to migrate: %v", err)
+					}
 					return nil
 				},
 			},

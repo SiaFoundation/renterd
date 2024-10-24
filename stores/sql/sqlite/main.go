@@ -75,6 +75,11 @@ func (b *MainDatabase) InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx,
 	return ssql.InsertDirectoriesMemoized(ctx, tx, bucketID, object.Directories(path), memo)
 }
 
+func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
+	mtx := b.wrapTxn(tx)
+	return mtx.MakeDirsForPathDeprecated(ctx, path)
+}
+
 func (b *MainDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
 }
@@ -465,6 +470,52 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
 	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+}
+
+func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ?")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer queryDirStmt.Close()
+
+	// Create root dir.
+	dirID := int64(1)
+	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
+		return 0, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	// Create remaining directories.
+	path = strings.TrimSuffix(path, "/")
+	if path == "/" {
+		return dirID, nil
+	}
+	for i := 0; i < utf8.RuneCountInString(path); i++ {
+		if path[i] != '/' {
+			continue
+		}
+		dir := path[:i+1]
+		if dir == "/" {
+			continue
+		}
+		if _, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		}
+		var childID int64
+		if err := queryDirStmt.QueryRow(ctx, dir).Scan(&childID); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if childID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		}
+		dirID = childID
+	}
+	return dirID, nil
 }
 
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {

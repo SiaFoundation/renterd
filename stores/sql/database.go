@@ -200,6 +200,12 @@ type (
 		// ListObjects returns a list of objects from the given bucket.
 		ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 
+		// MakeDirsForPathDeprecated creates all directories for a given
+		// object's path. This method is deprecated and should not be used, it's
+		// used by migration 00008_directories and should be removed when that
+		// migration is squashed.
+		MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error)
+
 		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
 		// database, causing the provided shards to be associated with the slab.
 		// The returned string contains the filename of the slab buffer on disk.
