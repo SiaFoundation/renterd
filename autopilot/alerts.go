@@ -44,7 +44,7 @@ func newAccountLowBalanceAlert(address types.Address, balance, initialFunding ty
 			"address":        address,
 			"balance":        balance,
 			"initialFunding": initialFunding,
-			"hint":           fmt.Sprintf("The current wallet balance of %v is less than the configured initialFunding of %v. Ideally, a wallet holds at least one allowance worth of funds to make sure it can renew all its contracts.", balance, initialFunding),
+			"hint":           fmt.Sprintf("The current wallet balance of %v is less than the configured initialFunding of %v times the number of contracts to form. Ideally, a wallet holds at least enough funds to make sure it can form a fresh set of contracts.", balance, initialFunding),
 		},
 		Timestamp: time.Now(),
 	}

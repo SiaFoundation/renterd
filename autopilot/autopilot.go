@@ -590,7 +590,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	balance := wallet.Confirmed
 
 	// register an alert if balance is low
-	if balance.Cmp(cfg.Contracts.InitialFunding) < 0 {
+	if balance.Cmp(cfg.Contracts.InitialFunding.Mul64(cfg.Contracts.Amount)) < 0 {
 		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, cfg.Contracts.InitialFunding, cs.BlockHeight, renewWindow, autopilot.EndHeight()))
 	} else {
 		ap.DismissAlert(ctx, alertLowBalanceID)
