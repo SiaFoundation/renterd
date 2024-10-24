@@ -362,7 +362,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	return sizes, nil
 }
 
-func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata, dstDirID int64) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
 	if err != nil {
@@ -417,12 +417,6 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 		return api.ObjectMetadata{}, fmt.Errorf("%w: destination bucket", api.ErrBucketNotFound)
 	} else if err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to fetch dest bucket id: %w", err)
-	}
-
-	// insert destination directory
-	dstDirID, err := InsertDirectories(ctx, tx, dstBucket, dstKey)
-	if err != nil {
-		return api.ObjectMetadata{}, err
 	}
 
 	// copy object
@@ -753,62 +747,6 @@ func InsertContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, 
 		return api.ContractMetadata{}, api.ErrContractNotFound
 	}
 	return contracts[0], nil
-}
-
-func InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
-	// sanity check input
-	if !strings.HasPrefix(path, "/") {
-		return 0, errors.New("path has to have a leading slash")
-	} else if bucket == "" {
-		return 0, errors.New("bucket cannot be empty")
-	}
-
-	// fetch bucket
-	var bucketID int64
-	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
-	} else if err != nil {
-		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
-	}
-
-	// prepare statements
-	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer insertDirStmt.Close()
-
-	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE db_bucket_id = ? AND name = ?")
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer queryDirStmt.Close()
-
-	// insert directories for give path
-	var dirID *int64
-	for _, dir := range object.Directories(path) {
-		// check if the directory exists
-		var existingID int64
-		if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if existingID > 0 {
-			dirID = &existingID
-			continue
-		}
-
-		// insert directory
-		var insertedID int64
-		if _, err := insertDirStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
-			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		} else if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&insertedID); err != nil {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if insertedID == 0 {
-			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
-		}
-		dirID = &insertedID
-	}
-	return *dirID, nil
 }
 
 func InsertMetadata(ctx context.Context, tx sql.Tx, objID, muID *int64, md api.ObjectUserMetadata) error {

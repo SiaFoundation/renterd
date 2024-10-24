@@ -5,15 +5,13 @@ import (
 	dsql "database/sql"
 	"embed"
 	"fmt"
-	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	"go.sia.tech/renterd/internal/sql"
 )
 
-var dbLockCondition = func(msg string) bool {
-	return (strings.Contains(msg, "Deadlock found when trying to get lock") ||
-		(strings.Contains(msg, "Duplicate entry") && strings.Contains(msg, "directories.idx_directories_bucket_name")))
+var deadlockMsgs = []string{
+	"Deadlock found when trying to get lock",
 }
 
 func Open(user, password, addr, dbName string) (*dsql.DB, error) {
