@@ -76,6 +76,11 @@ func (b *MainDatabase) InsertDirectoriesMemoized(ctx context.Context, tx sql.Tx,
 	return ssql.InsertDirectoriesMemoized(ctx, tx, bucketID, object.Directories(path), memo)
 }
 
+func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
+	mtx := b.wrapTxn(tx)
+	return mtx.MakeDirsForPathDeprecated(ctx, path)
+}
+
 func (b *MainDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "main", sql.MainMigrations(ctx, b, migrationsFs, b.log))
 }
@@ -479,6 +484,42 @@ func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
 func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
 	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
+}
+
+func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {
+	// Create root dir.
+	dirID := int64(1)
+	if _, err := tx.Exec(ctx, "INSERT IGNORE INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL)", dirID); err != nil {
+		return 0, fmt.Errorf("failed to create root directory: %w", err)
+	}
+
+	path = strings.TrimSuffix(path, "/")
+	if path == "/" {
+		return dirID, nil
+	}
+
+	// Create remaining directories.
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement to insert dir: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	for i := 0; i < utf8.RuneCountInString(path); i++ {
+		if path[i] != '/' {
+			continue
+		}
+		dir := path[:i+1]
+		if dir == "/" {
+			continue
+		}
+		if res, err := insertDirStmt.Exec(ctx, dir, dirID); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		} else if dirID, err = res.LastInsertId(); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		}
+	}
+	return dirID, nil
 }
 
 func (tx *MainDatabaseTx) MarkPackedSlabUploaded(ctx context.Context, slab api.UploadedPackedSlab) (string, error) {
