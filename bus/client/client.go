@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 )
@@ -16,6 +18,14 @@ func New(addr, password string) *Client {
 		BaseURL:  addr,
 		Password: password,
 	}}
+}
+
+func (c *Client) Backup(ctx context.Context, database, dstPath string) (err error) {
+	err = c.c.WithContext(ctx).POST("/system/sqlite3/backup", api.BackupRequest{
+		Database: database,
+		Path:     dstPath,
+	}, nil)
+	return
 }
 
 // State returns the current state of the bus.
