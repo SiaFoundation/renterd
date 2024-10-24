@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -13,7 +12,7 @@ import (
 )
 
 type Worker interface {
-	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
+	Account(ctx context.Context, hostKey types.PublicKey) (api.Account, error)
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab, set string) error
