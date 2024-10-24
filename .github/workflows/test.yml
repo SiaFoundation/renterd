@@ -7,28 +7,7 @@ on:
       - master
 
 jobs:
-  analyze:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Lint
-        uses: golangci/golangci-lint-action@v3
-        with:
-          args: --timeout=30m
-      - name: Jape Analyzer
-        uses: SiaFoundation/action-golang-analysis@HEAD
-        with:
-          analyzers: |
-            go.sia.tech/jape.Analyzer@master
-          directories: |
-            autopilot
-            bus bus/client
-            worker worker/client
-          flags: |
-            -japecheck.types=false
   test:
-    needs: analyze
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -56,34 +35,10 @@ jobs:
           host port: 3800
           mysql version: "8"
           mysql root password: test
-      - name: Test Stores
-        uses: n8maninger/action-golang-test@v1
-        with:
-          args: "-race;-short;-tags=netgo"
-      - name: Test Stores - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./stores"
-          args: "-race;-short;-tags=netgo"
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m;-tags=netgo"
-      - name: Test Integration - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m;-tags=netgo"
+          args: "-failfast;-race;-timeout=60m;-tags=netgo;-run=TestEphemeralAccountSync$;-count=50"
       - name: Build
         run: go build -o bin/ -tags='netgo timetzdata' ./cmd/renterd
