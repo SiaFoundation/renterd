@@ -25,11 +25,6 @@ type (
 		LastBlockTime TimeRFC3339 `json:"lastBlockTime"`
 		Synced        bool        `json:"synced"`
 	}
-
-	// ConsensusNetwork holds the name of the network.
-	ConsensusNetwork struct {
-		Name string
-	}
 )
 
 type (

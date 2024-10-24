@@ -262,6 +262,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
+
 	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
@@ -351,7 +352,8 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
+	network, genesis := testNetwork()
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, network, genesis, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -401,7 +403,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
-	network, genesis := testNetwork()
 	cluster := &TestCluster{
 		apID:         apCfg.ID,
 		dir:          dir,
@@ -534,7 +535,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
 	// create store config
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
@@ -571,7 +572,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 	}
 
 	// create chain manager
-	network, genesis := testNetwork()
 	store, state, err := chain.NewDBStore(bdb, network, genesis)
 	if err != nil {
 		return nil, nil, nil, nil, err
