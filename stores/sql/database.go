@@ -182,6 +182,10 @@ type (
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
 
+		// InsertDirectories inserts the directories for the given path and
+		// returns the ID of the immediate parent directory.
+		InsertDirectories(ctx context.Context, bucket, path string) (int64, error)
+
 		// InsertObject inserts a new object into the database.
 		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
@@ -195,8 +199,11 @@ type (
 		// ListObjects returns a list of objects from the given bucket.
 		ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
 
-		// MakeDirsForPath creates all directories for a given object's path.
-		MakeDirsForPath(ctx context.Context, path string) (int64, error)
+		// MakeDirsForPathDeprecated creates all directories for a given
+		// object's path. This method is deprecated and should not be used, it's
+		// used by migration 00008_directories and should be removed when that
+		// migration is squashed.
+		MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error)
 
 		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
 		// database, causing the provided shards to be associated with the slab.
@@ -277,6 +284,10 @@ type (
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
 		RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error)
+
+		// RenameDirectories renames all directories in the database with the
+		// given prefix to the new prefix.
+		RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error)
 
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an

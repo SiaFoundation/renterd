@@ -158,7 +158,7 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 // TODO: if we ever stop assuming that certain prices in the pricetable are
 // always set to 1H we should account for those fields in
 // `hostPeriodCostForScore` as well.
-func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, pt *rhpv3.HostPriceTable) error {
+func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, _ types.Currency, pt *rhpv3.HostPriceTable) error {
 	// check if we have a price table
 	if pt == nil {
 		return nil

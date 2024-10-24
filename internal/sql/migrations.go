@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
 
@@ -27,6 +28,7 @@ type (
 
 	MainMigrator interface {
 		Migrator
+		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
 	}
 )
@@ -215,6 +217,74 @@ var (
 				ID: "00017_unix_ms",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00017_unix_ms", log)
+				},
+			},
+			{
+				ID: "00018_directory_buckets",
+				Migrate: func(tx Tx) error {
+					// recreate the table, erasing all its contents
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_recreate_directories", log); err != nil {
+						return fmt.Errorf("failed to migrate: %v", err)
+					}
+
+					// fetch all objects
+					type obj struct {
+						ID     int64
+						Path   string
+						Bucket string
+					}
+
+					rows, err := tx.Query(ctx, "SELECT o.id, o.object_id, b.name FROM objects o INNER JOIN buckets b ON o.db_bucket_id = b.id")
+					if err != nil {
+						return fmt.Errorf("failed to fetch objects: %w", err)
+					}
+					defer rows.Close()
+
+					var objects []obj
+					for rows.Next() {
+						var o obj
+						if err := rows.Scan(&o.ID, &o.Path, &o.Bucket); err != nil {
+							return fmt.Errorf("failed to scan object: %w", err)
+						}
+						objects = append(objects, o)
+					}
+
+					// re-insert directories and collect object updates
+					memo := make(map[string]int64)
+					updates := make(map[int64]int64)
+					for _, o := range objects {
+						// build path directories
+						dirs := object.Directories(o.Path)
+						last := dirs[len(dirs)-1]
+						if _, ok := memo[last]; ok {
+							updates[o.ID] = memo[last]
+							continue
+						}
+
+						// insert directories
+						dirID, err := m.InsertDirectories(ctx, tx, o.Bucket, o.Path)
+						if err != nil {
+							return fmt.Errorf("failed to create directory %s in bucket %s: %w", o.Path, o.Bucket, err)
+						}
+						updates[o.ID] = dirID
+						memo[last] = dirID
+					}
+
+					// prepare an update statement
+					stmt, err := tx.Prepare(ctx, "UPDATE objects SET db_directory_id = ? WHERE id = ?")
+					if err != nil {
+						return fmt.Errorf("failed to prepare update statement: %w", err)
+					}
+					defer stmt.Close()
+
+					// update all objects
+					for id, dirID := range updates {
+						if _, err := stmt.Exec(ctx, dirID, id); err != nil {
+							return fmt.Errorf("failed to update object %d: %w", id, err)
+						}
+					}
+
+					return nil
 				},
 			},
 		}
