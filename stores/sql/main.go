@@ -1906,7 +1906,7 @@ func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefix
 
 	// fetch destination directories
 	directories := make(map[int64]string)
-	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucket)
+	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = ? ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucketID)
 	if err != nil {
 		return 0, err
 	}
