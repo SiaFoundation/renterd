@@ -39,12 +39,13 @@ var (
 
 type (
 	uploadManager struct {
-		hm     HostManager
-		mm     MemoryManager
-		os     ObjectStore
-		cl     ContractLocker
-		cs     ContractStore
-		logger *zap.SugaredLogger
+		hm        HostManager
+		mm        MemoryManager
+		os        ObjectStore
+		cl        ContractLocker
+		cs        ContractStore
+		uploadKey *utils.UploadKey
+		logger    *zap.SugaredLogger
 
 		contractLockDuration time.Duration
 
@@ -146,24 +147,24 @@ type (
 	}
 )
 
-func (w *Worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (w *Worker) initUploadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, uploadKey, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
+func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
 	// apply the options
-	up := defaultParameters(bucket, path, rs)
+	up := defaultParameters(bucket, key, rs)
 	for _, opt := range opts {
 		opt(&up)
 	}
 
 	// if not given, try decide on a mime type using the file extension
 	if !up.multipart && up.mimeType == "" {
-		up.mimeType = mime.TypeByExtension(filepath.Ext(up.path))
+		up.mimeType = mime.TypeByExtension(filepath.Ext(up.key))
 
 		// if mime type is still not known, wrap the reader with a mime reader
 		if up.mimeType == "" {
@@ -302,15 +303,16 @@ func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.Pac
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
+func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
-		hm:     hm,
-		mm:     newMemoryManager(maxMemory, logger),
-		os:     os,
-		cl:     cl,
-		cs:     cs,
-		logger: logger.Sugar(),
+		hm:        hm,
+		mm:        newMemoryManager(maxMemory, logger),
+		os:        os,
+		cl:        cl,
+		cs:        cs,
+		uploadKey: uploadKey,
+		logger:    logger.Sugar(),
 
 		contractLockDuration: contractLockDuration,
 
@@ -397,7 +399,10 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	r = io.TeeReader(r, hasher)
 
 	// create the cipher reader
-	cr, err := o.Encrypt(r, up.encryptionOffset)
+	cr, err := o.Encrypt(r, object.EncryptionOptions{
+		Offset: up.encryptionOffset,
+		Key:    mgr.uploadKey,
+	})
 	if err != nil {
 		return false, "", err
 	}
@@ -540,13 +545,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 
 	if up.multipart {
 		// persist the part
-		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
+		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.key, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}
 	} else {
 		// persist the object
-		err = mgr.os.AddObject(ctx, up.bucket, up.path, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
+		err = mgr.os.AddObject(ctx, up.bucket, up.key, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add object: %w", err)
 		}
@@ -561,7 +566,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	defer cancel()
 
 	// build the shards
-	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
+	shards := encryptPartialSlab(ps.Data, ps.EncryptionKey, uint8(rs.MinShards), uint8(rs.TotalShards))
 
 	// create the upload
 	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)

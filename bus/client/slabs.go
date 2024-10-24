@@ -19,9 +19,9 @@ import (
 func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
 	c.c.Custom("POST", "/slabs/partial", nil, &api.AddPartialSlabResponse{})
 	values := url.Values{}
-	values.Set("minShards", fmt.Sprint(minShards))
-	values.Set("totalShards", fmt.Sprint(totalShards))
-	values.Set("contractSet", contractSet)
+	values.Set("minshards", fmt.Sprint(minShards))
+	values.Set("totalshards", fmt.Sprint(totalShards))
+	values.Set("contractset", contractSet)
 
 	u, err := url.Parse(fmt.Sprintf("%v/slabs/partial", c.c.BaseURL))
 	if err != nil {

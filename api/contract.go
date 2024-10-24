@@ -50,26 +50,32 @@ type (
 
 	// ContractMetadata contains all metadata for a contract.
 	ContractMetadata struct {
-		ID         types.FileContractID `json:"id"`
-		HostIP     string               `json:"hostIP"`
-		HostKey    types.PublicKey      `json:"hostKey"`
-		SiamuxAddr string               `json:"siamuxAddr"`
+		ID      types.FileContractID `json:"id"`
+		HostKey types.PublicKey      `json:"hostKey"`
 
-		ProofHeight    uint64 `json:"proofHeight"`
-		RevisionHeight uint64 `json:"revisionHeight"`
-		RevisionNumber uint64 `json:"revisionNumber"`
-		Size           uint64 `json:"size"`
-		StartHeight    uint64 `json:"startHeight"`
-		State          string `json:"state"`
-		WindowStart    uint64 `json:"windowStart"`
-		WindowEnd      uint64 `json:"windowEnd"`
+		ProofHeight    uint64               `json:"proofHeight"`
+		RenewedFrom    types.FileContractID `json:"renewedFrom"`
+		RevisionHeight uint64               `json:"revisionHeight"`
+		RevisionNumber uint64               `json:"revisionNumber"`
+		Size           uint64               `json:"size"`
+		StartHeight    uint64               `json:"startHeight"`
+		State          string               `json:"state"`
+		WindowStart    uint64               `json:"windowStart"`
+		WindowEnd      uint64               `json:"windowEnd"`
 
-		ContractPrice types.Currency       `json:"contractPrice"`
-		RenewedFrom   types.FileContractID `json:"renewedFrom"`
-		Spending      ContractSpending     `json:"spending"`
-		TotalCost     types.Currency       `json:"totalCost"`
+		// costs & spending
+		ContractPrice      types.Currency   `json:"contractPrice"`
+		InitialRenterFunds types.Currency   `json:"initialRenterFunds"`
+		Spending           ContractSpending `json:"spending"`
 
-		ContractSets []string `json:"contractSets"`
+		// following fields are decorated
+		HostIP       string   `json:"hostIP"`
+		ContractSets []string `json:"contractSets,omitempty"`
+		SiamuxAddr   string   `json:"siamuxAddr,omitempty"`
+
+		// following fields are only set on archived contracts
+		ArchivalReason string               `json:"archivalReason,omitempty"`
+		RenewedTo      types.FileContractID `json:"renewedTo,omitempty"`
 	}
 
 	// ContractPrunableData wraps a contract's size information with its id.
@@ -80,11 +86,10 @@ type (
 
 	// ContractSpending contains all spending details for a contract.
 	ContractSpending struct {
-		Uploads     types.Currency `json:"uploads"`
-		Downloads   types.Currency `json:"downloads"`
-		FundAccount types.Currency `json:"fundAccount"`
 		Deletions   types.Currency `json:"deletions"`
+		FundAccount types.Currency `json:"fundAccount"`
 		SectorRoots types.Currency `json:"sectorRoots"`
+		Uploads     types.Currency `json:"uploads"`
 	}
 
 	ContractSpendingRecord struct {
@@ -95,29 +100,6 @@ type (
 
 		MissedHostPayout  types.Currency `json:"missedHostPayout"`
 		ValidRenterPayout types.Currency `json:"validRenterPayout"`
-	}
-
-	// An ArchivedContract contains all information about a contract with a host
-	// that has been moved to the archive either due to expiring or being renewed.
-	ArchivedContract struct {
-		ID        types.FileContractID `json:"id"`
-		HostIP    string               `json:"hostIP"`
-		HostKey   types.PublicKey      `json:"hostKey"`
-		RenewedTo types.FileContractID `json:"renewedTo"`
-		Spending  ContractSpending     `json:"spending"`
-
-		ArchivalReason string               `json:"archivalReason"`
-		ContractPrice  types.Currency       `json:"contractPrice"`
-		ProofHeight    uint64               `json:"proofHeight"`
-		RenewedFrom    types.FileContractID `json:"renewedFrom"`
-		RevisionHeight uint64               `json:"revisionHeight"`
-		RevisionNumber uint64               `json:"revisionNumber"`
-		Size           uint64               `json:"size"`
-		StartHeight    uint64               `json:"startHeight"`
-		State          string               `json:"state"`
-		TotalCost      types.Currency       `json:"totalCost"`
-		WindowStart    uint64               `json:"windowStart"`
-		WindowEnd      uint64               `json:"windowEnd"`
 	}
 )
 
@@ -137,11 +119,11 @@ type (
 
 	// ContractAddRequest is the request type for the /contract/:id endpoint.
 	ContractAddRequest struct {
-		Contract      rhpv2.ContractRevision `json:"contract"`
-		ContractPrice types.Currency         `json:"contractPrice"`
-		StartHeight   uint64                 `json:"startHeight"`
-		State         string                 `json:"state,omitempty"`
-		TotalCost     types.Currency         `json:"totalCost"`
+		ContractPrice      types.Currency         `json:"contractPrice"`
+		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
+		Revision           rhpv2.ContractRevision `json:"revision"`
+		StartHeight        uint64                 `json:"startHeight"`
+		State              string                 `json:"state,omitempty"`
 	}
 
 	// ContractFormRequest is the request type for the POST /contracts endpoint.
@@ -192,17 +174,6 @@ type (
 		RenterFunds        types.Currency `json:"renterFunds"`
 	}
 
-	// ContractRenewedRequest is the request type for the /contract/:id/renewed
-	// endpoint.
-	ContractRenewedRequest struct {
-		Contract      rhpv2.ContractRevision `json:"contract"`
-		ContractPrice types.Currency         `json:"contractPrice"`
-		RenewedFrom   types.FileContractID   `json:"renewedFrom"`
-		StartHeight   uint64                 `json:"startHeight"`
-		State         string                 `json:"state,omitempty"`
-		TotalCost     types.Currency         `json:"totalCost"`
-	}
-
 	// ContractRootsResponse is the response type for the /contract/:id/roots
 	// endpoint.
 	ContractRootsResponse struct {
@@ -223,18 +194,18 @@ type (
 
 	ContractsOpts struct {
 		ContractSet string `json:"contractset"`
+		FilterMode  string `json:"filterMode"`
 	}
 )
 
 // Total returns the total cost of the contract spending.
 func (x ContractSpending) Total() types.Currency {
-	return x.Uploads.Add(x.Downloads).Add(x.FundAccount).Add(x.Deletions).Add(x.SectorRoots)
+	return x.Uploads.Add(x.FundAccount).Add(x.Deletions).Add(x.SectorRoots)
 }
 
 // Add returns the sum of the current and given contract spending.
 func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 	z.Uploads = x.Uploads.Add(y.Uploads)
-	z.Downloads = x.Downloads.Add(y.Downloads)
 	z.FundAccount = x.FundAccount.Add(y.FundAccount)
 	z.Deletions = x.Deletions.Add(y.Deletions)
 	z.SectorRoots = x.SectorRoots.Add(y.SectorRoots)
