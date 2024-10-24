@@ -223,21 +223,6 @@ func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitial
 	return contract, true, nil
 }
 
-func (c *Contractor) initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding, maxFunding types.Currency) types.Currency {
-	if !maxFunding.IsZero() && minFunding.Cmp(maxFunding) > 0 {
-		panic("given min is larger than max") // developer error
-	}
-
-	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
-	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
-		return minFunding
-	}
-	if !maxFunding.IsZero() && funding.Cmp(maxFunding) > 0 {
-		return maxFunding
-	}
-	return funding
-}
-
 func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetadata) {
 	contractMap := make(map[types.FileContractID]struct{})
 	for _, contract := range contracts {
@@ -272,7 +257,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	// calculate the renter funds
 	var renterFunds types.Currency
 	if isOutOfFunds(ctx.AutopilotConfig(), pt, contract) {
-		renterFunds = c.refreshFundingEstimate(ctx.AutopilotConfig(), contract, host, ctx.state.Fee, logger)
+		renterFunds = c.refreshFundingEstimate(ctx.AutopilotConfig(), contract, logger)
 	} else {
 		renterFunds = rev.ValidRenterPayout() // don't increase funds
 	}
@@ -429,17 +414,13 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, w Worker, contracts
 	}
 }
 
-func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, host api.Host, fee types.Currency, logger *zap.SugaredLogger) types.Currency {
+func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, logger *zap.SugaredLogger) types.Currency {
 	// refresh with 1.2x the funds
 	refreshAmount := contract.InitialRenterFunds.Mul64(6).Div64(5)
 
-	// estimate the txn fee
-	txnFeeEstimate := fee.Mul64(estimatedFileContractTransactionSetSize)
-
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
-	minInitialContractFunds := cfg.Contracts.InitialFunding
-	minimum := c.initialContractFunding(host.Settings, txnFeeEstimate, minInitialContractFunds, types.ZeroCurrency)
+	minimum := cfg.Contracts.InitialFunding
 	refreshAmountCapped := refreshAmount
 	if refreshAmountCapped.Cmp(minimum) < 0 {
 		refreshAmountCapped = minimum
@@ -1239,6 +1220,9 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	// check if we want to run maintenance
 	if reason, skip := canSkipContractMaintenance(ctx, ctx.ContractsConfig()); skip {
 		logger.With("reason", reason).Info("skipping contract maintenance")
+		if err := alerter.RegisterAlert(ctx, newContractMaintenanceSkippedAlert(reason)); err != nil {
+			logger.With(zap.Error(err)).Error("failed to register skipped contract maintenance alert")
+		}
 		return false, nil
 	}
 
