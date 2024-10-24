@@ -2200,6 +2200,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/dir/1b",
 		"/fileś/dir/2b",
 		"/fileś/dir/3b",
+		"/folder/file1",
+		"/folder/foo/file2",
 		"/foo",
 		"/bar",
 		"/baz",
@@ -2222,6 +2224,9 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Perform some renames.
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/folder/", "/fileś/", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
@@ -2250,6 +2255,8 @@ func TestRenameObjects(t *testing.T) {
 
 	// Paths after.
 	objectsAfter := []string{
+		"/fileś/file1",
+		"/fileś/foo/file2",
 		"/fileś/1a",
 		"/fileś/2a",
 		"/fileś/3a",
@@ -2267,74 +2274,141 @@ func TestRenameObjects(t *testing.T) {
 		objectsAfterMap[path] = struct{}{}
 	}
 
-	// Assert that number of objects matches.
-	resp, err := ss.Objects(ctx, testBucket, "", "/", "", "", "", "", 100, object.EncryptionKey{})
-	if err != nil {
+	// Assert that number of objects matches and paths are correct.
+	if resp, err := ss.Objects(ctx, testBucket, "", "", "", "", "", "", 100, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	}
-	if len(resp.Objects) != len(objectsAfter) {
+	} else if len(resp.Objects) != len(objectsAfter) {
 		t.Fatal("unexpected number of objects", len(resp.Objects), len(objectsAfter))
-	}
-
-	// Assert paths are correct.
-	for _, obj := range resp.Objects {
-		if _, exists := objectsAfterMap[obj.Key]; !exists {
-			t.Fatal("unexpected path", obj.Key)
+	} else {
+		for _, obj := range resp.Objects {
+			if _, exists := objectsAfterMap[obj.Key]; !exists {
+				t.Fatal("unexpected path", obj.Key)
+			}
 		}
 	}
 
-	// Assert directories are correct
-	expectedDirs := []struct {
-		id       int64
-		parentID int64
-		name     string
-	}{
-		{
-			id:       1,
-			parentID: 0,
-			name:     "/",
-		},
-		{
-			id:       2,
-			parentID: 1,
-			name:     "/fileś/",
-		},
-	}
-
-	var n int64
-	if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
+	// Assert everything is under one folder in the root directory
+	if resp, err := ss.Objects(ctx, testBucket, "", "", "/", "", "", "", 100, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if n != int64(len(expectedDirs)) {
-		t.Fatalf("unexpected number of directories, %v != %v", n, len(expectedDirs))
+	} else if len(resp.Objects) != 1 {
+		t.Fatal("unexpected number of objects", len(resp.Objects))
+	} else if resp.Objects[0].Key != "/fileś/" {
+		t.Fatal("unexpected folder", resp.Objects[0])
 	}
 
-	type row struct {
-		ID       int64
-		ParentID int64
-		Name     string
+	// Assert file2 's parent dir id has not been updated and is still under the foo directory
+	if resp, err := ss.Objects(ctx, testBucket, "/fileś/foo/", "", "/", "", "", "", 100, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if len(resp.Objects) != 1 {
+		t.Fatal("unexpected number of objects", len(resp.Objects))
+	} else if resp.Objects[0].Key != "/fileś/foo/file2" {
+		t.Fatal("unexpected folder", resp.Objects[0])
 	}
-	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
+
+	// Assert directories are correct
+	expectedDirs := map[string]string{
+		"/":           "NULL",
+		"/fileś/":     "/",
+		"/fileś/foo/": "/fileś/",
+	}
+
+	rows, err := ss.DB().Query(context.Background(), "SELECT d1.name, COALESCE(d2.name, 'NULL') as parent FROM directories d1 LEFT JOIN directories d2 ON d1.db_parent_id = d2.id ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	var i int
 	for rows.Next() {
-		var dir row
-		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
+		var dir, parent string
+		if err := rows.Scan(&dir, &parent); err != nil {
 			t.Fatal(err)
-		} else if dir.ID != expectedDirs[i].id {
-			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
-		} else if dir.ParentID != expectedDirs[i].parentID {
-			t.Fatalf("unexpected directory parent id, %v != %v", dir.ParentID, expectedDirs[i].parentID)
-		} else if dir.Name != expectedDirs[i].name {
-			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
+		} else if expectedParent, ok := expectedDirs[dir]; !ok {
+			t.Fatalf("unexpected directory %v", dir)
+		} else if parent != expectedParent {
+			t.Fatalf("unexpected parent, %v != %v", parent, expectedParent)
 		}
 		i++
 	}
 	if len(expectedDirs) != i {
 		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), i)
 	}
+}
+
+func TestRenameObjectsRegression(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// define directory structure
+	objects := []string{
+		"/firefly/s1/",
+		"/firefly/s2/",
+		"/suits/s1/",
+		"/lost/",
+		"/movie",
+
+		"/firefly/trailer",
+		"/firefly/s1/ep1",
+		"/firefly/s1/ep2",
+		"/firefly/s2/ep1",
+	}
+
+	// define a helper to assert the number of objects with given prefix
+	ctx := context.Background()
+	assertNumObjects := func(prefix, delimiter string, n int) {
+		t.Helper()
+		if resp, err := ss.Objects(ctx, testBucket, prefix, "", delimiter, "", "", "", -1, object.EncryptionKey{}); err != nil {
+			t.Fatal(err)
+		} else if len(resp.Objects) != n {
+			t.Fatalf("unexpected number of objects %d != %d, objects:\n%+v", len(resp.Objects), n, resp.Objects)
+		}
+	}
+
+	// persist the structure
+	for _, path := range objects {
+		var s int
+		if !strings.HasSuffix(path, "/") {
+			s = 1
+		}
+		if _, err := ss.addTestObject(path, newTestObject(s)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert the structure
+	assertNumObjects("/", "/", 4)
+	assertNumObjects("/firefly", "", 6)
+	assertNumObjects("/firefly/", "/", 3)
+	assertNumObjects("/firefly/s1/", "/", 2)
+	assertNumObjects("/firefly/s2/", "/", 1)
+	assertNumObjects("/suits/", "/", 1)
+	assertNumObjects("/lost/", "/", 0)
+
+	// assert we can't rename to an already existing directory without force
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal("unexpected error", err)
+	}
+
+	// assert we can forcefully rename it
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", true); err != nil {
+		t.Fatal(err)
+	}
+	assertNumObjects("/firefly/s2/", "/", 2)
+
+	// assert we can rename it and its children still point to the right directory
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s2/", "/firefly/s02/", false); err != nil {
+		t.Fatal(err)
+	}
+	assertNumObjects("/firefly/s2/", "/", 0)
+	assertNumObjects("/firefly/s02/", "/", 2)
+
+	// assert we rename a grand parent and all children remain intact
+	if err := ss.RenameObjects(ctx, testBucket, "/firefly/", "/gotham/", true); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumObjects("/gotham/", "/", 2)
+	assertNumObjects("/gotham/s02/", "/", 2)
+	assertNumObjects("/", "/", 4)
 }
 
 // TestObjectsStats is a unit test for ObjectsStats.
@@ -4023,7 +4097,7 @@ func TestSlabCleanup(t *testing.T) {
 	var dirID int64
 	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
+		dirID, err = tx.InsertDirectories(context.Background(), object.Directories("1", true))
 		return err
 	})
 	if err != nil {
@@ -4564,20 +4638,20 @@ func TestDirectories(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	objects := []string{
+	paths := []string{
 		"/foo",
-		"/bar/baz",
+		"/fileś/baz",
 		"///somefile",
 		"/dir/fakedir/",
 		"/",
-		"/bar/fileinsamedirasbefore",
+		"/fileś/fileinsamedirasbefore",
 	}
 
-	for _, o := range objects {
+	for _, o := range paths {
 		var dirID int64
 		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.MakeDirsForPath(context.Background(), o)
+			dirID, err = tx.InsertDirectories(context.Background(), object.Directories(o, true))
 			return err
 		})
 		if err != nil {
@@ -4598,7 +4672,7 @@ func TestDirectories(t *testing.T) {
 			parentID: 0,
 		},
 		{
-			name:     "/bar/",
+			name:     "/fileś/",
 			id:       2,
 			parentID: 1,
 		},
