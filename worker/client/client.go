@@ -33,7 +33,7 @@ func New(addr, password string) *Client {
 }
 
 // Account returns the account id for a given host.
-func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
+func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account api.Account, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
 	return
 }
