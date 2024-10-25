@@ -13,10 +13,9 @@ var (
 	// one is explicitly set.
 	AutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Amount:         3,
-			InitialFunding: types.Siacoins(1),
-			Period:         144,
-			RenewWindow:    72,
+			Amount:      3,
+			Period:      144,
+			RenewWindow: 72,
 
 			Download: rhpv2.SectorSize * 500,
 			Upload:   rhpv2.SectorSize * 500,

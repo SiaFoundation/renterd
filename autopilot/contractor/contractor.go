@@ -75,6 +75,10 @@ const (
 	timeoutBroadcastRevision = time.Minute
 )
 
+var (
+	InitialContractFunding = types.Siacoins(10)
+)
+
 type Bus interface {
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
@@ -257,7 +261,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, w Worker, contract api.Contract,
 	// calculate the renter funds
 	var renterFunds types.Currency
 	if isOutOfFunds(ctx.AutopilotConfig(), pt, contract) {
-		renterFunds = c.refreshFundingEstimate(ctx.AutopilotConfig(), contract, logger)
+		renterFunds = c.refreshFundingEstimate(contract, logger)
 	} else {
 		renterFunds = rev.ValidRenterPayout() // don't increase funds
 	}
@@ -316,7 +320,7 @@ func (c *Contractor) renewContract(ctx *mCtx, w Worker, contract api.Contract, h
 
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
-	minRenterFunds := ctx.InitialContractFunding()
+	minRenterFunds := InitialContractFunding
 	renterFunds := renewFundingEstimate(minRenterFunds, contract.InitialRenterFunds, contract.RenterFunds(), logger)
 
 	// sanity check the endheight is not the same on renewals
@@ -414,13 +418,13 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, w Worker, contracts
 	}
 }
 
-func (c *Contractor) refreshFundingEstimate(cfg api.AutopilotConfig, contract api.Contract, logger *zap.SugaredLogger) types.Currency {
+func (c *Contractor) refreshFundingEstimate(contract api.Contract, logger *zap.SugaredLogger) types.Currency {
 	// refresh with 1.2x the funds
 	refreshAmount := contract.InitialRenterFunds.Mul64(6).Div64(5)
 
 	// check for a sane minimum that is equal to the initial contract funding
 	// but without an upper cap.
-	minimum := cfg.Contracts.InitialFunding
+	minimum := InitialContractFunding
 	refreshAmountCapped := refreshAmount
 	if refreshAmountCapped.Cmp(minimum) < 0 {
 		refreshAmountCapped = minimum
@@ -533,11 +537,6 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	// not zero in several places
 	if cfg.Amount == 0 {
 		return "contracts is set to zero, skipping contract maintenance", true
-	}
-
-	// no maintenance if no initial funding amount was set
-	if cfg.InitialFunding.IsZero() {
-		return "initial funding is set to zero, skipping contract maintenance", true
 	}
 
 	// no maintenance if no period was set
@@ -1061,7 +1060,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 	}
 
 	// get the initial contract funds
-	minInitialContractFunds := ctx.InitialContractFunding()
+	minInitialContractFunds := InitialContractFunding
 
 	// form contracts until the new set has the desired size
 	for _, candidate := range candidates {

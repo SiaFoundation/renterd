@@ -14,10 +14,9 @@ import (
 
 var cfg = api.AutopilotConfig{
 	Contracts: api.ContractsConfig{
-		Amount:         50,
-		InitialFunding: types.Siacoins(1),
-		Period:         144 * 7 * 6,
-		RenewWindow:    144 * 7 * 2,
+		Amount:      50,
+		Period:      144 * 7 * 6,
+		RenewWindow: 144 * 7 * 2,
 
 		Download: 1e12, // 1 TB
 		Upload:   1e12, // 1 TB
@@ -106,15 +105,6 @@ func TestHostScore(t *testing.T) {
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
-
-	// assert zero initial funding does not panic
-	cfg.Contracts.InitialFunding = types.ZeroCurrency
-	_ = hostScore(cfg, gs, h1, redundancy)
-
-	// assert missing amount does not panic
-	cfg.Contracts.InitialFunding = types.Siacoins(1) // reset
-	cfg.Contracts.Amount = 0
-	_ = hostScore(cfg, gs, h1, redundancy)
 }
 
 func TestPriceAdjustmentScore(t *testing.T) {

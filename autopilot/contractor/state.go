@@ -112,10 +112,6 @@ func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {
 	ctx.state.ContractsConfig().SortContractsForMaintenance(contracts)
 }
 
-func (ctx *mCtx) InitialContractFunding() types.Currency {
-	return ctx.state.AP.Config.Contracts.InitialFunding
-}
-
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
 	return state.AP.Config.Contracts
 }
