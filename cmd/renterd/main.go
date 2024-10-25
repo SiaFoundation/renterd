@@ -23,10 +23,13 @@ Usage:
 `
 	// usageFooter is the footer for the CLI usage text.
 	usageFooter = `
-There are 3 commands:
+There are 4 commands:
   - version: prints the network as well as build information
   - config: builds a YAML config file through a series of prompts
   - seed: generates a new seed and prints the recovery phrase
+  - sqlite backup <src> <dest>: backs up the sqlite database at a
+    specified source path to the specified destination path
+    (safe to use while renterd is running)
 
 See the documentation (https://docs.sia.tech/) for more information and examples
 on how to configure and use renterd.
@@ -49,6 +52,10 @@ func main() {
 		return
 	} else if flag.Arg(0) == "config" {
 		cmdBuildConfig(&cfg)
+		return
+	} else if flag.Arg(0) == "sqlite" && flag.Arg(1) == "backup" &&
+		flag.Arg(2) != "" && flag.Arg(3) != "" {
+		cmdBackup()
 		return
 	} else if flag.Arg(0) != "" {
 		flag.Usage()

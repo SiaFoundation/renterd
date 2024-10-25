@@ -30,6 +30,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -1372,18 +1373,17 @@ func TestEphemeralAccountSync(t *testing.T) {
 	cluster.sync()
 
 	// ask for the account, this should trigger its creation
-	tt.OKAll(cluster.Worker.Account(context.Background(), hk))
+	account, err := cluster.Worker.Account(context.Background(), hk)
+	tt.OK(err)
+	if account.ID != acc.ID {
+		t.Fatalf("account ID mismatch, expected %v got %v", acc.ID, account.ID)
+	} else if account.CleanShutdown || !account.RequiresSync {
+		t.Fatalf("account shouldn't be marked as clean shutdown or not require a sync, got %v %v", account.CleanShutdown, accounts[0].RequiresSync)
+	}
 
 	// make sure we form a contract
 	cluster.WaitForContracts()
 	cluster.MineBlocks(1)
-
-	accounts = cluster.Accounts()
-	if len(accounts) != 1 || accounts[0].ID != acc.ID {
-		t.Fatal("account should exist")
-	} else if accounts[0].CleanShutdown || !accounts[0].RequiresSync {
-		t.Fatal("account shouldn't be marked as clean shutdown or not require a sync, got", accounts[0].CleanShutdown, accounts[0].RequiresSync)
-	}
 
 	// assert account was funded
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -1392,8 +1392,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 			return errors.New("account should exist")
 		} else if accounts[0].Balance.Cmp(types.ZeroCurrency.Big()) == 0 {
 			return errors.New("account isn't funded")
-		} else if accounts[0].RequiresSync {
-			return fmt.Errorf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
+		} else if !accounts[0].CleanShutdown || accounts[0].RequiresSync {
+			return fmt.Errorf("account should be marked as clean shutdown and not require a sync, got %v %v", accounts[0].CleanShutdown, accounts[0].RequiresSync)
 		}
 		return nil
 	})
@@ -2682,4 +2682,47 @@ func TestHostScan(t *testing.T) {
 	if len(toScan) != 1 {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
+}
+
+func TestBackup(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	bus := cluster.Bus
+
+	// test that backup fails for MySQL
+	isSqlite := config.MySQLConfigFromEnv().URI == ""
+	if !isSqlite {
+		err := bus.Backup(context.Background(), "main", "backup.sql")
+		cluster.tt.AssertIs(err, api.ErrBackupNotSupported)
+		return
+	}
+
+	// test creating a backup
+	tmpDir := t.TempDir()
+	mainDst := filepath.Join(tmpDir, "main.sqlite")
+	metricsDst := filepath.Join(tmpDir, "metrics.sqlite")
+	cluster.tt.OK(bus.Backup(context.Background(), "main", mainDst))
+	cluster.tt.OK(bus.Backup(context.Background(), "metrics", metricsDst))
+	cluster.tt.OKAll(os.Stat(mainDst))
+	cluster.tt.OKAll(os.Stat(metricsDst))
+
+	// test creating backing up an invalid db
+	invalidDst := filepath.Join(tmpDir, "invalid.sqlite")
+	err := bus.Backup(context.Background(), "invalid", invalidDst)
+	cluster.tt.AssertIs(err, api.ErrInvalidDatabase)
+	_, err = os.Stat(invalidDst)
+	if !os.IsNotExist(err) {
+		t.Fatal("expected file to not exist")
+	}
+
+	// ping backups
+	dbMain, err := sqlite.Open(mainDst)
+	cluster.tt.OK(err)
+	defer dbMain.Close()
+	cluster.tt.OK(dbMain.Ping())
+
+	dbMetrics, err := sqlite.Open(metricsDst)
+	cluster.tt.OK(err)
+	defer dbMetrics.Close()
+	cluster.tt.OK(dbMetrics.Ping())
 }
