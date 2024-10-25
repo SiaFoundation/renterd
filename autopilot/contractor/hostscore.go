@@ -60,7 +60,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	// data will store twice the expectation
 	allocationPerHost := idealDataPerHost * 2
 	return api.HostScoreBreakdown{
-		Age:              clampScore(ageScore(h)),
+		Age:              ageScore(h), // not clamped since values are hardcoded
 		Collateral:       clampScore(collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost))),
 		Interactions:     clampScore(interactionScore(h)),
 		Prices:           clampScore(priceAdjustmentScore(h.PriceTable.HostPriceTable, gs)),
