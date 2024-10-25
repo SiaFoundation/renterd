@@ -840,8 +840,7 @@ func (w *Worker) accountHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	account := rhpv3.Account(w.accounts.ForHost(hostKey).ID())
-	jc.Encode(account)
+	jc.Encode(w.accounts.Account(hostKey))
 }
 
 func (w *Worker) accountsHandlerGET(jc jape.Context) {
