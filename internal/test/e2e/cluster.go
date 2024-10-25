@@ -240,9 +240,6 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	// Skip any test that requires a cluster when running short tests.
-	if testing.Short() {
-		t.SkipNow()
-	}
 	tt := test.NewTT(t)
 
 	// Ensure we don't hang

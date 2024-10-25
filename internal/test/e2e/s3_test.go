@@ -28,10 +28,6 @@ var (
 )
 
 func TestS3Basic(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	start := time.Now()
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -169,10 +165,6 @@ func TestS3Basic(t *testing.T) {
 }
 
 func TestS3ObjectMetadata(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create cluster
 	opts := testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -286,10 +278,6 @@ func TestS3ObjectMetadata(t *testing.T) {
 }
 
 func TestS3Authentication(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -523,10 +511,6 @@ func TestS3List(t *testing.T) {
 }
 
 func TestS3MultipartUploads(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -666,10 +650,6 @@ func TestS3MultipartUploads(t *testing.T) {
 // it, the following call to 'pruneSlabs' would fail. That's because it didn't
 // account for references of multipart uploads when deleting slabs.
 func TestS3MultipartPruneSlabs(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -718,10 +698,6 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 }
 
 func TestS3SpecialChars(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -762,10 +738,6 @@ func TestS3SpecialChars(t *testing.T) {
 }
 
 func TestS3SettingsValidate(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 

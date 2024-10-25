@@ -45,10 +45,6 @@ func (r *blockedReader) Read(buf []byte) (n int, err error) {
 }
 
 func TestUploadingSectorsCache(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
 	})
