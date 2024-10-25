@@ -1374,18 +1374,17 @@ func TestEphemeralAccountSync(t *testing.T) {
 	cluster.sync()
 
 	// ask for the account, this should trigger its creation
-	tt.OKAll(cluster.Worker.Account(context.Background(), hk))
+	account, err := cluster.Worker.Account(context.Background(), hk)
+	tt.OK(err)
+	if account.ID != acc.ID {
+		t.Fatalf("account ID mismatch, expected %v got %v", acc.ID, account.ID)
+	} else if account.CleanShutdown || !account.RequiresSync {
+		t.Fatalf("account shouldn't be marked as clean shutdown or not require a sync, got %v %v", account.CleanShutdown, accounts[0].RequiresSync)
+	}
 
 	// make sure we form a contract
 	cluster.WaitForContracts()
 	cluster.MineBlocks(1)
-
-	accounts = cluster.Accounts()
-	if len(accounts) != 1 || accounts[0].ID != acc.ID {
-		t.Fatal("account should exist")
-	} else if accounts[0].CleanShutdown || !accounts[0].RequiresSync {
-		t.Fatal("account shouldn't be marked as clean shutdown or not require a sync, got", accounts[0].CleanShutdown, accounts[0].RequiresSync)
-	}
 
 	// assert account was funded
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -1394,8 +1393,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 			return errors.New("account should exist")
 		} else if accounts[0].Balance.Cmp(types.ZeroCurrency.Big()) == 0 {
 			return errors.New("account isn't funded")
-		} else if accounts[0].RequiresSync {
-			return fmt.Errorf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
+		} else if !accounts[0].CleanShutdown || accounts[0].RequiresSync {
+			return fmt.Errorf("account should be marked as clean shutdown and not require a sync, got %v %v", accounts[0].CleanShutdown, accounts[0].RequiresSync)
 		}
 		return nil
 	})
