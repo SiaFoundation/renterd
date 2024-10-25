@@ -1729,10 +1729,27 @@ func TestUploadPacking(t *testing.T) {
 	// exactly.
 	data4 := make([]byte, slabSize/2)
 	uploadDownload("file4", data4)
-	time.Sleep(time.Second) // avoid NDF (race in async packed slab upload)
+	download("file4", data4, 0, int64(len(data4)))
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buffers, err := b.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, buffer := range buffers {
+			if buffer.Locked {
+				return errors.New("buffer locked")
+			}
+		}
+		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), test.ContractSet, 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) > 0 {
+			return errors.New("packed slabs left")
+		}
+		return nil
+	})
 	data5 := make([]byte, slabSize/2)
 	uploadDownload("file5", data5)
-	download("file4", data4, 0, int64(len(data4)))
 
 	// assert number of objects
 	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
