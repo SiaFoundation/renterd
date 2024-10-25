@@ -25,16 +25,6 @@ func TestSettings(t *testing.T) {
 
 	// build default pinned settings
 	dps := api.DefaultPinnedSettings
-	aps, err := b.Autopilots(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	dps.Autopilots = make(map[string]api.AutopilotPins)
-	for _, ap := range aps {
-		if ap.Config.Contracts.Amount > 0 {
-			dps.Autopilots[ap.ID] = api.AutopilotPins{}
-		}
-	}
 
 	// build default S3 settings
 	ds3 := api.S3Settings{
