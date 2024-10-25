@@ -1065,6 +1065,8 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkFoundation.Height = 1
 	n.HardforkV2.AllowHeight = 1000
 	n.HardforkV2.RequireHeight = 1020
+	n.MaturityDelay = 10
+	n.BlockInterval = time.Second
 
 	return n, genesis
 }
