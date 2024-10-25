@@ -30,6 +30,39 @@ var cfg = api.AutopilotConfig{
 	},
 }
 
+func TestClampScore(t *testing.T) {
+	tests := []struct {
+		in  float64
+		out float64
+	}{
+		{
+			in:  -1,
+			out: 0,
+		},
+		{
+			in:  0,
+			out: 0,
+		},
+		{
+			in:  1,
+			out: 1,
+		},
+		{
+			in:  1.1,
+			out: 1,
+		},
+		{
+			in:  0.05,
+			out: minSubScore,
+		},
+	}
+	for _, test := range tests {
+		if out := clampScore(test.in); out != test.out {
+			t.Errorf("expected %v, got %v", test.out, out)
+		}
+	}
+}
+
 func TestHostScore(t *testing.T) {
 	day := 24 * time.Hour
 
