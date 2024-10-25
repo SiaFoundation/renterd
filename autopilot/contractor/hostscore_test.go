@@ -84,7 +84,7 @@ func TestHostScore(t *testing.T) {
 	}
 
 	//	// assert age affects the score
-	h1.KnownSince = time.Now().Add(-1 * day)
+	h1.KnownSince = time.Now().Add(-100 * day)
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
