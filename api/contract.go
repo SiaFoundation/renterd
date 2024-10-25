@@ -170,7 +170,6 @@ type (
 	ContractRenewRequest struct {
 		EndHeight          uint64         `json:"endHeight"`
 		ExpectedNewStorage uint64         `json:"expectedNewStorage"`
-		MaxFundAmount      types.Currency `json:"maxFundAmount"`
 		MinNewCollateral   types.Currency `json:"minNewCollateral"`
 		RenterFunds        types.Currency `json:"renterFunds"`
 	}
