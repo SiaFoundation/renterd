@@ -47,7 +47,7 @@ type Bus interface {
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
-	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
+	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
@@ -568,12 +568,6 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 		return nil
 	}
 
-	// no allowance - nothing to do
-	if cfg.Contracts.Allowance.IsZero() {
-		l.Warn("wallet maintenance skipped, no allowance set")
-		return nil
-	}
-
 	// fetch consensus state
 	cs, err := ap.bus.ConsensusState(ctx)
 	if err != nil {
@@ -590,8 +584,8 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	balance := wallet.Confirmed
 
 	// register an alert if balance is low
-	if balance.Cmp(cfg.Contracts.Allowance) < 0 {
-		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, cfg.Contracts.Allowance, cs.BlockHeight, renewWindow, autopilot.EndHeight()))
+	if balance.Cmp(contractor.InitialContractFunding.Mul64(cfg.Contracts.Amount)) < 0 {
+		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, contractor.InitialContractFunding, cs.BlockHeight, renewWindow, autopilot.EndHeight()))
 	} else {
 		ap.DismissAlert(ctx, alertLowBalanceID)
 	}
@@ -612,7 +606,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 
 	// figure out the amount per output
 	wantedNumOutputs := 10
-	amount := cfg.Contracts.Allowance.Div64(uint64(wantedNumOutputs))
+	amount := contractor.InitialContractFunding.Div64(uint64(wantedNumOutputs))
 
 	// redistribute outputs
 	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, amount)
