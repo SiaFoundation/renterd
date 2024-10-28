@@ -240,9 +240,6 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	// Skip any test that requires a cluster when running short tests.
-	if testing.Short() {
-		t.SkipNow()
-	}
 	tt := test.NewTT(t)
 
 	// Ensure we don't hang
@@ -492,7 +489,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		cluster.MineBlocks(network.HardforkFoundation.Height + network.MaturityDelay) // mine until the first block reward matures
 		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
@@ -1068,6 +1065,8 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkFoundation.Height = 1
 	n.HardforkV2.AllowHeight = 1000
 	n.HardforkV2.RequireHeight = 1020
+	n.MaturityDelay = 10
+	n.BlockInterval = time.Second
 
 	return n, genesis
 }

@@ -17,10 +17,6 @@ import (
 )
 
 func TestHostPruning(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
@@ -95,10 +91,6 @@ func TestHostPruning(t *testing.T) {
 }
 
 func TestSectorPruning(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a cluster
 	opts := clusterOptsDefault
 	opts.logger = zap.NewNop()

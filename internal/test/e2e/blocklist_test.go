@@ -12,12 +12,6 @@ import (
 )
 
 func TestBlocklist(t *testing.T) {
-	t.SkipNow() // TODO: re-enable this test
-
-	// if testing.Short() {
-	// 	t.SkipNow()
-	// }
-
 	ctx := context.Background()
 
 	// create a new test cluster

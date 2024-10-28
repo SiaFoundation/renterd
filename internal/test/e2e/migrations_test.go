@@ -20,10 +20,6 @@ import (
 )
 
 func TestMigrations(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// configure the cluster to use one extra host
 	rs := test.RedundancySettings
 	cfg := test.AutopilotConfig
