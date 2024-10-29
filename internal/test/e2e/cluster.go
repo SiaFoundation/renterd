@@ -710,7 +710,7 @@ func (c *TestCluster) MineBlocks(n uint64) {
 
 func (c *TestCluster) sync() {
 	tip := c.cm.Tip()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
@@ -777,7 +777,7 @@ func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
 		n = len(c.hosts)
 	}
 
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		sets, err := c.Bus.ContractSets(context.Background())
 		if err != nil {
 			return err
@@ -813,7 +813,7 @@ func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
 
 func (c *TestCluster) WaitForPeers() {
 	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		peers, err := c.Bus.SyncerPeers(context.Background())
 		if err != nil {
 			return err
@@ -863,7 +863,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.MineBlocks(1)
 
 	// Wait for host's wallet to be funded
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
+	c.tt.Retry(1000, time.Millisecond, func() error {
 		balance, err := h.wallet.Balance()
 		c.tt.OK(err)
 		if balance.Confirmed.IsZero() {
@@ -878,13 +878,13 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
 	c.tt.OK(announceHosts([]*Host{h}))
 
-	// Mine until the host shows up.
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
+	// Mine a block and wait until the host shows up.
+	c.MineBlocks(1)
+	c.tt.Retry(1000, time.Millisecond, func() error {
 		c.tt.Helper()
 
 		_, err := c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
-			c.MineBlocks(1)
 			return err
 		}
 		return nil
@@ -924,7 +924,7 @@ func (c *TestCluster) AddHostsBlocking(n int) []*Host {
 // MineTransactions tries to mine the transactions in the transaction pool until
 // it is empty.
 func (c *TestCluster) MineTransactions(ctx context.Context) error {
-	return test.Retry(100, 100*time.Millisecond, func() error {
+	return test.Retry(1000, 10*time.Millisecond, func() error {
 		txns, err := c.Bus.TransactionPool(ctx)
 		if err != nil {
 			return err
@@ -953,7 +953,7 @@ func (c *TestCluster) Shutdown() {
 // they have money in them
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		accounts, err := c.Worker.Accounts(context.Background())
 		if err != nil {
 			return err
@@ -996,7 +996,7 @@ func (c *TestCluster) WaitForContractSet(set string, n int) {
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		if err != nil {
 			return err
