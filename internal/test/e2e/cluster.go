@@ -86,9 +86,8 @@ type TestCluster struct {
 }
 
 type dbConfig struct {
-	Database         config.Database
-	DatabaseLog      config.DatabaseLog
-	RetryTxIntervals []time.Duration
+	Database    config.Database
+	DatabaseLog config.DatabaseLog
 }
 
 func (tc *TestCluster) Accounts() []api.Account {
@@ -1075,20 +1074,12 @@ func testDBCfg() dbConfig {
 			IgnoreRecordNotFoundError: true,
 			SlowThreshold:             100 * time.Millisecond,
 		},
-		RetryTxIntervals: []time.Duration{
-			50 * time.Millisecond,
-			100 * time.Millisecond,
-			200 * time.Millisecond,
-			500 * time.Millisecond,
-			time.Second,
-			5 * time.Second,
-		},
 	}
 }
 
 func testWorkerCfg() config.Worker {
 	return config.Worker{
-		AccountsRefillInterval:   time.Second,
+		AccountsRefillInterval:   10 * time.Millisecond,
 		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
@@ -1108,7 +1099,7 @@ func testApCfg() config.Autopilot {
 		MigrationHealthCutoff:          0.99,
 		MigratorParallelSlabsPerWorker: 1,
 		RevisionSubmissionBuffer:       0,
-		ScannerInterval:                time.Second,
+		ScannerInterval:                10 * time.Millisecond,
 		ScannerBatchSize:               10,
 		ScannerNumThreads:              1,
 	}
@@ -1183,8 +1174,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		Logger:                        logger,
 		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
 
-		RetryTransactionIntervals: cfg.RetryTxIntervals,
-		LongQueryDuration:         cfg.DatabaseLog.SlowThreshold,
-		LongTxDuration:            cfg.DatabaseLog.SlowThreshold,
+		LongQueryDuration: cfg.DatabaseLog.SlowThreshold,
+		LongTxDuration:    cfg.DatabaseLog.SlowThreshold,
 	}, nil
 }
