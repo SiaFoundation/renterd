@@ -1505,10 +1505,10 @@ func TestWalletEvents(t *testing.T) {
 	tt := cluster.tt
 
 	// Make sure we get transactions that are spread out over multiple seconds.
-	time.Sleep(time.Second)
-	cluster.MineBlocks(1)
-	time.Sleep(time.Second)
-	cluster.MineBlocks(1)
+	for i := 0; i < 3; i++ {
+		time.Sleep(time.Second)
+		cluster.MineBlocks(1)
+	}
 
 	// Get all events of the wallet.
 	allTxns, err := b.WalletEvents(context.Background())
