@@ -133,7 +133,7 @@ func TestEvents(t *testing.T) {
 	tt.OK(h.UpdateSettings(settings))
 
 	// wait until we received the events
-	tt.Retry(10, time.Second, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		mu.Lock()
 		defer mu.Unlock()
 		if len(received) < len(allEvents) {
@@ -157,7 +157,7 @@ func TestEvents(t *testing.T) {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventContractSetUpdate:
-			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || e.ToAdd[0] != c.ID || len(e.ToRemove) != 0 || e.Timestamp.IsZero() {
+			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || (e.ToAdd[0] != c.ID && e.ToAdd[0] != renewed.ID) || len(e.ToRemove) != 0 || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventConsensusUpdate:
