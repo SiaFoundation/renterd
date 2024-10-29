@@ -212,6 +212,7 @@ type testClusterOptions struct {
 
 	autopilotCfg      *config.Autopilot
 	autopilotSettings *api.AutopilotConfig
+	cm                *chain.Manager
 	busCfg            *config.Bus
 	workerCfg         *config.Worker
 }
@@ -346,16 +347,22 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			},
 		})))
 
-	// create chain database
-	chainPath := filepath.Join(dir, "blockchain.db")
-	bdb, err := coreutils.OpenBoltChainDB(chainPath)
-	tt.OK(err)
-
-	// create chain manager
+	cm := opts.cm
 	network, genesis := testNetwork()
-	store, state, err := chain.NewDBStore(bdb, network, genesis)
-	tt.OK(err)
-	cm := chain.NewManager(store, state)
+	if cm == nil {
+		// create chain database
+		chainPath := filepath.Join(dir, "blockchain.db")
+		bdb, err := coreutils.OpenBoltChainDB(chainPath)
+		tt.OK(err)
+		tt.Cleanup(func() {
+			tt.OK(bdb.Close())
+		})
+
+		// create chain manager
+		store, state, err := chain.NewDBStore(bdb, network, genesis)
+		tt.OK(err)
+		cm = chain.NewManager(store, state)
+	}
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
@@ -377,7 +384,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	var busShutdownFns []func(context.Context) error
 	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
 	busShutdownFns = append(busShutdownFns, bShutdownFn)
-	busShutdownFns = append(busShutdownFns, func(_ context.Context) error { return bdb.Close() })
 
 	// Create worker.
 	workerKey := blake2b.Sum256(append([]byte("worker"), wk...))

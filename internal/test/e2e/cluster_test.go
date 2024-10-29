@@ -1315,6 +1315,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// start the cluster again
 	cluster = newTestCluster(t, testClusterOptions{
+		cm:        cluster.cm,
 		dir:       cluster.dir,
 		logger:    cluster.logger,
 		walletKey: &cluster.wk,
