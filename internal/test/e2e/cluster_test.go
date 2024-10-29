@@ -31,7 +31,6 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql/sqlite"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -895,8 +894,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: zap.NewNop(),
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 

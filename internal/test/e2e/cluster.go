@@ -218,13 +218,10 @@ type testClusterOptions struct {
 }
 
 // newTestLogger creates a console logger used for testing.
-func newTestLogger() *zap.Logger {
-	return newTestLoggerCustom(zapcore.WarnLevel)
-}
-
-// newTestLoggerCustom creates a console logger used for testing and allows
-// passing in the desired log level.
-func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
+func newTestLogger(enable bool) *zap.Logger {
+	if !enable {
+		return zap.NewNop()
+	}
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
@@ -232,9 +229,9 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	return zap.New(
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zap.DebugLevel),
 		zap.AddCaller(),
-		zap.AddStacktrace(level),
+		zap.AddStacktrace(zap.DebugLevel),
 	)
 }
 
@@ -252,7 +249,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.dir != "" {
 		dir = opts.dir
 	}
-	logger := newTestLogger()
+	logger := newTestLogger(false) // enable logging here if needed
 	if opts.logger != nil {
 		logger = opts.logger
 	}
