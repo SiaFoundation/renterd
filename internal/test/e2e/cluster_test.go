@@ -2441,6 +2441,9 @@ func TestWalletRedistribute(t *testing.T) {
 	})
 	defer cluster.Shutdown()
 
+	// mine to get more money
+	cluster.MineBlocks(1)
+
 	// redistribute into 2 outputs of 500KS each
 	numOutputs := 2
 	outputAmt := types.Siacoins(500e3)

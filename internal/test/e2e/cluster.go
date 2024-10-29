@@ -687,24 +687,7 @@ func (c *TestCluster) MineBlocks(n uint64) {
 	wallet, err := c.Bus.Wallet(context.Background())
 	c.tt.OK(err)
 
-	// If we don't have any hosts in the cluster mine all blocks right away.
-	if len(c.hosts) == 0 {
-		c.tt.OK(c.mineBlocks(wallet.Address, n))
-		c.sync()
-		return
-	}
-
-	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
-	// with hosts by too many blocks.
-	for mined := uint64(0); mined < n; {
-		toMine := n - mined
-		if toMine > 10 {
-			toMine = 10
-		}
-		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
-		mined += toMine
-		c.sync()
-	}
+	c.tt.OK(c.mineBlocks(wallet.Address, n))
 	c.sync()
 }
 
