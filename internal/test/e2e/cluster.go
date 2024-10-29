@@ -346,9 +346,20 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			},
 		})))
 
+	// create chain database
+	chainPath := filepath.Join(dir, "blockchain.db")
+	bdb, err := coreutils.OpenBoltChainDB(chainPath)
+	tt.OK(err)
+
+	// create chain manager
+	network, genesis := testNetwork()
+	store, state, err := chain.NewDBStore(bdb, network, genesis)
+	tt.OK(err)
+	cm := chain.NewManager(store, state)
+
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, cm, genesis, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -366,6 +377,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	var busShutdownFns []func(context.Context) error
 	busShutdownFns = append(busShutdownFns, busServer.Shutdown)
 	busShutdownFns = append(busShutdownFns, bShutdownFn)
+	busShutdownFns = append(busShutdownFns, func(_ context.Context) error { return bdb.Close() })
 
 	// Create worker.
 	workerKey := blake2b.Sum256(append([]byte("worker"), wk...))
@@ -398,7 +410,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
-	network, genesis := testNetwork()
 	cluster := &TestCluster{
 		apID:         apCfg.ID,
 		dir:          dir,
@@ -531,7 +542,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
 	// create store config
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
@@ -560,21 +571,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 		return nil, nil, nil, nil, err
 	}
 
-	// create chain database
-	chainPath := filepath.Join(consensusDir, "blockchain.db")
-	bdb, err := coreutils.OpenBoltChainDB(chainPath)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	// create chain manager
-	network, genesis := testNetwork()
-	store, state, err := chain.NewDBStore(bdb, network, genesis)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	cm := chain.NewManager(store, state)
-
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
@@ -595,7 +591,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create header
 	header := gateway.Header{
-		GenesisID:  genesis.ID(),
+		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}
@@ -637,7 +633,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-			bdb.Close(),
 			syncerShutdown(ctx),
 		)
 	}
@@ -736,12 +731,6 @@ func (c *TestCluster) sync() {
 			return err
 		} else if wallet.ScanHeight < tip.Height {
 			return fmt.Errorf("wallet hasn't caught up, %d < %d", wallet.ScanHeight, tip.Height)
-		}
-
-		for _, h := range c.hosts {
-			if hh := h.cm.Tip().Height; hh < tip.Height {
-				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
-			}
 		}
 		return nil
 	})
@@ -857,7 +846,7 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock)
+	h, err := NewHost(types.GeneratePrivateKey(), c.cm, hostDir, c.network, c.genesisBlock)
 	c.tt.OK(err)
 
 	// Connect gateways.
