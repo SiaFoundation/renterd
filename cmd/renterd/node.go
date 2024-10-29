@@ -540,17 +540,9 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: cfg.Bus.SlabBufferCompletionThreshold,
 		Logger:                        logger,
-		RetryTransactionIntervals: []time.Duration{
-			200 * time.Millisecond,
-			500 * time.Millisecond,
-			time.Second,
-			3 * time.Second,
-			10 * time.Second,
-			10 * time.Second,
-		},
-		WalletAddress:     types.StandardUnlockHash(pk.PublicKey()),
-		LongQueryDuration: cfg.Log.Database.SlowThreshold,
-		LongTxDuration:    cfg.Log.Database.SlowThreshold,
+		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
+		LongQueryDuration:             cfg.Log.Database.SlowThreshold,
+		LongTxDuration:                cfg.Log.Database.SlowThreshold,
 	}, nil
 }
 
