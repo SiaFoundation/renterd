@@ -347,16 +347,8 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	cm := opts.cm
 	network, genesis := testNetwork()
 	if cm == nil {
-		// create chain database
-		chainPath := filepath.Join(dir, "blockchain.db")
-		bdb, err := coreutils.OpenBoltChainDB(chainPath)
-		tt.OK(err)
-		tt.Cleanup(func() {
-			tt.OK(bdb.Close())
-		})
-
 		// create chain manager
-		store, state, err := chain.NewDBStore(bdb, network, genesis)
+		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
 		tt.OK(err)
 		cm = chain.NewManager(store, state)
 	}
