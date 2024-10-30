@@ -88,7 +88,6 @@ outer:
 	for {
 		// wait for work
 		select {
-		case <-time.After(100 * time.Millisecond):
 		case <-u.signalNewUpload:
 		case <-u.shutdownCtx.Done():
 			return

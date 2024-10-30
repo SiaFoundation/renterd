@@ -635,8 +635,8 @@ func (s *slabDownload) overdrive(ctx context.Context, resps *sectorResponses) (r
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				for {
-					if canOverdrive(timeout()) {
+				if canOverdrive(timeout()) {
+					for {
 						req := s.nextRequest(ctx, resps, true)
 						if req == nil {
 							break
