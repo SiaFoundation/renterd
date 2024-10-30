@@ -29,11 +29,7 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 	p.mu.Lock()
 	t, found := p.pool[addr]
 	if !found {
-		t = &transport{
-			dialer: p.dialer,
-			hk:     hk,
-			addr:   addr,
-		}
+		t = &transport{}
 		p.pool[addr] = t
 	}
 	t.refCount++
@@ -46,7 +42,7 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 				err = fmt.Errorf("panic (withTransport): %v", r)
 			}
 		}()
-		client, err := t.Dial(ctx)
+		client, err := t.Dial(ctx, p.dialer, hk, addr)
 		if err != nil {
 			return err
 		}
@@ -69,30 +65,27 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 }
 
 type transport struct {
-	dialer   Dialer
 	refCount uint64 // locked by pool
 
-	mu   sync.Mutex
-	hk   types.PublicKey
-	addr string
-	t    rhp.TransportClient
+	mu sync.Mutex
+	t  rhp.TransportClient
 }
 
 // DialStream dials a new stream on the transport.
-func (t *transport) Dial(ctx context.Context) (rhp.TransportClient, error) {
+func (t *transport) Dial(ctx context.Context, dialer Dialer, hk types.PublicKey, addr string) (rhp.TransportClient, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.t == nil {
 		start := time.Now()
 
 		// dial host
-		conn, err := t.dialer.Dial(ctx, t.hk, t.addr)
+		conn, err := dialer.Dial(ctx, hk, addr)
 		if err != nil {
 			return nil, err
 		}
 
 		// upgrade conn
-		newTransport, err := rhp.UpgradeConn(ctx, conn, t.hk)
+		newTransport, err := rhp.UpgradeConn(ctx, conn, hk)
 		if err != nil {
 			return nil, fmt.Errorf("UpgradeConn: %w: %w (%v)", ErrDialTransport, err, time.Since(start))
 		}
