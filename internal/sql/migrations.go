@@ -256,9 +256,9 @@ var (
 				},
 			},
 			{
-				ID: "00024_latest_host",
+				ID: "00025_latest_host",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00024_latest_host", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_latest_host", log)
 				},
 			},
 		}
