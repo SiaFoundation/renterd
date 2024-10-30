@@ -24,7 +24,7 @@ func newTransportPool(dialer Dialer) *transportPool {
 	}
 }
 
-func (p *transportPool) withTransport(hk types.PublicKey, addr string, fn func(*transport) error) (err error) {
+func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, addr string, fn func(rhp.TransportClient) error) (err error) {
 	// fetch or create transport
 	p.mu.Lock()
 	t, found := p.pool[addr]
@@ -46,7 +46,11 @@ func (p *transportPool) withTransport(hk types.PublicKey, addr string, fn func(*
 				err = fmt.Errorf("panic (withTransport): %v", r)
 			}
 		}()
-		return fn(t)
+		client, err := t.Dial(ctx)
+		if err != nil {
+			return err
+		}
+		return fn(client)
 	}()
 
 	// Decrement refcounter again and clean up pool.
