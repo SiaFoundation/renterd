@@ -939,7 +939,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 	uploadDownload := func() {
 		t.Helper()
 		for _, data := range files {
-
 			// prepare some data - make sure it's more than one sector
 			tt.OKAll(frand.Read(data))
 
