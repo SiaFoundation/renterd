@@ -12,11 +12,9 @@ import (
 )
 
 func TestBlocklist(t *testing.T) {
-	t.SkipNow() // TODO: re-enable this test
-
-	// if testing.Short() {
-	// 	t.SkipNow()
-	// }
+	if testing.Short() {
+		t.SkipNow()
+	}
 
 	ctx := context.Background()
 
