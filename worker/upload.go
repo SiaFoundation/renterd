@@ -199,7 +199,7 @@ func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.Redundan
 				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
 			} else if len(packedSlabs) > 0 {
 				// upload packed slab
-				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
+				if err := w.uploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
 					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
 			}
@@ -266,8 +266,8 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
 			defer cancel()
 
-			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
-			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
+			// upload packed slab
+			if err := w.uploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
 				w.logger.Error(err)
 				interruptCancel() // prevent new uploads from being launched
 			}
@@ -278,7 +278,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	wg.Wait()
 }
 
-func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
+func (w *Worker) uploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
