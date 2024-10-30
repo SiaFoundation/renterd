@@ -56,34 +56,34 @@ jobs:
           host port: 3800
           mysql version: "8"
           mysql root password: test
-      - name: Test Stores
-        uses: n8maninger/action-golang-test@v1
-        with:
-          args: "-race;-short;-tags=netgo"
-      - name: Test Stores - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./stores"
-          args: "-race;-short;-tags=netgo"
+      # - name: Test Stores
+      #   uses: n8maninger/action-golang-test@v1
+      #   with:
+      #     args: "-race;-short;-tags=netgo"
+      # - name: Test Stores - MySQL
+      #   if: matrix.os == 'ubuntu-latest'
+      #   uses: n8maninger/action-golang-test@v1
+      #   env:
+      #     RENTERD_DB_URI: 127.0.0.1:3800
+      #     RENTERD_DB_USER: root
+      #     RENTERD_DB_PASSWORD: test
+      #   with:
+      #     package: "./stores"
+      #     args: "-race;-short;-tags=netgo"
       - name: Test Integration
         uses: n8maninger/action-golang-test@v1
         with:
           package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m;-tags=netgo"
-      - name: Test Integration - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m;-tags=netgo"
+          args: "-failfast;-race;-timeout=60m;-tags=netgo;-count=50;-run=^TestUploadDownloadExtended$"
+      # - name: Test Integration - MySQL
+      #   if: matrix.os == 'ubuntu-latest'
+      #   uses: n8maninger/action-golang-test@v1
+      #   env:
+      #     RENTERD_DB_URI: 127.0.0.1:3800
+      #     RENTERD_DB_USER: root
+      #     RENTERD_DB_PASSWORD: test
+      #   with:
+      #     package: "./internal/test/e2e/..."
+      #     args: "-failfast;-race;-timeout=60m;-tags=netgo"
       - name: Build
         run: go build -o bin/ -tags='netgo timetzdata' ./cmd/renterd

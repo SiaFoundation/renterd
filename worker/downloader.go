@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,6 +128,15 @@ func (d *downloader) estimate() float64 {
 }
 
 func (d *downloader) execute(req *sectorDownloadReq) (err error) {
+	start := time.Now()
+	defer func() {
+		if err == nil {
+			fmt.Printf("DEBUG %v |  HOST: read sector took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
+		} else {
+			fmt.Printf("DEBUG %v |  HOST: read sector took %v, failed with %v\n", time.Now().Format(time.TimeOnly), time.Since(start), err)
+		}
+	}()
+
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, req.length))
 	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
