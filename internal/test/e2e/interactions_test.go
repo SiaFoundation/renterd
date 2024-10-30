@@ -73,7 +73,7 @@ func TestInteractions(t *testing.T) {
 	})
 
 	// scan the host manually
-	tt.OKAll(w.RHPScan(context.Background(), h1.PublicKey(), h.NetAddress, 0))
+	tt.OKAll(b.ScanHost(context.Background(), h1.PublicKey(), h.NetAddress, 0))
 	time.Sleep(3 * testBusFlushInterval)
 
 	// fetch the host

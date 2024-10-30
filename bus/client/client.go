@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 )
@@ -25,6 +27,16 @@ func (c *Client) Backup(ctx context.Context, database, dstPath string) (err erro
 		Database: database,
 		Path:     dstPath,
 	}, nil)
+	return
+}
+
+// ScanHost scans a host, returning its current settings.
+func (c *Client) ScanHost(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.HostScanResponse, err error) {
+	err = c.c.WithContext(ctx).POST("/hosts/scan", api.HostScanRequest{
+		HostKey: hostKey,
+		HostIP:  hostIP,
+		Timeout: api.DurationMS(timeout),
+	}, &resp)
 	return
 }
 

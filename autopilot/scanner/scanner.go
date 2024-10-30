@@ -18,20 +18,20 @@ const (
 )
 
 type (
+	HostScanner interface {
+		ScanHost(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.HostScanResponse, error)
+	}
+
 	HostStore interface {
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
 
 	Scanner interface {
-		Scan(ctx context.Context, w WorkerRHPScan, force bool)
+		Scan(ctx context.Context, w HostScanner, force bool)
 		Shutdown(ctx context.Context) error
 		Status() (bool, time.Time)
 		UpdateHostsConfig(cfg api.HostsConfig)
-	}
-
-	WorkerRHPScan interface {
-		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	}
 )
 
@@ -88,7 +88,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	}, nil
 }
 
-func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
+func (s *scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 	if s.canSkipScan(force) {
 		s.logger.Debug("host scan skipped")
 		return
@@ -110,7 +110,7 @@ func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
 	go func() {
 		defer s.wg.Done()
 
-		scanned := s.scanHosts(ctx, w, cutoff)
+		scanned := s.scanHosts(ctx, hs, cutoff)
 		removed := s.removeOfflineHosts(ctx)
 
 		s.mu.Lock()
@@ -156,7 +156,7 @@ func (s *scanner) UpdateHostsConfig(cfg api.HostsConfig) {
 	s.hostsCfg = &cfg
 }
 
-func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Time) (scanned uint64) {
+func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Time) (scanned uint64) {
 	// define worker
 	worker := func(jobs <-chan scanJob) {
 		for h := range jobs {
@@ -164,7 +164,7 @@ func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, cutoff time.Ti
 				return // shutdown
 			}
 
-			scan, err := w.RHPScan(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
+			scan, err := hs.ScanHost(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
 			if errors.Is(err, context.Canceled) {
 				return
 			} else if err != nil {

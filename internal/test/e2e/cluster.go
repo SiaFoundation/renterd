@@ -616,8 +616,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
 	// create bus
-	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, "", logger)
+	b, err := bus.New(ctx, cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -1040,6 +1039,7 @@ func testNetwork() (*consensus.Network, types.Block) {
 
 func testBusCfg() config.Bus {
 	return config.Bus{
+		AllowPrivateIPs:               true,
 		AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 		Bootstrap:                     false,
 		GatewayAddr:                   "127.0.0.1:0",
@@ -1064,7 +1064,6 @@ func testDBCfg() dbConfig {
 func testWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   10 * time.Millisecond,
-		AllowPrivateIPs:          true,
 		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
 		BusFlushInterval:         testBusFlushInterval,
