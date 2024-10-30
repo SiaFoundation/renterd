@@ -83,4 +83,14 @@ type (
 		ToAdd    []types.FileContractID `json:"toAdd"`
 		ToRemove []types.FileContractID `json:"toRemove"`
 	}
+
+	ContractLatestRevisionResponse struct {
+		ContractID types.FileContractID `json:"contractID"`
+		V2         bool                 `json:"v2"`
+		types.V2FileContract
+	}
 )
+
+func (rev *ContractLatestRevisionResponse) EndHeight() uint64 {
+	return rev.ProofHeight
+}

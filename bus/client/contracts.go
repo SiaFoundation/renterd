@@ -144,6 +144,13 @@ func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileCon
 
 // PrunableData returns an overview of all contract sizes, the total size and
 // the amount of data that can be pruned.
+func (c *Client) LatestRevision(ctx context.Context, contractID types.FileContractID) (resp api.ContractLatestRevisionResponse, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/latestrevision", contractID), &resp)
+	return
+}
+
+// PrunableData returns an overview of all contract sizes, the total size and
+// the amount of data that can be pruned.
 func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/contracts/prunable", &prunableData)
 	return

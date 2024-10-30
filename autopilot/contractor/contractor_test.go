@@ -100,7 +100,7 @@ func TestShouldArchive(t *testing.T) {
 	n.HardforkV2.RequireHeight = 20
 
 	// dummy contract
-	c1 := api.Contract{
+	c1 := contract{
 		ContractMetadata: api.ContractMetadata{
 			State:          api.ContractStateActive,
 			StartHeight:    0,
@@ -109,7 +109,11 @@ func TestShouldArchive(t *testing.T) {
 			RevisionNumber: 1,
 			V2:             true,
 		},
-		Revision: &types.FileContractRevision{FileContract: types.FileContract{RevisionNumber: 1}},
+		Revision: &api.ContractLatestRevisionResponse{
+			V2FileContract: types.V2FileContract{
+				RevisionNumber: 1,
+			},
+		},
 	}
 
 	err := c.shouldArchive(c1, 25, n)
