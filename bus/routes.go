@@ -678,7 +678,7 @@ func (b *Bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 			if allowlist, err := b.store.HostAllowlist(ctx); jc.Check("couldn't fetch allowlist", err) == nil {
 				if blocklist, err := b.store.HostBlocklist(ctx); jc.Check("couldn't fetch blocklist", err) == nil {
 					b.broadcastAction(webhooks.Event{
-						Module: api.ModuleHost,
+						Module: api.ModuleACL,
 						Event:  api.EventUpdate,
 						Payload: api.EventACLUpdate{
 							Allowlist: allowlist,
@@ -706,6 +706,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	case api.ContractFilterModeAll:
 	case api.ContractFilterModeActive:
 	case api.ContractFilterModeArchived:
+	case api.ContractFilterModeDownload:
 	default:
 		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
 		return

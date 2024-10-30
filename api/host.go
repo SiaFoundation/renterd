@@ -15,6 +15,7 @@ import (
 const (
 	ContractFilterModeAll      = "all"
 	ContractFilterModeActive   = "active"
+	ContractFilterModeDownload = "download"
 	ContractFilterModeArchived = "archived"
 
 	HostFilterModeAll     = "all"

@@ -119,14 +119,14 @@ func (c *cache) DownloadContracts(ctx context.Context) (contracts []api.Contract
 	// fetch directly from bus if the cache is not ready
 	if !c.isReady() {
 		c.logger.Warn(errCacheNotReady)
-		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{})
+		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
 		return
 	}
 
 	// fetch from bus if it's not cached or expired
 	value, found, expired := c.cache.Get(cacheKeyDownloadContracts)
 	if !found || expired {
-		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{})
+		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
 		if err == nil {
 			c.cache.Set(cacheKeyDownloadContracts, contracts)
 		}

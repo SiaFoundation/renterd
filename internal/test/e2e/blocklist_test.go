@@ -1,14 +1,18 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
+	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 func TestBlocklist(t *testing.T) {
@@ -159,4 +163,43 @@ func TestBlocklist(t *testing.T) {
 	if len(hosts) != 5 {
 		t.Fatal("unexpected number of hosts", len(hosts))
 	}
+}
+
+func TestBlocklistUploadDownload(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// create a new test cluster
+	os.RemoveAll("/Users/peterjan/testing2")
+	cluster := newTestCluster(t, testClusterOptions{
+		logger: zap.NewNop(),
+		dbName: "pj.sql",
+		dir:    "/Users/peterjan/testing2",
+		hosts:  test.RedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload the data
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "/foo", api.UploadObjectOptions{}))
+
+	// download data
+	var buffer bytes.Buffer
+	tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
+
+	// block two hosts
+	h1 := cluster.hosts[0].settings.Settings().NetAddress
+	h2 := cluster.hosts[1].settings.Settings().NetAddress
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1, h2}, nil, false))
+
+	// download data again
+	buffer.Reset()
+	tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
 }

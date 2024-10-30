@@ -292,11 +292,26 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 		whereArgs = append(whereArgs, contractSetID)
 	}
 
+	var hasAllowlist, hasBlocklist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
+		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
+	} else if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
+		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
+	}
+
 	if opts.FilterMode != "" {
 		// validate filter mode
 		switch opts.FilterMode {
 		case api.ContractFilterModeActive:
 			whereExprs = append(whereExprs, "c.archival_reason IS NULL")
+		case api.ContractFilterModeDownload:
+			whereExprs = append(whereExprs, "c.archival_reason IS NULL")
+			if hasAllowlist {
+				whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+			}
+			if hasBlocklist {
+				whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+			}
 		case api.ContractFilterModeArchived:
 			whereExprs = append(whereExprs, "c.archival_reason IS NOT NULL")
 		case api.ContractFilterModeAll:
