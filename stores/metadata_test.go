@@ -4480,7 +4480,6 @@ func TestUpdateObjectParallel(t *testing.T) {
 		t.SkipNow()
 	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
 	defer ss.Close()
 
 	// create 2 hosts

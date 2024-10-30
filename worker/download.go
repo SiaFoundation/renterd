@@ -663,9 +663,6 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 			pending = append(pending, sector)
 		}
 	}
-	if len(pending) == 0 {
-		return nil
-	}
 
 	// sort pending sectors
 	sort.Slice(pending, func(i, j int) bool {
@@ -690,27 +687,31 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 	})
 
 	for _, next := range pending {
-		if fastest := s.mgr.fastest(next.hks); fastest != nil {
-			next.selectHost(fastest.PublicKey())
-			return &sectorDownloadReq{
-				ctx: ctx,
+		fastest := s.mgr.fastest(next.hks)
+		if fastest == nil {
+			// no host available for this sector, clean 'hks'
+			next.hks = nil
+			continue
+		}
+		next.selectHost(fastest.PublicKey())
+		return &sectorDownloadReq{
+			ctx: ctx,
 
-				offset: s.offset,
-				length: s.length,
-				root:   next.root,
-				host:   fastest,
+			offset: s.offset,
+			length: s.length,
+			root:   next.root,
+			host:   fastest,
 
-				// overpay is set to 'true' when a request is retried after the slab
-				// download failed and we realise that it might have succeeded if we
-				// allowed overpaying for certain sectors, we only do this when trying
-				// to migrate a critically low-health slab that might otherwise be
-				// unrecoverable
-				overpay: false,
+			// overpay is set to 'true' when a request is retried after the slab
+			// download failed and we realise that it might have succeeded if we
+			// allowed overpaying for certain sectors, we only do this when trying
+			// to migrate a critically low-health slab that might otherwise be
+			// unrecoverable
+			overpay: false,
 
-				overdrive:   overdrive,
-				sectorIndex: next.index,
-				resps:       resps,
-			}
+			overdrive:   overdrive,
+			sectorIndex: next.index,
+			resps:       resps,
 		}
 	}
 

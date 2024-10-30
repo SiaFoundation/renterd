@@ -13,10 +13,6 @@ import (
 )
 
 func TestObjectMetadata(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,

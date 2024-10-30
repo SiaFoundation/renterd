@@ -741,7 +741,7 @@ func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
 		return
 	} else if jc.Check("could not add contracts to set", b.store.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
-	} else {
+	} else if len(req.ToAdd)+len(req.ToRemove) > 0 {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleContractSet,
 			Event:  api.EventUpdate,
@@ -1049,9 +1049,6 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	} else if rrr.ExpectedNewStorage == 0 {
 		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
 		return
-	} else if rrr.MaxFundAmount.IsZero() {
-		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
-		return
 	} else if rrr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
@@ -1087,7 +1084,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		newRevision, contractPrice, initialRenterFunds, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		newRevision, contractPrice, initialRenterFunds, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
 			jc.Error(err, http.StatusBadRequest)
 			return
