@@ -456,6 +456,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 			}
 
 			// read next slab's data
+			start := time.Now()
 			data := make([]byte, slabSizeNoRedundancy)
 			length, err := io.ReadFull(io.LimitReader(cr, int64(slabSizeNoRedundancy)), data)
 			if err == io.EOF {
@@ -486,7 +487,8 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 				partialSlab = data[:length]
 			} else {
 				// regular upload
-				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
+				go func(rs api.RedundancySettings, data []byte, length, slabIndex int, start time.Time) {
+					fmt.Printf("DEBUG %v |  WORKER: encrypting slab data took %v, starting upload \n", time.Now().Format(time.TimeOnly), time.Since(start))
 					uploadSpeed, overdrivePct := upload.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
 
 					// track stats
@@ -495,7 +497,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 
 					// release memory
 					mem.Release()
-				}(up.rs, data, length, slabIndex)
+				}(up.rs, data, length, slabIndex, start)
 			}
 
 			slabIndex++

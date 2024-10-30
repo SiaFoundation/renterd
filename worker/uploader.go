@@ -88,6 +88,7 @@ outer:
 	for {
 		// wait for work
 		select {
+		case <-time.After(100 * time.Millisecond):
 		case <-u.signalNewUpload:
 		case <-u.shutdownCtx.Done():
 			return
@@ -249,6 +250,15 @@ func (u *uploader) estimate() float64 {
 // execute executes the sector upload request, if the upload was successful it
 // returns the time it took to upload the sector to the host
 func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
+	start := time.Now()
+	defer func() {
+		if err == nil {
+			fmt.Printf("DEBUG %v |  HOST: write sector took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
+		} else {
+			fmt.Printf("DEBUG %v |  HOST: write sector took %v, failed with %v\n", time.Now().Format(time.TimeOnly), time.Since(start), err)
+		}
+	}()
+
 	// grab fields
 	u.mu.Lock()
 	host := u.host
@@ -298,7 +308,7 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	}
 
 	// upload the sector
-	start := time.Now()
+	start = time.Now()
 	err = host.UploadSector(ctx, req.sector.root, req.sector.sectorData(), rev)
 	if err != nil {
 		return 0, fmt.Errorf("failed to upload sector to contract %v; %w", fcid, err)

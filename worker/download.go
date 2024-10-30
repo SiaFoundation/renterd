@@ -747,7 +747,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 		i++
 	}
 
-	fmt.Printf("DEBUG PJ: launching min shards took %v\n", time.Since(start))
+	fmt.Printf("DEBUG %v |  WORKER: launching min shards took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
 	start = time.Now()
 
 	// collect requests that failed due to gouging
@@ -781,9 +781,14 @@ loop:
 
 			// handle errors
 			if resp.err != nil {
+				fmt.Printf("DEBUG %v |  WORKER: received err response: %v\n", time.Now().Format(time.TimeOnly), resp.err)
+				startt := start
 				// launch replacement request
 				if req := s.nextRequest(ctx, resps, resp.req.overdrive); req != nil {
 					s.launch(req)
+					fmt.Printf("DEBUG %v |  WORKER: launching replacement request took %v\n", time.Now().Format(time.TimeOnly), time.Since(startt))
+				} else {
+					fmt.Printf("DEBUG %v |  WORKER: no replacement request launched\n", time.Now().Format(time.TimeOnly))
 				}
 
 				// handle lost sectors
@@ -811,7 +816,7 @@ loop:
 	s.mgr.statsOverdrivePct.Track(s.overdrivePct())
 	s.mgr.statsSlabDownloadSpeedBytesPerMS.Track(float64(s.downloadSpeed()))
 	data, overpaid, err := s.finish()
-	fmt.Printf("DEBUG PJ: slab download took %v overpaid %v err %v\n", time.Since(start), overpaid, err)
+	fmt.Printf("DEBUG %v |  WORKER: slab download took %v overpaid %v err %v\n", time.Now().Format(time.TimeOnly), time.Since(start), overpaid, err)
 	return data, overpaid, err
 }
 
