@@ -11,6 +11,7 @@ type (
 
 		AssertContains(err error, target string)
 		AssertIs(err, target error)
+		Fail(err error)
 		FailAll(vs ...interface{})
 		OK(err error)
 		OKAll(vs ...interface{})
@@ -61,6 +62,13 @@ func (t impl) AssertContains(err error, target string) {
 func (t impl) AssertIs(err, target error) {
 	t.Helper()
 	t.AssertContains(err, target.Error())
+}
+
+func (t impl) Fail(err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("should've failed")
+	}
 }
 
 func (t impl) FailAll(vs ...interface{}) {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -29,10 +28,17 @@ func TestBlocklist(t *testing.T) {
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
+	cs := test.AutopilotConfig.Contracts.Set
 
 	// fetch contracts
-	opts := api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set}
-	contracts, err := b.Contracts(ctx, opts)
+	contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: cs})
+	tt.OK(err)
+	if len(contracts) != 3 {
+		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
+	}
+
+	// fetch again using filter mode
+	contracts, err = b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
 	tt.OK(err)
 	if len(contracts) != 3 {
 		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
@@ -45,12 +51,21 @@ func TestBlocklist(t *testing.T) {
 	err = b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
 	tt.OK(err)
 
+	// assert the contract of h3 can't be used for downloads
+	contracts, err = b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
+	tt.OK(err)
+	if len(contracts) != 2 {
+		t.Fatalf("unexpected number of contracts, %v != 2", len(contracts))
+	} else if contracts[0].HostKey == hk3 || contracts[1].HostKey == hk3 {
+		t.Fatal("unexpected download contract")
+	}
+
 	// assert h3 is no longer in the contract set
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(ctx, opts)
+		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: cs})
 		tt.OK(err)
 		if len(contracts) != 2 {
-			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 2", opts.ContractSet, len(contracts))
+			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 2", cs, len(contracts))
 		}
 		for _, c := range contracts {
 			if c.HostKey == hk3 {
@@ -65,12 +80,21 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(err)
 	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false))
 
+	// assert the contract of h1 can't be used for downloads
+	contracts, err = b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
+	tt.OK(err)
+	if len(contracts) != 1 {
+		t.Fatalf("unexpected number of contracts, %v != 1", len(contracts))
+	} else if contracts[0].HostKey != hk2 {
+		t.Fatal("unexpected download contract")
+	}
+
 	// assert h1 is no longer in the contract set
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
 		tt.OK(err)
 		if len(contracts) != 1 {
-			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 1", opts.ContractSet, len(contracts))
+			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 1", cs, len(contracts))
 		}
 		for _, c := range contracts {
 			if c.HostKey == hk1 {
@@ -83,11 +107,19 @@ func TestBlocklist(t *testing.T) {
 	// clear the allowlist and blocklist and assert we have 3 contracts again
 	tt.OK(b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false))
 	tt.OK(b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false))
+
+	// fetch again using filter mode
+	contracts, err = b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
+	tt.OK(err)
+	if len(contracts) != 3 {
+		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
+	}
+
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(ctx, opts)
+		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: cs})
 		tt.OK(err)
 		if len(contracts) != 3 {
-			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 3", opts.ContractSet, len(contracts))
+			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 3", cs, len(contracts))
 		}
 		return nil
 	})
@@ -171,11 +203,8 @@ func TestBlocklistUploadDownload(t *testing.T) {
 	}
 
 	// create a new test cluster
-	os.RemoveAll("/Users/peterjan/testing2")
 	cluster := newTestCluster(t, testClusterOptions{
 		logger: zap.NewNop(),
-		dbName: "pj.sql",
-		dir:    "/Users/peterjan/testing2",
 		hosts:  test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
@@ -195,11 +224,34 @@ func TestBlocklistUploadDownload(t *testing.T) {
 	tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
 
 	// block two hosts
-	h1 := cluster.hosts[0].settings.Settings().NetAddress
-	h2 := cluster.hosts[1].settings.Settings().NetAddress
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1, h2}, nil, false))
+	h1 := cluster.hosts[0]
+	h2 := cluster.hosts[1]
+	h1Addr := h1.settings.Settings().NetAddress
+	h2Addr := h2.settings.Settings().NetAddress
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h1Addr, h2Addr}, nil, false))
 
-	// download data again
+	// download data again and expect it to fail
+	tt.Fail(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
+
+	// unblock one of the hosts and expect it to succeed
 	buffer.Reset()
+	tt.OK(b.UpdateHostBlocklist(context.Background(), nil, []string{h1Addr}, false))
+	tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
+
+	// clear blocklist and set allowlist to allow one host
+	tt.OK(b.UpdateHostBlocklist(context.Background(), nil, nil, true))
+	tt.OK(b.UpdateHostAllowlist(context.Background(), []types.PublicKey{h1.PublicKey()}, nil, false))
+
+	c, err := b.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeDownload})
+	tt.OK(err)
+	if len(c) != 1 {
+		t.Fatal("unexpected number of contracts", len(c))
+	}
+	// download data again and expect it to fail
+	tt.Fail(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
+
+	// extend allowlist with one more host and expect download to succeed
+	buffer.Reset()
+	tt.OK(b.UpdateHostAllowlist(context.Background(), []types.PublicKey{h2.PublicKey()}, nil, false))
 	tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, "/foo", api.DownloadObjectOptions{}))
 }
