@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
+	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
@@ -84,6 +85,7 @@ type Bus interface {
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
+	ConsensusNetwork(ctx context.Context) (consensus.Network, error)
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
@@ -105,7 +107,7 @@ type Worker interface {
 type contractChecker interface {
 	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract api.Contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string)
 	pruneContractRefreshFailures(contracts []api.ContractMetadata)
-	shouldArchive(c api.Contract, bh uint64) error
+	shouldArchive(c api.Contract, bh uint64, network consensus.Network) error
 }
 
 type contractReviser interface {
@@ -436,7 +438,7 @@ func (c *Contractor) refreshFundingEstimate(contract api.Contract, logger *zap.S
 	return refreshAmountCapped
 }
 
-func (c *Contractor) shouldArchive(contract api.Contract, bh uint64) error {
+func (c *Contractor) shouldArchive(contract api.Contract, bh uint64, n consensus.Network) (err error) {
 	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
 		return errContractExpired
 	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
@@ -445,6 +447,8 @@ func (c *Contractor) shouldArchive(contract api.Contract, bh uint64) error {
 		return errContractMaxRevisionNumber
 	} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > ContractConfirmationDeadline {
 		return errContractNotConfirmed
+	} else if !contract.V2 && bh >= n.HardforkV2.RequireHeight {
+		return errContractBeyondV2RequireHeight
 	}
 	return nil
 }
@@ -787,6 +791,12 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 	}
 	churnReasons := make(map[types.FileContractID]string)
 
+	// fetch network
+	network, err := bus.ConsensusNetwork(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// fetch all contracts we already have
 	logger.Info("fetching existing contracts")
 	start := time.Now()
@@ -849,7 +859,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		logger = logger.With("blockHeight", bh)
 
 		// check if contract is ready to be archived.
-		if reason := cc.shouldArchive(c, bh); reason != nil {
+		if reason := cc.shouldArchive(c, bh, network); reason != nil {
 			if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
 				c.ID: reason.Error(),
 			}); err != nil {

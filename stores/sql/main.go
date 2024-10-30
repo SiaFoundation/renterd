@@ -139,7 +139,7 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			WHERE contracts.renewed_to = c.fcid
 		)
 		SELECT
-			c.fcid, c.host_id, c.host_key,
+			c.fcid, c.host_id, c.host_key, c.v2,
 			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 			c.contract_price, c.initial_renter_funds,
 			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
@@ -1836,7 +1836,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 SELECT
-	c.fcid, c.host_id, c.host_key,
+	c.fcid, c.host_id, c.host_key, c.v2,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
 	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
