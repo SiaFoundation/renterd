@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
@@ -167,6 +168,7 @@ type Worker struct {
 
 	rhp2Client *rhp2.Client
 	rhp3Client *rhp3.Client
+	rhp4Client *rhp4.Client
 
 	allowPrivateIPs bool
 	id              string
@@ -930,6 +932,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		logger:                  l.Sugar(),
 		rhp2Client:              rhp2.New(dialer, l),
 		rhp3Client:              rhp3.New(dialer, l),
+		rhp4Client:              rhp4.New(dialer),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             shutdownCtx,
