@@ -1953,15 +1953,15 @@ func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefix
 		}
 
 		// insert directory
-		var insertedID int64
-		if _, err := insertStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
-			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
-		} else if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&insertedID); err != nil {
+		if res, err := insertStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v %v: %w", dirID, dir, err)
+		} else if insertedID, err := res.LastInsertId(); err != nil {
 			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
 		} else if insertedID == 0 {
 			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		} else {
+			dirID = &insertedID
 		}
-		dirID = &insertedID
 	}
 	return *dirID, nil
 }
