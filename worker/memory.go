@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
@@ -150,13 +149,6 @@ func (lmm *limitMemoryManager) Status() api.MemoryStatus {
 }
 
 func (lmm *limitMemoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
-	start := time.Now()
-	defer func() {
-		if time.Since(start) > time.Second {
-			fmt.Printf("DEBUG %v |  WORKER: SLOW MEMORY ACQUIRE (%v) \n", time.Now().Format(time.TimeOnly), time.Since(start))
-		}
-	}()
-
 	childMem := lmm.child.AcquireMemory(ctx, amt)
 	if childMem == nil {
 		return nil

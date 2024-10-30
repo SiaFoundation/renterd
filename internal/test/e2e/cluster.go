@@ -667,11 +667,6 @@ func announceHosts(hosts []*Host) error {
 // MineToRenewWindow is a helper which mines enough blocks for the autopilot to
 // reach its renew window.
 func (c *TestCluster) MineToRenewWindow() {
-	start := time.Now()
-	defer func() {
-		fmt.Printf("DEBUG %v |  CLUSTER: MineToRenewWindow took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
-	}()
-
 	c.tt.Helper()
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
@@ -697,10 +692,6 @@ func (c *TestCluster) MineBlocks(n uint64) {
 }
 
 func (c *TestCluster) sync() {
-	start := time.Now()
-	defer func() {
-		fmt.Printf("DEBUG %v |  CLUSTER: sync took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
-	}()
 	tip := c.cm.Tip()
 	c.tt.Retry(3000, time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())

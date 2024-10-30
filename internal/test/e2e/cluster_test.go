@@ -903,7 +903,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 	tt := cluster.tt
 
 	// check that the funding was recorded
-	start := time.Now()
 	tt.Retry(100, testBusFlushInterval, func() error {
 		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
@@ -928,8 +927,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 		return nil
 	})
-	fmt.Printf("DEBUG %v |  TEST: funding took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
-	start = time.Now()
 
 	// prepare two files, a small one and a large one
 	small := make([]byte, rhpv2.SectorSize/12)
@@ -943,22 +940,16 @@ func TestUploadDownloadSpending(t *testing.T) {
 			tt.OKAll(frand.Read(data))
 
 			// upload the data
-			startt := time.Now()
 			path := fmt.Sprintf("data_%v", len(data))
 			tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
-			fmt.Printf("DEBUG %v |  TEST: upload %s took %v\n", time.Now().Format(time.TimeOnly), path, time.Since(startt))
 
 			// Should be registered in bus.
-			startt = time.Now()
 			_, err := cluster.Bus.Object(context.Background(), testBucket, path, api.GetObjectOptions{})
-			fmt.Printf("DEBUG %v |  TEST: fetch %s took %v\n", time.Now().Format(time.TimeOnly), path, time.Since(startt))
 			tt.OK(err)
 
 			// download the data
 			var buffer bytes.Buffer
-			startt = time.Now()
 			tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, path, api.DownloadObjectOptions{}))
-			fmt.Printf("DEBUG %v |  TEST: download %s took %v\n", time.Now().Format(time.TimeOnly), path, time.Since(startt))
 
 			// assert it matches
 			if !bytes.Equal(data, buffer.Bytes()) {
@@ -969,8 +960,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// run uploads once
 	uploadDownload()
-	fmt.Printf("DEBUG %v |  TEST: upload-download took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
-	start = time.Now()
 
 	// Fuzzy search for uploaded data in various ways.
 	resp, err := cluster.Bus.Objects(context.Background(), "", api.ListObjectOptions{Bucket: testBucket})
@@ -991,10 +980,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// renew contracts.
 	cluster.MineToRenewWindow()
-	fmt.Printf("DEBUG %v |  TEST: mining took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
 
 	// wait for the contract to be renewed
-	start = time.Now()
 	tt.Retry(10, time.Second, func() error {
 		// mine a block
 		cluster.MineBlocks(1)
@@ -1025,7 +1012,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 		return nil
 	})
-	fmt.Printf("DEBUG %v |  TEST: renew took %v\n", time.Now().Format(time.TimeOnly), time.Since(start))
 
 	// run uploads again
 	uploadDownload()
