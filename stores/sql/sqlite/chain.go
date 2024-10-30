@@ -285,7 +285,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	defer deleteBlocklistLinkStmt.Close()
 
 	// fetch allowlist entries
-	rows, err := c.tx.Query(c.ctx, "SELECT id, entry FROM host_allowlist_entries WHERE entry = ?", ssql.PublicKey(hk))
+	rows, err := c.tx.Query(c.ctx, "SELECT id FROM host_allowlist_entries WHERE entry = ?", ssql.PublicKey(hk))
 	if err != nil {
 		return fmt.Errorf("failed to fetch allow list: %w", err)
 	}
