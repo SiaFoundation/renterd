@@ -21,7 +21,28 @@ const (
 	// minValidScore is the smallest score that a host can have before
 	// being ignored.
 	minValidScore = math.SmallestNonzeroFloat64
+
+	// minSubScore is the smallest score that a host can have for a given
+	// sub-score such as its pricing. By choosing 0.1, a host that has a very bad
+	// price score but is otherwise perfect can at most be 90% less likely to be
+	// picked than a host that has a perfect score.
+	minSubScore = 0.1
 )
+
+// clampScore makes sure that a score can not be smaller than 'minSubScore'.
+// Unless the score is 0, which indicates a more severe issue with the host. By
+// doing so, we limit the impact of a single sub-score on the overall score of a
+// host.
+func clampScore(score float64) float64 {
+	if score <= 0.0 {
+		return 0.0
+	} else if score < minSubScore {
+		return minSubScore
+	} else if score > 1.0 {
+		return 1.0
+	}
+	return score
+}
 
 func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expectedRedundancy float64) (sb api.HostScoreBreakdown) {
 	cCfg := cfg.Contracts
@@ -39,13 +60,13 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	// data will store twice the expectation
 	allocationPerHost := idealDataPerHost * 2
 	return api.HostScoreBreakdown{
-		Age:              ageScore(h),
-		Collateral:       collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost)),
-		Interactions:     interactionScore(h),
-		Prices:           priceAdjustmentScore(h.PriceTable.HostPriceTable, gs),
-		StorageRemaining: storageRemainingScore(h.Settings, h.StoredData, allocationPerHost),
-		Uptime:           uptimeScore(h),
-		Version:          versionScore(h.Settings, cfg.Hosts.MinProtocolVersion),
+		Age:              ageScore(h), // not clamped since values are hardcoded
+		Collateral:       clampScore(collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost))),
+		Interactions:     clampScore(interactionScore(h)),
+		Prices:           clampScore(priceAdjustmentScore(h.PriceTable.HostPriceTable, gs)),
+		StorageRemaining: clampScore(storageRemainingScore(h.Settings, h.StoredData, allocationPerHost)),
+		Uptime:           clampScore(uptimeScore(h)),
+		Version:          clampScore(versionScore(h.Settings, cfg.Hosts.MinProtocolVersion)),
 	}
 }
 
@@ -240,7 +261,7 @@ func uptimeScore(h api.Host) float64 {
 		} else if lastScanSuccess || secondToLastScanSuccess {
 			return 0.5
 		} else {
-			return 0.05
+			return minSubScore
 		}
 	}
 

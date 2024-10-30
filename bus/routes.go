@@ -741,7 +741,7 @@ func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
 		return
 	} else if jc.Check("could not add contracts to set", b.store.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
-	} else {
+	} else if len(req.ToAdd)+len(req.ToRemove) > 0 {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleContractSet,
 			Event:  api.EventUpdate,

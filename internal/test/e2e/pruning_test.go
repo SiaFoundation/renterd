@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap"
 )
 
 func TestHostPruning(t *testing.T) {
@@ -93,7 +92,6 @@ func TestHostPruning(t *testing.T) {
 func TestSectorPruning(t *testing.T) {
 	// create a cluster
 	opts := clusterOptsDefault
-	opts.logger = zap.NewNop()
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 

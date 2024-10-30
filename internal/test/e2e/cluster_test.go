@@ -31,7 +31,6 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql/sqlite"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -895,8 +894,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: zap.NewNop(),
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1315,6 +1313,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// start the cluster again
 	cluster = newTestCluster(t, testClusterOptions{
+		cm:        cluster.cm,
 		dir:       cluster.dir,
 		logger:    cluster.logger,
 		walletKey: &cluster.wk,
@@ -1506,10 +1505,10 @@ func TestWalletEvents(t *testing.T) {
 	tt := cluster.tt
 
 	// Make sure we get transactions that are spread out over multiple seconds.
-	time.Sleep(time.Second)
-	cluster.MineBlocks(1)
-	time.Sleep(time.Second)
-	cluster.MineBlocks(1)
+	for i := 0; i < 3; i++ {
+		time.Sleep(time.Second)
+		cluster.MineBlocks(1)
+	}
 
 	// Get all events of the wallet.
 	allTxns, err := b.WalletEvents(context.Background())
@@ -2441,6 +2440,9 @@ func TestWalletRedistribute(t *testing.T) {
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
+
+	// mine to get more money
+	cluster.MineBlocks(1)
 
 	// redistribute into 2 outputs of 500KS each
 	numOutputs := 2
