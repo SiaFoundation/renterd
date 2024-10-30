@@ -181,49 +181,6 @@ func (pm *pinManager) run() {
 	}
 }
 
-func (pm *pinManager) updateAutopilotSettings(ctx context.Context, autopilotID string, pins api.AutopilotPins, rate decimal.Decimal) error {
-	var updated bool
-
-	ap, err := pm.s.Autopilot(ctx, autopilotID)
-	if err != nil {
-		return err
-	}
-
-	// update allowance
-	if pins.Allowance.IsPinned() {
-		update, err := convertCurrencyToSC(decimal.NewFromFloat(pins.Allowance.Value), rate)
-		if err != nil {
-			pm.logger.Warnw("failed to convert allowance to currency", zap.Error(err))
-		} else {
-			bkp := ap.Config.Contracts.Allowance
-			ap.Config.Contracts.Allowance = update
-			if err := ap.Config.Validate(); err != nil {
-				pm.logger.Warnw("failed to update autopilot setting, new allowance makes the setting invalid", zap.Error(err))
-				ap.Config.Contracts.Allowance = bkp
-			} else {
-				pm.logger.Infow("updating autopilot allowance", "old", bkp, "new", ap.Config.Contracts.Allowance, "rate", rate, "autopilot", autopilotID)
-				updated = true
-			}
-		}
-	}
-
-	// return early if no updates took place
-	if !updated {
-		pm.logger.Infow("autopilots did not require price update", "rate", rate)
-		return nil
-	}
-
-	// validate config
-	err = ap.Config.Validate()
-	if err != nil {
-		pm.logger.Warnw("failed to update autopilot setting, new settings make the setting invalid", zap.Error(err))
-		return err
-	}
-
-	// update autopilto
-	return pm.s.UpdateAutopilot(ctx, ap)
-}
-
 func (pm *pinManager) updateExchangeRates(currency string, rate float64) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -368,15 +325,6 @@ func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {
 	if err != nil {
 		pm.logger.Warnw("failed to update gouging settings", zap.Error(err))
 	}
-
-	// update autopilot settings
-	for ap, pins := range settings.Autopilots {
-		err = pm.updateAutopilotSettings(ctx, ap, pins, update)
-		if err != nil {
-			pm.logger.Warnw("failed to update autopilot settings", zap.String("autopilot", ap), zap.Error(err))
-		}
-	}
-
 	return nil
 }
 

@@ -282,7 +282,7 @@ func (s *scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 
 	var err error
 	removed, err = s.hs.RemoveOfflineHosts(ctx, s.hostsCfg.MaxConsecutiveScanFailures, maxDowntime)
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Errorw("removing offline hosts failed", zap.Error(err), "maxDowntime", maxDowntime, "maxConsecutiveScanFailures", s.hostsCfg.MaxConsecutiveScanFailures)
 		return
 	}

@@ -18,9 +18,6 @@ import (
 )
 
 func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -183,9 +180,6 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 }
 
 func TestMultipartUploads(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -279,9 +273,6 @@ func TestMultipartUploads(t *testing.T) {
 }
 
 func TestMultipartUploadEmptyObjects(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 

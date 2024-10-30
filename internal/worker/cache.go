@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -53,6 +54,15 @@ func (c *memoryCache) Get(key string) (value interface{}, found bool, expired bo
 	} else if time.Now().After(entry.expiry) {
 		return entry.value, true, true
 	}
+
+	t := reflect.TypeOf(entry.value)
+	if t.Kind() == reflect.Slice {
+		v := reflect.ValueOf(entry.value)
+		copied := reflect.MakeSlice(t, v.Len(), v.Cap())
+		reflect.Copy(copied, v)
+		return copied.Interface(), true, false
+	}
+
 	return entry.value, true, false
 }
 

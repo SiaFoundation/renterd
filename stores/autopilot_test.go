@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
@@ -25,7 +24,6 @@ func TestAutopilotStore(t *testing.T) {
 	// create a cfg
 	cfg := api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Amount:      3,
 			Period:      144,
 			RenewWindow: 72,
