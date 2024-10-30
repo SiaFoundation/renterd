@@ -13,8 +13,8 @@ var ErrMissingRequiredFields = errors.New("missing required fields in configurat
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
 	for _, host := range hosts {
-		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
-		if hc.Usability.IsUsable() {
+		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore)
+		if hc.UsabilityBreakdown.IsUsable() {
 			usables++
 		}
 	}
@@ -26,7 +26,7 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uin
 // a recommendation on how to loosen it.
 func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse, _ error) {
 	// we need an allowance and a target amount of contracts to evaluate
-	if cfg.Contracts.Allowance.IsZero() || cfg.Contracts.Amount == 0 {
+	if cfg.Contracts.Amount == 0 {
 		return api.ConfigEvaluationResponse{}, ErrMissingRequiredFields
 	}
 
@@ -36,33 +36,33 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	resp.Hosts = uint64(len(hosts))
 	for i, host := range hosts {
 		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight // ignore block height
-		hc := checkHost(gc, scoreHost(host, cfg, rs.Redundancy()), minValidScore)
-		if hc.Usability.IsUsable() {
+		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore)
+		if hc.UsabilityBreakdown.IsUsable() {
 			resp.Usable++
 			continue
 		}
-		if hc.Usability.Blocked {
+		if hc.UsabilityBreakdown.Blocked {
 			resp.Unusable.Blocked++
 		}
-		if hc.Usability.NotAcceptingContracts {
+		if hc.UsabilityBreakdown.NotAcceptingContracts {
 			resp.Unusable.NotAcceptingContracts++
 		}
-		if hc.Usability.NotCompletingScan {
+		if hc.UsabilityBreakdown.NotCompletingScan {
 			resp.Unusable.NotScanned++
 		}
-		if hc.Gouging.ContractErr != "" {
+		if hc.GougingBreakdown.ContractErr != "" {
 			resp.Unusable.Gouging.Contract++
 		}
-		if hc.Gouging.DownloadErr != "" {
+		if hc.GougingBreakdown.DownloadErr != "" {
 			resp.Unusable.Gouging.Download++
 		}
-		if hc.Gouging.GougingErr != "" {
+		if hc.GougingBreakdown.GougingErr != "" {
 			resp.Unusable.Gouging.Gouging++
 		}
-		if hc.Gouging.PruneErr != "" {
+		if hc.GougingBreakdown.PruneErr != "" {
 			resp.Unusable.Gouging.Pruning++
 		}
-		if hc.Gouging.UploadErr != "" {
+		if hc.GougingBreakdown.UploadErr != "" {
 			resp.Unusable.Gouging.Upload++
 		}
 	}

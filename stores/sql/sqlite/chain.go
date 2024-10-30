@@ -191,12 +191,12 @@ func (c chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 	return ssql.UpdateChainIndex(c.ctx, c.tx, index, c.l)
 }
 
-func (c chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
-	return ssql.UpdateContract(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
-}
-
 func (c chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
 	return ssql.UpdateContractProofHeight(c.ctx, c.tx, fcid, proofHeight, c.l)
+}
+
+func (c chainUpdateTx) UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
+	return ssql.UpdateContractRevision(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
 }
 
 func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {
@@ -271,12 +271,18 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		return fmt.Errorf("failed to fetch allow list: %w", err)
 	}
 	defer rows.Close()
+
+	allowlistEntries := make(map[types.PublicKey]int64)
 	for rows.Next() {
 		var id int64
 		var pk ssql.PublicKey
 		if err := rows.Scan(&id, &pk); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
+		allowlistEntries[types.PublicKey(pk)] = id
+	}
+
+	for pk, id := range allowlistEntries {
 		if hk == types.PublicKey(pk) {
 			if _, err := c.tx.Exec(c.ctx,
 				"INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id) VALUES (?,?)",

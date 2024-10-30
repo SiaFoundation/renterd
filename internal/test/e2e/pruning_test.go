@@ -13,14 +13,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap"
 )
 
 func TestHostPruning(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
@@ -61,7 +56,7 @@ func TestHostPruning(t *testing.T) {
 	tt.OKAll(a.Trigger(true))
 
 	// assert the host was not pruned
-	hostss, err := b.Hosts(context.Background(), api.GetHostsOptions{})
+	hostss, err := b.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	if len(hostss) != 1 {
 		t.Fatal("host was pruned")
@@ -73,7 +68,7 @@ func TestHostPruning(t *testing.T) {
 
 	// assert the host was pruned
 	tt.Retry(10, time.Second, func() error {
-		hostss, err = b.Hosts(context.Background(), api.GetHostsOptions{})
+		hostss, err = b.Hosts(context.Background(), api.HostOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
 			a.Trigger(true) // trigger autopilot
@@ -95,13 +90,8 @@ func TestHostPruning(t *testing.T) {
 }
 
 func TestSectorPruning(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a cluster
 	opts := clusterOptsDefault
-	opts.logger = zap.NewNop()
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 
@@ -136,7 +126,7 @@ func TestSectorPruning(t *testing.T) {
 	// add several objects
 	for i := 0; i < numObjects; i++ {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), api.DefaultBucketName, filename, api.UploadObjectOptions{}))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(filename)), testBucket, filename, api.UploadObjectOptions{}))
 	}
 
 	// shut down the autopilot to prevent it from interfering
@@ -181,7 +171,7 @@ func TestSectorPruning(t *testing.T) {
 	// delete every other object
 	for i := 0; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
+		tt.OK(b.DeleteObject(context.Background(), testBucket, filename))
 	}
 
 	// assert amount of prunable data
@@ -227,7 +217,7 @@ func TestSectorPruning(t *testing.T) {
 	// delete other object
 	for i := 1; i < numObjects; i += 2 {
 		filename := fmt.Sprintf("obj_%d", i)
-		tt.OK(b.DeleteObject(context.Background(), api.DefaultBucketName, filename, api.DeleteObjectOptions{}))
+		tt.OK(b.DeleteObject(context.Background(), testBucket, filename))
 	}
 
 	// assert amount of prunable data

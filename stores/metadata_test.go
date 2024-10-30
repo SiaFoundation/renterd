@@ -26,26 +26,28 @@ import (
 	"lukechampine.com/frand"
 )
 
+const testBucket = "testbucket"
+
 func (s *testSQLStore) InsertSlab(slab object.Slab) {
 	s.t.Helper()
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: object.SlabSlices{
 			object.SlabSlice{
 				Slab: slab,
 			},
 		},
 	}
-	err := s.UpdateObject(context.Background(), api.DefaultBucketName, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
+	err := s.UpdateObject(context.Background(), testBucket, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
 	if err != nil {
 		s.t.Fatal(err)
 	}
 }
 
-func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, path string) error {
+func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, key string) error {
 	ts := time.Now()
 	time.Sleep(time.Millisecond)
-	if err := s.RemoveObject(ctx, bucket, path); err != nil {
+	if err := s.RemoveObject(ctx, bucket, key); err != nil {
 		return err
 	}
 	return s.waitForPruneLoop(ts)
@@ -102,18 +104,6 @@ func (s *SQLStore) waitForPruneLoop(ts time.Time) error {
 	})
 }
 
-func randomMultisigUC() types.UnlockConditions {
-	uc := types.UnlockConditions{
-		PublicKeys:         make([]types.UnlockKey, 2),
-		SignaturesRequired: 1,
-	}
-	for i := range uc.PublicKeys {
-		uc.PublicKeys[i].Algorithm = types.SpecifierEd25519
-		uc.PublicKeys[i].Key = frand.Bytes(32)
-	}
-	return uc
-}
-
 func updateAllObjectsHealth(db *isql.DB) error {
 	_, err := db.Exec(context.Background(), `
 UPDATE objects
@@ -144,13 +134,13 @@ func TestPrunableContractRoots(t *testing.T) {
 	// add 4 objects
 	for i := 1; i <= 4; i++ {
 		if _, err := ss.addTestObject(fmt.Sprintf("%s_%d", t.Name(), i), object.Object{
-			Key: object.GenerateEncryptionKey(),
+			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
-						Shards:    newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
+						EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+						MinShards:     1,
+						Shards:        newTestShards(hks[0], fcids[0], types.Hash256{byte(i)}),
 					},
 				},
 			},
@@ -176,10 +166,10 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// delete every other object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, fmt.Sprintf("%s_1", t.Name())); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("%s_1", t.Name())); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, fmt.Sprintf("%s_3", t.Name())); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("%s_3", t.Name())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,24 +214,24 @@ func TestObjectBasic(t *testing.T) {
 
 	// create an object
 	want := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -265,14 +255,14 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = ss.Object(context.Background(), api.DefaultBucketName, t.Name())
+	_, err = ss.Object(context.Background(), testBucket, t.Name())
 	if !errors.Is(err, api.ErrObjectCorrupted) {
 		t.Fatal("unexpected err", err)
 	}
 
 	// create an object without slabs
 	want2 := object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{},
 	}
 
@@ -306,24 +296,24 @@ func TestObjectMetadata(t *testing.T) {
 
 	// create an object
 	want := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1.0,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1.0,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -342,9 +332,10 @@ func TestObjectMetadata(t *testing.T) {
 		t.Log(got.Object)
 		t.Log(want)
 		t.Fatal("object mismatch", cmp.Diff(got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
-	}
-	if !reflect.DeepEqual(got.Metadata, testMetadata) {
+	} else if !reflect.DeepEqual(got.Metadata, testMetadata) {
 		t.Fatal("meta mismatch", cmp.Diff(got.Metadata, testMetadata))
+	} else if got.Bucket != testBucket {
+		t.Fatal("unexpected bucket", got.Bucket)
 	}
 
 	// assert metadata CASCADE on object delete
@@ -353,7 +344,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// remove the object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -368,151 +359,95 @@ func TestSQLContractStore(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create a host for the contract.
+	// add test host
 	hk := types.GeneratePrivateKey().PublicKey()
 	err := ss.addTestHost(hk)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Add an announcement.
+	// announce a custom address
 	if err := ss.announceHost(hk, "address"); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create random unlock conditions for the host.
-	uc := randomMultisigUC()
-	uc.PublicKeys[1].Key = hk[:]
-	uc.Timelock = 192837
-
-	// Create a contract and set all fields.
-	fcid := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				RevisionNumber: 200,
-				Filesize:       4096,
-				FileMerkleRoot: types.Hash256{222},
-				WindowStart:    400,
-				WindowEnd:      500,
-				ValidProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(121),
-						Address: types.Address{2, 1, 2},
-					},
-				},
-				MissedProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(323),
-						Address: types.Address{2, 3, 2},
-					},
-				},
-				UnlockHash: types.Hash256{6, 6, 6},
-			},
-		},
-		Signatures: [2]types.TransactionSignature{
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 0,
-				Timelock:       100000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature1"),
-			},
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 1,
-				Timelock:       200000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature2"),
-			},
-		},
-	}
-
-	// Look it up. Should fail.
-	ctx := context.Background()
-	_, err = ss.Contract(ctx, c.ID())
-	if !errors.Is(err, api.ErrContractNotFound) {
+	// assert api.ErrContractNotFound is returned
+	fcid := types.FileContractID{1}
+	if _, err := ss.Contract(context.Background(), fcid); !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err := ss.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(contracts) != 0 {
-		t.Fatalf("should have 0 contracts but got %v", len(contracts))
-	}
 
-	// Insert it.
-	contractPrice := types.NewCurrency64(1)
-	totalCost := types.NewCurrency64(456)
-	startHeight := uint64(100)
-	returned, err := ss.AddContract(ctx, c, contractPrice, totalCost, startHeight, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := api.ContractMetadata{
-		ID:          fcid,
-		HostIP:      "address",
-		HostKey:     hk,
-		StartHeight: 100,
-		State:       api.ContractStatePending,
-		WindowStart: 400,
-		WindowEnd:   500,
-		RenewedFrom: types.FileContractID{},
+	// add the contract
+	c := api.ContractMetadata{
+		ID:      fcid,
+		HostKey: hk,
+
+		ProofHeight:    1,
+		RenewedFrom:    types.FileContractID{1},
+		RevisionHeight: 2,
+		RevisionNumber: 3,
+		Size:           4,
+		StartHeight:    5,
+		State:          api.ContractStateActive,
+		WindowStart:    6,
+		WindowEnd:      7,
+
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
+
 		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
+			Deletions:   types.NewCurrency64(3),
+			FundAccount: types.NewCurrency64(4),
+			SectorRoots: types.NewCurrency64(5),
+			Uploads:     types.NewCurrency64(6),
 		},
-		ContractPrice: types.NewCurrency64(1),
-		TotalCost:     totalCost,
-		Size:          c.Revision.Filesize,
 	}
-	if !reflect.DeepEqual(returned, expected) {
-		t.Fatal("contract mismatch", cmp.Diff(returned, expected))
+	if err := ss.PutContract(context.Background(), c); err != nil {
+		t.Fatal(err)
 	}
 
-	// Look it up again.
-	fetched, err := ss.Contract(ctx, c.ID())
+	// fetch the contract
+	inserted, err := ss.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(fetched, expected) {
-		t.Fatal("contract mismatch")
+
+	// assert it's equal
+	c.HostIP = inserted.HostIP
+	if !reflect.DeepEqual(inserted, c) {
+		t.Fatal("contract mismatch", cmp.Diff(inserted, c))
 	}
-	contracts, err = ss.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
+
+	// fetch all contracts
+	if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{}); err != nil {
 		t.Fatal(err)
-	}
-	if len(contracts) != 1 {
+	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
-	}
-	if !reflect.DeepEqual(contracts[0], expected) {
+	} else if !reflect.DeepEqual(contracts[0], c) {
 		t.Fatal("contract mismatch")
 	}
 
-	// Add a contract set with our contract and assert we can fetch it using the set name
-	if err := ss.UpdateContractSet(ctx, "foo", []types.FileContractID{contracts[0].ID}, nil); err != nil {
+	// add a contract set, assert we can fetch it and it holds our contract
+	if err := ss.UpdateContractSet(context.Background(), "foo", []types.FileContractID{fcid}, nil); err != nil {
 		t.Fatal(err)
-	}
-	if contracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "foo"}); err != nil {
+	} else if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: "foo"}); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("should have 1 contracts but got %v", len(contracts))
 	}
-	if _, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
+
+	// assert api.ErrContractSetNotFound is returned
+	if _, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
 		t.Fatal(err)
 	}
 
-	// Add another contract set.
-	if err := ss.UpdateContractSet(ctx, "foo2", []types.FileContractID{contracts[0].ID}, nil); err != nil {
+	// add another contract set
+	if err := ss.UpdateContractSet(context.Background(), "foo2", []types.FileContractID{fcid}, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	// Fetch contract sets.
-	sets, err := ss.ContractSets(ctx)
+	// fetch all sets
+	sets, err := ss.ContractSets(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,17 +458,17 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal("wrong sets returned", sets)
 	}
 
-	// Delete the contract.
-	if err := ss.ArchiveContract(ctx, c.ID(), api.ContractArchivalReasonRemoved); err != nil {
+	// archive the contract
+	if err := ss.ArchiveContract(context.Background(), fcid, api.ContractArchivalReasonRemoved); err != nil {
 		t.Fatal(err)
 	}
 
-	// Look it up. Should fail.
-	_, err = ss.Contract(ctx, c.ID())
+	// assert archived contracts are not returned
+	_, err = ss.Contract(context.Background(), fcid)
 	if !errors.Is(err, api.ErrContractNotFound) {
 		t.Fatal(err)
 	}
-	contracts, err = ss.Contracts(ctx, api.ContractsOpts{})
+	contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,12 +476,7 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatalf("should have 0 contracts but got %v", len(contracts))
 	}
 
-	// Make sure the db was cleaned up properly through the CASCADE delete.
-	if count := ss.Count("contracts"); count != 0 {
-		t.Fatalf("expected %v rows in contracts but got %v", 0, count)
-	}
-
-	// Check join table count as well.
+	// assert sectors got removed
 	if count := ss.Count("contract_sectors"); count != 0 {
 		t.Fatalf("expected %v objects in contract_sectors but got %v", 0, count)
 	}
@@ -571,13 +501,13 @@ func TestContractRoots(t *testing.T) {
 	// add an object
 	root := types.Hash256{1}
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hks[0], fcids[0], types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hks[0], fcids[0], types.Hash256{1}),
 				},
 			},
 		},
@@ -599,278 +529,6 @@ func TestContractRoots(t *testing.T) {
 	}
 }
 
-// TestRenewContract is a test for AddRenewedContract.
-func TestRenewedContract(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// Create a host for the contract and another one for redundancy.
-	hks, err := ss.addTestHosts(2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hk, hk2 := hks[0], hks[1]
-
-	// Add announcements.
-	if err := ss.announceHost(hk, "address"); err != nil {
-		t.Fatal(err)
-	}
-	if err := ss.announceHost(hk2, "address2"); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create random unlock conditions for the hosts.
-	uc := randomMultisigUC()
-	uc.PublicKeys[1].Key = hk[:]
-	uc.Timelock = 192837
-
-	uc2 := randomMultisigUC()
-	uc2.PublicKeys[1].Key = hk2[:]
-	uc2.Timelock = 192837
-
-	// Insert the contracts.
-	fcid1 := types.FileContractID{1, 1, 1, 1, 1}
-	c := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid1,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				Filesize:       1,
-				WindowStart:    2,
-				WindowEnd:      3,
-				RevisionNumber: 4,
-			},
-		},
-	}
-	oldContractPrice := types.NewCurrency64(1)
-	oldContractTotal := types.NewCurrency64(111)
-	oldContractStartHeight := uint64(100)
-	ctx := context.Background()
-	added, err := ss.AddContract(ctx, c, oldContractPrice, oldContractTotal, oldContractStartHeight, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert the contract is returned.
-	if added.RenewedFrom != (types.FileContractID{}) {
-		t.Fatal("unexpected")
-	}
-
-	fcid2 := types.FileContractID{9, 9, 9, 9, 9}
-	c2 := c
-	c2.Revision.ParentID = fcid2
-	c2.Revision.UnlockConditions = uc2
-	_, err = ss.AddContract(ctx, c2, oldContractPrice, oldContractTotal, oldContractStartHeight, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// add an object for that contract.
-	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			// good slab
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    append(newTestShards(hk, fcid1, types.Hash256{1}), newTestShards(hk2, fcid2, types.Hash256{2})...),
-				},
-			},
-		},
-	}
-
-	// create a contract set with both contracts.
-	if err := ss.UpdateContractSet(context.Background(), "test", []types.FileContractID{fcid1, fcid2}, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	// add the object.
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
-		t.Fatal(err)
-	}
-
-	// mock recording of spending records to ensure the cached fields get updated
-	spending := api.ContractSpending{
-		Uploads:     types.Siacoins(1),
-		Downloads:   types.Siacoins(2),
-		FundAccount: types.Siacoins(3),
-		Deletions:   types.Siacoins(4),
-		SectorRoots: types.Siacoins(5),
-	}
-	if err := ss.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
-		{ContractID: fcid1, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: spending},
-		{ContractID: fcid2, RevisionNumber: 1, Size: rhpv2.SectorSize, ContractSpending: spending},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// no slabs should be unhealthy.
-	if err := ss.RefreshHealth(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, "test", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(slabs) > 0 {
-		t.Fatal("shouldn't return any slabs", len(slabs))
-	}
-
-	// Assert we can't fetch the renewed contract.
-	_, err = ss.RenewedContract(context.Background(), fcid1)
-	if !errors.Is(err, api.ErrContractNotFound) {
-		t.Fatal("unexpected", err)
-	}
-
-	// Renew it.
-	fcid1Renewed := types.FileContractID{2, 2, 2, 2, 2}
-	rev := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid1Renewed,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				Filesize:           2 * rhpv2.SectorSize,
-				MissedProofOutputs: []types.SiacoinOutput{},
-				ValidProofOutputs:  []types.SiacoinOutput{},
-			},
-		},
-	}
-	newContractPrice := types.NewCurrency64(2)
-	newContractTotal := types.NewCurrency64(222)
-	newContractStartHeight := uint64(200)
-	if _, err := ss.AddRenewedContract(ctx, rev, newContractPrice, newContractTotal, newContractStartHeight, fcid1, api.ContractStatePending); err != nil {
-		t.Fatal(err)
-	}
-
-	// Assert we can fetch the renewed contract.
-	renewed, err := ss.RenewedContract(context.Background(), fcid1)
-	if err != nil {
-		t.Fatal("unexpected", err)
-	}
-	if renewed.ID != fcid1Renewed {
-		t.Fatal("unexpected")
-	}
-
-	// make sure the contract set was updated.
-	setContracts, err := ss.Contracts(ctx, api.ContractsOpts{ContractSet: "test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(setContracts) != 2 || (setContracts[0].ID != fcid1Renewed && setContracts[1].ID != fcid1Renewed) {
-		t.Fatal("contract set wasn't updated", setContracts)
-	}
-
-	// slab should still be in good shape.
-	if err := ss.RefreshHealth(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.99, "test", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(slabs) > 0 {
-		t.Fatal("shouldn't return any slabs", len(slabs))
-	}
-
-	// Contract should be gone from active contracts.
-	_, err = ss.Contract(ctx, fcid1)
-	if !errors.Is(err, api.ErrContractNotFound) {
-		t.Fatal(err)
-	}
-
-	// New contract should exist.
-	newContract, err := ss.Contract(ctx, fcid1Renewed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := api.ContractMetadata{
-		ID:          fcid1Renewed,
-		HostIP:      "address",
-		HostKey:     hk,
-		StartHeight: newContractStartHeight,
-		RenewedFrom: fcid1,
-		Size:        2 * rhpv2.SectorSize,
-		State:       api.ContractStatePending,
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
-		ContractPrice: types.NewCurrency64(2),
-		ContractSets:  []string{"test"},
-		TotalCost:     newContractTotal,
-	}
-	if !reflect.DeepEqual(newContract, expected) {
-		t.Fatal("mismatch")
-	}
-
-	// Archived contract should exist.
-	ancestors, err := ss.AncestorContracts(context.Background(), fcid1Renewed, 0)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(ancestors) != 1 {
-		t.Fatalf("expected 1 ancestor but got %v", len(ancestors))
-	}
-	ac := ancestors[0]
-
-	expectedContract := api.ArchivedContract{
-		ID:        fcid1,
-		HostIP:    "address",
-		HostKey:   c.HostKey(),
-		RenewedTo: fcid1Renewed,
-		Spending: api.ContractSpending{
-			Uploads:     types.Siacoins(1),
-			Downloads:   types.Siacoins(2),
-			FundAccount: types.Siacoins(3),
-			Deletions:   types.Siacoins(4),
-			SectorRoots: types.ZeroCurrency, // currently not persisted
-		},
-
-		ArchivalReason: api.ContractArchivalReasonRenewed,
-		ContractPrice:  oldContractPrice,
-		ProofHeight:    0,
-		RenewedFrom:    types.FileContractID{},
-		RevisionHeight: 0,
-		RevisionNumber: 1,
-		Size:           rhpv2.SectorSize,
-		StartHeight:    100,
-		State:          api.ContractStatePending,
-		TotalCost:      oldContractTotal,
-		WindowStart:    2,
-		WindowEnd:      3,
-	}
-
-	if !reflect.DeepEqual(ac, expectedContract) {
-		t.Fatal("mismatch", cmp.Diff(ac, expectedContract))
-	}
-
-	// Renew it once more.
-	fcid3 := types.FileContractID{3, 3, 3, 3, 3}
-	rev = rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid3,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				MissedProofOutputs: []types.SiacoinOutput{},
-				ValidProofOutputs:  []types.SiacoinOutput{},
-			},
-		},
-	}
-	newContractPrice = types.NewCurrency64(3)
-	newContractTotal = types.NewCurrency64(333)
-	newContractStartHeight = uint64(300)
-
-	// Assert the renewed contract is returned
-	renewedContract, err := ss.AddRenewedContract(ctx, rev, newContractPrice, newContractTotal, newContractStartHeight, fcid1Renewed, api.ContractStatePending)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if renewedContract.RenewedFrom != fcid1Renewed {
-		t.Fatal("unexpected")
-	}
-}
-
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {
@@ -889,7 +547,7 @@ func TestAncestorsContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i < len(fcids); i++ {
-		if _, err := ss.addTestRenewedContract(fcids[i], fcids[i-1], hk, uint64(i)); err != nil {
+		if err := ss.renewTestContract(hk, fcids[i-1], fcids[i], uint64(i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -912,19 +570,12 @@ func TestAncestorsContracts(t *testing.T) {
 		if j := len(fcids) - 1 - i; j >= 0 {
 			renewedTo = fcids[j]
 		}
-		expected := api.ArchivedContract{
-			ArchivalReason: api.ContractArchivalReasonRenewed,
-			ID:             fcids[len(fcids)-2-i],
-			HostKey:        hk,
-			RenewedFrom:    renewedFrom,
-			RenewedTo:      renewedTo,
-			RevisionNumber: 200,
-			StartHeight:    uint64(len(fcids) - 2 - i),
-			Size:           4096,
-			State:          api.ContractStatePending,
-			WindowStart:    400,
-			WindowEnd:      500,
-		}
+
+		expected := newTestContract(fcids[len(fcids)-2-i], hk)
+		expected.RenewedFrom = renewedFrom
+		expected.RenewedTo = renewedTo
+		expected.ArchivalReason = api.ContractArchivalReasonRenewed
+		expected.StartHeight = uint64(len(fcids) - 2 - i)
 		if !reflect.DeepEqual(contracts[i], expected) {
 			t.Log(cmp.Diff(contracts[i], expected))
 			t.Fatal("wrong contract", i, contracts[i])
@@ -978,7 +629,7 @@ func TestArchiveContracts(t *testing.T) {
 	ffcids := make([]sql.FileContractID, 2)
 	ffcids[0] = sql.FileContractID(fcids[1])
 	ffcids[1] = sql.FileContractID(fcids[2])
-	rows, err := ss.DB().Query(context.Background(), "SELECT reason FROM archived_contracts WHERE fcid IN (?, ?)",
+	rows, err := ss.DB().Query(context.Background(), "SELECT archival_reason FROM contracts WHERE fcid IN (?, ?)",
 		sql.FileContractID(ffcids[0]), sql.FileContractID(ffcids[1]))
 	if err != nil {
 		t.Fatal(err)
@@ -1002,51 +653,13 @@ func TestArchiveContracts(t *testing.T) {
 	}
 }
 
-func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.ContractRevision {
-	uc := randomMultisigUC()
-	uc.PublicKeys[1].Key = hk[:]
-	uc.Timelock = 192837
-	return rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcid,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				RevisionNumber: 200,
-				Filesize:       4096,
-				FileMerkleRoot: types.Hash256{222},
-				WindowStart:    400,
-				WindowEnd:      500,
-				ValidProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(121),
-						Address: types.Address{2, 1, 2},
-					},
-				},
-				MissedProofOutputs: []types.SiacoinOutput{
-					{
-						Value:   types.NewCurrency64(323),
-						Address: types.Address{2, 3, 2},
-					},
-				},
-				UnlockHash: types.Hash256{6, 6, 6},
-			},
-		},
-		Signatures: [2]types.TransactionSignature{
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 0,
-				Timelock:       100000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature1"),
-			},
-			{
-				ParentID:       types.Hash256(fcid),
-				PublicKeyIndex: 1,
-				Timelock:       200000,
-				CoveredFields:  types.CoveredFields{WholeTransaction: true},
-				Signature:      []byte("signature2"),
-			},
-		},
+func newTestContract(fcid types.FileContractID, hk types.PublicKey) api.ContractMetadata {
+	return api.ContractMetadata{
+		ID:                 fcid,
+		HostKey:            hk,
+		State:              api.ContractStatePending,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
 	}
 }
 
@@ -1055,44 +668,40 @@ func TestSQLMetadataStore(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create 2 hosts
+	// add 2 hosts
 	hks, err := ss.addTestHosts(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hk1, hk2 := hks[0], hks[1]
 
-	// Create 2 contracts
-	fcids, contracts, err := ss.addTestContracts(hks)
+	// add 2 contracts
+	fcids, _, err := ss.addTestContracts(hks)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fcid1, fcid2 := fcids[0], fcids[1]
 
-	// Extract start height and total cost
-	startHeight1, totalCost1 := contracts[0].StartHeight, contracts[0].TotalCost
-	startHeight2, totalCost2 := contracts[1].StartHeight, contracts[1].TotalCost
-
-	// Create an object with 2 slabs pointing to 2 different sectors.
+	// create an object with 2 slabs pointing to 2 different sectors.
 	obj1 := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Health:    1,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					Health:        1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 				Offset: 10,
 				Length: 100,
 			},
 			{
 				Slab: object.Slab{
-					Health:    1,
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
-					Shards:    newTestShards(hk2, fcid2, types.Hash256{2}),
+					Health:        1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     2,
+					Shards:        newTestShards(hk2, fcid2, types.Hash256{2}),
 				},
 				Offset: 20,
 				Length: 200,
@@ -1100,15 +709,15 @@ func TestSQLMetadataStore(t *testing.T) {
 		},
 	}
 
-	// Store it.
+	// add it
 	ctx := context.Background()
 	objID := "key1"
 	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
 
-	// Fetch it using get and verify every field.
-	obj, err := ss.Object(context.Background(), api.DefaultBucketName, objID)
+	// fetch it
+	obj, err := ss.Object(context.Background(), testBucket, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1119,15 +728,16 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	obj.ModTime = api.TimeRFC3339{}
 
-	obj1Slab0Key := obj1.Slabs[0].Key
-	obj1Slab1Key := obj1.Slabs[1].Key
+	obj1Slab0Key := obj1.Slabs[0].EncryptionKey
+	obj1Slab1Key := obj1.Slabs[1].EncryptionKey
 
 	expectedObj := api.Object{
 		ObjectMetadata: api.ObjectMetadata{
+			Bucket:   testBucket,
 			ETag:     testETag,
 			Health:   1,
 			ModTime:  api.TimeRFC3339{},
-			Name:     objID,
+			Key:      objID,
 			Size:     obj1.TotalSize(),
 			MimeType: testMimeType,
 		},
@@ -1139,9 +749,9 @@ func TestSQLMetadataStore(t *testing.T) {
 					Offset: 10,
 					Length: 100,
 					Slab: object.Slab{
-						Health:    1,
-						Key:       obj1Slab0Key,
-						MinShards: 1,
+						Health:        1,
+						EncryptionKey: obj1Slab0Key,
+						MinShards:     1,
 						Shards: []object.Sector{
 							{
 								LatestHost: hk1,
@@ -1157,9 +767,9 @@ func TestSQLMetadataStore(t *testing.T) {
 					Offset: 20,
 					Length: 200,
 					Slab: object.Slab{
-						Health:    1,
-						Key:       obj1Slab1Key,
-						MinShards: 2,
+						Health:        1,
+						EncryptionKey: obj1Slab1Key,
+						MinShards:     2,
 						Shards: []object.Sector{
 							{
 								LatestHost: hk2,
@@ -1178,13 +788,13 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj, cmp.AllowUnexported(object.EncryptionKey{}), cmp.Comparer(api.CompareTimeRFC3339)))
 	}
 
-	// Try to store it again. Should work.
+	// try to add it again, should work
 	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
 
-	// Fetch it again and verify.
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, objID)
+	// fetch it again and verify
+	obj, err = ss.Object(context.Background(), testBucket, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1195,13 +805,13 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 	obj.ModTime = api.TimeRFC3339{}
 
-	// The expected object is the same.
+	// the expected object is the same
 	if !reflect.DeepEqual(obj, expectedObj) {
 		t.Fatal("object mismatch", cmp.Diff(obj, expectedObj, cmp.AllowUnexported(object.EncryptionKey{}), cmp.Comparer(api.CompareTimeRFC3339)))
 	}
 
-	// Fetch it and verify again.
-	fullObj, err := ss.Object(ctx, api.DefaultBucketName, objID)
+	// fetch it and verify again
+	fullObj, err := ss.Object(ctx, testBucket, objID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1210,9 +820,9 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedObjSlab1 := object.Slab{
-		Health:    1,
-		Key:       obj1Slab0Key,
-		MinShards: 1,
+		Health:        1,
+		EncryptionKey: obj1Slab0Key,
+		MinShards:     1,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -1225,33 +835,17 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedContract1 := api.ContractMetadata{
-		ID:             fcid1,
-		HostIP:         "",
-		HostKey:        hk1,
-		SiamuxAddr:     "",
-		ProofHeight:    0,
-		RevisionHeight: 0,
-		RevisionNumber: 0,
-		Size:           4096,
-		StartHeight:    startHeight1,
-		State:          api.ContractStatePending,
-		WindowStart:    400,
-		WindowEnd:      500,
-		ContractPrice:  types.ZeroCurrency,
-		RenewedFrom:    types.FileContractID{},
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
-		TotalCost:    totalCost1,
-		ContractSets: nil,
+		ID:                 fcid1,
+		HostKey:            hk1,
+		State:              api.ContractStatePending,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
 	}
 
 	expectedObjSlab2 := object.Slab{
-		Health:    1,
-		Key:       obj1Slab1Key,
-		MinShards: 2,
+		Health:        1,
+		EncryptionKey: obj1Slab1Key,
+		MinShards:     2,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -1264,30 +858,14 @@ func TestSQLMetadataStore(t *testing.T) {
 	}
 
 	expectedContract2 := api.ContractMetadata{
-		ID:             fcid2,
-		HostIP:         "",
-		HostKey:        hk2,
-		SiamuxAddr:     "",
-		ProofHeight:    0,
-		RevisionHeight: 0,
-		RevisionNumber: 0,
-		Size:           4096,
-		StartHeight:    startHeight2,
-		State:          api.ContractStatePending,
-		WindowStart:    400,
-		WindowEnd:      500,
-		ContractPrice:  types.ZeroCurrency,
-		RenewedFrom:    types.FileContractID{},
-		Spending: api.ContractSpending{
-			Uploads:     types.ZeroCurrency,
-			Downloads:   types.ZeroCurrency,
-			FundAccount: types.ZeroCurrency,
-		},
-		TotalCost:    totalCost2,
-		ContractSets: nil,
+		ID:                 fcid2,
+		HostKey:            hk2,
+		State:              api.ContractStatePending,
+		ContractPrice:      types.NewCurrency64(1),
+		InitialRenterFunds: types.NewCurrency64(2),
 	}
 
-	// Compare slabs.
+	// compare slabs
 	slab1, err := ss.Slab(context.Background(), obj1Slab0Key)
 	if err != nil {
 		t.Fatal(err)
@@ -1317,7 +895,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("mismatch", cmp.Diff(contract2, expectedContract2))
 	}
 
-	// Remove the first slab of the object.
+	// remove the first slab of the object
 	obj1.Slabs = obj1.Slabs[1:]
 	fullObj, err = ss.addTestObject(objID, obj1)
 	if err != nil {
@@ -1326,7 +904,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal("object mismatch")
 	}
 
-	// Sanity check the db at the end of the test. We expect:
+	// sanity check the db at the end of the test. We expect:
 	// - 1 element in the object table since we only stored and overwrote a single object
 	// - 1 element in the slabs table since we updated the object to only have 1 slab
 	// - 1 element in the slices table for the same reason
@@ -1357,9 +935,9 @@ func TestSQLMetadataStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Delete the object. Due to the cascade this should delete everything
-	// but the sectors.
-	if err := ss.RemoveObjectBlocking(ctx, api.DefaultBucketName, objID); err != nil {
+	// delete the object, due to the cascade this should delete everything but
+	// the sectors
+	if err := ss.RemoveObjectBlocking(ctx, testBucket, objID); err != nil {
 		t.Fatal(err)
 	}
 	if err := countCheck(0, 0, 0, 0); err != nil {
@@ -1391,12 +969,12 @@ func TestObjectHealth(t *testing.T) {
 
 	// add an object with 2 slabs
 	add := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[0], fcids[0], types.Hash256{1}),
 						newTestShard(hks[1], fcids[1], types.Hash256{2}),
@@ -1407,8 +985,8 @@ func TestObjectHealth(t *testing.T) {
 			},
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hks[1], fcids[1], types.Hash256{5}),
 						newTestShard(hks[2], fcids[2], types.Hash256{6}),
@@ -1430,7 +1008,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health
-	obj, err := ss.Object(context.Background(), api.DefaultBucketName, "/foo")
+	obj, err := ss.Object(context.Background(), testBucket, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != 1 {
@@ -1447,7 +1025,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth := float64(2) / float64(3)
 
 	// assert object method
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, "/foo")
+	obj, err = ss.Object(context.Background(), testBucket, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1455,7 +1033,8 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by ObjectEntries
-	entries, _, err := ss.ObjectEntries(context.Background(), api.DefaultBucketName, "/", "", "", "", "", 0, -1)
+	resp, err := ss.Objects(context.Background(), testBucket, "/", "", "", "", "", "", -1, object.EncryptionKey{})
+	entries := resp.Objects
 	if err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 1 {
@@ -1465,10 +1044,10 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// assert health is returned correctly by SearchObject
-	entries, err = ss.SearchObjects(context.Background(), api.DefaultBucketName, "foo", 0, -1)
+	resp, err = ss.Objects(context.Background(), testBucket, "/", "foo", "", "", "", "", -1, object.EncryptionKey{})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("wrong number of entries", len(entries))
 	} else if entries[0].Health != expectedHealth {
 		t.Fatal("wrong health", entries[0].Health)
@@ -1484,7 +1063,7 @@ func TestObjectHealth(t *testing.T) {
 	expectedHealth = float64(1) / float64(3)
 
 	// assert health is the min. health of the slabs
-	obj, err = ss.Object(context.Background(), api.DefaultBucketName, "/foo")
+	obj, err = ss.Object(context.Background(), testBucket, "/foo")
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.Health != expectedHealth {
@@ -1497,7 +1076,7 @@ func TestObjectHealth(t *testing.T) {
 
 	// add an empty object and assert health is 1
 	if obj, err := ss.addTestObject("/bar", object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: nil,
 	}); err != nil {
 		t.Fatal(err)
@@ -1506,13 +1085,14 @@ func TestObjectHealth(t *testing.T) {
 	}
 }
 
-// TestObjectEntries is a test for the ObjectEntries method.
-func TestObjectEntries(t *testing.T) {
+// TestObjectsWithDelimiterSlash is a test for the TestObjects method with '/'
+// as the prefix.
+func TestObjectsWithDelimiterSlash(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/foo/bar", 1},
@@ -1532,7 +1112,7 @@ func TestObjectEntries(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		_, err := ss.addTestObject(o.path, obj)
+		_, err := ss.addTestObject(o.key, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1544,13 +1124,13 @@ func TestObjectEntries(t *testing.T) {
 		t.Helper()
 		for i := range entries {
 			// assert mod time
-			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+			if !strings.HasSuffix(entries[i].Key, "/") && entries[i].ModTime.IsZero() {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = api.TimeRFC3339{}
 
 			// assert mime type
-			isDir := strings.HasSuffix(entries[i].Name, "/")
+			isDir := strings.HasSuffix(entries[i].Key, "/")
 			if (isDir && entries[i].MimeType != "") || (!isDir && entries[i].MimeType != testMimeType) {
 				t.Fatal("unexpected mime type", entries[i].MimeType)
 			}
@@ -1584,43 +1164,53 @@ func TestObjectEntries(t *testing.T) {
 		sortDir string
 		want    []api.ObjectMetadata
 	}{
-		{"/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/foo/", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/", Size: 7, Health: .5}}},
-		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/gab/", "", "", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/fileś/", "", "", "", []api.ObjectMetadata{{Name: "/fileś/śpecial", Size: 6, Health: 1}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/foo/", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/", Size: 7, Health: .5}}},
+		{"/foo/baz/", "", "", "", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/gab/", "", "", "", []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/fileś/", "", "", "", []api.ObjectMetadata{{Key: "/fileś/śpecial", Size: 6, Health: 1}}},
 
-		{"/", "f", "", "", []api.ObjectMetadata{{Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
-		{"/", "F", "", "", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}}},
+		{"/", "f", "", "", []api.ObjectMetadata{{Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
+		{"/", "F", "", "", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}}},
 		{"/foo/", "fo", "", "", []api.ObjectMetadata{}},
-		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: .75}}},
+		{"/foo/baz/", "quux", "", "", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: .75}}},
 		{"/gab/", "/guub", "", "", []api.ObjectMetadata{}},
 
-		{"/", "", "name", "ASC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "name", "DESC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}}},
+		{"/", "", "name", "ASC", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "name", "DESC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}}},
 
-		{"/", "", "health", "ASC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "health", "DESC", []api.ObjectMetadata{{Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
+		{"/", "", "health", "ASC", []api.ObjectMetadata{{Key: "/foo/", Size: 10, Health: .5}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "health", "DESC", []api.ObjectMetadata{{Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
 
-		{"/", "", "size", "DESC", []api.ObjectMetadata{{Name: "/foo/", Size: 10, Health: .5}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/gab/", Size: 5, Health: 1}}},
-		{"/", "", "size", "ASC", []api.ObjectMetadata{{Name: "/gab/", Size: 5, Health: 1}, {Name: "/fileś/", Size: 6, Health: 1}, {Name: "/FOO/", Size: 7, Health: 1}, {Name: "/foo/", Size: 10, Health: .5}}},
+		{"/", "", "size", "DESC", []api.ObjectMetadata{{Key: "/foo/", Size: 10, Health: .5}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/gab/", Size: 5, Health: 1}}},
+		{"/", "", "size", "ASC", []api.ObjectMetadata{{Key: "/gab/", Size: 5, Health: 1}, {Key: "/fileś/", Size: 6, Health: 1}, {Key: "/FOO/", Size: 7, Health: 1}, {Key: "/foo/", Size: 10, Health: .5}}},
+	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].Bucket = testBucket
+		}
 	}
 	for _, test := range tests {
-		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
+		resp, err := ss.Objects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
+		got := resp.Objects
 		assertMetadata(got)
 
 		if !(len(got) == 0 && len(test.want) == 0) && !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			got, hasMore, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", offset, 1)
+			resp, err := ss.Objects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, marker, 1, object.EncryptionKey{})
 			if err != nil {
 				t.Fatal(err)
 			}
+			marker = resp.NextMarker
+			got := resp.Objects
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset] {
@@ -1628,8 +1218,8 @@ func TestObjectEntries(t *testing.T) {
 			}
 
 			moreRemaining := len(test.want)-offset-1 > 0
-			if hasMore != moreRemaining {
-				t.Fatalf("invalid value for hasMore (%t) at offset (%d) test (%+v)", hasMore, offset, test)
+			if resp.HasMore != moreRemaining {
+				t.Fatalf("invalid value for hasMore (%t) at offset (%d) test (%+v)", resp.HasMore, offset, test)
 			}
 
 			// make sure we stay within bounds
@@ -1637,30 +1227,31 @@ func TestObjectEntries(t *testing.T) {
 				continue
 			}
 
-			got, hasMore, err = ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, test.want[offset].Name, 0, 1)
+			resp, err = ss.Objects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, test.want[offset].Key, 1, object.EncryptionKey{})
 			if err != nil {
 				t.Fatal(err)
 			}
+			got = resp.Objects
 			assertMetadata(got)
 
 			if len(got) != 1 || got[0] != test.want[offset+1] {
-				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", offset+1, test.path, test.prefix, test.want[offset].Name, got, test.want[offset+1])
+				t.Fatalf("\noffset: %v\nlist: %v\nprefix: %v\nmarker: %v\ngot: %v\nwant: %v", offset+1, test.path, test.prefix, test.want[offset].Key, got, test.want[offset+1])
 			}
 
 			moreRemaining = len(test.want)-offset-2 > 0
-			if hasMore != moreRemaining {
-				t.Fatalf("invalid value for hasMore (%t) at marker (%s) test (%+v)", hasMore, test.want[offset].Name, test)
+			if resp.HasMore != moreRemaining {
+				t.Fatalf("invalid value for hasMore (%t) at marker (%s) test (%+v)", resp.HasMore, test.want[offset].Key, test)
 			}
 		}
 	}
 }
 
-func TestObjectEntriesExplicitDir(t *testing.T) {
+func TestObjectsExplicitDir(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/dir/", 0},     // empty dir - created first
@@ -1673,7 +1264,7 @@ func TestObjectEntriesExplicitDir(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		_, err := ss.addTestObject(o.path, obj)
+		_, err := ss.addTestObject(o.key, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1697,31 +1288,100 @@ func TestObjectEntriesExplicitDir(t *testing.T) {
 		want    []api.ObjectMetadata
 	}{
 		{"/", "", "", "", []api.ObjectMetadata{
-			{Name: "/dir/", Size: 1, Health: 0.5},
-			{ETag: "d34db33f", Name: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
+			{Key: "/dir/", Size: 1, Health: 0.5},
+			{ETag: "d34db33f", Key: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
 		}},
-		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Name: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
+		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
+	}
+	// set common fields
+	for i := range tests {
+		for j := range tests[i].want {
+			tests[i].want[j].Bucket = testBucket
+		}
 	}
 	for _, test := range tests {
-		got, _, err := ss.ObjectEntries(ctx, api.DefaultBucketName, test.path, test.prefix, test.sortBy, test.sortDir, "", 0, -1)
+		got, err := ss.Objects(ctx, testBucket, test.path+test.prefix, "", "/", test.sortBy, test.sortDir, "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i := range got {
-			got[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
+		for i := range got.Objects {
+			got.Objects[i].ModTime = api.TimeRFC3339{} // ignore time for comparison
 		}
-		if !reflect.DeepEqual(got, test.want) {
+		if !reflect.DeepEqual(got.Objects, test.want) {
 			t.Fatalf("\nlist: %v\nprefix: %v\ngot: %v\nwant: %v", test.path, test.prefix, got, test.want)
 		}
 	}
 }
 
-// TestSearchObjects is a test for the SearchObjects method.
-func TestSearchObjects(t *testing.T) {
+func TestListObjectsSlabEncryptionKey(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create a host
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// create a contract
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+
+	// create a slab.
+	slab := object.Slab{
+		Health:        1.0,
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		MinShards:     1,
+		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
+	}
+
+	// add 3 objects that all reference the slab
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Slabs: []object.SlabSlice{
+			{
+				Slab:   slab,
+				Offset: 1,
+				Length: 0, // incremented later
+			},
+		},
+	}
+	for _, name := range []string{"obj1", "obj2", "obj3"} {
+		obj.Slabs[0].Length++
+		if _, err := ss.addTestObject(name, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the objects by slab.
+	res, err := ss.Objects(context.Background(), "", "", "", "", "", "", "", -1, slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"obj1", "obj2", "obj3"} {
+		if res.Objects[i].Key != name {
+			t.Fatal("unexpected object name", res.Objects[i].Key, name)
+		}
+		if res.Objects[i].Size != int64(i)+1 {
+			t.Fatal("unexpected object size", res.Objects[i].Size, i+1)
+		}
+		if res.Objects[i].Health != 1.0 {
+			t.Fatal("unexpected object health", res.Objects[i].Health)
+		}
+	}
+}
+
+// TestObjectsSubstring is a test for the ListObjects fuzzy
+// search via the "substring" argument.
+func TestObjectsSubstring(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/foo/bar", 1},
@@ -1736,14 +1396,14 @@ func TestSearchObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if _, err := ss.addTestObject(o.path, obj); err != nil {
+		if _, err := ss.addTestObject(o.key, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	metadataEquals := func(got api.ObjectMetadata, want api.ObjectMetadata) bool {
 		t.Helper()
-		return got.Name == want.Name &&
+		return got.Key == want.Key &&
 			got.Size == want.Size &&
 			got.Health == want.Health
 	}
@@ -1761,27 +1421,31 @@ func TestSearchObjects(t *testing.T) {
 	}
 
 	tests := []struct {
-		path string
+		key  string
 		want []api.ObjectMetadata
 	}{
-		{"/", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/foo/b", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"o/baz/quu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}}},
-		{"uu", []api.ObjectMetadata{{Name: "/foo/baz/quux", Size: 3, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/foo/b", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"o/baz/quu", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}}},
+		{"uu", []api.ObjectMetadata{{Key: "/foo/baz/quux", Size: 3, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
 	}
 	for _, test := range tests {
-		got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, 0, -1)
+		resp, err := ss.Objects(ctx, testBucket, "", test.key, "", "", "", "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
+		got := resp.Objects
 		assertEqual(got, test.want)
+		var marker string
 		for offset := 0; offset < len(test.want); offset++ {
-			if got, err := ss.SearchObjects(ctx, api.DefaultBucketName, test.path, offset, 1); err != nil {
+			if resp, err := ss.Objects(ctx, testBucket, "", test.key, "", "", "", marker, 1, object.EncryptionKey{}); err != nil {
 				t.Fatal(err)
-			} else if len(got) != 1 {
-				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.path, len(got))
+			} else if got := resp.Objects; len(got) != 1 {
+				t.Errorf("\nkey: %v unexpected number of objects, %d != 1", test.key, len(got))
 			} else if !metadataEquals(got[0], test.want[offset]) {
-				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.path, got, test.want[offset])
+				t.Errorf("\nkey: %v\ngot: %v\nwant: %v", test.key, got, test.want[offset])
+			} else {
+				marker = resp.NextMarker
 			}
 		}
 	}
@@ -1815,13 +1479,13 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			// good slab
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -1832,8 +1496,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (1/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{4}),
 						newTestShard(hk2, fcid2, types.Hash256{5}),
@@ -1844,8 +1508,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk4 is bad (2/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{7}),
 						newTestShard(hk4, fcid4, types.Hash256{8}),
@@ -1856,8 +1520,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - hk5 is deleted (1/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{10}),
 						newTestShard(hk2, fcid2, types.Hash256{11}),
@@ -1868,8 +1532,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// unhealthy slab - h1 is reused
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{13}),
 						newTestShard(hk1, fcid4, types.Hash256{14}),
@@ -1880,8 +1544,8 @@ func TestUnhealthySlabs(t *testing.T) {
 			// lost slab - no good pieces (0/3)
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{16}),
 						newTestShard(hk2, fcid2, types.Hash256{17}),
@@ -1914,10 +1578,10 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	expected := []api.UnhealthySlab{
-		{Key: obj.Slabs[2].Key, Health: 0},
-		{Key: obj.Slabs[4].Key, Health: 0},
-		{Key: obj.Slabs[1].Key, Health: 0.5},
-		{Key: obj.Slabs[3].Key, Health: 0.5},
+		{EncryptionKey: obj.Slabs[2].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[4].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[1].EncryptionKey, Health: 0.5},
+		{EncryptionKey: obj.Slabs[3].EncryptionKey, Health: 0.5},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -1935,8 +1599,8 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	expected = []api.UnhealthySlab{
-		{Key: obj.Slabs[2].Key, Health: 0},
-		{Key: obj.Slabs[4].Key, Health: 0},
+		{EncryptionKey: obj.Slabs[2].EncryptionKey, Health: 0},
+		{EncryptionKey: obj.Slabs[4].EncryptionKey, Health: 0},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order", slabs, expected)
@@ -1981,12 +1645,12 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk1, fcid1, types.Hash256{2}),
@@ -2040,13 +1704,13 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 		},
@@ -2120,21 +1784,21 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 
 	// add an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			// hk1 is good so this slab should have full health.
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
 				},
 			},
 			// hk4 is bad so this slab should have no health.
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 2,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     2,
 					Shards: []object.Sector{
 						newTestShard(hk2, fcid2, types.Hash256{2}),
 						newTestShard(hk3, fcid3, types.Hash256{4}),
@@ -2160,7 +1824,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	}
 
 	expected := []api.UnhealthySlab{
-		{Key: obj.Slabs[1].Slab.Key, Health: -1},
+		{EncryptionKey: obj.Slabs[1].Slab.EncryptionKey, Health: -1},
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order")
@@ -2173,70 +1837,56 @@ func TestContractSectors(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// Create a host, contract and sector to upload to that host into the
-	// given contract.
-	hk1 := types.PublicKey{1}
-	fcid1 := types.FileContractID{1}
-	err := ss.addTestHost(hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ss.addTestContract(fcid1, hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sectorGood := newTestShard(hk1, fcid1, types.Hash256{1})
-
-	// Create object.
-	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
-					Shards: []object.Sector{
-						sectorGood,
-					},
-				},
-			},
-		},
-	}
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
-		t.Fatal(err)
-	}
-
-	// Delete the contract.
-	err = ss.ArchiveContract(context.Background(), fcid1, api.ContractArchivalReasonRemoved)
+	// add two hosts
+	hks, err := ss.addTestHosts(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Check the join table. Should be empty.
+	// add two contracts
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create two objects
+	obj1 := newTestObject(1)
+	obj1.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hks[0]: {fcids[0]}}
+	obj1.Slabs[0].Shards[1].LatestHost = hks[0]
+	if _, err := ss.addTestObject(t.Name()+"_1", obj1); err != nil {
+		t.Fatal(err)
+	}
+
+	obj2 := newTestObject(1)
+	obj2.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hks[1]: {fcids[1]}}
+	obj2.Slabs[0].Shards[1].LatestHost = hks[1]
+	if _, err := ss.addTestObject(t.Name()+"_2", obj2); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's two sectors
+	if n := ss.Count("contract_sectors"); n != 2 {
+		t.Fatal("expected two sectors", n)
+	}
+
+	// archive the contract
+	err = ss.ArchiveContract(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's one sector
+	if n := ss.Count("contract_sectors"); n != 1 {
+		t.Fatal("expected one sector", n)
+	}
+
+	// delete the object
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, t.Name()+"_2"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert there's no sectors
 	if n := ss.Count("contract_sectors"); n != 0 {
-		t.Fatal("table should be empty", n)
-	}
-
-	// Add the contract back.
-	_, err = ss.addTestContract(fcid1, hk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Add the object again.
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
-		t.Fatal(err)
-	}
-
-	// Delete the object.
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
-		t.Fatal(err)
-	}
-
-	// Delete the sector.
-	if _, err := ss.DB().Exec(context.Background(), "DELETE FROM sectors WHERE id = ?", 1); err != nil {
-		t.Fatal(err)
-	} else if n := ss.Count("contract_sectors"); n != 0 {
 		t.Fatal("table should be empty", n)
 	}
 }
@@ -2262,12 +1912,12 @@ func TestUpdateSlab(t *testing.T) {
 
 	// add an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{
 			{
 				Slab: object.Slab{
-					Key:       object.GenerateEncryptionKey(),
-					MinShards: 1,
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
 					Shards: []object.Sector{
 						newTestShard(hk1, fcid1, types.Hash256{1}),
 						newTestShard(hk2, fcid2, types.Hash256{2}),
@@ -2282,7 +1932,7 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// extract the slab key
-	key, err := obj.Slabs[0].Key.MarshalBinary()
+	key, err := obj.Slabs[0].EncryptionKey.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2290,7 +1940,7 @@ func TestUpdateSlab(t *testing.T) {
 	// helper to fetch a slab from the database
 	fetchSlab := func() (slab object.Slab) {
 		t.Helper()
-		if slab, err = ss.Slab(ctx, obj.Slabs[0].Key); err != nil {
+		if slab, err = ss.Slab(ctx, obj.Slabs[0].EncryptionKey); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -2400,12 +2050,12 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := ss.Object(context.Background(), api.DefaultBucketName, t.Name()); err != nil {
+	if obj, err := ss.Object(context.Background(), testBucket, t.Name()); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
-	} else if obj.Slabs[0].Key.String() != updated.Key.String() {
-		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].Key, updated.Key)
+	} else if obj.Slabs[0].EncryptionKey.String() != updated.EncryptionKey.String() {
+		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].EncryptionKey, updated.EncryptionKey)
 	}
 
 	// update the slab to change its contract set.
@@ -2429,16 +2079,16 @@ func newTestObject(slabs int) object.Object {
 	obj := object.Object{}
 
 	obj.Slabs = make([]object.SlabSlice, slabs)
-	obj.Key = object.GenerateEncryptionKey()
+	obj.Key = object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	for i := range obj.Slabs {
 		n := uint8(frand.Uint64n(10) + 1)
 		offset := uint32(frand.Uint64n(1 << 22))
 		length := offset + uint32(frand.Uint64n(1<<22))
 		obj.Slabs[i] = object.SlabSlice{
 			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: n,
-				Shards:    make([]object.Sector, n*2),
+				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+				MinShards:     n,
+				Shards:        make([]object.Sector, n*2),
 			},
 			Offset: offset,
 			Length: length,
@@ -2482,10 +2132,9 @@ func TestRecordContractSpending(t *testing.T) {
 	// Record some spending.
 	expectedSpending := api.ContractSpending{
 		Uploads:     types.Siacoins(1),
-		Downloads:   types.Siacoins(2),
-		FundAccount: types.Siacoins(3),
-		Deletions:   types.Siacoins(4),
-		SectorRoots: types.Siacoins(5),
+		FundAccount: types.Siacoins(2),
+		Deletions:   types.Siacoins(3),
+		SectorRoots: types.Siacoins(4),
 	}
 	err = ss.RecordContractSpending(context.Background(), []api.ContractSpendingRecord{
 		// non-existent contract
@@ -2565,37 +2214,37 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Try renaming objects that don't exist.
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/fileś", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś1", "/fileś2", false); !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal(err)
 	}
 
 	// Perform some renames.
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/dir/", "/fileś/", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/foo", "/fileś/foo", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/foo", "/fileś/foo", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/bar", "/fileś/bar", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/bar", "/fileś/bar", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/baz", "/fileś/baz", false); err != nil {
+	if err := ss.RenameObjectBlocking(ctx, testBucket, "/baz", "/fileś/baz", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/case", "/fileś/case1", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/case", "/fileś/case1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/fileś/CASE", "/fileś/case2", false); err != nil {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/CASE", "/fileś/case2", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/baz2", "/fileś/baz", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal(err)
-	} else if err := ss.RenameObjectsBlocking(ctx, api.DefaultBucketName, "/baz2", "/fileś/baz", true); err != nil {
+	} else if err := ss.RenameObjectsBlocking(ctx, testBucket, "/baz2", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
-	} else if err := ss.RenameObjectBlocking(ctx, api.DefaultBucketName, "/baz3", "/fileś/baz", true); err != nil {
+	} else if err := ss.RenameObjectBlocking(ctx, testBucket, "/baz3", "/fileś/baz", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2619,18 +2268,18 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Assert that number of objects matches.
-	objs, err := ss.SearchObjects(ctx, api.DefaultBucketName, "/", 0, 100)
+	resp, err := ss.Objects(ctx, testBucket, "", "/", "", "", "", "", 100, object.EncryptionKey{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(objs) != len(objectsAfter) {
-		t.Fatal("unexpected number of objects", len(objs), len(objectsAfter))
+	if len(resp.Objects) != len(objectsAfter) {
+		t.Fatal("unexpected number of objects", len(resp.Objects), len(objectsAfter))
 	}
 
 	// Assert paths are correct.
-	for _, obj := range objs {
-		if _, exists := objectsAfterMap[obj.Name]; !exists {
-			t.Fatal("unexpected path", obj.Name)
+	for _, obj := range resp.Objects {
+		if _, exists := objectsAfterMap[obj.Key]; !exists {
+			t.Fatal("unexpected path", obj.Key)
 		}
 	}
 
@@ -2760,8 +2409,8 @@ func TestObjectsStats(t *testing.T) {
 
 	// Check sizes.
 	for _, opts := range []api.ObjectsStatsOpts{
-		{},                              // any bucket
-		{Bucket: api.DefaultBucketName}, // specific bucket
+		{},                   // any bucket
+		{Bucket: testBucket}, // specific bucket
 	} {
 		info, err = ss.ObjectsStats(context.Background(), opts)
 		if err != nil {
@@ -2873,7 +2522,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	data, err := ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	data, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, slab1Data) {
@@ -2898,7 +2547,7 @@ func TestPartialSlab(t *testing.T) {
 		return
 	}
 
-	buffer := fetchBuffer(slabs[0].Key)
+	buffer := fetchBuffer(slabs[0].EncryptionKey)
 	if buffer.Filename == "" {
 		t.Fatal("empty filename")
 	}
@@ -2908,13 +2557,13 @@ func TestPartialSlab(t *testing.T) {
 	// Use the added partial slab to create an object.
 	testObject := func(partialSlabs []object.SlabSlice) object.Object {
 		obj := object.Object{
-			Key: object.GenerateEncryptionKey(),
+			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Health:    1.0,
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
+						Health:        1.0,
+						EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+						MinShards:     1,
 						Shards: []object.Sector{
 							newTestShard(hk1, fcid1, frand.Entropy256()),
 							newTestShard(hk2, fcid2, frand.Entropy256()),
@@ -2950,7 +2599,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if bufferSize != rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	data, err = ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	data, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, slab2Data) {
@@ -2985,16 +2634,16 @@ func TestPartialSlab(t *testing.T) {
 	if bufferSize != 2*rhpv2.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
-	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length); err != nil {
+	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length); err != nil {
 		t.Fatal(err)
-	} else if data2, err := ss.FetchPartialSlab(ctx, slabs[1].Key, slabs[1].Offset, slabs[1].Length); err != nil {
+	} else if data2, err := ss.FetchPartialSlab(ctx, slabs[1].EncryptionKey, slabs[1].Offset, slabs[1].Length); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
 		t.Fatal("wrong data")
 	}
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
 
-	buffer = fetchBuffer(slabs[1].Key)
+	buffer = fetchBuffer(slabs[1].EncryptionKey)
 	buffer2Name := buffer.Filename
 	assertBuffer(buffer2Name, 1, false, false)
 
@@ -3019,7 +2668,7 @@ func TestPartialSlab(t *testing.T) {
 	assertBuffer(buffer1Name, rhpv2.SectorSize, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
-	buffer = fetchBuffer(packedSlabs[0].Key)
+	buffer = fetchBuffer(packedSlabs[0].EncryptionKey)
 	if buffer.ID != packedSlabs[0].BufferID {
 		t.Fatalf("wrong buffer id, %v != %v", buffer.ID, packedSlabs[0].BufferID)
 	}
@@ -3038,13 +2687,13 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	buffer = fetchBuffer(packedSlabs[0].Key)
+	buffer = fetchBuffer(packedSlabs[0].EncryptionKey)
 	if buffer != (bufferedSlab{}) {
 		t.Fatal("shouldn't be able to find buffer", err)
 	}
 	assertBuffer(buffer2Name, 1, false, false)
 
-	_, err = ss.FetchPartialSlab(ctx, slabs[0].Key, slabs[0].Offset, slabs[0].Length)
+	_, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
 	if !errors.Is(err, api.ErrObjectNotFound) {
 		t.Fatal("expected ErrObjectNotFound", err)
 	}
@@ -3075,7 +2724,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Associate them with an object.
 	if _, err := ss.addTestObject(t.Name(), object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: append(slices1, slices2...),
 	}); err != nil {
 		t.Fatal(err)
@@ -3156,13 +2805,13 @@ func TestContractSizes(t *testing.T) {
 	// add an object to both contracts
 	for i := 0; i < 2; i++ {
 		if _, err := ss.addTestObject(fmt.Sprintf("obj_%d", i+1), object.Object{
-			Key: object.GenerateEncryptionKey(),
+			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
 					Slab: object.Slab{
-						Key:       object.GenerateEncryptionKey(),
-						MinShards: 1,
-						Shards:    newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
+						EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+						MinShards:     1,
+						Shards:        newTestShards(hks[i], fcids[i], types.Hash256{byte(i)}),
 					},
 				},
 			},
@@ -3195,7 +2844,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the first object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "obj_1"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "obj_1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3207,7 +2856,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the second object
-	if err := ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "obj_2"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3243,79 +2892,17 @@ func TestContractSizes(t *testing.T) {
 	}
 }
 
-func TestObjectsBySlabKey(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	// create a host
-	hks, err := ss.addTestHosts(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hk1 := hks[0]
-
-	// create a contract
-	fcids, _, err := ss.addTestContracts(hks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fcid1 := fcids[0]
-
-	// create a slab.
-	slab := object.Slab{
-		Health:    1.0,
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: 1,
-		Shards:    newTestShards(hk1, fcid1, types.Hash256{1}),
-	}
-
-	// Add 3 objects that all reference the slab.
-	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
-		Slabs: []object.SlabSlice{
-			{
-				Slab:   slab,
-				Offset: 1,
-				Length: 0, // incremented later
-			},
-		},
-	}
-	for _, name := range []string{"obj1", "obj2", "obj3"} {
-		obj.Slabs[0].Length++
-		if _, err := ss.addTestObject(name, obj); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Fetch the objects by slab.
-	objs, err := ss.ObjectsBySlabKey(context.Background(), api.DefaultBucketName, slab.Key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, name := range []string{"obj1", "obj2", "obj3"} {
-		if objs[i].Name != name {
-			t.Fatal("unexpected object name", objs[i].Name, name)
-		}
-		if objs[i].Size != int64(i)+1 {
-			t.Fatal("unexpected object size", objs[i].Size, i+1)
-		}
-		if objs[i].Health != 1.0 {
-			t.Fatal("unexpected object health", objs[i].Health)
-		}
-	}
-}
-
 func TestBuckets(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	// List the buckets. Should be the default one.
-	buckets, err := ss.ListBuckets(context.Background())
+	buckets, err := ss.Buckets(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(buckets) != 1 {
 		t.Fatal("expected 1 bucket", len(buckets))
-	} else if buckets[0].Name != api.DefaultBucketName {
+	} else if buckets[0].Name != testBucket {
 		t.Fatal("expected default bucket")
 	}
 
@@ -3326,9 +2913,9 @@ func TestBuckets(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.CreateBucket(context.Background(), b2, api.BucketPolicy{}); err != nil {
 		t.Fatal(err)
-	} else if err := ss.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+	} else if err := ss.DeleteBucket(context.Background(), testBucket); err != nil {
 		t.Fatal(err)
-	} else if buckets, err := ss.ListBuckets(context.Background()); err != nil {
+	} else if buckets, err := ss.Buckets(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(buckets) != 2 {
 		t.Fatal("expected 2 buckets", len(buckets))
@@ -3396,67 +2983,75 @@ func TestBucketObjects(t *testing.T) {
 	}
 
 	// List the objects in the buckets.
-	if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	if resp, err := ss.Objects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 1 {
 		t.Fatal("unexpected size", entries[0].Size)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	} else if entries[0].Size != 2 {
 		t.Fatal("unexpected size", entries[0].Size)
+	} else if resp, err := ss.Objects(context.Background(), "", "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if entries := resp.Objects; len(entries) != 2 {
+		t.Fatal("expected 2 entries", len(entries))
 	}
 
 	// Search the objects in the buckets.
-	if objects, err := ss.SearchObjects(context.Background(), b1, "", 0, -1); err != nil {
+	if resp, err := ss.Objects(context.Background(), b1, "", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 2 {
+	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 3 || objects[1].Size != 1 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
-	} else if objects, err := ss.SearchObjects(context.Background(), b2, "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b2, "", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 2 {
+	} else if objects := resp.Objects; len(objects) != 2 {
 		t.Fatal("expected 2 objects", len(objects))
 	} else if objects[0].Size != 4 || objects[1].Size != 2 {
 		t.Fatal("unexpected size", objects[0].Size, objects[1].Size)
+	} else if resp, err := ss.Objects(context.Background(), "", "", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
+		t.Fatal(err)
+	} else if objects := resp.Objects; len(objects) != 4 {
+		t.Fatal("expected 4 objects", len(objects))
 	}
 
 	// Rename object foo/bar in bucket 1 to foo/baz but not in bucket 2.
 	if err := ss.RenameObjectBlocking(context.Background(), b1, "/foo/bar", "/foo/baz", false); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/baz" {
-		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if entries[0].Key != "/foo/baz" {
+		t.Fatal("unexpected name", entries[0].Key)
+	} else if resp, err := ss.Objects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/bar" {
-		t.Fatal("unexpected name", entries[0].Name)
+	} else if entries[0].Key != "/foo/bar" {
+		t.Fatal("unexpected name", entries[0].Key)
 	}
 
 	// Rename foo/bar in bucket 2 using the batch rename.
 	if err := ss.RenameObjectsBlocking(context.Background(), b2, "/foo/bar", "/foo/bam", false); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/baz" {
-		t.Fatal("unexpected name", entries[0].Name)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if entries[0].Key != "/foo/baz" {
+		t.Fatal("unexpected name", entries[0].Key)
+	} else if resp, err := ss.Objects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/foo/bam" {
-		t.Fatal("unexpected name", entries[0].Name)
+	} else if entries[0].Key != "/foo/bam" {
+		t.Fatal("unexpected name", entries[0].Key)
 	}
 
 	// Delete foo/baz in bucket 1 but first try bucket 2 since that should fail.
@@ -3464,30 +3059,30 @@ func TestBucketObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if err := ss.RemoveObjectBlocking(context.Background(), b1, "/foo/baz"); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b1, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) > 0 {
+	} else if entries := resp.Objects; len(entries) > 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/foo/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b2, "/foo/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
 	// Delete all files in bucket 2.
-	if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
+	if resp, err := ss.Objects(context.Background(), b2, "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 2 {
+	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
 	} else if err := ss.RemoveObjectsBlocking(context.Background(), b2, "/"); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b2, "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b2, "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 0 {
+	} else if entries := resp.Objects; len(entries) != 0 {
 		t.Fatal("expected 0 entries", len(entries))
-	} else if entries, _, err := ss.ObjectEntries(context.Background(), b1, "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(context.Background(), b1, "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
 	}
 
@@ -3503,13 +3098,13 @@ func TestBucketObjects(t *testing.T) {
 	// See if we can fetch the object by slab.
 	if obj, err := ss.Object(context.Background(), b1, "/bar"); err != nil {
 		t.Fatal(err)
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b1, obj.Slabs[0].Key); err != nil {
+	} else if res, err := ss.Objects(context.Background(), b1, "", "", "", "", "", "", -1, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 1 {
+	} else if len(res.Objects) != 1 {
 		t.Fatal("expected 1 object", len(objects))
-	} else if objects, err := ss.ObjectsBySlabKey(context.Background(), b2, obj.Slabs[0].Key); err != nil {
+	} else if res, err := ss.Objects(context.Background(), b2, "", "", "", "", "", "", -1, obj.Slabs[0].EncryptionKey); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 0 {
+	} else if len(res.Objects) != 0 {
 		t.Fatal("expected 0 objects", len(objects))
 	}
 }
@@ -3536,12 +3131,12 @@ func TestCopyObject(t *testing.T) {
 	// Copy it within the same bucket.
 	if om, err := ss.CopyObject(ctx, "src", "src", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(ctx, "src", "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(ctx, "src", "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 2 {
+	} else if entries := resp.Objects; len(entries) != 2 {
 		t.Fatal("expected 2 entries", len(entries))
-	} else if entries[0].Name != "/bar" || entries[1].Name != "/foo" {
-		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	} else if entries[0].Key != "/bar" || entries[1].Key != "/foo" {
+		t.Fatal("unexpected names", entries[0].Key, entries[1].Key)
 	} else if om.ModTime.IsZero() {
 		t.Fatal("expected mod time to be set")
 	}
@@ -3549,12 +3144,12 @@ func TestCopyObject(t *testing.T) {
 	// Copy it cross buckets.
 	if om, err := ss.CopyObject(ctx, "src", "dst", "/foo", "/bar", "", nil); err != nil {
 		t.Fatal(err)
-	} else if entries, _, err := ss.ObjectEntries(ctx, "dst", "/", "", "", "", "", 0, -1); err != nil {
+	} else if resp, err := ss.Objects(ctx, "dst", "/", "", "", "", "", "", -1, object.EncryptionKey{}); err != nil {
 		t.Fatal(err)
-	} else if len(entries) != 1 {
+	} else if entries := resp.Objects; len(entries) != 1 {
 		t.Fatal("expected 1 entry", len(entries))
-	} else if entries[0].Name != "/bar" {
-		t.Fatal("unexpected names", entries[0].Name, entries[1].Name)
+	} else if entries[0].Key != "/bar" {
+		t.Fatal("unexpected names", entries[0].Key, entries[1].Key)
 	} else if om.ModTime.IsZero() {
 		t.Fatal("expected mod time to be set")
 	}
@@ -3587,7 +3182,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// add it to an object to prevent it from getting pruned.
 	_, err = ss.addTestObject(t.Name(), object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: slabs,
 	})
 	if err != nil {
@@ -3605,18 +3200,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// renew the contract.
 	fcidRenewed := types.FileContractID{2, 2, 2, 2, 2}
-	uc := randomMultisigUC()
-	rev := rhpv2.ContractRevision{
-		Revision: types.FileContractRevision{
-			ParentID:         fcidRenewed,
-			UnlockConditions: uc,
-			FileContract: types.FileContract{
-				MissedProofOutputs: []types.SiacoinOutput{},
-				ValidProofOutputs:  []types.SiacoinOutput{},
-			},
-		},
-	}
-	_, err = ss.AddRenewedContract(context.Background(), rev, types.NewCurrency64(1), types.NewCurrency64(1), 100, fcid, api.ContractStatePending)
+	err = ss.renewTestContract(hk, fcid, fcidRenewed, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3635,11 +3219,11 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 }
 
-func TestListObjects(t *testing.T) {
+func TestObjectsNoDelimiter(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	objects := []struct {
-		path string
+		key  string
 		size int64
 	}{
 		{"/foo/bar", 1},
@@ -3653,7 +3237,7 @@ func TestListObjects(t *testing.T) {
 	// assert mod time & clear it afterwards so we can compare
 	assertModTime := func(entries []api.ObjectMetadata) {
 		for i := range entries {
-			if !strings.HasSuffix(entries[i].Name, "/") && entries[i].ModTime.IsZero() {
+			if !strings.HasSuffix(entries[i].Key, "/") && entries[i].ModTime.IsZero() {
 				t.Fatal("mod time should be set")
 			}
 			entries[i].ModTime = api.TimeRFC3339{}
@@ -3665,7 +3249,7 @@ func TestListObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		if _, err := ss.addTestObject(o.path, obj); err != nil {
+		if _, err := ss.addTestObject(o.key, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3690,26 +3274,27 @@ func TestListObjects(t *testing.T) {
 		marker  string
 		want    []api.ObjectMetadata
 	}{
-		{"/", "", "", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", "ASC", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "", "DESC", "", []api.ObjectMetadata{{Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/FOO/bar", Size: 6, Health: 1}}},
-		{"/", "health", "ASC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}}},
-		{"/", "health", "DESC", "", []api.ObjectMetadata{{Name: "/FOO/bar", Size: 6, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/gab/guub", Size: 5, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/foo/b", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/", "", "", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", "ASC", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "", "DESC", "", []api.ObjectMetadata{{Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/FOO/bar", Size: 6, Health: 1}}},
+		{"/", "health", "ASC", "", []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}}},
+		{"/", "health", "DESC", "", []api.ObjectMetadata{{Key: "/FOO/bar", Size: 6, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/gab/guub", Size: 5, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo/b", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
 		{"o/baz/quu", "", "", "", []api.ObjectMetadata{}},
-		{"/foo", "", "", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Name: "/foo/bar", Size: 1, Health: 1}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/baz/quuz", Size: 4, Health: .5}}},
-		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Name: "/foo/baz/quuz", Size: 4, Health: .5}, {Name: "/foo/baz/quux", Size: 3, Health: .75}, {Name: "/foo/bat", Size: 2, Health: 1}, {Name: "/foo/bar", Size: 1, Health: 1}}},
+		{"/foo", "", "", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo", "size", "ASC", "", []api.ObjectMetadata{{Key: "/foo/bar", Size: 1, Health: 1}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/baz/quuz", Size: 4, Health: .5}}},
+		{"/foo", "size", "DESC", "", []api.ObjectMetadata{{Key: "/foo/baz/quuz", Size: 4, Health: .5}, {Key: "/foo/baz/quux", Size: 3, Health: .75}, {Key: "/foo/bat", Size: 2, Health: 1}, {Key: "/foo/bar", Size: 1, Health: 1}}},
 	}
 	// set common fields
 	for i := range tests {
 		for j := range tests[i].want {
+			tests[i].want[j].Bucket = testBucket
 			tests[i].want[j].ETag = testETag
 			tests[i].want[j].MimeType = testMimeType
 		}
 	}
 	for _, test := range tests {
-		res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, "", -1)
+		res, err := ss.Objects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, "", -1, object.EncryptionKey{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3724,7 +3309,7 @@ func TestListObjects(t *testing.T) {
 		if len(res.Objects) > 0 {
 			marker := ""
 			for offset := 0; offset < len(test.want); offset++ {
-				res, err := ss.ListObjects(ctx, api.DefaultBucketName, test.prefix, test.sortBy, test.sortDir, marker, 1)
+				res, err := ss.Objects(ctx, testBucket, test.prefix, "", "", test.sortBy, test.sortDir, marker, 1, object.EncryptionKey{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -3735,8 +3320,8 @@ func TestListObjects(t *testing.T) {
 				got := res.Objects
 				if len(got) != 1 {
 					t.Fatalf("expected 1 object, got %v", len(got))
-				} else if got[0].Name != test.want[offset].Name {
-					t.Fatalf("expected %v, got %v, offset %v, marker %v", test.want[offset].Name, got[0].Name, offset, marker)
+				} else if got[0].Key != test.want[offset].Key {
+					t.Fatalf("expected %v, got %v, offset %v, marker %v", test.want[offset].Key, got[0].Key, offset, marker)
 				}
 				marker = res.NextMarker
 			}
@@ -3764,8 +3349,8 @@ func TestDeleteHostSector(t *testing.T) {
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	root := types.Hash256{1, 2, 3}
 	ss.InsertSlab(object.Slab{
-		Key:       object.GenerateEncryptionKey(),
-		MinShards: 1,
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		MinShards:     1,
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
@@ -3895,6 +3480,7 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatalf("expected slab id to be %v, got %v", slabID, sectors[0].SlabID)
 	}
 }
+
 func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) []object.Sector {
 	return []object.Sector{
 		newTestShard(hk, fcid, root),
@@ -3931,14 +3517,14 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		shards = append(shards, newTestShard(hks[i], contracts[i].ID, types.Hash256{byte(i + 1)}))
 	}
 	slab := object.Slab{
-		Key:    object.GenerateEncryptionKey(),
-		Shards: shards,
-		Health: 1,
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Shards:        shards,
+		Health:        1,
 	}
 
 	// set slab.
 	_, err = ss.addTestObject(t.Name(), object.Object{
-		Key:   object.GenerateEncryptionKey(),
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: slab}},
 	})
 	if err != nil {
@@ -3946,7 +3532,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	}
 
 	// verify slab.
-	rSlab, err := ss.Slab(context.Background(), slab.Key)
+	rSlab, err := ss.Slab(context.Background(), slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, rSlab) {
@@ -3955,8 +3541,8 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 
 	// change the length to fail the update.
 	if err := ss.UpdateSlab(context.Background(), object.Slab{
-		Key:    slab.Key,
-		Shards: shards[:len(shards)-1],
+		EncryptionKey: slab.EncryptionKey,
+		Shards:        shards[:len(shards)-1],
 	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
 		t.Fatal(err)
 	}
@@ -3968,8 +3554,8 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		reversedShards[i], reversedShards[j] = reversedShards[j], reversedShards[i]
 	}
 	reversedSlab := object.Slab{
-		Key:    slab.Key,
-		Shards: reversedShards,
+		EncryptionKey: slab.EncryptionKey,
+		Shards:        reversedShards,
 	}
 	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
 		t.Fatal(err)
@@ -4019,11 +3605,11 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// prepare a slab with pieces on h1 and h2
-	s1 := object.GenerateEncryptionKey()
+	s1 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	_, err = ss.addTestObject("o1", object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s1,
+			EncryptionKey: s1,
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -4035,11 +3621,11 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// prepare a slab with pieces on h3 and h4
-	s2 := object.GenerateEncryptionKey()
-	err = ss.UpdateObject(context.Background(), api.DefaultBucketName, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
-		Key: object.GenerateEncryptionKey(),
+	s2 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
+	err = ss.UpdateObject(context.Background(), testBucket, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			Key: s2,
+			EncryptionKey: s2,
 			Shards: []object.Sector{
 				newTestShard(hks[2], fcids[2], types.Hash256{2}),
 				newTestShard(hks[3], fcids[3], types.Hash256{3}),
@@ -4134,6 +3720,169 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 }
 
+func TestRenewedContract(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add test host
+	hk := types.PublicKey{1}
+	if err := ss.addTestHost(hk); err != nil {
+		t.Fatal(err)
+	}
+
+	// add test contract
+	fcid := types.FileContractID{1}
+	c, err := ss.addTestContract(fcid, hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's a freshly formed contract
+	if c.RenewedFrom != (types.FileContractID{}) {
+		t.Fatal("unexpected")
+	}
+
+	// assert we can't fetch the renewed contract
+	_, err = ss.RenewedContract(context.Background(), fcid)
+	if !errors.Is(err, api.ErrContractNotFound) {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert it has no ancestors
+	ancestors, err := ss.AncestorContracts(context.Background(), fcid, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(ancestors) != 0 {
+		t.Fatal("unexpected", len(ancestors))
+	}
+
+	// create a contract set
+	if err := ss.UpdateContractSet(context.Background(), t.Name(), []types.FileContractID{fcid}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Slabs: []object.SlabSlice{
+			{
+				Slab: object.Slab{
+					EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+					MinShards:     1,
+					Shards:        newTestShards(hk, fcid, types.Hash256{1}),
+				},
+			},
+		},
+	}
+
+	// add the object.
+	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+		t.Fatal(err)
+	}
+
+	// no slabs should be unhealthy
+	if err := ss.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, t.Name(), 10); err != nil {
+		t.Fatal(err)
+	} else if len(slabs) > 0 {
+		t.Fatal("shouldn't return any slabs", len(slabs))
+	}
+
+	// renew it
+	fcidR := types.FileContractID{2}
+	if err := ss.renewTestContract(hk, fcid, fcidR, 1); err != nil {
+		t.Fatal("unexpected")
+	}
+
+	// assert we can now fetch the renewed contract
+	renewal, err := ss.RenewedContract(context.Background(), fcid)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if renewal.ID != fcidR {
+		t.Fatal("unexpected")
+	}
+
+	// assert the original contract is now an ancestor
+	ancestors, err = ss.AncestorContracts(context.Background(), fcidR, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(ancestors) != 1 {
+		t.Fatal("unexpected", len(ancestors))
+	} else if ancestors[0].ID != fcid {
+		t.Fatal("unexpected")
+	}
+
+	// assert the contract set was updated.
+	csc, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(csc) != 1 {
+		t.Fatal("unexpected", len(csc))
+	} else if csc[0].ID != fcidR {
+		t.Fatal("unexpected")
+	}
+
+	// slab should still be in good shape.
+	if err := ss.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, t.Name(), 10); err != nil {
+		t.Fatal(err)
+	} else if len(slabs) > 0 {
+		t.Fatal("shouldn't return any slabs", len(slabs))
+	}
+
+	// assert the contract is not being returned
+	_, err = ss.Contract(context.Background(), fcid)
+	if !errors.Is(err, api.ErrContractNotFound) {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert it's not returned when listing all contracts either
+	cs, err := ss.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cs) != 1 {
+		t.Fatal("unexpected number of contracts", len(cs))
+	} else if cs[0].ID != fcidR {
+		t.Fatal("unexpected")
+	}
+
+	// assert it's returned if we change the filter mode
+	cs, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cs) != 2 {
+		t.Fatal("unexpected number of contracts", len(cs))
+	}
+
+	// assert the archived contract is not in the set
+	cs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name(), FilterMode: api.ContractFilterModeAll})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(cs) != 1 {
+		t.Fatal("unexpected number of contracts", len(cs))
+	} else if cs[0].ID != fcidR {
+		t.Fatal("unexpected contract", cs[0])
+	}
+
+	// archive the renewal
+	err = ss.ArchiveContract(context.Background(), renewal.ID, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we can fetch archived contracts
+	archived, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(archived) != 2 {
+		t.Fatal("unexpected two archived contracts", len(cs))
+	}
+}
+
 func TestRefreshHealth(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -4141,7 +3890,7 @@ func TestRefreshHealth(t *testing.T) {
 	// define a helper function to return an object's health
 	health := func(name string) float64 {
 		t.Helper()
-		o, err := ss.Object(context.Background(), api.DefaultBucketName, name)
+		o, err := ss.Object(context.Background(), testBucket, name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -4167,10 +3916,10 @@ func TestRefreshHealth(t *testing.T) {
 	// add two test objects
 	o1 := t.Name() + "1"
 	if added, err := ss.addTestObject(o1, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			MinShards: 2,
-			Key:       object.GenerateEncryptionKey(),
+			MinShards:     2,
+			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Shards: []object.Sector{
 				newTestShard(hks[0], fcids[0], types.Hash256{0}),
 				newTestShard(hks[1], fcids[1], types.Hash256{1}),
@@ -4186,10 +3935,10 @@ func TestRefreshHealth(t *testing.T) {
 
 	o2 := t.Name() + "2"
 	if added, err := ss.addTestObject(o2, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
-			MinShards: 2,
-			Key:       object.GenerateEncryptionKey(),
+			MinShards:     2,
+			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Shards: []object.Sector{
 				newTestShard(hks[4], fcids[4], types.Hash256{4}),
 				newTestShard(hks[5], fcids[5], types.Hash256{5}),
@@ -4237,7 +3986,7 @@ func TestRefreshHealth(t *testing.T) {
 	// add another object that is empty
 	o3 := t.Name() + "3"
 	if added, err := ss.addTestObject(o3, object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}); err != nil {
 		t.Fatal(err)
 	} else if added.Health != 1 {
@@ -4282,18 +4031,23 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// create objects
-	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health) VALUES (?, ?, ?, ?);")
+	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health, `key`) VALUES (?, ?, ?, ?, ?);")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer insertObjStmt.Close()
 
+	randomKey := func() sql.EncryptionKey {
+		return sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted))
+	}
+
 	var obj1ID, obj2ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1); err != nil {
+	obj1Key, obj2Key := randomKey(), randomKey()
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
 		t.Fatal(err)
 	} else if obj1ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1); err != nil {
+	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
 		t.Fatal(err)
 	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4301,7 +4055,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create a slab
 	var slabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
 		t.Fatal(err)
 	} else if slabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4322,7 +4076,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "1")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4333,7 +4087,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete second object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "2")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "2")
 	if err != nil {
 		t.Fatal(err)
 	} else if slabCntr := ss.Count("slabs"); slabCntr != 0 {
@@ -4342,14 +4096,15 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create another slab referencing the buffered slab
 	var bufferedSlabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey()), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
 		t.Fatal(err)
 	} else if bufferedSlabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
 	}
 
 	var obj3ID int64
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1); err != nil {
+	obj3Key := randomKey()
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1, obj3Key); err != nil {
 		t.Fatal(err)
 	} else if obj3ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4361,7 +4116,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete third object
-	err = ss.RemoveObjectBlocking(context.Background(), api.DefaultBucketName, "3")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "3")
 	if err != nil {
 		t.Fatal(err)
 	} else if slabCntr := ss.Count("slabs"); slabCntr != 1 {
@@ -4389,7 +4144,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// create an object
 	obj := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}
 	// add 2 slabs
 	for i := 0; i < 2; i++ {
@@ -4397,8 +4152,8 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			Offset: 0,
 			Length: uint32(minShards) * rhpv2.SectorSize,
 			Slab: object.Slab{
-				Key:       object.GenerateEncryptionKey(),
-				MinShards: uint8(minShards),
+				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+				MinShards:     uint8(minShards),
 			},
 		})
 	}
@@ -4549,7 +4304,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			t.Fatal("invalid minShards", slab.MinShards)
 		} else if slab.TotalShards != uint8(totalShards) {
 			t.Fatal("invalid totalShards", slab.TotalShards)
-		} else if slab.Key.String() != obj.Slabs[i].Key.String() {
+		} else if slab.Key.String() != obj.Slabs[i].EncryptionKey.String() {
 			t.Fatal("wrong key")
 		}
 
@@ -4572,15 +4327,15 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	obj2 := object.Object{
-		Key: object.GenerateEncryptionKey(),
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}
 	// add 1 slab with 30 shards
 	obj2.Slabs = append(obj2.Slabs, object.SlabSlice{
 		Offset: 0,
 		Length: uint32(minShards) * rhpv2.SectorSize,
 		Slab: object.Slab{
-			Key:       object.GenerateEncryptionKey(),
-			MinShards: uint8(minShards),
+			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+			MinShards:     uint8(minShards),
 		},
 	})
 	// 30 shards each
@@ -4652,7 +4407,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal("invalid minShards", slab2.MinShards)
 	} else if slab2.TotalShards != uint8(totalShards) {
 		t.Fatal("invalid totalShards", slab2.TotalShards)
-	} else if slab2.Key.String() != obj2.Slabs[0].Key.String() {
+	} else if slab2.Key.String() != obj2.Slabs[0].EncryptionKey.String() {
 		t.Fatal("wrong key")
 	}
 
@@ -4725,7 +4480,6 @@ func TestUpdateObjectParallel(t *testing.T) {
 		t.SkipNow()
 	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	ss.retryTransactionIntervals = []time.Duration{0} // don't retry
 	defer ss.Close()
 
 	// create 2 hosts
@@ -4750,24 +4504,24 @@ func TestUpdateObjectParallel(t *testing.T) {
 		for name := range c {
 			// create an object
 			obj := object.Object{
-				Key: object.GenerateEncryptionKey(),
+				Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 				Slabs: []object.SlabSlice{
 					{
 						Slab: object.Slab{
-							Health:    1.0,
-							Key:       object.GenerateEncryptionKey(),
-							MinShards: 1,
-							Shards:    newTestShards(hk1, fcid1, frand.Entropy256()),
+							Health:        1.0,
+							EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+							MinShards:     1,
+							Shards:        newTestShards(hk1, fcid1, frand.Entropy256()),
 						},
 						Offset: 10,
 						Length: 100,
 					},
 					{
 						Slab: object.Slab{
-							Health:    1.0,
-							Key:       object.GenerateEncryptionKey(),
-							MinShards: 2,
-							Shards:    newTestShards(hk2, fcid2, frand.Entropy256()),
+							Health:        1.0,
+							EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+							MinShards:     2,
+							Shards:        newTestShards(hk2, fcid2, frand.Entropy256()),
 						},
 						Offset: 20,
 						Length: 200,
@@ -4776,7 +4530,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 			}
 
 			// update the object
-			if err := ss.UpdateObject(context.Background(), api.DefaultBucketName, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+			if err := ss.UpdateObject(context.Background(), testBucket, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
 				t.Error(err)
 				return
 			}
@@ -4900,5 +4654,93 @@ func TestDirectories(t *testing.T) {
 
 	if n := ss.Count("directories"); n != 1 {
 		t.Fatal("expected 1 dir, got", n)
+	}
+}
+
+func TestPutContract(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	hk := types.PublicKey{1}
+	if err := ss.addTestHost(hk); err != nil {
+		t.Fatal(err)
+	}
+
+	c := api.ContractMetadata{
+		ID:      types.FileContractID{1},
+		HostKey: hk,
+
+		ProofHeight:    2,
+		RenewedFrom:    types.FileContractID{3},
+		RevisionHeight: 4,
+		RevisionNumber: 5,
+		Size:           6,
+		StartHeight:    7,
+		State:          api.ContractStateComplete,
+		WindowStart:    8,
+		WindowEnd:      9,
+
+		ContractPrice:      types.NewCurrency64(10),
+		InitialRenterFunds: types.NewCurrency64(11),
+		Spending: api.ContractSpending{
+			Deletions:   types.NewCurrency64(12),
+			FundAccount: types.NewCurrency64(13),
+			SectorRoots: types.NewCurrency64(14),
+			Uploads:     types.NewCurrency64(15),
+		},
+
+		ArchivalReason: api.ContractArchivalReasonHostPruned,
+		RenewedTo:      types.FileContractID{16},
+	}
+	if err := ss.PutContract(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+
+	// insert and assert the returned metadata is equal to the inserted metadata
+	if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll}); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, instead got %d", len(contracts))
+	} else if !reflect.DeepEqual(contracts[0], c) {
+		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], c))
+	}
+
+	u := api.ContractMetadata{
+		ID:      types.FileContractID{1},
+		HostKey: hk,
+
+		ProofHeight:    17,
+		RenewedFrom:    types.FileContractID{18},
+		RevisionHeight: 19,
+		RevisionNumber: 20,
+		Size:           21,
+		StartHeight:    22,
+		State:          api.ContractStateFailed,
+		WindowStart:    23,
+		WindowEnd:      24,
+
+		ContractPrice:      types.NewCurrency64(25),
+		InitialRenterFunds: types.NewCurrency64(26),
+		Spending: api.ContractSpending{
+			Deletions:   types.NewCurrency64(27),
+			FundAccount: types.NewCurrency64(28),
+			SectorRoots: types.NewCurrency64(29),
+			Uploads:     types.NewCurrency64(30),
+		},
+
+		ArchivalReason: api.ContractArchivalReasonRemoved,
+		RenewedTo:      types.FileContractID{31},
+	}
+	if err := ss.PutContract(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+
+	// update and assert the returned metadata is equal to the metadata
+	if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll}); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, instead got %d", len(contracts))
+	} else if !reflect.DeepEqual(contracts[0], u) {
+		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], u))
 	}
 }

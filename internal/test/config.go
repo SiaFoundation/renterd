@@ -13,7 +13,6 @@ var (
 	// one is explicitly set.
 	AutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Amount:      3,
 			Period:      144,
 			RenewWindow: 72,
@@ -32,10 +31,7 @@ var (
 		},
 	}
 
-	ContractSet         = "testset"
-	ContractSetSettings = api.ContractSetSetting{
-		Default: ContractSet,
-	}
+	ContractSet = "testset"
 
 	GougingSettings = api.GougingSettings{
 		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
@@ -51,11 +47,16 @@ var (
 		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
 	}
 
-	PricePinSettings = api.DefaultPricePinSettings
+	PricePinSettings = api.DefaultPinnedSettings
 
 	RedundancySettings = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 3,
+	}
+
+	UploadSettings = api.UploadSettings{
+		DefaultContractSet: ContractSet,
+		Redundancy:         RedundancySettings,
 	}
 
 	S3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"

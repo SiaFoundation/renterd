@@ -14,7 +14,6 @@ import (
 
 var cfg = api.AutopilotConfig{
 	Contracts: api.ContractsConfig{
-		Allowance:   types.Siacoins(1000),
 		Amount:      50,
 		Period:      144 * 7 * 6,
 		RenewWindow: 144 * 7 * 2,
@@ -31,6 +30,39 @@ var cfg = api.AutopilotConfig{
 	},
 }
 
+func TestClampScore(t *testing.T) {
+	tests := []struct {
+		in  float64
+		out float64
+	}{
+		{
+			in:  -1,
+			out: 0,
+		},
+		{
+			in:  0,
+			out: 0,
+		},
+		{
+			in:  1,
+			out: 1,
+		},
+		{
+			in:  1.1,
+			out: 1,
+		},
+		{
+			in:  0.05,
+			out: minSubScore,
+		},
+	}
+	for _, test := range tests {
+		if out := clampScore(test.in); out != test.out {
+			t.Errorf("expected %v, got %v", test.out, out)
+		}
+	}
+}
+
 func TestHostScore(t *testing.T) {
 	day := 24 * time.Hour
 
@@ -39,39 +71,42 @@ func TestHostScore(t *testing.T) {
 	}
 	h1 := newHost(test.NewHostSettings())
 	h2 := newHost(test.NewHostSettings())
+	gs := api.GougingSettings{
+		MaxUploadPrice:   types.NewCurrency64(1000000000000),
+		MaxStoragePrice:  types.NewCurrency64(3000000000),
+		MaxDownloadPrice: types.NewCurrency64(100000000000000),
+	}
 
 	// assert both hosts score equal
 	redundancy := 3.0
-	if hostScore(cfg, h1, redundancy) != hostScore(cfg, h2, redundancy) {
+	if hostScore(cfg, gs, h1, redundancy) != hostScore(cfg, gs, h2, redundancy) {
 		t.Fatal("unexpected")
 	}
 
-	// assert age affects the score
-	h1.KnownSince = time.Now().Add(-1 * day)
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	//	// assert age affects the score
+	h1.KnownSince = time.Now().Add(-100 * day)
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert collateral affects the score
-	settings := test.NewHostSettings()
-	settings.Collateral = settings.Collateral.Div64(2)
-	settings.MaxCollateral = settings.MaxCollateral.Div64(2)
-	h1 = newHost(settings) // reset
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	h1 = newHost(test.NewHostSettings()) // reset
+	h1.PriceTable.CollateralCost = h1.PriceTable.CollateralCost.Div64(1000)
+	if hostScore(cfg, gs, h1, redundancy).Score() >= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert interactions affect the score
 	h1 = newHost(test.NewHostSettings()) // reset
 	h1.Interactions.SuccessfulInteractions++
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert uptime affects the score
 	h2 = newHost(test.NewHostSettings()) // reset
 	h2.Interactions.SecondToLastScanSuccess = false
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() || ageScore(h1) != ageScore(h2) {
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() || ageScore(h1) != ageScore(h2) {
 		t.Fatal("unexpected")
 	}
 
@@ -79,99 +114,114 @@ func TestHostScore(t *testing.T) {
 	h2Settings := test.NewHostSettings()
 	h2Settings.Version = "1.5.6" // lower
 	h2 = newHost(h2Settings)     // reset
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// asseret remaining storage affects the score.
 	h1 = newHost(test.NewHostSettings()) // reset
 	h2.Settings.RemainingStorage = 100
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert MaxCollateral affects the score.
 	h2 = newHost(test.NewHostSettings()) // reset
 	h2.PriceTable.MaxCollateral = types.ZeroCurrency
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert price affects the score.
 	h2 = newHost(test.NewHostSettings()) // reset
 	h2.PriceTable.WriteBaseCost = types.Siacoins(1)
-	if hostScore(cfg, h1, redundancy).Score() <= hostScore(cfg, h2, redundancy).Score() {
+	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
-
-	// assert zero allowance does not panic
-	cfg.Contracts.Allowance = types.ZeroCurrency
-	_ = hostScore(cfg, h1, redundancy)
-
-	// assert missing amount does not panic
-	cfg.Contracts.Allowance = types.Siacoins(1000) // reset
-	cfg.Contracts.Amount = 0
-	_ = hostScore(cfg, h1, redundancy)
 }
 
 func TestPriceAdjustmentScore(t *testing.T) {
-	score := func(cpp uint32) float64 {
+	score := func(mdp, mup, msp uint64) float64 {
 		t.Helper()
-		cfg := api.ContractsConfig{
-			Allowance: types.Siacoins(5000),
-			Amount:    50,
+		pt := rhpv3.HostPriceTable{
+			WriteStoreCost:        types.NewCurrency64(50),
+			DownloadBandwidthCost: types.NewCurrency64(50),
+			UploadBandwidthCost:   types.NewCurrency64(50),
 		}
-		return priceAdjustmentScore(types.Siacoins(cpp), cfg)
+		return priceAdjustmentScore(pt, api.GougingSettings{
+			MaxDownloadPrice: types.NewCurrency64(mdp),
+			MaxUploadPrice:   types.NewCurrency64(mup),
+			MaxStoragePrice:  types.NewCurrency64(msp),
+		})
 	}
 
 	// Cost matches budges.
-	if s := score(100); s != 0.5 {
+
+	if s := score(100, 100, 100); s != 0.5 {
 		t.Errorf("expected %v but got %v", 0.5, s)
 	}
 
-	// Test decreasing values for host cost. Score should go from 0.5 to 1 and
+	// Test increasing gouging values. Score should go from 0.5 to 1 and
 	// be capped at 1.
+
 	round := func(f float64) float64 {
 		i := uint64(f * 100.0)
 		return float64(i) / 100.0
 	}
-	if s := round(score(50)); s != 0.56 {
-		t.Errorf("expected %v but got %v", 0.56, s)
-	}
-	if s := round(score(25)); s != 0.68 {
-		t.Errorf("expected %v but got %v", 0.64, s)
-	}
-	if s := round(score(15)); s != 0.84 {
-		t.Errorf("expected %v but got %v", 0.84, s)
-	}
-	if s := round(score(10)); s != 1 {
-		t.Errorf("expected %v but got %v", 1, s)
-	}
-	if s := round(score(1)); s != 1 {
-		t.Errorf("expected %v but got %v", 1, s)
+
+	if s := round(score(125, 125, 125)); s != 0.62 {
+		t.Fatalf("expected %v but got %v", 0.62, s)
 	}
 
-	// Test increasing values for host cost. Score should go from 1 towards 0.
-	if s := round(score(101)); s != 0.49 {
-		t.Errorf("expected %v but got %v", 0.49, s)
+	if s := round(score(150, 150, 150)); s != 0.75 {
+		t.Fatalf("expected %v but got %v", 0.75, s)
 	}
-	if s := round(score(110)); s != 0.44 {
-		t.Errorf("expected %v but got %v", 0.44, s)
+
+	if s := round(score(175, 175, 175)); s != 0.87 {
+		t.Fatalf("expected %v but got %v", 0.87, s)
 	}
-	if s := round(score(125)); s != 0.37 {
-		t.Errorf("expected %v but got %v", 0.37, s)
+
+	if s := round(score(190, 190, 190)); s != 0.95 {
+		t.Fatalf("expected %v but got %v", 0.95, s)
 	}
-	if s := round(score(150)); s != 0.28 {
-		t.Errorf("expected %v but got %v", 0.28, s)
+
+	if s := round(score(200, 200, 200)); s != 1 {
+		t.Fatalf("expected %v but got %v", 1, s)
 	}
-	if s := round(score(200)); s != 0.16 {
-		t.Errorf("expected %v but got %v", 0.16, s)
+
+	if s := round(score(1000, 1000, 1000)); s != 1 {
+		t.Fatalf("expected %v but got %v", 1, s)
 	}
-	if s := round(score(250)); s != 0.09 {
-		t.Errorf("expected %v but got %v", 0.09, s)
+
+	// Test decreasing gouging values. Score should go from 0.5 towards 0.
+
+	if s := round(score(99, 99, 99)); s != 0.48 {
+		t.Fatalf("expected %v but got %v", 0.48, s)
 	}
-	if s := round(score(300)); s != 0.05 {
-		t.Errorf("expected %v but got %v", 0.05, s)
+
+	if s := round(score(90, 90, 90)); s != 0.44 {
+		t.Fatalf("expected %v but got %v", 0.44, s)
+	}
+
+	if s := round(score(75, 75, 75)); s != 0.33 {
+		t.Fatalf("expected %v but got %v", 0.33, s)
+	}
+
+	if s := round(score(50, 50, 50)); s != 0.16 {
+		t.Fatalf("expected %v but got %v", 0.16, s)
+	}
+
+	if s := round(score(25, 25, 25)); s != 0.01 {
+		t.Fatalf("expected %v but got %v", 0.01, s)
+	}
+
+	if s := round(score(10, 10, 10)); s != 0 {
+		t.Fatalf("expected %v but got %v", 0, s)
+	}
+
+	// Edge case where gouging is disabled
+	if s := round(score(0, 0, 0)); s != 1.0 {
+		t.Fatalf("expected %v but got %v", 1.0, s)
 	}
 }
 

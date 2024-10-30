@@ -10,10 +10,6 @@ import (
 )
 
 func TestInteractions(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()

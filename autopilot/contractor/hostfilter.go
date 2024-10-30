@@ -138,9 +138,9 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSetti
 }
 
 func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contract) bool {
-	// TotalCost should never be zero but for legacy reasons we check and return
-	// true should it be the case
-	if c.TotalCost.IsZero() {
+	// InitialRenterFunds should never be zero but for legacy reasons we check
+	// and return true should it be the case
+	if c.InitialRenterFunds.IsZero() {
 		return true
 	}
 
@@ -148,7 +148,7 @@ func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contra
 		Add(pt.AppendSectorCost(cfg.Contracts.Period)).
 		Add(pt.ReadSectorCost(rhpv2.SectorSize)).
 		Total()
-	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.TotalCost.Big()).Float64()
+	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.InitialRenterFunds.Big()).Float64()
 
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
@@ -258,9 +258,9 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostChe
 	}
 
 	return &api.HostCheck{
-		Usability: ub,
-		Gouging:   gb,
-		Score:     sh.sb,
+		UsabilityBreakdown: ub,
+		GougingBreakdown:   gb,
+		ScoreBreakdown:     sh.sb,
 	}
 }
 
@@ -272,6 +272,6 @@ func newScoredHost(h api.Host, sb api.HostScoreBreakdown) scoredHost {
 	}
 }
 
-func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
-	return newScoredHost(h, hostScore(cfg, h, expectedRedundancy))
+func scoreHost(h api.Host, cfg api.AutopilotConfig, gs api.GougingSettings, expectedRedundancy float64) scoredHost {
+	return newScoredHost(h, hostScore(cfg, gs, h, expectedRedundancy))
 }

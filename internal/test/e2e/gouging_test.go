@@ -17,10 +17,6 @@ import (
 )
 
 func TestGouging(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
@@ -57,11 +53,11 @@ func TestGouging(t *testing.T) {
 
 	// upload the data
 	path := fmt.Sprintf("data_%v", len(data))
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
 
 	// download the data
 	var buffer bytes.Buffer
-	tt.OK(w.DownloadObject(context.Background(), &buffer, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
+	tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, path, api.DownloadObjectOptions{}))
 	if !bytes.Equal(data, buffer.Bytes()) {
 		t.Fatal("unexpected data")
 	}
@@ -69,7 +65,7 @@ func TestGouging(t *testing.T) {
 	// update the gouging settings to limit the max storage price to 100H
 	gs := test.GougingSettings
 	gs.MaxStoragePrice = types.NewCurrency64(100)
-	if err := b.UpdateSetting(context.Background(), api.SettingGouging, gs); err != nil {
+	if err := b.UpdateGougingSettings(context.Background(), gs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,7 +85,7 @@ func TestGouging(t *testing.T) {
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// upload some data - should fail
-	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{}))
+	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
 
 	// update all host settings so they're gouging
 	for _, h := range cluster.hosts {
@@ -105,7 +101,7 @@ func TestGouging(t *testing.T) {
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
 	// download the data - should still work
-	tt.OKAll(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, path, api.DownloadObjectOptions{}))
+	tt.OKAll(w.DownloadObject(context.Background(), io.Discard, testBucket, path, api.DownloadObjectOptions{}))
 
 	// try optimising gouging settings
 	resp, err := cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, gs, test.RedundancySettings)
@@ -117,7 +113,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// set optimised settings
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, resp.Recommendation.GougingSettings))
+	tt.OK(b.UpdateGougingSettings(context.Background(), resp.Recommendation.GougingSettings))
 
 	// evaluate optimised settings
 	resp, err = cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, resp.Recommendation.GougingSettings, test.RedundancySettings)
@@ -130,16 +126,12 @@ func TestGouging(t *testing.T) {
 
 	// upload some data - should work now once contract maintenance is done
 	tt.Retry(30, time.Second, func() error {
-		_, err := w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, path, api.UploadObjectOptions{})
+		_, err := w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{})
 		return err
 	})
 }
 
 func TestHostMinVersion(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: int(test.AutopilotConfig.Contracts.Amount),

@@ -78,6 +78,10 @@ func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration
 	}, nil
 }
 
+func (s *DB) DB() *sql.DB {
+	return s.db
+}
+
 // exec executes a query without returning any rows. The args are for
 // any placeholder parameters in the query.
 func (s *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
