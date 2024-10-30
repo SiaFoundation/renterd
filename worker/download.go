@@ -721,6 +721,8 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 }
 
 func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
+	start := time.Now()
+
 	// cancel any sector downloads once the download is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -743,6 +745,9 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, bool, error) {
 		s.launch(req)
 		i++
 	}
+
+	fmt.Printf("DEBUG PJ: launching min shards took %v\n", time.Since(start))
+	start = time.Now()
 
 	// collect requests that failed due to gouging
 	var gouging []*sectorDownloadReq
@@ -804,7 +809,9 @@ loop:
 	// track stats
 	s.mgr.statsOverdrivePct.Track(s.overdrivePct())
 	s.mgr.statsSlabDownloadSpeedBytesPerMS.Track(float64(s.downloadSpeed()))
-	return s.finish()
+	data, overpaid, err := s.finish()
+	fmt.Printf("DEBUG PJ: slab download took %v overpaid %v err %v\n", time.Since(start), overpaid, err)
+	return data, overpaid, err
 }
 
 func (s *slabDownload) overdrivePct() float64 {
