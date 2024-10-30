@@ -2518,7 +2518,6 @@ func TestHostScan(t *testing.T) {
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
-	w := cluster.Worker
 	tt := cluster.tt
 
 	// add 2 hosts to the cluster, 1 to scan and 1 to make sure we always have 1
@@ -2556,7 +2555,7 @@ func TestHostScan(t *testing.T) {
 		// between scans
 		time.Sleep(time.Millisecond)
 
-		resp, err := w.RHPScan(context.Background(), hk, hostIP, 10*time.Second)
+		resp, err := b.ScanHost(context.Background(), hk, hostIP, 10*time.Second)
 		tt.OK(err)
 		if resp.ScanError != "" {
 			return errors.New(resp.ScanError)

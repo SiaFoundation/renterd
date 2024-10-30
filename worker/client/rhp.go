@@ -18,13 +18,3 @@ func (c *Client) RHPPriceTable(ctx context.Context, hostKey types.PublicKey, sia
 	err = c.c.WithContext(ctx).POST("/rhp/pricetable", req, &pt)
 	return
 }
-
-// RHPScan scans a host, returning its current settings.
-func (c *Client) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.RHPScanResponse, err error) {
-	err = c.c.WithContext(ctx).POST("/rhp/scan", api.RHPScanRequest{
-		HostKey: hostKey,
-		HostIP:  hostIP,
-		Timeout: api.DurationMS(timeout),
-	}, &resp)
-	return
-}
