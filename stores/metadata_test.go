@@ -2537,12 +2537,8 @@ func TestRecordContractSpending(t *testing.T) {
 }
 
 // TestRenameObjects is a unit test for RenameObject and RenameObjects.
-func TestRenameObjectsA(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
-	cfg.dir = "/users/peterjan/testing2"
-	os.RemoveAll(cfg.dir)
-	ss := newTestSQLStore(t, cfg)
+func TestRenameObjects(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
 	// Create a few objects.
