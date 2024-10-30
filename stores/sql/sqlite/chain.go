@@ -265,42 +265,49 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		}
 	}
 
-	// update allow list
-	rows, err := c.tx.Query(c.ctx, "SELECT id, entry FROM host_allowlist_entries")
+	// prepare statements
+	insertAllowlistLinkStmt, err := c.tx.Prepare(c.ctx, "INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id) VALUES (?,?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement, %w", err)
+	}
+	defer insertAllowlistLinkStmt.Close()
+
+	insertBlocklistLinkStmt, err := c.tx.Prepare(c.ctx, "INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id) VALUES (?,?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement, %w", err)
+	}
+	defer insertBlocklistLinkStmt.Close()
+
+	deleteBlocklistLinkStmt, err := c.tx.Prepare(c.ctx, "DELETE FROM host_blocklist_entry_hosts WHERE db_blocklist_entry_id = ? AND db_host_id = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement, %w", err)
+	}
+	defer deleteBlocklistLinkStmt.Close()
+
+	// fetch allowlist entries
+	rows, err := c.tx.Query(c.ctx, "SELECT id, entry FROM host_allowlist_entries WHERE entry = ?", ssql.PublicKey(hk))
 	if err != nil {
 		return fmt.Errorf("failed to fetch allow list: %w", err)
 	}
 	defer rows.Close()
 
-	allowlistEntries := make(map[types.PublicKey]int64)
+	var allowlistEntryIDs []int64
 	for rows.Next() {
 		var id int64
-		var pk ssql.PublicKey
-		if err := rows.Scan(&id, &pk); err != nil {
+		if err := rows.Scan(&id); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
-		allowlistEntries[types.PublicKey(pk)] = id
+		allowlistEntryIDs = append(allowlistEntryIDs, id)
 	}
 
-	for pk, id := range allowlistEntries {
-		if hk == types.PublicKey(pk) {
-			if _, err := c.tx.Exec(c.ctx,
-				"INSERT OR IGNORE INTO host_allowlist_entry_hosts (db_allowlist_entry_id, db_host_id) VALUES (?,?)",
-				id,
-				hostID,
-			); err != nil {
-				return fmt.Errorf("failed to insert host into allowlist: %w", err)
-			}
+	// insert allowlist links
+	for _, entryID := range allowlistEntryIDs {
+		if _, err := insertAllowlistLinkStmt.Exec(c.ctx, entryID, hostID); err != nil {
+			return fmt.Errorf("failed to insert host into allowlist: %w", err)
 		}
 	}
 
-	// update blocklist
-	values := []string{ha.NetAddress}
-	host, _, err := net.SplitHostPort(ha.NetAddress)
-	if err == nil {
-		values = append(values, host)
-	}
-
+	// fetch blocklist entries
 	rows, err = c.tx.Query(c.ctx, "SELECT id, entry FROM host_blocklist_entries")
 	if err != nil {
 		return fmt.Errorf("failed to fetch block list: %w", err)
@@ -320,6 +327,14 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		entries = append(entries, r)
 	}
 
+	// prepare blocklist values
+	values := []string{ha.NetAddress}
+	host, _, err := net.SplitHostPort(ha.NetAddress)
+	if err == nil {
+		values = append(values, host)
+	}
+
+	// insert blocklist links
 	for _, row := range entries {
 		var blocked bool
 		for _, value := range values {
@@ -329,19 +344,11 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 			}
 		}
 		if blocked {
-			if _, err := c.tx.Exec(c.ctx,
-				"INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id) VALUES (?,?)",
-				row.id,
-				hostID,
-			); err != nil {
+			if _, err := insertBlocklistLinkStmt.Exec(c.ctx, row.id, hostID); err != nil {
 				return fmt.Errorf("failed to insert host into blocklist: %w", err)
 			}
 		} else {
-			if _, err := c.tx.Exec(c.ctx,
-				"DELETE FROM host_blocklist_entry_hosts WHERE db_blocklist_entry_id = ? AND db_host_id = ?",
-				row.id,
-				hostID,
-			); err != nil {
+			if _, err := deleteBlocklistLinkStmt.Exec(c.ctx, row.id, hostID); err != nil {
 				return fmt.Errorf("failed to remove host from blocklist: %w", err)
 			}
 		}
