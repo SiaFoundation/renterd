@@ -272,6 +272,6 @@ func newScoredHost(h api.Host, sb api.HostScoreBreakdown) scoredHost {
 	}
 }
 
-func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
-	return newScoredHost(h, hostScore(cfg, h, expectedRedundancy))
+func scoreHost(h api.Host, cfg api.AutopilotConfig, gs api.GougingSettings, expectedRedundancy float64) scoredHost {
+	return newScoredHost(h, hostScore(cfg, gs, h, expectedRedundancy))
 }
