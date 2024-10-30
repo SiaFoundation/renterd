@@ -2710,16 +2710,16 @@ func TestRenameObjectsRegression(t *testing.T) {
 
 	// define directory structure
 	objects := []string{
-		"/firefly/s1/",
-		"/firefly/s2/",
-		"/suits/s1/",
-		"/lost/",
-		"/movie",
+		"/videos/comedy/",
+		"/videos/horror/",
+		"/audio/classical/",
+		"/pictures/",
+		"/README.md",
 
-		"/firefly/trailer",
-		"/firefly/s1/ep1",
-		"/firefly/s1/ep2",
-		"/firefly/s2/ep1",
+		"/videos/trailer",
+		"/videos/comedy/ep1",
+		"/videos/comedy/ep2",
+		"/videos/horror/ep1",
 	}
 
 	testBucket := api.DefaultBucketName
@@ -2757,39 +2757,39 @@ func TestRenameObjectsRegression(t *testing.T) {
 
 	// assert the structure
 	assertNumObjects("/", 4)
-	assertNumObjects("/firefly", 6)
-	assertNumObjects("/firefly/", 3)
-	assertNumObjects("/firefly/s1/", 2)
-	assertNumObjects("/firefly/s2/", 1)
-	assertNumObjects("/suits/", 1)
-	assertNumObjects("/lost/", 0)
+	assertNumObjects("/videos", 6)
+	assertNumObjects("/videos/", 3)
+	assertNumObjects("/videos/comedy/", 2)
+	assertNumObjects("/videos/horror/", 1)
+	assertNumObjects("/audio/", 1)
+	assertNumObjects("/pictures/", 0)
 
 	// assert we can't rename to an already existing directory without force
-	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", false); !errors.Is(err, api.ErrObjectExists) {
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/comedy/", "/videos/horror/", false); !errors.Is(err, api.ErrObjectExists) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// assert we can forcefully rename it
-	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s1/", "/firefly/s2/", true); err != nil {
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/comedy/", "/videos/horror/", true); err != nil {
 		t.Fatal(err)
 	}
-	assertNumObjects("/firefly/s2/", 2)
+	assertNumObjects("/videos/horror/", 2)
 
 	// assert we can rename it and its children still point to the right directory
-	if err := ss.RenameObjects(ctx, testBucket, "/firefly/s2/", "/firefly/s02/", false); err != nil {
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/horror/", "/videos/thriller/", false); err != nil {
 		t.Fatal(err)
 	}
-	assertNumObjects("/firefly/", 2)
-	assertNumObjects("/firefly/s2/", 0)
-	assertNumObjects("/firefly/s02/", 2)
+	assertNumObjects("/videos/", 2)
+	assertNumObjects("/videos/horror/", 0)
+	assertNumObjects("/videos/thriller/", 2)
 
 	// assert we rename a grand parent and all children remain intact
-	if err := ss.RenameObjects(ctx, testBucket, "/firefly/", "/gotham/", true); err != nil {
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/", "/video/", true); err != nil {
 		t.Fatal(err)
 	}
 
-	assertNumObjects("/gotham/", 2)
-	assertNumObjects("/gotham/s02/", 2)
+	assertNumObjects("/video/", 2)
+	assertNumObjects("/video/thriller/", 2)
 	assertNumObjects("/", 4)
 }
 
