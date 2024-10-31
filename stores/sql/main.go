@@ -2218,7 +2218,7 @@ EXISTS (
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
 	WHERE %s
 	GROUP by h.id
-	ORDER BY hc.score_age * hc.score_collateral * hc.score_interactions * hc.score_storage_remaining * hc.score_uptime * hc.score_version * hc.score_prices DESC
+	ORDER BY MAX(hc.score_age) * MAX(hc.score_collateral) * MAX(hc.score_interactions) * MAX(hc.score_storage_remaining) * MAX(hc.score_uptime) * MAX(hc.score_version) * MAX(hc.score_prices) DESC
 	LIMIT ? OFFSET ?`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
