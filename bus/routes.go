@@ -630,16 +630,6 @@ func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	}
 }
 
-func (b *Bus) hostsPricetableHandlerPOST(jc jape.Context) {
-	var req api.HostsPriceTablesRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if jc.Check("failed to record interactions", b.store.RecordPriceTables(jc.Request.Context(), req.PriceTableUpdates)) != nil {
-		return
-	}
-}
-
 func (b *Bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	var records []api.ContractSpendingRecord
 	if jc.Decode(&records) != nil {
