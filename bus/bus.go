@@ -31,6 +31,7 @@ import (
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores"
@@ -326,8 +327,9 @@ type Bus struct {
 	w           Wallet
 	store       Store
 
-	rhp2 *rhp2.Client
-	rhp3 *rhp3.Client
+	rhp2Client *rhp2.Client
+	rhp3Client *rhp3.Client
+	rhp4Client *rhp4.Client
 
 	contractLocker        ContractLocker
 	explorer              *ibus.Explorer
@@ -340,6 +342,7 @@ type Bus struct {
 // New returns a new Bus
 func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
+	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
 	b := &Bus{
 		startTime: time.Now(),
@@ -356,8 +359,9 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		webhooksMgr: wm,
 		logger:      l.Sugar(),
 
-		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
-		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
+		rhp2Client: rhp2.New(dialer, l),
+		rhp3Client: rhp3.New(dialer, l),
+		rhp4Client: rhp4.New(dialer),
 	}
 
 	// create contract locker
@@ -616,7 +620,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
 	// fetch revision
-	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
+	rev, err := b.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -718,7 +722,7 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 
 	// form the contract
-	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
+	contract, txnSet, err := b.rhp2Client.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 		return rhpv2.ContractRevision{}, err
@@ -868,7 +872,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	}()
 
 	// fetch the revision
-	rev, err := b.rhp3.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
 	if err != nil {
 		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -876,7 +880,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {
 		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
 	}

@@ -60,7 +60,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
 	// latest revision
-	rev, err := b.rhp3.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
 	if jc.Check("failed to fetch contract revision", err) != nil {
 		return
 	}
@@ -72,7 +72,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// price table
-	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+	pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
 	if jc.Check("failed to fetch price table", err) != nil {
 		return
 	}
@@ -92,7 +92,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// fund the account
-	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
+	err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
 	if jc.Check("failed to fund account", err) != nil {
 		return
 	}
@@ -876,7 +876,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, rk, gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+	rev, spending, pruned, remaining, err := b.rhp2Client.PruneContract(pruneCtx, rk, gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
 		indices, err := b.store.PrunableContractRoots(ctx, fcid, roots)
 		if err != nil {
 			return nil, err
@@ -2343,7 +2343,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
 	// fetch host settings
-	settings, err := b.rhp2.Settings(ctx, rfr.HostKey, rfr.HostIP)
+	settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
 	if jc.Check("couldn't fetch host settings", err) != nil {
 		return
 	}
