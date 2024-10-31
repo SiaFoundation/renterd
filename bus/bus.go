@@ -910,7 +910,7 @@ func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types
 		// fetch the host settings
 		start := time.Now()
 		scanCtx, cancel := timeoutCtx()
-		settings, err := b.rhp2.Settings(scanCtx, hostKey, hostIP)
+		settings, err := b.rhp2Client.Settings(scanCtx, hostKey, hostIP)
 		cancel()
 		if err != nil {
 			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
@@ -918,7 +918,7 @@ func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types
 
 		// fetch the host pricetable
 		scanCtx, cancel = timeoutCtx()
-		pt, err := b.rhp3.PriceTableUnpaid(scanCtx, hostKey, settings.SiamuxAddr())
+		pt, err := b.rhp3Client.PriceTableUnpaid(scanCtx, hostKey, settings.SiamuxAddr())
 		cancel()
 		if err != nil {
 			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
