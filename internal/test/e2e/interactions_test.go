@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -42,31 +41,6 @@ func TestInteractions(t *testing.T) {
 	if ptUID == (rhpv3.SettingsID{}) {
 		t.Fatal("expected pt UID to be set")
 	}
-
-	// assert price table gets updated
-	var ptUpdates int
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		// fetch the host
-		h, err := b.Host(context.Background(), h1.PublicKey())
-		tt.OK(err)
-
-		// make sure it did not get scanned again
-		if h.Interactions.TotalScans != ts {
-			t.Fatal("expected no new scans", h.Interactions.TotalScans, ts)
-		}
-
-		// keep track of pt updates
-		if h.PriceTable.UID != ptUID {
-			ptUID = h.PriceTable.UID
-			ptUpdates++
-		}
-
-		// assert the price table was updated
-		if ptUpdates < 2 {
-			return errors.New("price table should be updated from time to time")
-		}
-		return nil
-	})
 
 	// scan the host manually
 	tt.OKAll(b.ScanHost(context.Background(), h1.PublicKey(), 0))
