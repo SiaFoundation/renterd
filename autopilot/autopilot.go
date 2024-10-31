@@ -74,7 +74,7 @@ type Bus interface {
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
 	// scanner
-	ScanHost(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (resp api.HostScanResponse, err error)
+	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (resp api.HostScanResponse, err error)
 
 	// settings
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)

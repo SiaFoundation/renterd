@@ -19,7 +19,7 @@ const (
 
 type (
 	HostScanner interface {
-		ScanHost(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.HostScanResponse, error)
+		ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
 	}
 
 	HostStore interface {
@@ -28,7 +28,7 @@ type (
 	}
 
 	Scanner interface {
-		Scan(ctx context.Context, w HostScanner, force bool)
+		Scan(ctx context.Context, hs HostScanner, force bool)
 		Shutdown(ctx context.Context) error
 		Status() (bool, time.Time)
 		UpdateHostsConfig(cfg api.HostsConfig)
@@ -164,7 +164,7 @@ func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 				return // shutdown
 			}
 
-			scan, err := hs.ScanHost(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
+			scan, err := hs.ScanHost(ctx, h.hostKey, DefaultScanTimeout)
 			if errors.Is(err, context.Canceled) {
 				return
 			} else if err != nil {

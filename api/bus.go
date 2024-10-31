@@ -87,9 +87,7 @@ type (
 
 	// HostScanRequest is the request type for the /host/scan endpoint.
 	HostScanRequest struct {
-		HostKey types.PublicKey `json:"hostKey"`
-		HostIP  string          `json:"hostIP"`
-		Timeout DurationMS      `json:"timeout"`
+		Timeout DurationMS `json:"timeout"`
 	}
 
 	// HostScanResponse is the response type for the /host/scan endpoint.
