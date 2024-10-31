@@ -590,7 +590,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 
 	// decode the request
 	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", hk) != nil {
+	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
 	var rsr api.HostScanRequest
