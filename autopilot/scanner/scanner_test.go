@@ -77,7 +77,7 @@ func (hs *mockHostStore) state() ([]string, []string) {
 	return hs.scans, hs.removals
 }
 
-type mockBus struct {
+type mockHostScanner struct {
 	blockChan chan struct{}
 	hs        *mockHostStore
 
@@ -85,7 +85,7 @@ type mockBus struct {
 	scanCount int
 }
 
-func (w *mockBus) ScanHost(ctx context.Context, hostKey types.PublicKey, hostIP string, _ time.Duration) (api.HostScanResponse, error) {
+func (w *mockHostScanner) ScanHost(ctx context.Context, hostKey types.PublicKey, _ time.Duration) (api.HostScanResponse, error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
@@ -117,7 +117,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// initiate a host scan using a worker that blocks
-	b := &mockBus{
+	b := &mockHostScanner{
 		blockChan: make(chan struct{}),
 		hs:        hs,
 	}

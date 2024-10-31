@@ -444,9 +444,9 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
 		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
-		"POST   /hosts/scan":                     b.hostsScanHandlerPOST,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
+		"POST   /host/:hostkey/scan":             b.hostsScanHandlerPOST,
 
 		"PUT    /metric/:key": b.metricsHandlerPUT,
 		"GET    /metric/:key": b.metricsHandlerGET,
@@ -1073,9 +1073,9 @@ func isErrHostUnreachable(err error) bool {
 	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
 		utils.IsErr(err, context.DeadlineExceeded) ||
 		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
-		utils.IsErr(err, errors.New("no route to host")) ||
-		utils.IsErr(err, errors.New("no such host")) ||
-		utils.IsErr(err, errors.New("connection refused")) ||
+		utils.IsErr(err, utils.ErrNoRouteToHost) ||
+		utils.IsErr(err, utils.ErrNoSuchHost) ||
+		utils.IsErr(err, utils.ErrConnectionRefused) ||
 		utils.IsErr(err, errors.New("unknown port")) ||
 		utils.IsErr(err, errors.New("cannot assign requested address"))
 }

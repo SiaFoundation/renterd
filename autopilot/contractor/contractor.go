@@ -101,7 +101,7 @@ type Bus interface {
 }
 
 type HostScanner interface {
-	ScanHost(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.HostScanResponse, error)
+	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
 }
 
 type Worker interface {
@@ -194,7 +194,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, w Worker, host api.
 	hk := host.PublicKey
 
 	// fetch host settings
-	scan, err := hs.ScanHost(ctx, hk, host.NetAddress, 0)
+	scan, err := hs.ScanHost(ctx, hk, 0)
 	if err != nil {
 		logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
@@ -715,7 +715,7 @@ func refreshPriceTable(ctx context.Context, hs HostScanner, w Worker, host *api.
 	// scan the host if it hasn't been successfully scanned before, which
 	// can occur when contracts are added manually to the bus or database
 	if !host.Scanned {
-		scan, err := hs.ScanHost(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
+		scan, err := hs.ScanHost(ctx, host.PublicKey, timeoutHostScan)
 		if err != nil {
 			return fmt.Errorf("failed to scan host %v: %w", host.PublicKey, err)
 		}

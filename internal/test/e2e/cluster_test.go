@@ -2525,11 +2525,7 @@ func TestHostScan(t *testing.T) {
 	hosts := cluster.AddHosts(2)
 	host := hosts[0]
 
-	settings, err := host.RHPv2Settings()
-	tt.OK(err)
-
 	hk := host.PublicKey()
-	hostIP := settings.NetAddress
 
 	assertHost := func(ls time.Time, lss, slss bool, ts uint64) {
 		t.Helper()
@@ -2555,7 +2551,7 @@ func TestHostScan(t *testing.T) {
 		// between scans
 		time.Sleep(time.Millisecond)
 
-		resp, err := b.ScanHost(context.Background(), hk, hostIP, 10*time.Second)
+		resp, err := b.ScanHost(context.Background(), hk, 10*time.Second)
 		tt.OK(err)
 		if resp.ScanError != "" {
 			return errors.New(resp.ScanError)
