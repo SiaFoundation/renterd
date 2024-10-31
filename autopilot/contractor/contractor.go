@@ -82,6 +82,8 @@ var (
 )
 
 type Bus interface {
+	HostScanner
+
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
@@ -100,9 +102,12 @@ type Bus interface {
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
 
+type HostScanner interface {
+	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
+}
+
 type Worker interface {
 	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
-	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
 type contractChecker interface {
@@ -112,7 +117,7 @@ type contractChecker interface {
 }
 
 type contractReviser interface {
-	formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
+	formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 	renewContract(ctx *mCtx, w Worker, c contract, h api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 	refreshContract(ctx *mCtx, w Worker, c contract, h api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 }
@@ -183,14 +188,14 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, s
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, w, c, c, c, c.logger)
 }
 
-func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 
 	// convenience variables
 	hk := host.PublicKey
 
 	// fetch host settings
-	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
+	scan, err := hs.ScanHost(ctx, hk, 0)
 	if err != nil {
 		logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
@@ -702,7 +707,7 @@ func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding type
 	return funding
 }
 
-func refreshPriceTable(ctx context.Context, w Worker, host *api.Host) error {
+func refreshPriceTable(ctx context.Context, hs HostScanner, w Worker, host *api.Host) error {
 	// return early if the host's pricetable is not expired yet
 	if time.Now().Before(host.PriceTable.Expiry) {
 		return nil
@@ -711,7 +716,7 @@ func refreshPriceTable(ctx context.Context, w Worker, host *api.Host) error {
 	// scan the host if it hasn't been successfully scanned before, which
 	// can occur when contracts are added manually to the bus or database
 	if !host.Scanned {
-		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
+		scan, err := hs.ScanHost(ctx, host.PublicKey, timeoutHostScan)
 		if err != nil {
 			return fmt.Errorf("failed to scan host %v: %w", host.PublicKey, err)
 		}
@@ -1102,7 +1107,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		}
 
 		// fetch a new price table if necessary
-		if err := refreshPriceTable(ctx, w, &candidate.host); err != nil {
+		if err := refreshPriceTable(ctx, bus, w, &candidate.host); err != nil {
 			logger.Warnf("failed to fetch price table for candidate host %v: %v", candidate.host.PublicKey, err)
 			continue
 		}
@@ -1130,7 +1135,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 			continue
 		}
 
-		formedContract, proceed, err := cr.formContract(ctx, w, candidate.host, minInitialContractFunds, logger)
+		formedContract, proceed, err := cr.formContract(ctx, bus, candidate.host, minInitialContractFunds, logger)
 		if err != nil {
 			logger.With(zap.Error(err)).Error("failed to form contract")
 			continue

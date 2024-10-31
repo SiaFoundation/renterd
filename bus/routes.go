@@ -581,6 +581,44 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
+	// only scan hosts if we are online
+	if len(b.s.Peers()) == 0 {
+		jc.Error(errors.New("not connected to the internet"), http.StatusServiceUnavailable)
+		return
+	}
+
+	// decode the request
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	var rsr api.HostScanRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	// fetch host
+	h, err := b.store.Host(jc.Request.Context(), hk)
+	if jc.Check("failed to fetch host", err) != nil {
+		return
+	}
+
+	// scan host
+	var errStr string
+	settings, priceTable, elapsed, err := b.scanHost(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	jc.Encode(api.HostScanResponse{
+		Ping:       api.DurationMS(elapsed),
+		PriceTable: priceTable,
+		ScanError:  errStr,
+		Settings:   settings,
+	})
+}
+
 func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
@@ -588,16 +626,6 @@ func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	}
 	err := b.store.ResetLostSectors(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't reset lost sectors", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
-	var req api.HostsScanRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if jc.Check("failed to record scans", b.store.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
 		return
 	}
 }

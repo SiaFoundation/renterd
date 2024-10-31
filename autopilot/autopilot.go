@@ -74,6 +74,9 @@ type Bus interface {
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
 
+	// scanner
+	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (resp api.HostScanResponse, err error)
+
 	// settings
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
@@ -238,7 +241,7 @@ func (ap *Autopilot) Run() {
 			defer ap.logger.Info("autopilot iteration ended")
 
 			// initiate a host scan - no need to be synced or configured for scanning
-			ap.s.Scan(ap.shutdownCtx, w, forceScan)
+			ap.s.Scan(ap.shutdownCtx, ap.bus, forceScan)
 
 			// reset forceScans
 			forceScan = false
@@ -253,7 +256,7 @@ func (ap *Autopilot) Run() {
 				return
 			} else if blocked {
 				if scanning, _ := ap.s.Status(); !scanning {
-					ap.s.Scan(ap.shutdownCtx, w, true)
+					ap.s.Scan(ap.shutdownCtx, ap.bus, true)
 				}
 			}
 
