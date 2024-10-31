@@ -814,6 +814,8 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 
 	contracts := make([]contract, len(contractMetadatas))
 	for i, c := range contractMetadatas {
+		contracts[i].ContractMetadata = c
+
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -823,8 +825,9 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 				logger.With(zap.Error(err)).
 					With("hostKey", c.HostKey).
 					With("contractID", c.ID).Debug("failed to fetch contract revision")
+			} else {
+				contracts[i].Revision = &rev
 			}
-			contracts[i].Revision = &rev
 		}(i)
 	}
 	wg.Wait()
