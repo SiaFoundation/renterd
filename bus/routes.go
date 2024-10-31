@@ -507,6 +507,7 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	}
 	jc.Encode(hosts)
 }
+
 func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 	var req api.HostsRequest
 	if jc.Decode(&req) != nil {
