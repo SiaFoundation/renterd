@@ -256,6 +256,12 @@ var (
 				},
 			},
 			{
+				ID: "00024_contract_v2",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00024_contract_v2", log)
+				},
+			},
+			{
 				ID: "00025_latest_host",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_latest_host", log)

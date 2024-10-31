@@ -69,7 +69,7 @@ func prepareDB(db *isql.DB, fcid types.FileContractID, n int) (roots []types.Has
 	// insert contract
 	hk := types.PublicKey{1}
 	res, err := db.Exec(context.Background(), `
-INSERT INTO contracts (fcid, host_key, start_height) VALUES (?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0)
+INSERT INTO contracts (fcid, host_key, start_height, v2) VALUES (?, ?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0, false)
 	if err != nil {
 		return nil, err
 	}
