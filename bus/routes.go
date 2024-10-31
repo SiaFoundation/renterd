@@ -484,6 +484,29 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 	jc.Encode(events)
 }
 
+func (b *Bus) hostsHandlerGET(jc jape.Context) {
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
+	}
+
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+		return
+	}
+
+	hosts, err := b.store.UsableHosts(jc.Request.Context(), offset, limit)
+	if jc.Check("couldn't fetch hosts", err) != nil {
+		return
+	}
+	jc.Encode(hosts)
+}
 func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 	var req api.HostsRequest
 	if jc.Decode(&req) != nil {

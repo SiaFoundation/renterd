@@ -116,3 +116,11 @@ func (s *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api
 		return tx.RecordPriceTables(ctx, priceTableUpdate)
 	})
 }
+
+func (s *SQLStore) UsableHosts(ctx context.Context, offset, limit int) (hosts []api.HostInfo, err error) {
+	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		hosts, err = tx.UsableHosts(ctx, offset, limit)
+		return err
+	})
+	return
+}

@@ -102,6 +102,11 @@ type (
 		MaxLastScan     TimeRFC3339
 		Offset          int
 	}
+
+	UsableHostOptions struct {
+		Limit  int
+		Offset int
+	}
 )
 
 type (
@@ -119,6 +124,11 @@ type (
 		StoredData        uint64               `json:"storedData"`
 		ResolvedAddresses []string             `json:"resolvedAddresses"`
 		Subnets           []string             `json:"subnets"`
+	}
+
+	HostInfo struct {
+		PublicKey  types.PublicKey `json:"publicKey"`
+		SiamuxAddr string          `json:"siamuxAddr"`
 	}
 
 	HostInteractions struct {

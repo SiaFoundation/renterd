@@ -1242,6 +1242,10 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) UsableHosts(ctx context.Context, offset, limit int) ([]api.HostInfo, error) {
+	return ssql.UsableHosts(ctx, tx, offset, limit)
+}
+
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
 	return ssql.WalletEvents(ctx, tx.Tx, offset, limit)
 }

@@ -446,6 +446,99 @@ func TestHosts(t *testing.T) {
 	}
 }
 
+func TestUsableHosts(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+	ctx := context.Background()
+
+	// add autopilot
+	err := ss.UpdateAutopilot(context.Background(), api.Autopilot{ID: api.DefaultAutopilotID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare hosts & contracts
+	//
+	// h1: usable
+	// h2: usable - best one
+	// h3: not usable - blocked
+	// h4: not usable - no host check
+	// h5: not usable - no contract
+	var hks []types.PublicKey
+	for i := 1; i <= 5; i++ {
+		// add host
+		hk := types.PublicKey{byte(i)}
+		addr := fmt.Sprintf("foo.com:100%d", i)
+		err := ss.addCustomTestHost(hk, addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hks = append(hks, hk)
+
+		// add host check
+		if i != 4 {
+			hc := newTestHostCheck()
+			if i == 2 {
+				hc.ScoreBreakdown.Age = .2
+			}
+			err = ss.UpdateHostCheck(context.Background(), api.DefaultAutopilotID, hk, hc)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// add contract
+		if i != 5 {
+			_, err = ss.addTestContract(types.FileContractID{byte(i)}, hk)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// block host
+		if i == 3 {
+			err = ss.UpdateHostBlocklistEntries(context.Background(), []string{addr}, nil, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// set siamux port in settings
+	_, err = ss.DB().Exec(context.Background(), "UPDATE hosts SET settings = ? WHERE 1=1", sql.HostSettings(rhpv2.HostSettings{SiaMuxPort: "9983"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert h1 and h2 are usable and ordered by score
+	hosts, err := ss.UsableHosts(ctx, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != hks[1] || hosts[1].PublicKey != hks[0] {
+		t.Fatal("unexpected", hosts)
+	} else if hosts[0].SiamuxAddr != "foo.com:9983" || hosts[1].SiamuxAddr != "foo.com:9983" {
+		t.Fatal("unexpected", hosts)
+	}
+
+	// assert offset and limit
+	hosts, err = ss.UsableHosts(ctx, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != hks[0] {
+		t.Fatal("unexpected", hosts)
+	}
+	hosts, err = ss.UsableHosts(ctx, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 0 {
+		t.Fatal("unexpected", len(hosts))
+	}
+}
+
 // TestRecordScan is a test for recording scans.
 func TestRecordScan(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)

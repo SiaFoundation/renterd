@@ -2159,6 +2159,92 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 	return
 }
 
+func UsableHosts(ctx context.Context, tx sql.Tx, offset, limit int) ([]api.HostInfo, error) {
+	// handle input parameters
+	if offset < 0 {
+		return nil, ErrNegativeOffset
+	} else if limit == 0 || limit == -1 {
+		limit = math.MaxInt64
+	}
+
+	// only include allowed hosts
+	var whereExprs []string
+	var hasAllowlist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
+		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
+	} else if hasAllowlist {
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+
+	// exclude blocked hosts
+	var hasBlocklist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
+		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
+	} else if hasBlocklist {
+		whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+
+	// fetch autopilot
+	var autopilotID int64
+	if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", api.DefaultAutopilotID).Scan(&autopilotID); err != nil {
+		return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
+	}
+
+	// only include usable hosts
+	whereExprs = append(whereExprs, `
+EXISTS (
+	SELECT 1
+	FROM hosts h2
+	INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND hc.db_autopilot_id = ? AND h2.id = h.id
+	WHERE
+		hc.usability_blocked = 0 AND
+		hc.usability_offline = 0 AND
+		hc.usability_low_score = 0 AND
+		hc.usability_redundant_ip = 0 AND
+		hc.usability_gouging = 0 AND
+		hc.usability_not_accepting_contracts = 0 AND
+		hc.usability_not_announced = 0 AND
+		hc.usability_not_completing_scan = 0
+)`)
+
+	// query hosts
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+	SELECT
+	h.public_key,
+	COALESCE(h.net_address, ""),
+	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+	FROM hosts h
+	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
+	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
+	WHERE %s
+	GROUP by h.id
+	ORDER BY hc.score_age * hc.score_collateral * hc.score_interactions * hc.score_storage_remaining * hc.score_uptime * hc.score_version * hc.score_prices DESC
+	LIMIT ? OFFSET ?`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []api.HostInfo
+	for rows.Next() {
+		var hk PublicKey
+		var addr, port string
+		err := rows.Scan(&hk, &addr, &port)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil || host == "" {
+			continue
+		}
+		hosts = append(hosts, api.HostInfo{
+			PublicKey:  types.PublicKey(hk),
+			SiamuxAddr: net.JoinHostPort(host, port),
+		})
+	}
+	return hosts, nil
+}
+
 func WalletEvents(ctx context.Context, tx sql.Tx, offset, limit int) (events []wallet.Event, _ error) {
 	if limit == 0 || limit == -1 {
 		limit = math.MaxInt64
