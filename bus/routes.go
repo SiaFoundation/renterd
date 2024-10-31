@@ -810,7 +810,7 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 	if b.isPassedV2AllowHeight() {
 		panic("not implemented")
 	} else {
-		revision, err := b.rhp3.Revision(jc.Request.Context(), fcid, contract.HostKey, contract.SiamuxAddr)
+		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, contract.SiamuxAddr)
 		if jc.Check("failed to fetch revision", err) != nil {
 			return
 		}
