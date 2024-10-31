@@ -1659,10 +1659,28 @@ func TestUploadPacking(t *testing.T) {
 	// upload 2 more files which are half a slab each to test filling up a slab
 	// exactly.
 	data4 := make([]byte, slabSize/2)
-	data5 := make([]byte, slabSize/2)
 	uploadDownload("file4", data4)
-	uploadDownload("file5", data5)
 	download("file4", data4, 0, int64(len(data4)))
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buffers, err := b.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, buffer := range buffers {
+			if buffer.Locked {
+				return errors.New("buffer locked")
+			}
+		}
+		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), test.ContractSet, 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) > 0 {
+			return errors.New("packed slabs left")
+		}
+		return nil
+	})
+	data5 := make([]byte, slabSize/2)
+	uploadDownload("file5", data5)
 
 	// assert number of objects
 	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
@@ -1673,7 +1691,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
-	tt.Retry(60, time.Second, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
@@ -2593,6 +2611,123 @@ func TestHostScan(t *testing.T) {
 	tt.OK(err)
 	if len(toScan) != 1 {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
+	}
+}
+
+// TestDownloadAllHosts makes sure we try to download sectors, from all hosts
+// that a sector is stored on.
+func TestDownloadAllHosts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// get rid of redundancy
+	rs := test.RedundancySettings
+	rs.MinShards = rs.TotalShards
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         rs.TotalShards,
+		uploadPacking: false, // make sure data is uploaded
+	})
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// update redundancy settings
+	us, err := b.UploadSettings(context.Background())
+	us.Redundancy = rs
+	tt.OK(err)
+	tt.OK(b.UpdateUploadSettings(context.Background(), us))
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload the data
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
+
+	// fetch object
+	obj, err := cluster.Bus.Object(context.Background(), testBucket, path, api.GetObjectOptions{})
+	tt.OK(err)
+
+	// build used hosts
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, s := range obj.Object.Slabs {
+		for _, ss := range s.Shards {
+			for hk := range ss.Contracts {
+				usedHosts[hk] = struct{}{}
+			}
+		}
+	}
+	if len(usedHosts) != rs.TotalShards {
+		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
+	}
+
+	// add a host
+	cluster.AddHosts(1)
+
+	// grab random used host
+	var randomHost string
+	for _, host := range cluster.hosts {
+		if _, used := usedHosts[host.PublicKey()]; used {
+			randomHost = host.settings.Settings().NetAddress
+			break
+		}
+	}
+
+	// add it to the blocklist
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+
+	// wait until we migrated away from that host
+	var newHost types.PublicKey
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		obj, err := cluster.Bus.Object(context.Background(), testBucket, path, api.GetObjectOptions{})
+		tt.OK(err)
+		for _, s := range obj.Object.Slabs {
+			for _, ss := range s.Shards {
+				for hk := range ss.Contracts {
+					if _, used := usedHosts[hk]; !used {
+						newHost = hk
+						return nil
+					}
+				}
+			}
+		}
+		return errors.New("no migration took place")
+	})
+
+	// download the object
+	dst := new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, testBucket, path, api.DownloadObjectOptions{}))
+	if !bytes.Equal(dst.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	// block the new host but unblock the old one
+	for _, host := range cluster.hosts {
+		if host.PublicKey() == newHost {
+			tt.OK(b.UpdateHostBlocklist(context.Background(), []string{host.settings.Settings().NetAddress}, []string{randomHost}, false))
+		}
+	}
+
+	// gouge prices on the new host
+	for _, host := range cluster.hosts {
+		if host.PublicKey() == newHost {
+			settings := host.settings.Settings()
+			settings.StoragePrice = types.Siacoins(1e3)
+			tt.OK(host.UpdateSettings(settings))
+		}
+	}
+
+	// download the object
+	dst = new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, testBucket, path, api.DownloadObjectOptions{}))
+	if !bytes.Equal(dst.Bytes(), data) {
+		t.Fatal("data mismatch")
 	}
 }
 

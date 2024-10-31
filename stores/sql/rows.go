@@ -14,6 +14,7 @@ type ContractRow struct {
 	FCID    FileContractID
 	HostID  *int64
 	HostKey PublicKey
+	V2      bool
 
 	// state fields
 	ArchivalReason NullableString
@@ -46,7 +47,7 @@ type ContractRow struct {
 
 func (r *ContractRow) Scan(s Scanner) error {
 	return s.Scan(
-		&r.FCID, &r.HostID, &r.HostKey,
+		&r.FCID, &r.HostID, &r.HostKey, &r.V2,
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
@@ -79,6 +80,7 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 		ID:      types.FileContractID(r.FCID),
 		HostIP:  r.NetAddress,
 		HostKey: types.PublicKey(r.HostKey),
+		V2:      r.V2,
 
 		ContractPrice:      types.Currency(r.ContractPrice),
 		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
