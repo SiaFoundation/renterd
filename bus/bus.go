@@ -442,7 +442,6 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,

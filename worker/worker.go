@@ -94,7 +94,6 @@ type (
 	}
 
 	HostStore interface {
-		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -271,45 +270,6 @@ func (w *Worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	// wait until they're done
 	wg.Wait()
 	return
-}
-
-func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
-	// decode the request
-	var rptr api.RHPPriceTableRequest
-	if jc.Decode(&rptr) != nil {
-		return
-	}
-
-	// defer interaction recording before applying timeout to make sure we still
-	// record the failed update if it timed out
-	var err error
-	var hpt api.HostPriceTable
-	defer func() {
-		if shouldRecordPriceTable(err) {
-			w.bus.RecordPriceTables(jc.Request.Context(), []api.HostPriceTableUpdate{
-				{
-					HostKey:    rptr.HostKey,
-					Success:    err == nil,
-					Timestamp:  time.Now(),
-					PriceTable: hpt,
-				},
-			})
-		}
-	}()
-
-	// apply timeout
-	ctx := jc.Request.Context()
-	if rptr.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(rptr.Timeout))
-		defer cancel()
-	}
-
-	hpt, err = w.Host(rptr.HostKey, types.FileContractID{}, rptr.SiamuxAddr).PriceTableUnpaid(ctx)
-	if jc.Check("could not get price table", err) != nil {
-		return
-	}
-	jc.Encode(hpt)
 }
 
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
@@ -925,8 +885,7 @@ func (w *Worker) Handler() http.Handler {
 
 		"GET    /memory": w.memoryGET,
 
-		"GET    /rhp/contracts":  w.rhpContractsHandlerGET,
-		"POST   /rhp/pricetable": w.rhpPriceTableHandler,
+		"GET    /rhp/contracts": w.rhpContractsHandlerGET,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,

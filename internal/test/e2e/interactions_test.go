@@ -14,7 +14,6 @@ func TestInteractions(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
-	w := cluster.Worker
 	tt := cluster.tt
 
 	// add a host
@@ -47,9 +46,6 @@ func TestInteractions(t *testing.T) {
 	// assert price table gets updated
 	var ptUpdates int
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		// fetch pricetable (this registers host interactions)
-		tt.OKAll(w.RHPPriceTable(context.Background(), h1.PublicKey(), h.Settings.SiamuxAddr(), 0))
-
 		// fetch the host
 		h, err := b.Host(context.Background(), h1.PublicKey())
 		tt.OK(err)
