@@ -222,8 +222,8 @@ var (
 			{
 				ID: "00018_directory_buckets",
 				Migrate: func(tx Tx) error {
-					// recreate the table, erasing all its contents
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_recreate_directories", log); err != nil {
+					// recreate the directories table
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_directory_buckets_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
@@ -284,7 +284,8 @@ var (
 						}
 					}
 
-					return nil
+					// re-add the foreign key check (only for MySQL)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_directory_buckets_2", log)
 				},
 			},
 		}
