@@ -8,7 +8,7 @@ import (
 )
 
 type contract struct {
-	Revision *api.ContractLatestRevisionResponse
+	Revision *api.Revision
 	api.ContractMetadata
 }
 

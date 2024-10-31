@@ -214,7 +214,7 @@ func minRemainingCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, 
 	return minCollateral
 }
 
-func isUpForRenewal(cfg api.AutopilotConfig, r api.ContractLatestRevisionResponse, blockHeight uint64) (shouldRenew, secondHalf bool) {
+func isUpForRenewal(cfg api.AutopilotConfig, r api.Revision, blockHeight uint64) (shouldRenew, secondHalf bool) {
 	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
 	return

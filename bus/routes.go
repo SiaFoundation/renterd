@@ -814,9 +814,8 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 		if jc.Check("failed to fetch revision", err) != nil {
 			return
 		}
-		jc.Encode(api.ContractLatestRevisionResponse{
+		jc.Encode(api.Revision{
 			ContractID: revision.ParentID,
-			V2:         contract.V2,
 			V2FileContract: types.V2FileContract{
 				Capacity:         revision.Filesize, // same as size for v1
 				Filesize:         revision.Filesize,

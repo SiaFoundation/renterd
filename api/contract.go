@@ -219,3 +219,14 @@ func (cm ContractMetadata) InSet(set string) bool {
 	}
 	return false
 }
+
+type (
+	Revision struct {
+		ContractID types.FileContractID `json:"contractID"`
+		types.V2FileContract
+	}
+)
+
+func (rev *Revision) EndHeight() uint64 {
+	return rev.ProofHeight
+}
