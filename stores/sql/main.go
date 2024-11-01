@@ -17,6 +17,7 @@ import (
 	dsql "database/sql"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -2212,7 +2213,10 @@ EXISTS (
 	SELECT
 	h.public_key,
 	COALESCE(h.net_address, ""),
-	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
+	h.price_table,
+	h.price_table_expiry,
+	h.settings
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
@@ -2229,7 +2233,10 @@ EXISTS (
 	for rows.Next() {
 		var hk PublicKey
 		var addr, port string
-		err := rows.Scan(&hk, &addr, &port)
+		var pt PriceTable
+		var hs HostSettings
+		var pte dsql.NullTime
+		err := rows.Scan(&hk, &addr, &port, &pt, &pte, &hs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -2240,6 +2247,8 @@ EXISTS (
 		hosts = append(hosts, api.HostInfo{
 			PublicKey:  types.PublicKey(hk),
 			SiamuxAddr: net.JoinHostPort(host, port),
+			Prices:     api.HostPriceTable{HostPriceTable: rhpv3.HostPriceTable(pt), Expiry: pte.Time},
+			Settings:   rhpv2.HostSettings(hs),
 		})
 	}
 	return hosts, nil
