@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.uber.org/zap"
@@ -129,11 +130,46 @@ func UpdateFailedContracts(ctx context.Context, tx sql.Tx, blockHeight uint64, l
 	return nil
 }
 
-func UpdateWalletStateElements(ctx context.Context, tx sql.Tx, elements []types.StateElement) error {
-	if len(elements) == 0 {
+// UpdateWalletSiacoinElementProofs updates the proofs of all state elements
+// affected by the update. ProofUpdater.UpdateElementProof must be called
+// for each state element in the database.
+func UpdateWalletSiacoinElementProofs(ctx context.Context, tx sql.Tx, updater wallet.ProofUpdater) error {
+	se, err := getSiacoinStateElements(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("failed to get siacoin state elements: %w", err)
+	} else if len(se) == 0 {
 		return nil
 	}
+	for i := range se {
+		ele := types.StateElement{
+			LeafIndex:   se[i].LeafIndex,
+			MerkleProof: se[i].MerkleProof.Hashes,
+		}
+		updater.UpdateElementProof(&ele)
+		se[i].LeafIndex = ele.LeafIndex
+		se[i].MerkleProof.Hashes = ele.MerkleProof
+	}
+	return updateSiacoinStateElements(ctx, tx, se)
+}
 
+func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []StateElement, err error) {
+	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof FROM wallet_outputs")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch state elements: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		el, err := scanStateElement(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan state element: %w", err)
+		}
+		elements = append(elements, el)
+	}
+	return elements, rows.Err()
+}
+
+func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []StateElement) error {
 	updateStmt, err := tx.Prepare(ctx, "UPDATE wallet_outputs SET leaf_index = ?, merkle_proof= ?  WHERE output_id = ?")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to update state elements: %w", err)
@@ -141,30 +177,11 @@ func UpdateWalletStateElements(ctx context.Context, tx sql.Tx, elements []types.
 	defer updateStmt.Close()
 
 	for _, el := range elements {
-		if _, err := updateStmt.Exec(ctx, el.LeafIndex, MerkleProof{Hashes: el.MerkleProof}, Hash256(el.ID)); err != nil {
+		if _, err := updateStmt.Exec(ctx, el.LeafIndex, el.MerkleProof, el.ID); err != nil {
 			return fmt.Errorf("failed to update state element '%v': %w", el.ID, err)
 		}
 	}
-
 	return nil
-}
-
-func WalletStateElements(ctx context.Context, tx sql.Tx) ([]types.StateElement, error) {
-	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof FROM wallet_outputs")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch state elements: %w", err)
-	}
-	defer rows.Close()
-
-	var elements []types.StateElement
-	for rows.Next() {
-		if el, err := scanStateElement(rows); err != nil {
-			return nil, fmt.Errorf("failed to scan state element: %w", err)
-		} else {
-			elements = append(elements, el)
-		}
-	}
-	return elements, nil
 }
 
 func contractNotFoundErr(fcid types.FileContractID) error {

@@ -338,10 +338,6 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	return nil
 }
 
-func (c chainUpdateTx) UpdateWalletStateElements(elements []types.StateElement) error {
-	return ssql.UpdateWalletStateElements(c.ctx, c.tx, elements)
-}
-
-func (c chainUpdateTx) WalletStateElements() ([]types.StateElement, error) {
-	return ssql.WalletStateElements(c.ctx, c.tx)
+func (c chainUpdateTx) UpdateWalletSiacoinElementProofs(updater wallet.ProofUpdater) error {
+	return ssql.UpdateWalletSiacoinElementProofs(c.ctx, c.tx, updater)
 }
