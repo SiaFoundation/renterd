@@ -313,8 +313,6 @@ func (a *AccountMgr) refillAccounts() {
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch usable hosts: %v", err))
 		return
-	} else if len(hosts) == 0 {
-		return
 	}
 
 	// refill accounts in separate goroutines

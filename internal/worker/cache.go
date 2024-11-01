@@ -224,6 +224,9 @@ func (c *cache) isReady() bool {
 }
 
 func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
+	// invalidate usable hosts cache
+	c.cache.Invalidate(cacheKeyUsableHosts)
+
 	// return early if the doesn't have gouging params to update
 	value, found, _ := c.cache.Get(cacheKeyGougingParams)
 	if !found {

@@ -717,6 +717,9 @@ func (c *TestCluster) sync() {
 func (c *TestCluster) WaitForAccounts() []api.Account {
 	c.tt.Helper()
 
+	// mine a block (ensures worker cache gets invalidated)
+	c.MineBlocks(1)
+
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})
 	for _, host := range c.hosts {
