@@ -60,7 +60,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
 	// latest revision
-	rev, err := b.rhp3.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
 	if jc.Check("failed to fetch contract revision", err) != nil {
 		return
 	}
@@ -72,7 +72,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// price table
-	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+	pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
 	if jc.Check("failed to fetch price table", err) != nil {
 		return
 	}
@@ -92,7 +92,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 
 	// fund the account
-	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
+	err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
 	if jc.Check("failed to fund account", err) != nil {
 		return
 	}
@@ -170,9 +170,7 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
-	jc.Encode(api.ConsensusNetwork{
-		Name: b.cm.TipState().Network.Name,
-	})
+	jc.Encode(*b.cm.TipState().Network)
 }
 
 func (b *Bus) postSystemSQLite3BackupHandler(jc jape.Context) {
@@ -583,6 +581,44 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	}
 }
 
+func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
+	// only scan hosts if we are online
+	if len(b.s.Peers()) == 0 {
+		jc.Error(errors.New("not connected to the internet"), http.StatusServiceUnavailable)
+		return
+	}
+
+	// decode the request
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	var rsr api.HostScanRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	// fetch host
+	h, err := b.store.Host(jc.Request.Context(), hk)
+	if jc.Check("failed to fetch host", err) != nil {
+		return
+	}
+
+	// scan host
+	var errStr string
+	settings, priceTable, elapsed, err := b.scanHost(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	jc.Encode(api.HostScanResponse{
+		Ping:       api.DurationMS(elapsed),
+		PriceTable: priceTable,
+		ScanError:  errStr,
+		Settings:   settings,
+	})
+}
+
 func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	var hostKey types.PublicKey
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
@@ -590,16 +626,6 @@ func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	}
 	err := b.store.ResetLostSectors(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't reset lost sectors", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
-	var req api.HostsScanRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if jc.Check("failed to record scans", b.store.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
 		return
 	}
 }
@@ -741,7 +767,7 @@ func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
 		return
 	} else if jc.Check("could not add contracts to set", b.store.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
-	} else {
+	} else if len(req.ToAdd)+len(req.ToRemove) > 0 {
 		b.broadcastAction(webhooks.Event{
 			Module: api.ModuleContractSet,
 			Event:  api.EventUpdate,
@@ -854,7 +880,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, rk, gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+	rev, spending, pruned, remaining, err := b.rhp2Client.PruneContract(pruneCtx, rk, gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
 		indices, err := b.store.PrunableContractRoots(ctx, fcid, roots)
 		if err != nil {
 			return nil, err
@@ -2321,7 +2347,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
 	// fetch host settings
-	settings, err := b.rhp2.Settings(ctx, rfr.HostKey, rfr.HostIP)
+	settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
 	if jc.Check("couldn't fetch host settings", err) != nil {
 		return
 	}

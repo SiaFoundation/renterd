@@ -14,7 +14,6 @@ import (
 	crhpv2 "go.sia.tech/core/rhp/v2"
 	crhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -109,8 +108,6 @@ type Host struct {
 
 	s            *syncer.Syncer
 	syncerCancel context.CancelFunc
-	cm           *chain.Manager
-	chainDB      *coreutils.BoltChainDB
 
 	store     *sqlite.Store
 	wallet    *wallet.SingleAddressWallet
@@ -160,7 +157,6 @@ func (h *Host) Close() error {
 	h.store.Close()
 	h.syncerCancel()
 	h.s.Close()
-	h.chainDB.Close()
 	return nil
 }
 
@@ -220,20 +216,10 @@ func (h *Host) SyncerAddr() string {
 }
 
 // NewHost initializes a new test host.
-func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block) (*Host, error) {
+func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *consensus.Network, genesisBlock types.Block) (*Host, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create dir: %w", err)
 	}
-	chainDB, err := coreutils.OpenBoltChainDB(filepath.Join(dir, "chain.db"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chaindb: %w", err)
-	}
-	dbStore, tipState, err := chain.NewDBStore(chainDB, network, genesisBlock)
-	if err != nil {
-		return nil, err
-	}
-	cm := chain.NewManager(dbStore, tipState)
-
 	l, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create syncer listener: %w", err)
@@ -283,7 +269,7 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, settings.WithValidateNetAddress(false))
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, storage, settings.WithValidateNetAddress(false))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
@@ -296,13 +282,13 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
-	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage)
+	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv2 session handler: %w", err)
 	}
 	go rhpv2.Serve()
 
-	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings)
+	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv3 session handler: %w", err)
 	}
@@ -314,8 +300,6 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 
 		s:            s,
 		syncerCancel: syncerCancel,
-		cm:           cm,
-		chainDB:      chainDB,
 
 		store:     db,
 		wallet:    wallet,

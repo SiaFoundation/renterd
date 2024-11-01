@@ -9,7 +9,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/gotd/contrib/http_range"
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
@@ -29,6 +27,7 @@ import (
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
@@ -95,7 +94,6 @@ type (
 	}
 
 	HostStore interface {
-		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
@@ -167,12 +165,12 @@ type Worker struct {
 
 	rhp2Client *rhp2.Client
 	rhp3Client *rhp3.Client
+	rhp4Client *rhp4.Client
 
-	allowPrivateIPs bool
-	id              string
-	bus             Bus
-	masterKey       utils.MasterKey
-	startTime       time.Time
+	id        string
+	bus       Bus
+	masterKey utils.MasterKey
+	startTime time.Time
 
 	eventSubscriber iworker.EventSubscriber
 	downloadManager *downloadManager
@@ -221,40 +219,6 @@ func (w *Worker) registerAlert(a alerts.Alert) {
 		w.logger.Errorf("failed to register alert, err: %v", err)
 	}
 	cancel()
-}
-
-func (w *Worker) rhpScanHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the request
-	var rsr api.RHPScanRequest
-	if jc.Decode(&rsr) != nil {
-		return
-	}
-
-	// only scan hosts if we are online
-	peers, err := w.bus.SyncerPeers(ctx)
-	if jc.Check("failed to fetch peers from bus", err) != nil {
-		return
-	}
-	if len(peers) == 0 {
-		jc.Error(errors.New("not connected to the internet"), http.StatusServiceUnavailable)
-		return
-	}
-
-	// scan host
-	var errStr string
-	settings, priceTable, elapsed, err := w.scanHost(ctx, time.Duration(rsr.Timeout), rsr.HostKey, rsr.HostIP)
-	if err != nil {
-		errStr = err.Error()
-	}
-
-	jc.Encode(api.RHPScanResponse{
-		Ping:       api.DurationMS(elapsed),
-		PriceTable: priceTable,
-		ScanError:  errStr,
-		Settings:   settings,
-	})
 }
 
 func (w *Worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
@@ -919,7 +883,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:                  a,
-		allowPrivateIPs:         cfg.AllowPrivateIPs,
 		contractLockingDuration: cfg.ContractLockTimeout,
 		cache:                   iworker.NewCache(b, l),
 		dialer:                  dialer,
@@ -930,6 +893,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		logger:                  l.Sugar(),
 		rhp2Client:              rhp2.New(dialer, l),
 		rhp3Client:              rhp3.New(dialer, l),
+		rhp4Client:              rhp4.New(dialer),
 		startTime:               time.Now(),
 		uploadingPackedSlabs:    make(map[string]struct{}),
 		shutdownCtx:             shutdownCtx,
@@ -962,7 +926,6 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /memory": w.memoryGET,
 
 		"GET    /rhp/contracts":  w.rhpContractsHandlerGET,
-		"POST   /rhp/scan":       w.rhpScanHandler,
 		"POST   /rhp/pricetable": w.rhpPriceTableHandler,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
@@ -1011,114 +974,6 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 
 	// shutdown the subscriber
 	return w.eventSubscriber.Shutdown(ctx)
-}
-
-func (w *Worker) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
-	logger := w.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
-
-	// prepare a helper to create a context for scanning
-	timeoutCtx := func() (context.Context, context.CancelFunc) {
-		if timeout > 0 {
-			return context.WithTimeout(ctx, timeout)
-		}
-		return ctx, func() {}
-	}
-
-	// prepare a helper for scanning
-	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
-		// fetch the host settings
-		start := time.Now()
-		scanCtx, cancel := timeoutCtx()
-		settings, err := w.rhp2Client.Settings(scanCtx, hostKey, hostIP)
-		cancel()
-		if err != nil {
-			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
-		}
-
-		// fetch the host pricetable
-		scanCtx, cancel = timeoutCtx()
-		pt, err := w.rhp3Client.PriceTableUnpaid(scanCtx, hostKey, settings.SiamuxAddr())
-		cancel()
-		if err != nil {
-			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
-		}
-		return settings, pt.HostPriceTable, time.Since(start), nil
-	}
-
-	// resolve host ip, don't scan if the host is on a private network or if it
-	// resolves to more than two addresses of the same type, if it fails for
-	// another reason the host scan won't have subnets
-	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
-	if errors.Is(err, utils.ErrHostTooManyAddresses) {
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-	} else if private && !w.allowPrivateIPs {
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
-	}
-
-	// scan: first try
-	settings, pt, duration, err := scan()
-	if err != nil {
-		logger = logger.With(zap.Error(err))
-
-		// scan: second try
-		select {
-		case <-ctx.Done():
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
-		case <-time.After(time.Second):
-		}
-		settings, pt, duration, err = scan()
-
-		logger = logger.With("elapsed", duration).With(zap.Error(err))
-		if err == nil {
-			logger.Info("successfully scanned host on second try")
-		} else if !isErrHostUnreachable(err) {
-			logger.Infow("failed to scan host")
-		}
-	}
-
-	// check if the scan failed due to a shutdown - shouldn't be necessary but
-	// just in case since recording a failed scan might have serious
-	// repercussions
-	select {
-	case <-ctx.Done():
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
-	default:
-	}
-
-	// record host scan - make sure this is interrupted by the request ctx and
-	// not the context with the timeout used to time out the scan itself.
-	// Otherwise scans that time out won't be recorded.
-	scanErr := w.bus.RecordHostScans(ctx, []api.HostScan{
-		{
-			HostKey:           hostKey,
-			PriceTable:        pt,
-			ResolvedAddresses: resolvedAddresses,
-
-			// NOTE: A scan is considered successful if both fetching the price
-			// table and the settings succeeded. Right now scanning can't fail
-			// due to a reason that is our fault unless we are offline. If that
-			// changes, we should adjust this code to account for that.
-			Success:   err == nil,
-			Settings:  settings,
-			Timestamp: time.Now(),
-		},
-	})
-	if scanErr != nil {
-		logger.Errorw("failed to record host scan", zap.Error(scanErr))
-	}
-	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
-	return settings, pt, duration, err
-}
-
-func isErrHostUnreachable(err error) bool {
-	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
-		utils.IsErr(err, context.DeadlineExceeded) ||
-		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
-		utils.IsErr(err, errors.New("no route to host")) ||
-		utils.IsErr(err, errors.New("no such host")) ||
-		utils.IsErr(err, errors.New("connection refused")) ||
-		utils.IsErr(err, errors.New("unknown port")) ||
-		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
 func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.Object, error) {
