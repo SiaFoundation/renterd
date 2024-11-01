@@ -17,6 +17,7 @@ import (
 	dsql "database/sql"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -2216,6 +2217,9 @@ EXISTS (
 	h.public_key,
 	COALESCE(h.net_address, ""),
 	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
+	h.price_table,
+	h.price_table_expiry,
+	h.settings,
 	MAX(c.fcid)
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
@@ -2233,8 +2237,11 @@ EXISTS (
 	for rows.Next() {
 		var hk PublicKey
 		var addr, port string
+		var pt PriceTable
+		var hs HostSettings
+		var pte dsql.NullTime
 		var fcid FileContractID
-		err := rows.Scan(&hk, &addr, &port, &fcid)
+		err := rows.Scan(&hk, &addr, &port, &pt, &pte, &hs, &fcid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -2246,6 +2253,8 @@ EXISTS (
 			ContractID: types.FileContractID(fcid),
 			PublicKey:  types.PublicKey(hk),
 			SiamuxAddr: net.JoinHostPort(host, port),
+			Prices:     api.HostPriceTable{HostPriceTable: rhpv3.HostPriceTable(pt), Expiry: pte.Time},
+			Settings:   rhpv2.HostSettings(hs),
 		})
 	}
 	return hosts, nil

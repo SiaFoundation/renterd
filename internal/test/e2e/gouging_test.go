@@ -10,7 +10,6 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
@@ -30,8 +29,16 @@ func TestGouging(t *testing.T) {
 	cluster.MineBlocks(cfg.Period + 1)
 
 	// add hosts
-	tt.OKAll(cluster.AddHostsBlocking(int(test.AutopilotConfig.Contracts.Amount)))
+	n := int(test.AutopilotConfig.Contracts.Amount)
+	tt.OKAll(cluster.AddHostsBlocking(n))
 	cluster.WaitForAccounts()
+
+	// assert all hosts are usable
+	h, err := b.UsableHosts(context.Background(), api.UsableHostOptions{})
+	tt.OK(err)
+	if len(h) != n {
+		t.Fatal("unexpected number of hosts")
+	}
 
 	// assert that the current period is greater than the period
 	tt.Retry(10, time.Second, func() error {
@@ -62,27 +69,31 @@ func TestGouging(t *testing.T) {
 		t.Fatal("unexpected data")
 	}
 
-	// update the gouging settings to limit the max storage price to 100H
+	// fetch current host settings
+	settings := cluster.hosts[0].settings.Settings()
+
+	// update host settings
+	updated := settings
+	updated.StoragePrice = updated.StoragePrice.Mul64(2)
+	tt.OK(cluster.hosts[0].UpdateSettings(updated))
+
+	// update gouging settings
 	gs := test.GougingSettings
-	gs.MaxStoragePrice = types.NewCurrency64(100)
+	gs.MaxStoragePrice = settings.StoragePrice
 	if err := b.UpdateGougingSettings(context.Background(), gs); err != nil {
 		t.Fatal(err)
 	}
 
-	// fetch current contract set
-	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: cfg.Set})
-	tt.OK(err)
-
-	// update one host's settings so it's gouging
-	hk := contracts[0].HostKey
-	host := hostsMap[hk.String()]
-	settings := host.settings.Settings()
-	settings.StoragePrice = types.NewCurrency64(101) // gouging
-	tt.OK(host.UpdateSettings(settings))
-
 	// make sure the price table expires so the worker is forced to fetch it
 	// again, this is necessary for the host to be considered price gouging
 	time.Sleep(defaultHostSettings.PriceTableValidity)
+
+	// assert all hosts are usable
+	h, err = b.UsableHosts(context.Background(), api.UsableHostOptions{})
+	tt.OK(err)
+	if len(h) != n-1 {
+		t.Fatal("unexpected number of hosts", len(h))
+	}
 
 	// upload some data - should fail
 	tt.FailAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
@@ -90,7 +101,7 @@ func TestGouging(t *testing.T) {
 	// update all host settings so they're gouging
 	for _, h := range cluster.hosts {
 		settings := h.settings.Settings()
-		settings.StoragePrice = types.NewCurrency64(101)
+		settings.StoragePrice = settings.StoragePrice.Mul64(2)
 		if err := h.UpdateSettings(settings); err != nil {
 			t.Fatal(err)
 		}
