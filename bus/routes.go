@@ -501,7 +501,13 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	hosts, err := b.store.UsableHosts(jc.Request.Context(), offset, limit)
+	cs, err := b.consensusState(jc.Request.Context())
+	if jc.Check("couldn't fetch consensus state", err) != nil {
+		return
+	}
+	minWindowStart := cs.BlockHeight + b.revisionSubmissionBuffer
+
+	hosts, err := b.store.UsableHosts(jc.Request.Context(), minWindowStart, offset, limit)
 	if jc.Check("couldn't fetch hosts", err) != nil {
 		return
 	}

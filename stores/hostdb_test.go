@@ -511,7 +511,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// assert h1 and h2 are usable and ordered by score
-	hosts, err := ss.UsableHosts(ctx, 0, -1)
+	hosts, err := ss.UsableHosts(ctx, 0, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
@@ -523,7 +523,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// assert offset and limit
-	hosts, err = ss.UsableHosts(ctx, 1, 1)
+	hosts, err = ss.UsableHosts(ctx, 0, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -531,7 +531,21 @@ func TestUsableHosts(t *testing.T) {
 	} else if hosts[0].PublicKey != hks[0] {
 		t.Fatal("unexpected", hosts)
 	}
-	hosts, err = ss.UsableHosts(ctx, 2, 1)
+	hosts, err = ss.UsableHosts(ctx, 0, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 0 {
+		t.Fatal("unexpected", len(hosts))
+	}
+
+	// assert minWindowStart is taken into account
+	hosts, err = ss.UsableHosts(ctx, 9, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts))
+	}
+	hosts, err = ss.UsableHosts(ctx, 10, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {

@@ -246,3 +246,11 @@ func (cm ContractMetadata) InSet(set string) bool {
 	}
 	return false
 }
+
+func (cm ContractMetadata) HostInfo() HostInfo {
+	return HostInfo{
+		PublicKey:  cm.HostKey,
+		ContractID: cm.ID,
+		SiamuxAddr: cm.SiamuxAddr,
+	}
+}

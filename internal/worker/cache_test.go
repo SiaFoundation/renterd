@@ -20,11 +20,15 @@ type mockBus struct {
 	gougingParams api.GougingParams
 }
 
-func (m *mockBus) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
-	return m.contracts, nil
-}
 func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) {
 	return m.gougingParams, nil
+}
+
+func (m *mockBus) UsableHosts(ctx context.Context, opts api.UsableHostOptions) (hosts []api.HostInfo, _ error) {
+	for _, c := range m.contracts {
+		hosts = append(hosts, c.HostInfo())
+	}
+	return
 }
 
 type mockEventSubscriber struct {
@@ -78,11 +82,11 @@ func TestWorkerCache(t *testing.T) {
 	c.Subscribe(m)
 
 	// assert using cache before it's ready prints a warning
-	contracts, err := c.DownloadContracts(context.Background())
+	hosts, err := c.UsableHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 3 {
-		t.Fatal("expected 3 contracts, got", len(contracts))
+	} else if len(hosts) != 3 {
+		t.Fatal("expected 3 hosts, got", len(hosts))
 	}
 	gp, err := c.GougingParams(context.Background())
 	if err != nil {
@@ -105,8 +109,8 @@ func TestWorkerCache(t *testing.T) {
 	// close the ready channel
 	close(m.readyChan)
 
-	// fetch contracts & gouging params so they're cached
-	_, err = c.DownloadContracts(context.Background())
+	// fetch usable hosts & gouging params so they're cached
+	_, err = c.UsableHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,25 +121,25 @@ func TestWorkerCache(t *testing.T) {
 
 	// update bus contracts & expire cache entry manually
 	b.contracts = append(b.contracts, testContractMetadata(4))
-	contracts, err = c.DownloadContracts(context.Background())
+	hosts, err = c.UsableHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 3 {
-		t.Fatal("expected 3 contracts, got", len(contracts))
+	} else if len(hosts) != 3 {
+		t.Fatal("expected 3 hosts, got", len(hosts))
 	}
 	mc.mu.Lock()
-	mc.items[cacheKeyDownloadContracts].expiry = time.Now().Add(-1 * time.Minute)
+	mc.items[cacheKeyUsableHosts].expiry = time.Now().Add(-1 * time.Minute)
 	mc.mu.Unlock()
 
-	// fetch contracts again, assert we have 4 now and we printed a warning to indicate the cache entry was invalid
-	contracts, err = c.DownloadContracts(context.Background())
+	// fetch hosts again, assert we have 4 now and we printed a warning to indicate the cache entry was invalid
+	hosts, err = c.UsableHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 4 {
-		t.Fatal("expected 4 contracts, got", len(contracts))
+	} else if len(hosts) != 4 {
+		t.Fatal("expected 4 hosts, got", len(hosts))
 	} else if logs := observedLogs.FilterLevelExact(zap.WarnLevel); logs.Len() != 1 {
 		t.Fatal("expected 1 warning, got", logs.Len(), logs.All())
-	} else if lines := observedLogs.TakeAll(); !strings.Contains(lines[0].Message, errCacheOutdated.Error()) || !strings.Contains(lines[0].Message, cacheKeyDownloadContracts) {
+	} else if lines := observedLogs.TakeAll(); !strings.Contains(lines[0].Message, errCacheOutdated.Error()) || !strings.Contains(lines[0].Message, cacheKeyUsableHosts) {
 		t.Fatal("expected error message to contain 'cache is outdated', got", lines[0].Message)
 	}
 

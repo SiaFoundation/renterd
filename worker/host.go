@@ -17,10 +17,14 @@ import (
 )
 
 type (
+	SectorDownloader interface {
+		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
+		PublicKey() types.PublicKey
+	}
+
 	Host interface {
 		PublicKey() types.PublicKey
 
-		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
 		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
@@ -32,11 +36,21 @@ type (
 	}
 
 	HostManager interface {
-		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
+		Downloader(hk types.PublicKey, siamuxAddr string) SectorDownloader
+		Host(hi api.HostInfo) Host
 	}
 )
 
 type (
+	sectorDownloader struct {
+		hk         types.PublicKey
+		siamuxAddr string
+
+		acc  *worker.Account
+		pts  *priceTables
+		rhp3 *rhp3.Client
+	}
+
 	host struct {
 		hk         types.PublicKey
 		renterKey  types.PrivateKey
@@ -57,49 +71,33 @@ var (
 	_ HostManager = (*Worker)(nil)
 )
 
-func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
+func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) SectorDownloader {
+	return &sectorDownloader{
+		hk:         hk,
+		siamuxAddr: siamuxAddr,
+
+		acc:  w.accounts.ForHost(hk),
+		pts:  w.priceTables,
+		rhp3: w.rhp3Client,
+	}
+}
+
+func (w *Worker) Host(hi api.HostInfo) Host {
 	return &host{
 		client:                   w.rhp3Client,
-		hk:                       hk,
-		acc:                      w.accounts.ForHost(hk),
+		hk:                       hi.PublicKey,
+		acc:                      w.accounts.ForHost(hi.PublicKey),
 		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
-		logger:                   w.logger.Named(hk.String()[:4]),
-		fcid:                     fcid,
-		siamuxAddr:               siamuxAddr,
-		renterKey:                w.deriveRenterKey(hk),
+		logger:                   w.logger.Named(hi.PublicKey.String()[:4]),
+		fcid:                     hi.ContractID,
+		siamuxAddr:               hi.SiamuxAddr,
+		renterKey:                w.deriveRenterKey(hi.PublicKey),
 		priceTables:              w.priceTables,
 	}
 }
 
 func (h *host) PublicKey() types.PublicKey { return h.hk }
-
-func (h *host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
-	var amount types.Currency
-	return h.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
-		if err != nil {
-			return types.ZeroCurrency, err
-		}
-		hpt := pt.HostPriceTable
-		amount = uptc
-
-		// check for download gouging specifically
-		gc, err := GougingCheckerFromContext(ctx, overpay)
-		if err != nil {
-			return amount, err
-		}
-		if breakdown := gc.Check(nil, &hpt); breakdown.DownloadErr != "" {
-			return amount, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
-		}
-
-		cost, err := h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.ID(), h.acc.Key(), hpt)
-		if err != nil {
-			return amount, err
-		}
-		return amount.Add(cost), nil
-	})
-}
 
 func (h *host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
 	// fetch price table
@@ -242,3 +240,20 @@ func (h *host) priceTable(ctx context.Context, rev *types.FileContractRevision) 
 	}
 	return pt.HostPriceTable, cost, nil
 }
+
+func (d *sectorDownloader) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
+	return d.acc.WithWithdrawal(func() (types.Currency, error) {
+		pt, ptc, err := d.pts.fetch(ctx, d.hk, nil)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+
+		cost, err := d.rhp3.ReadSector(ctx, offset, length, root, w, d.hk, d.siamuxAddr, d.acc.ID(), d.acc.Key(), pt.HostPriceTable)
+		if err != nil {
+			return ptc, err
+		}
+		return ptc.Add(cost), nil
+	})
+}
+
+func (d *sectorDownloader) PublicKey() types.PublicKey { return d.hk }

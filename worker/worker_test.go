@@ -130,6 +130,17 @@ func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
 	return renewal
 }
 
+func (w *testWorker) UsableHosts() (hosts []api.HostInfo) {
+	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		w.tt.Fatal(err)
+	}
+	for _, md := range metadatas {
+		hosts = append(hosts, md.HostInfo())
+	}
+	return
+}
+
 func newTestWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   time.Second,

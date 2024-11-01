@@ -347,7 +347,7 @@ func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs Cont
 		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
-		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
+		host:      hm.Host(c.HostInfo()),
 		fcid:      c.ID,
 		endHeight: c.WindowEnd,
 		queue:     make([]*sectorUploadReq, 0),

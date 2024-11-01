@@ -2159,7 +2159,7 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 	return
 }
 
-func UsableHosts(ctx context.Context, tx sql.Tx, offset, limit int) ([]api.HostInfo, error) {
+func UsableHosts(ctx context.Context, tx sql.Tx, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error) {
 	// handle input parameters
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -2167,8 +2167,11 @@ func UsableHosts(ctx context.Context, tx sql.Tx, offset, limit int) ([]api.HostI
 		limit = math.MaxInt64
 	}
 
-	// only include allowed hosts
+	// only include contracts with a window start greater than the given value
 	var whereExprs []string
+	whereExprs = append(whereExprs, "c.window_start > ?")
+
+	// only include allowed hosts
 	var hasAllowlist bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
 		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
@@ -2212,14 +2215,15 @@ EXISTS (
 	SELECT
 	h.public_key,
 	COALESCE(h.net_address, ""),
-	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
+	MAX(c.fcid)
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
 	WHERE %s
 	GROUP by h.id
 	ORDER BY MAX(hc.score_age) * MAX(hc.score_collateral) * MAX(hc.score_interactions) * MAX(hc.score_storage_remaining) * MAX(hc.score_uptime) * MAX(hc.score_version) * MAX(hc.score_prices) DESC
-	LIMIT ? OFFSET ?`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID, limit, offset)
+	LIMIT ? OFFSET ?`, strings.Join(whereExprs, " AND ")), autopilotID, minWindowStart, autopilotID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -2229,7 +2233,8 @@ EXISTS (
 	for rows.Next() {
 		var hk PublicKey
 		var addr, port string
-		err := rows.Scan(&hk, &addr, &port)
+		var fcid FileContractID
+		err := rows.Scan(&hk, &addr, &port, &fcid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -2238,6 +2243,7 @@ EXISTS (
 			continue
 		}
 		hosts = append(hosts, api.HostInfo{
+			ContractID: types.FileContractID(fcid),
 			PublicKey:  types.PublicKey(hk),
 			SiamuxAddr: net.JoinHostPort(host, port),
 		})

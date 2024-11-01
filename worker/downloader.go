@@ -25,7 +25,7 @@ var (
 
 type (
 	downloader struct {
-		host Host
+		host SectorDownloader
 
 		statsDownloadSpeedBytesPerMS    *utils.DataPoints // keep track of this separately for stats (no decay is applied)
 		statsSectorDownloadEstimateInMS *utils.DataPoints
@@ -41,9 +41,9 @@ type (
 	}
 )
 
-func newDownloader(ctx context.Context, host Host) *downloader {
+func newDownloader(ctx context.Context, h SectorDownloader) *downloader {
 	return &downloader{
-		host: host,
+		host: h,
 
 		statsSectorDownloadEstimateInMS: utils.NewDataPoints(10 * time.Minute),
 		statsDownloadSpeedBytesPerMS:    utils.NewDataPoints(0),

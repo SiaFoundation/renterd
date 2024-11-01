@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"sync"
 	"time"
 
@@ -269,6 +270,25 @@ func (hs *hostStoreMock) Host(ctx context.Context, hostKey types.PublicKey) (api
 		return api.Host{}, api.ErrHostNotFound
 	}
 	return h.hi, nil
+}
+
+func (hs *hostStoreMock) UsableHosts(ctx context.Context, opts api.UsableHostOptions) (hosts []api.HostInfo, _ error) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+
+	for _, h := range hs.hosts {
+		host, _, err := net.SplitHostPort(h.hi.NetAddress)
+		if err != nil || host == "" {
+			continue
+		}
+
+		hosts = append(hosts, api.HostInfo{
+			PublicKey:  h.hk,
+			SiamuxAddr: net.JoinHostPort(host, h.hi.Settings.SiaMuxPort),
+		})
+	}
+
+	return
 }
 
 func (hs *hostStoreMock) RecordHostScans(ctx context.Context, scans []api.HostScan) error {

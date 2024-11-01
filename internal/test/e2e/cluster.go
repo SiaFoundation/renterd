@@ -617,7 +617,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 
 	// create bus
 	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, "", logger)
+	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, "", cfg.RevisionSubmissionBuffer, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

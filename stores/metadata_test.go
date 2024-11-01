@@ -660,6 +660,7 @@ func newTestContract(fcid types.FileContractID, hk types.PublicKey) api.Contract
 		State:              api.ContractStatePending,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
+		WindowStart:        10,
 	}
 }
 
@@ -840,6 +841,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		State:              api.ContractStatePending,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
+		WindowStart:        10,
 	}
 
 	expectedObjSlab2 := object.Slab{
@@ -863,6 +865,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		State:              api.ContractStatePending,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
+		WindowStart:        10,
 	}
 
 	// compare slabs

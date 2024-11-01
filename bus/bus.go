@@ -212,7 +212,7 @@ type (
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
-		UsableHosts(ctx context.Context, offset, limit int) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error)
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -314,8 +314,9 @@ type (
 )
 
 type Bus struct {
-	startTime time.Time
-	masterKey utils.MasterKey
+	startTime                time.Time
+	masterKey                utils.MasterKey
+	revisionSubmissionBuffer uint64
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -340,13 +341,14 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, revisionSubmissionBuffer uint64, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
 	b := &Bus{
-		startTime: time.Now(),
-		masterKey: masterKey,
+		startTime:                time.Now(),
+		masterKey:                masterKey,
+		revisionSubmissionBuffer: revisionSubmissionBuffer,
 
 		s:        s,
 		cm:       cm,

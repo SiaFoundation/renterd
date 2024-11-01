@@ -101,6 +101,7 @@ type (
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+		UsableHosts(ctx context.Context, opts api.UsableHostOptions) ([]api.HostInfo, error)
 	}
 
 	ObjectStore interface {
@@ -206,10 +207,9 @@ func (w *Worker) isStopped() bool {
 	return false
 }
 
-func (w *Worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
-	return w.withContractLock(ctx, fcid, lockPriority, func() error {
-		h := w.Host(hk, fcid, siamuxAddr)
-		rev, err := h.FetchRevision(ctx, fetchTimeout)
+func (w *Worker) withRevision(ctx context.Context, hi api.HostInfo, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
+	return w.withContractLock(ctx, hi.ContractID, lockPriority, func() error {
+		rev, err := w.Host(hi).FetchRevision(ctx, fetchTimeout)
 		if err != nil {
 			return err
 		}
@@ -270,7 +270,7 @@ func (w *Worker) fetchContracts(ctx context.Context, metadatas []api.ContractMet
 	worker := func() {
 		for md := range reqs {
 			var revision types.FileContractRevision
-			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev types.FileContractRevision) error {
+			err := w.withRevision(ctx, md.HostInfo(), timeout, lockingPriorityActiveContractRevision, func(rev types.FileContractRevision) error {
 				revision = rev
 				return nil
 			})
@@ -343,7 +343,7 @@ func (w *Worker) rhpPriceTableHandler(jc jape.Context) {
 		defer cancel()
 	}
 
-	hpt, err = w.Host(rptr.HostKey, types.FileContractID{}, rptr.SiamuxAddr).PriceTableUnpaid(ctx)
+	hpt, err = w.Host(api.HostInfo{PublicKey: rptr.HostKey, SiamuxAddr: rptr.SiamuxAddr}).PriceTableUnpaid(ctx)
 	if jc.Check("could not get price table", err) != nil {
 		return
 	}
@@ -395,22 +395,20 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch all contracts
-	dlContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
+	// fetch hosts
+	dlHosts, err := w.bus.UsableHosts(ctx, api.UsableHostOptions{})
+	if jc.Check("couldn't fetch hosts from bus", err) != nil {
+		return
+	}
+
+	// fetch contracts
+	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
-	// filter upload contracts
-	var ulContracts []api.ContractMetadata
-	for _, c := range dlContracts {
-		if c.InSet(up.ContractSet) {
-			ulContracts = append(ulContracts, c)
-		}
-	}
-
 	// migrate the slab and handle alerts
-	err = w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
+	err = w.migrate(ctx, slab, up.ContractSet, dlHosts, ulContracts, up.CurrentHeight)
 	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
 		var objects []api.ObjectMetadata
 		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
@@ -1156,9 +1154,9 @@ func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadat
 	}, res, nil
 }
 
-func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
+func (w *Worker) FundAccount(ctx context.Context, hi api.HostInfo, desired types.Currency) error {
 	// calculate the deposit amount
-	acc := w.accounts.ForHost(hk)
+	acc := w.accounts.ForHost(hi.PublicKey)
 	return acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
 		// return early if we have the desired balance
 		if balance.Cmp(desired) >= 0 {
@@ -1168,7 +1166,7 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 
 		// fund the account
 		var err error
-		deposit, err = w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
+		deposit, err = w.bus.FundAccount(ctx, acc.ID(), hi.ContractID, desired.Sub(balance))
 		if err != nil {
 			if rhp3.IsBalanceMaxExceeded(err) {
 				acc.ScheduleSync()
@@ -1208,8 +1206,8 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
 	}
 
-	// fetch all contracts
-	contracts, err := w.cache.DownloadContracts(ctx)
+	// fetch usable hosts
+	hosts, err := w.cache.UsableHosts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -1224,13 +1222,13 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 		// otherwise return a pipe reader
 		downloadFn := func(wr io.Writer, offset, length int64) error {
 			ctx = WithGougingChecker(ctx, w.bus, gp)
-			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts)
+			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), hosts)
 			if err != nil {
 				w.logger.Error(err)
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(hosts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -1255,7 +1253,7 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	return res, err
 }
 
-func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
+func (w *Worker) SyncAccount(ctx context.Context, hi api.HostInfo) error {
 	// attach gouging checker
 	gp, err := w.cache.GougingParams(ctx)
 	if err != nil {
@@ -1264,9 +1262,8 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// sync the account
-	h := w.Host(hk, fcid, siamuxAddr)
-	err = w.withRevision(ctx, defaultRevisionFetchTimeout, fcid, hk, siamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
-		return h.SyncAccount(ctx, &rev)
+	err = w.withRevision(ctx, hi, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+		return w.Host(hi).SyncAccount(ctx, &rev)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to sync account; %w", err)
