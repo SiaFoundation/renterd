@@ -25,3 +25,5 @@ jobs:
       macos-build-args: -tags='timetzdata netgo' -trimpath -a -ldflags '-s -w'
       cgo-enabled: 1
       project: renterd
+      project-desc: "renterd: The Next-Gen Sia Renter"
+      version-tag: ${{ github.ref_name }}
