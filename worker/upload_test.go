@@ -493,8 +493,10 @@ func TestUploadShards(t *testing.T) {
 				gc++
 			}
 		}
-		if bc > 0 && gc == 0 {
-			t.Fatal("shard is on exclusively bad hosts")
+		if i%2 == 0 && bc != 0 && gc != 1 {
+			t.Fatal("expected shard to be one 1 good host")
+		} else if i%2 != 0 && bc != 1 && gc != 1 {
+			t.Fatal("expected shard to be on 1 bad host and 1 good host")
 		}
 	}
 

@@ -506,6 +506,10 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, key object.Encryption
 
 	updated := make(map[types.Hash256]types.FileContractID)
 	for _, sector := range sectors {
+		_, exists := updated[sector.Root]
+		if exists {
+			return errors.New("duplicate sector")
+		}
 		updated[sector.Root] = sector.ContractID
 	}
 
