@@ -24,7 +24,6 @@ type (
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
 		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
-		PriceTableUnpaid(ctx context.Context) (hpt api.HostPriceTable, err error)
 		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error

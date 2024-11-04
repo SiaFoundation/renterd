@@ -15,6 +15,14 @@ import (
 	"go.sia.tech/renterd/stores/sql"
 )
 
+type passthroughProofUpdater struct {
+	fn func(*types.StateElement)
+}
+
+func (ppu *passthroughProofUpdater) UpdateElementProof(se *types.StateElement) {
+	ppu.fn(se)
+}
+
 // TestProcessChainUpdate tests the ProcessChainUpdate method on the SQL store.
 func TestProcessChainUpdate(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
@@ -210,14 +218,13 @@ func TestProcessChainUpdate(t *testing.T) {
 
 	// assert we can revert spent outputs
 	now := time.Now().Round(time.Millisecond)
-	var ses []types.StateElement
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		index3 := types.ChainIndex{Height: 3}
 		index4 := types.ChainIndex{Height: 4}
 		created := []types.SiacoinElement{
 			{
+				ID: types.SiacoinOutputID{1},
 				StateElement: types.StateElement{
-					ID:          types.Hash256{1},
 					LeafIndex:   1,
 					MerkleProof: []types.Hash256{{1}, {2}},
 				},
@@ -275,55 +282,55 @@ func TestProcessChainUpdate(t *testing.T) {
 		if err != nil {
 			return err
 		}
-
-		// fetch elements
-		ses, err = tx.WalletStateElements()
-		return err
+		return nil
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
 
 	// assert wallet state elements
-	if len(ses) != 1 {
-		t.Fatal("unexpected number of state elements", len(ses))
-	} else if se := ses[0]; se.ID != (types.Hash256{1}) {
+	sces, err := ss.UnspentSiacoinElements()
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	} else if len(sces) != 1 {
+		t.Fatal("unexpected number of state elements", len(sces))
+	} else if se := sces[0]; se.ID != (types.SiacoinOutputID{1}) {
 		t.Fatal("unexpected state element id", se.ID)
-	} else if se.LeafIndex != 1 {
-		t.Fatal("unexpected state element leaf index", se.LeafIndex)
-	} else if len(se.MerkleProof) != 2 {
-		t.Fatal("unexpected state element merkle proof", len(se.MerkleProof))
-	} else if se.MerkleProof[0] != (types.Hash256{1}) {
-		t.Fatal("unexpected state element merkle proof[0]", se.MerkleProof[0])
-	} else if se.MerkleProof[1] != (types.Hash256{2}) {
-		t.Fatal("unexpected state element merkle proof[1]", se.MerkleProof[1])
+	} else if se.StateElement.LeafIndex != 1 {
+		t.Fatal("unexpected state element leaf index", se.StateElement.LeafIndex)
+	} else if len(se.StateElement.MerkleProof) != 2 {
+		t.Fatal("unexpected state element merkle proof", len(se.StateElement.MerkleProof))
+	} else if se.StateElement.MerkleProof[0] != (types.Hash256{1}) {
+		t.Fatal("unexpected state element merkle proof[0]", se.StateElement.MerkleProof[0])
+	} else if se.StateElement.MerkleProof[1] != (types.Hash256{2}) {
+		t.Fatal("unexpected state element merkle proof[1]", se.StateElement.MerkleProof[1])
 	}
 
 	// update state elements
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		ses[0].LeafIndex = 2
-		ses[0].MerkleProof = []types.Hash256{{3}, {4}}
-		err := tx.UpdateWalletStateElements(ses)
-		if err != nil {
-			return err
-		}
-
-		ses, err = tx.WalletStateElements()
-		return err
+		return tx.UpdateWalletSiacoinElementProofs(&passthroughProofUpdater{
+			fn: func(se *types.StateElement) {
+				se.LeafIndex = 2
+				se.MerkleProof = []types.Hash256{{3}, {4}}
+			},
+		})
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
 
 	// assert wallet state elements
-	if len(ses) != 1 {
-		t.Fatal("unexpected number of state elements", len(ses))
-	} else if se := ses[0]; se.LeafIndex != 2 {
-		t.Fatal("unexpected state element leaf index", se.LeafIndex)
-	} else if len(se.MerkleProof) != 2 {
-		t.Fatal("unexpected state element merkle proof length", len(se.MerkleProof))
-	} else if se.MerkleProof[0] != (types.Hash256{3}) {
-		t.Fatal("unexpected state element merkle proof[0]", se.MerkleProof[0])
-	} else if se.MerkleProof[1] != (types.Hash256{4}) {
-		t.Fatal("unexpected state element merkle proof[1]", se.MerkleProof[1])
+	sces, err = ss.UnspentSiacoinElements()
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	} else if len(sces) != 1 {
+		t.Fatal("unexpected number of state elements", len(sces))
+	} else if se := sces[0]; se.StateElement.LeafIndex != 2 {
+		t.Fatal("unexpected state element leaf index", se.StateElement.LeafIndex)
+	} else if len(se.StateElement.MerkleProof) != 2 {
+		t.Fatal("unexpected state element merkle proof length", len(se.StateElement.MerkleProof))
+	} else if se.StateElement.MerkleProof[0] != (types.Hash256{3}) {
+		t.Fatal("unexpected state element merkle proof[0]", se.StateElement.MerkleProof[0])
+	} else if se.StateElement.MerkleProof[1] != (types.Hash256{4}) {
+		t.Fatal("unexpected state element merkle proof[1]", se.StateElement.MerkleProof[1])
 	}
 
 	// assert events
@@ -355,7 +362,8 @@ func TestProcessChainUpdate(t *testing.T) {
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		return tx.WalletRevertIndex(types.ChainIndex{Height: 5}, []types.SiacoinElement{
 			{
-				StateElement:   types.StateElement{ID: types.Hash256{2}},
+				ID:             types.SiacoinOutputID{2},
+				StateElement:   types.StateElement{},
 				SiacoinOutput:  types.SiacoinOutput{},
 				MaturityHeight: 100,
 			},
