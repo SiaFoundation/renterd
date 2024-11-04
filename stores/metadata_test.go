@@ -2400,7 +2400,6 @@ func TestRenameObjectsRegression(t *testing.T) {
 	assertNumObjects("/", 4)
 	assertNumObjects("/videos", 6)
 	assertNumObjects("/videos/", 3)
-	return
 	assertNumObjects("/videos/comedy/", 2)
 	assertNumObjects("/videos/horror/", 1)
 	assertNumObjects("/audio/", 1)
