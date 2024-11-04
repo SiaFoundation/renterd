@@ -54,6 +54,7 @@ type (
 
 	// Bus contains the configuration for a bus.
 	Bus struct {
+		AllowPrivateIPs               bool          `yaml:"allowPrivateIPs,omitempty"`
 		AnnouncementMaxAgeHours       uint64        `yaml:"announcementMaxAgeHours,omitempty"`
 		Bootstrap                     bool          `yaml:"bootstrap,omitempty"`
 		GatewayAddr                   string        `yaml:"gatewayAddr,omitempty"`
@@ -122,7 +123,6 @@ type (
 		ID                            string         `yaml:"id,omitempty"`
 		Remotes                       []RemoteWorker `yaml:"remotes,omitempty"`
 		AccountsRefillInterval        time.Duration  `yaml:"accountsRefillInterval,omitempty"`
-		AllowPrivateIPs               bool           `yaml:"allowPrivateIPs,omitempty"`
 		BusFlushInterval              time.Duration  `yaml:"busFlushInterval,omitempty"`
 		ContractLockTimeout           time.Duration  `yaml:"contractLockTimeout,omitempty"`
 		DownloadOverdriveTimeout      time.Duration  `yaml:"downloadOverdriveTimeout,omitempty"`

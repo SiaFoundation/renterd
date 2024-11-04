@@ -55,10 +55,6 @@ const (
 	// targetBlockTime is the average block time of the Sia network
 	targetBlockTime = 10 * time.Minute
 
-	// timeoutHostPriceTable is the amount of time we wait to receive a price
-	// table from the host
-	timeoutHostPriceTable = 30 * time.Second
-
 	// timeoutHostRevision is the amount of time we wait to receive the latest
 	// revision from the host. This is set to 4 minutes since siad currently
 	// blocks for 3 minutes when trying to fetch a revision and not having
@@ -66,10 +62,6 @@ const (
 	// guaranteed to receive the host's ErrBalanceInsufficient.
 	// TODO: This can be lowered once the network uses hostd.
 	timeoutHostRevision = 4 * time.Minute
-
-	// timeoutHostScan is the amount of time we wait for a host scan to be
-	// completed
-	timeoutHostScan = 30 * time.Second
 
 	// timeoutBroadcastRevision is the amount of time we wait for the broadcast
 	// of a revision to succeed.
@@ -81,6 +73,8 @@ var (
 )
 
 type Bus interface {
+	HostScanner
+
 	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
@@ -98,10 +92,12 @@ type Bus interface {
 	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
 
+type HostScanner interface {
+	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
+}
+
 type Worker interface {
 	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
-	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
-	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 }
 
 type contractChecker interface {
@@ -111,7 +107,7 @@ type contractChecker interface {
 }
 
 type contractReviser interface {
-	formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
+	formContract(ctx *mCtx, hs HostScanner, w Worker, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 	renewContract(ctx *mCtx, w Worker, c api.Contract, h api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 	refreshContract(ctx *mCtx, w Worker, c api.Contract, h api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 }
@@ -182,14 +178,14 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, w Worker, s
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, w, c, c, c, c.logger)
 }
 
-func (c *Contractor) formContract(ctx *mCtx, w Worker, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, w Worker, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 
 	// convenience variables
 	hk := host.PublicKey
 
 	// fetch host settings
-	scan, err := w.RHPScan(ctx, hk, host.NetAddress, 0)
+	scan, err := hs.ScanHost(ctx, hk, 0)
 	if err != nil {
 		logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
@@ -701,32 +697,6 @@ func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding type
 	return funding
 }
 
-func refreshPriceTable(ctx context.Context, w Worker, host *api.Host) error {
-	// return early if the host's pricetable is not expired yet
-	if time.Now().Before(host.PriceTable.Expiry) {
-		return nil
-	}
-
-	// scan the host if it hasn't been successfully scanned before, which
-	// can occur when contracts are added manually to the bus or database
-	if !host.Scanned {
-		scan, err := w.RHPScan(ctx, host.PublicKey, host.NetAddress, timeoutHostScan)
-		if err != nil {
-			return fmt.Errorf("failed to scan host %v: %w", host.PublicKey, err)
-		}
-		host.Settings = scan.Settings
-	}
-
-	// fetch the price table
-	hpt, err := w.RHPPriceTable(ctx, host.PublicKey, host.Settings.SiamuxAddr(), timeoutHostPriceTable)
-	if err != nil {
-		return fmt.Errorf("failed to fetch price table for host %v: %w", host.PublicKey, err)
-	}
-
-	host.PriceTable = hpt
-	return nil
-}
-
 // renewFundingEstimate computes the funds the renter should use to renew a
 // contract. 'minRenterFunds' is the minimum amount the renter should use to
 // renew a contract, 'initRenterFunds' is the amount the renter used to form the
@@ -1085,28 +1055,9 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		default:
 		}
 
-		// fetch a new price table if necessary
-		if err := refreshPriceTable(ctx, w, &candidate.host); err != nil {
-			logger.Warnf("failed to fetch price table for candidate host %v: %v", candidate.host.PublicKey, err)
-			continue
-		}
-
-		// prepare gouging checker
-		cs, err := bus.ConsensusState(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch consensus state: %w", err)
-		}
-		gc := ctx.GougingChecker(cs)
-
 		// prepare a logger
 		logger := logger.With("hostKey", candidate.host.PublicKey).
 			With("addresses", candidate.host.ResolvedAddresses)
-
-		// perform gouging checks on the fly to ensure the host is not gouging its prices
-		if breakdown := gc.Check(nil, &candidate.host.PriceTable.HostPriceTable); breakdown.Gouging() {
-			logger.With("reasons", breakdown.String()).Info("candidate is price gouging")
-			continue
-		}
 
 		// check if we already have a contract with a host on that address
 		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
@@ -1114,7 +1065,7 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 			continue
 		}
 
-		formedContract, proceed, err := cr.formContract(ctx, w, candidate.host, minInitialContractFunds, logger)
+		formedContract, proceed, err := cr.formContract(ctx, bus, w, candidate.host, minInitialContractFunds, logger)
 		if err != nil {
 			logger.With(zap.Error(err)).Error("failed to form contract")
 			continue

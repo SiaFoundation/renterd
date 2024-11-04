@@ -38,7 +38,7 @@ func TestHostPruning(t *testing.T) {
 				Success:   false,
 			}
 		}
-		tt.OK(b.RecordHostScans(context.Background(), his))
+		tt.OK(cluster.bs.RecordHostScans(context.Background(), his))
 	}
 
 	// shut down the worker manually, this will flush any interactions
