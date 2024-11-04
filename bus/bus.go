@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"reflect"
 	"time"
 
@@ -26,11 +27,13 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/config"
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores"
@@ -312,8 +315,9 @@ type (
 )
 
 type Bus struct {
-	startTime time.Time
-	masterKey utils.MasterKey
+	allowPrivateIPs bool
+	startTime       time.Time
+	masterKey       utils.MasterKey
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -325,8 +329,9 @@ type Bus struct {
 	w           Wallet
 	store       Store
 
-	rhp2 *rhp2.Client
-	rhp3 *rhp3.Client
+	rhp2Client *rhp2.Client
+	rhp3Client *rhp3.Client
+	rhp4Client *rhp4.Client
 
 	contractLocker        ContractLocker
 	explorer              *ibus.Explorer
@@ -337,12 +342,14 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
+	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
 	b := &Bus{
-		startTime: time.Now(),
-		masterKey: masterKey,
+		allowPrivateIPs: cfg.AllowPrivateIPs,
+		startTime:       time.Now(),
+		masterKey:       masterKey,
 
 		s:        s,
 		cm:       cm,
@@ -355,8 +362,9 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 		webhooksMgr: wm,
 		logger:      l.Sugar(),
 
-		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
-		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
+		rhp2Client: rhp2.New(dialer, l),
+		rhp3Client: rhp3.New(dialer, l),
+		rhp4Client: rhp4.New(dialer),
 	}
 
 	// create contract locker
@@ -369,6 +377,7 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 	b.pinMgr = ibus.NewPinManager(b.alerts, wm, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
+	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
 	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
@@ -433,11 +442,10 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
 		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
 		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
-		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
+		"POST   /host/:hostkey/scan":             b.hostsScanHandlerPOST,
 
 		"PUT    /metric/:key": b.metricsHandlerPUT,
 		"GET    /metric/:key": b.metricsHandlerGET,
@@ -614,7 +622,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
 	// fetch revision
-	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
+	rev, err := b.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -716,7 +724,7 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 
 	// form the contract
-	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
+	contract, txnSet, err := b.rhp2Client.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 		return rhpv2.ContractRevision{}, err
@@ -866,7 +874,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	}()
 
 	// fetch the revision
-	rev, err := b.rhp3.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
 	if err != nil {
 		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -874,7 +882,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {
 		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
 	}
@@ -883,6 +891,103 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	b.s.BroadcastTransactionSet(txnSet)
 
 	return newRevision, contractPrice, fundAmount, nil
+}
+
+func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+	logger := b.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
+
+	// prepare a helper to create a context for scanning
+	timeoutCtx := func() (context.Context, context.CancelFunc) {
+		if timeout > 0 {
+			return context.WithTimeout(ctx, timeout)
+		}
+		return ctx, func() {}
+	}
+
+	// prepare a helper for scanning
+	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+		// fetch the host settings
+		start := time.Now()
+		scanCtx, cancel := timeoutCtx()
+		settings, err := b.rhp2Client.Settings(scanCtx, hostKey, hostIP)
+		cancel()
+		if err != nil {
+			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
+		}
+
+		// fetch the host pricetable
+		scanCtx, cancel = timeoutCtx()
+		pt, err := b.rhp3Client.PriceTableUnpaid(scanCtx, hostKey, settings.SiamuxAddr())
+		cancel()
+		if err != nil {
+			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
+		}
+		return settings, pt.HostPriceTable, time.Since(start), nil
+	}
+
+	// resolve host ip, don't scan if the host is on a private network or if it
+	// resolves to more than two addresses of the same type, if it fails for
+	// another reason the host scan won't have subnets
+	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
+	if errors.Is(err, utils.ErrHostTooManyAddresses) {
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+	} else if private && !b.allowPrivateIPs {
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
+	}
+
+	// scan: first try
+	settings, pt, duration, err := scan()
+	if err != nil {
+		logger = logger.With(zap.Error(err))
+
+		// scan: second try
+		select {
+		case <-ctx.Done():
+			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
+		case <-time.After(time.Second):
+		}
+		settings, pt, duration, err = scan()
+
+		logger = logger.With("elapsed", duration).With(zap.Error(err))
+		if err == nil {
+			logger.Info("successfully scanned host on second try")
+		} else if !isErrHostUnreachable(err) {
+			logger.Infow("failed to scan host")
+		}
+	}
+
+	// check if the scan failed due to a shutdown - shouldn't be necessary but
+	// just in case since recording a failed scan might have serious
+	// repercussions
+	select {
+	case <-ctx.Done():
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
+	default:
+	}
+
+	// record host scan - make sure this is interrupted by the request ctx and
+	// not the context with the timeout used to time out the scan itself.
+	// Otherwise scans that time out won't be recorded.
+	scanErr := b.store.RecordHostScans(ctx, []api.HostScan{
+		{
+			HostKey:           hostKey,
+			PriceTable:        pt,
+			ResolvedAddresses: resolvedAddresses,
+
+			// NOTE: A scan is considered successful if both fetching the price
+			// table and the settings succeeded. Right now scanning can't fail
+			// due to a reason that is our fault unless we are offline. If that
+			// changes, we should adjust this code to account for that.
+			Success:   err == nil,
+			Settings:  settings,
+			Timestamp: time.Now(),
+		},
+	})
+	if scanErr != nil {
+		logger.Errorw("failed to record host scan", zap.Error(scanErr))
+	}
+	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
+	return settings, pt, duration, err
 }
 
 func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
@@ -961,6 +1066,17 @@ func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
 	}
 
 	return nil
+}
+
+func isErrHostUnreachable(err error) bool {
+	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
+		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
+		utils.IsErr(err, utils.ErrNoRouteToHost) ||
+		utils.IsErr(err, utils.ErrNoSuchHost) ||
+		utils.IsErr(err, utils.ErrConnectionRefused) ||
+		utils.IsErr(err, errors.New("unknown port")) ||
+		utils.IsErr(err, errors.New("cannot assign requested address"))
 }
 
 // patchSettings merges two settings maps. returns an error if the two maps are

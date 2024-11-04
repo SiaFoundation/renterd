@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
@@ -82,5 +83,18 @@ type (
 	ContractSetUpdateRequest struct {
 		ToAdd    []types.FileContractID `json:"toAdd"`
 		ToRemove []types.FileContractID `json:"toRemove"`
+	}
+
+	// HostScanRequest is the request type for the /host/scan endpoint.
+	HostScanRequest struct {
+		Timeout DurationMS `json:"timeout"`
+	}
+
+	// HostScanResponse is the response type for the /host/scan endpoint.
+	HostScanResponse struct {
+		Ping       DurationMS           `json:"ping"`
+		ScanError  string               `json:"scanError,omitempty"`
+		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 	}
 )
