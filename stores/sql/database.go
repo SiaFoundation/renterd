@@ -364,6 +364,10 @@ type (
 		// the health of the updated slabs becomes invalid
 		UpdateSlabHealth(ctx context.Context, limit int64, minValidity, maxValidity time.Duration) (int64, error)
 
+		// UpsertContractSectors ensures the given contract-sector links are
+		// present in the database.
+		UpsertContractSectors(ctx context.Context, contractSectors []ContractSector) error
+
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
 

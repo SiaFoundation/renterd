@@ -1111,7 +1111,7 @@ func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) 
 }
 
 func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
-	return ssql.UpdateSlab(ctx, tx, key, sectors, tx.upsertContractSectors)
+	return ssql.UpdateSlab(ctx, tx, key, sectors)
 }
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
@@ -1142,6 +1142,31 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
+	if len(contractSectors) == 0 {
+		return nil
+	}
+
+	// insert contract <-> sector links
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
+											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
+	}
+	defer insertContractSectorStmt.Close()
+
+	for _, cs := range contractSectors {
+		_, err := insertContractSectorStmt.Exec(ctx,
+			cs.SectorID,
+			cs.ContractID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert contract sector link: %w", err)
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
@@ -1274,33 +1299,8 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			sectorIdx++
 		}
 	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
+	if err := tx.UpsertContractSectors(ctx, upsertContractSectors); err != nil {
 		return err
-	}
-	return nil
-}
-
-func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
-	if len(contractSectors) == 0 {
-		return nil
-	}
-
-	// insert contract <-> sector links
-	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
-	}
-	defer insertContractSectorStmt.Close()
-
-	for _, cs := range contractSectors {
-		_, err := insertContractSectorStmt.Exec(ctx,
-			cs.SectorID,
-			cs.ContractID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract sector link: %w", err)
-		}
 	}
 	return nil
 }
