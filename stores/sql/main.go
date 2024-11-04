@@ -2698,8 +2698,8 @@ func scanSiacoinElement(s Scanner) (el types.SiacoinElement, err error) {
 		return types.SiacoinElement{}, err
 	}
 	return types.SiacoinElement{
+		ID: types.SiacoinOutputID(id),
 		StateElement: types.StateElement{
-			ID:          types.Hash256(id),
 			LeafIndex:   leafIndex,
 			MerkleProof: merkleProof.Hashes,
 		},
@@ -2711,17 +2711,19 @@ func scanSiacoinElement(s Scanner) (el types.SiacoinElement, err error) {
 	}, nil
 }
 
-func scanStateElement(s Scanner) (types.StateElement, error) {
+func scanStateElement(s Scanner) (stateElement, error) {
 	var id Hash256
 	var leafIndex uint64
 	var merkleProof MerkleProof
 	if err := s.Scan(&id, &leafIndex, &merkleProof); err != nil {
-		return types.StateElement{}, err
+		return stateElement{}, err
 	}
-	return types.StateElement{
-		ID:          types.Hash256(id),
-		LeafIndex:   leafIndex,
-		MerkleProof: merkleProof.Hashes,
+	return stateElement{
+		ID: types.Hash256(id),
+		StateElement: types.StateElement{
+			LeafIndex:   leafIndex,
+			MerkleProof: merkleProof.Hashes,
+		},
 	}, nil
 }
 
