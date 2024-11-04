@@ -192,7 +192,7 @@ func TestNewTestCluster(t *testing.T) {
 	var contract api.ContractMetadata
 	contracts := cluster.WaitForContracts()
 	contract = contracts[0]
-	revision, err := cluster.Bus.LatestRevision(context.Background(), contract.ID)
+	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
 	tt.OK(err)
 
 	// Verify startHeight and endHeight of the contract.

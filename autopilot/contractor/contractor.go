@@ -93,7 +93,7 @@ type Bus interface {
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
-	LatestRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
+	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
@@ -824,7 +824,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			rev, err := bus.LatestRevision(revisionCtx, c.ID)
+			rev, err := bus.ContractRevision(revisionCtx, c.ID)
 			if err != nil {
 				// print the reason for the missing revisions
 				logger.With(zap.Error(err)).
