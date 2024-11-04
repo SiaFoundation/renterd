@@ -302,7 +302,7 @@ func (ap *Autopilot) Run() {
 			}
 
 			// perform maintenance
-			setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, w, state)
+			setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, state)
 			if err != nil && utils.IsErr(err, context.Canceled) {
 				return
 			} else if err != nil {

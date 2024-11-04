@@ -83,13 +83,6 @@ type (
 		Balance    types.Currency       `json:"balance"`
 	}
 
-	// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
-	RHPPriceTableRequest struct {
-		HostKey    types.PublicKey `json:"hostKey"`
-		SiamuxAddr string          `json:"siamuxAddr"`
-		Timeout    DurationMS      `json:"timeout"`
-	}
-
 	// RHPSyncRequest is the request type for the /rhp/sync endpoint.
 	RHPSyncRequest struct {
 		ContractID types.FileContractID `json:"contractID"`
