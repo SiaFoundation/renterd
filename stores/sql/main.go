@@ -407,7 +407,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	return sizes, nil
 }
 
-func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata, dstDirID int64) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
 	if err != nil {
@@ -466,9 +466,9 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 
 	// copy object
 	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
-						SELECT ?, ?, db_directory_id, ?, `+"`key`"+`, size, ?, etag
+						SELECT ?, ?, ?, ?, `+"`key`"+`, size, ?, etag
 						FROM objects
-						WHERE id = ?`, time.Now(), dstKey, dstBID, mimeType, srcObjID)
+						WHERE id = ?`, time.Now(), dstKey, dstDirID, dstBID, mimeType, srcObjID)
 	if err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -509,6 +509,10 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 		return fmt.Errorf("failed to check if bucket is empty: %w", err)
 	} else if !empty {
 		return api.ErrBucketNotEmpty
+	}
+	_, err = tx.Exec(ctx, "DELETE FROM directories WHERE db_bucket_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete bucket: %w", err)
 	}
 	_, err = tx.Exec(ctx, "DELETE FROM buckets WHERE id = ?", id)
 	if err != nil {
@@ -1440,19 +1444,17 @@ func NormalizePeer(peer string) (string, error) {
 	return normalized.String(), nil
 }
 
-func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
-	if !strings.HasPrefix(dirPath, "/") {
+func dirID(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
+	if bucket == "" {
+		return 0, fmt.Errorf("bucket must be set")
+	} else if !strings.HasPrefix(path, "/") {
 		return 0, fmt.Errorf("path must start with /")
-	} else if !strings.HasSuffix(dirPath, "/") {
+	} else if !strings.HasSuffix(path, "/") {
 		return 0, fmt.Errorf("path must end with /")
 	}
 
-	if dirPath == "/" {
-		return 1, nil // root dir returned
-	}
-
 	var id int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE name = ?", dirPath).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE db_bucket_id = (SELECT id FROM buckets WHERE name = ?) AND name = ?", bucket, path).Scan(&id); err != nil {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
@@ -1811,6 +1813,112 @@ WHERE h.recent_downtime >= ? AND h.recent_scan_failures >= ?`, DurationMS(maxDow
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+// RenameDirectories renames all directories in the database with the given
+// prefix to the new prefix.
+func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefixNew string) (int64, error) {
+	// sanity check input
+	if !strings.HasPrefix(prefixNew, "/") {
+		return 0, errors.New("paths has to have a leading slash")
+	} else if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
+	}
+
+	// prepare statements
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer queryDirStmt.Close()
+
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertStmt.Close()
+
+	updateNameStmt, err := tx.Prepare(ctx, "UPDATE directories SET name = ? WHERE id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateNameStmt.Close()
+
+	updateParentStmt, err := tx.Prepare(ctx, "UPDATE directories SET db_parent_id = ? WHERE db_parent_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateParentStmt.Close()
+
+	// fetch bucket id
+	var bucketID int64
+	err = tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// fetch destination directories
+	directories := make(map[int64]string)
+	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = ? ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucketID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return 0, err
+		}
+		directories[id] = strings.Replace(name, prefixOld, prefixNew, 1)
+	}
+
+	// update existing directories
+	for id, name := range directories {
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, name, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, err
+		} else if existingID > 0 {
+			if _, err := updateParentStmt.Exec(ctx, existingID, id); err != nil {
+				return 0, err
+			}
+		} else {
+			if _, err := updateNameStmt.Exec(ctx, name, id); err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	// insert new directories
+	var dirID *int64
+	dirs := object.Directories(prefixNew)
+	if strings.HasSuffix(prefixNew, "/") {
+		dirs = append(dirs, prefixNew)
+	}
+	for _, dir := range dirs {
+		// check if the directory exists
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, dir, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if existingID > 0 {
+			dirID = &existingID
+			continue
+		}
+
+		// insert directory
+		if res, err := insertStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v %v: %w", dirID, dir, err)
+		} else if insertedID, err := res.LastInsertId(); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if insertedID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		} else {
+			dirID = &insertedID
+		}
+	}
+	return *dirID, nil
 }
 
 func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
@@ -2695,7 +2803,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	}
 
 	// fetch directory id
-	dirID, err := dirID(ctx, tx, path)
+	dirID, err := dirID(ctx, tx, bucket, path)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.ObjectsResponse{}, nil
 	} else if err != nil {
