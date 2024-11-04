@@ -89,28 +89,6 @@ type (
 		Balance    types.Currency       `json:"balance"`
 	}
 
-	// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
-	RHPPriceTableRequest struct {
-		HostKey    types.PublicKey `json:"hostKey"`
-		SiamuxAddr string          `json:"siamuxAddr"`
-		Timeout    DurationMS      `json:"timeout"`
-	}
-
-	// RHPScanRequest is the request type for the /rhp/scan endpoint.
-	RHPScanRequest struct {
-		HostKey types.PublicKey `json:"hostKey"`
-		HostIP  string          `json:"hostIP"`
-		Timeout DurationMS      `json:"timeout"`
-	}
-
-	// RHPScanResponse is the response type for the /rhp/scan endpoint.
-	RHPScanResponse struct {
-		Ping       DurationMS           `json:"ping"`
-		ScanError  string               `json:"scanError,omitempty"`
-		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
-		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
-	}
-
 	// RHPSyncRequest is the request type for the /rhp/sync endpoint.
 	RHPSyncRequest struct {
 		ContractID types.FileContractID `json:"contractID"`
@@ -244,7 +222,7 @@ func ParseDownloadRange(req *http.Request) (DownloadRange, error) {
 	return dr, nil
 }
 
-func (r RHPScanResponse) Error() error {
+func (r HostScanResponse) Error() error {
 	if r.ScanError != "" {
 		return errors.New(r.ScanError)
 	}
