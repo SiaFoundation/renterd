@@ -2276,8 +2276,8 @@ func scanSiacoinElement(s Scanner) (el types.SiacoinElement, err error) {
 		return types.SiacoinElement{}, err
 	}
 	return types.SiacoinElement{
+		ID: types.SiacoinOutputID(id),
 		StateElement: types.StateElement{
-			ID:          types.Hash256(id),
 			LeafIndex:   leafIndex,
 			MerkleProof: merkleProof.Hashes,
 		},
@@ -2289,18 +2289,9 @@ func scanSiacoinElement(s Scanner) (el types.SiacoinElement, err error) {
 	}, nil
 }
 
-func scanStateElement(s Scanner) (types.StateElement, error) {
-	var id Hash256
-	var leafIndex uint64
-	var merkleProof MerkleProof
-	if err := s.Scan(&id, &leafIndex, &merkleProof); err != nil {
-		return types.StateElement{}, err
-	}
-	return types.StateElement{
-		ID:          types.Hash256(id),
-		LeafIndex:   leafIndex,
-		MerkleProof: merkleProof.Hashes,
-	}, nil
+func scanStateElement(s Scanner) (se StateElement, err error) {
+	err = s.Scan(&se.ID, &se.LeafIndex, &se.MerkleProof)
+	return
 }
 
 func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedSlab) (string, error) {
