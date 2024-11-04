@@ -65,6 +65,8 @@ type (
 		// selected and scanned by passing them to the method as 'others'.
 		ScanObjectMetadata(s Scanner, others ...any) (md api.ObjectMetadata, err error)
 		SelectObjectMetadataExpr() string
+
+		UpsertContractSectors(ctx context.Context, contractSectors []ContractSector) error
 	}
 )
 
@@ -2102,13 +2104,7 @@ func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer
 	return nil
 }
 
-func UpdateSlab(ctx context.Context, tx sql.Tx, key object.EncryptionKey, updated []api.UploadedSector) error {
-	// ensure the given transaction has the required methods
-	_, ok := tx.(DatabaseTx)
-	if !ok {
-		return errors.New("update slab requires a database transaction")
-	}
-
+func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []api.UploadedSector) error {
 	// update slab
 	res, err := tx.Exec(ctx, `
 		UPDATE slabs
@@ -2171,7 +2167,7 @@ func UpdateSlab(ctx context.Context, tx sql.Tx, key object.EncryptionKey, update
 			SectorID:   sectorID,
 		})
 	}
-	return tx.(DatabaseTx).UpsertContractSectors(ctx, upsert)
+	return tx.UpsertContractSectors(ctx, upsert)
 }
 
 func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
