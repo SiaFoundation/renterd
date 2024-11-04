@@ -178,9 +178,11 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventConsensusUpdate:
 		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
 		c.handleConsensusUpdate(e)
+		c.cache.Invalidate(cacheKeyUsableHosts)
 	case api.EventSettingUpdate:
 		log = log.With("gouging", e.GougingSettings != nil, "pinned", e.PinnedSettings != nil, "upload", e.UploadSettings != nil, "ts", e.Timestamp)
 		c.handleSettingUpdate(e)
+	case api.EventACLUpdate:
 	case api.EventContractAdd:
 	case api.EventContractArchive:
 	case api.EventContractRenew:

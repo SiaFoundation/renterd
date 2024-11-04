@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	ModuleACL         = "acl"
 	ModuleConsensus   = "consensus"
 	ModuleContract    = "contract"
 	ModuleContractSet = "contract_set"
@@ -28,6 +29,12 @@ var (
 )
 
 type (
+	EventACLUpdate struct {
+		Allowlist []types.PublicKey `json:"allowlist"`
+		Blocklist []string          `json:"blocklist"`
+		Timestamp time.Time         `json:"timestamp"`
+	}
+
 	EventConsensusUpdate struct {
 		ConsensusState
 		TransactionFee types.Currency `json:"transactionFee"`
@@ -73,6 +80,15 @@ type (
 )
 
 var (
+	WebhookACLUpdate = func(url string, headers map[string]string) webhooks.Webhook {
+		return webhooks.Webhook{
+			Event:   EventUpdate,
+			Headers: headers,
+			Module:  ModuleACL,
+			URL:     url,
+		}
+	}
+
 	WebhookConsensusUpdate = func(url string, headers map[string]string) webhooks.Webhook {
 		return webhooks.Webhook{
 			Event:   EventUpdate,
@@ -143,6 +159,14 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 		return nil, err
 	}
 	switch event.Module {
+	case ModuleACL:
+		if event.Event == EventUpdate {
+			var e EventACLUpdate
+			if err := json.Unmarshal(bytes, &e); err != nil {
+				return nil, err
+			}
+			return e, nil
+		}
 	case ModuleContract:
 		switch event.Event {
 		case EventAdd:

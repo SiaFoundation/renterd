@@ -2616,13 +2616,10 @@ func TestDownloadAllHosts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// get rid of redundancy
-	rs := test.RedundancySettings
-	rs.MinShards = rs.TotalShards
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         rs.TotalShards,
+		logger:        newTestLogger(false),
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: false, // make sure data is uploaded
 	})
 	defer cluster.Shutdown()
@@ -2630,12 +2627,6 @@ func TestDownloadAllHosts(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
-
-	// update redundancy settings
-	us, err := b.UploadSettings(context.Background())
-	us.Redundancy = rs
-	tt.OK(err)
-	tt.OK(b.UpdateUploadSettings(context.Background(), us))
 
 	// prepare a file
 	data := make([]byte, 128)
@@ -2658,12 +2649,9 @@ func TestDownloadAllHosts(t *testing.T) {
 			}
 		}
 	}
-	if len(usedHosts) != rs.TotalShards {
+	if len(usedHosts) != test.RedundancySettings.TotalShards {
 		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
 	}
-
-	// add a host
-	cluster.AddHosts(1)
 
 	// grab random used host
 	var randomHost string
@@ -2676,6 +2664,10 @@ func TestDownloadAllHosts(t *testing.T) {
 
 	// add it to the blocklist
 	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+
+	// add a host
+	cluster.AddHostsBlocking(1)
+	cluster.WaitForAccounts()
 
 	// wait until we migrated away from that host
 	var newHost types.PublicKey

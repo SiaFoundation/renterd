@@ -700,6 +700,20 @@ func (b *Bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 			return
 		} else if jc.Check("couldn't update allowlist entries", b.store.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
+		} else {
+			if allowlist, err := b.store.HostAllowlist(ctx); jc.Check("couldn't fetch allowlist", err) == nil {
+				if blocklist, err := b.store.HostBlocklist(ctx); jc.Check("couldn't fetch blocklist", err) == nil {
+					b.broadcastAction(webhooks.Event{
+						Module: api.ModuleACL,
+						Event:  api.EventUpdate,
+						Payload: api.EventACLUpdate{
+							Allowlist: allowlist,
+							Blocklist: blocklist,
+							Timestamp: time.Now().UTC(),
+						},
+					})
+				}
+			}
 		}
 	}
 }
@@ -720,6 +734,20 @@ func (b *Bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 			return
 		} else if jc.Check("couldn't update blocklist entries", b.store.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
+		} else {
+			if allowlist, err := b.store.HostAllowlist(ctx); jc.Check("couldn't fetch allowlist", err) == nil {
+				if blocklist, err := b.store.HostBlocklist(ctx); jc.Check("couldn't fetch blocklist", err) == nil {
+					b.broadcastAction(webhooks.Event{
+						Module: api.ModuleACL,
+						Event:  api.EventUpdate,
+						Payload: api.EventACLUpdate{
+							Allowlist: allowlist,
+							Blocklist: blocklist,
+							Timestamp: time.Now().UTC(),
+						},
+					})
+				}
+			}
 		}
 	}
 }
