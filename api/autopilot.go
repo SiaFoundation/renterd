@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"sort"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/utils"
@@ -136,15 +135,4 @@ func (c AutopilotConfig) Validate() error {
 		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
 	}
 	return nil
-}
-
-func (c ContractsConfig) SortContractsForMaintenance(contracts []Contract) {
-	sort.SliceStable(contracts, func(i, j int) bool {
-		iInSet := contracts[i].InSet(c.Set)
-		jInSet := contracts[j].InSet(c.Set)
-		if iInSet != jInSet {
-			return iInSet
-		}
-		return contracts[i].FileSize() > contracts[j].FileSize()
-	})
 }

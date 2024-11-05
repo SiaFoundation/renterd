@@ -220,58 +220,6 @@ func (w *Worker) registerAlert(a alerts.Alert) {
 	cancel()
 }
 
-func (w *Worker) fetchContracts(ctx context.Context, metadatas []api.ContractMetadata, timeout time.Duration) (contracts []api.Contract, errs HostErrorSet) {
-	errs = make(HostErrorSet)
-
-	// create requests channel
-	reqs := make(chan api.ContractMetadata)
-
-	// create worker function
-	var mu sync.Mutex
-	worker := func() {
-		for md := range reqs {
-			var revision types.FileContractRevision
-			err := w.withRevision(ctx, timeout, md.ID, md.HostKey, md.SiamuxAddr, lockingPriorityActiveContractRevision, func(rev types.FileContractRevision) error {
-				revision = rev
-				return nil
-			})
-			mu.Lock()
-			if err != nil {
-				errs[md.HostKey] = err
-				contracts = append(contracts, api.Contract{
-					ContractMetadata: md,
-				})
-			} else {
-				contracts = append(contracts, api.Contract{
-					ContractMetadata: md,
-					Revision:         &revision,
-				})
-			}
-			mu.Unlock()
-		}
-	}
-
-	// launch all workers
-	var wg sync.WaitGroup
-	for t := 0; t < 20 && t < len(metadatas); t++ {
-		wg.Add(1)
-		go func() {
-			worker()
-			wg.Done()
-		}()
-	}
-
-	// launch all requests
-	for _, metadata := range metadatas {
-		reqs <- metadata
-	}
-	close(reqs)
-
-	// wait until they're done
-	wg.Wait()
-	return
-}
-
 func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -713,41 +661,6 @@ func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
 	jc.Check("couldn't remove objects", w.bus.RemoveObjects(jc.Request.Context(), orr.Bucket, orr.Prefix))
 }
 
-func (w *Worker) rhpContractsHandlerGET(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// fetch contracts
-	busContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
-	if jc.Check("failed to fetch contracts from bus", err) != nil {
-		return
-	}
-	if len(busContracts) == 0 {
-		jc.Encode(api.ContractsResponse{Contracts: nil})
-		return
-	}
-
-	var hosttimeout time.Duration
-	if jc.DecodeForm("hosttimeout", (*api.DurationMS)(&hosttimeout)) != nil {
-		return
-	}
-
-	gp, err := w.bus.GougingParams(ctx)
-	if jc.Check("could not get gouging parameters", err) != nil {
-		return
-	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
-
-	contracts, errs := w.fetchContracts(ctx, busContracts, hosttimeout)
-	resp := api.ContractsResponse{Contracts: contracts}
-	if errs != nil {
-		resp.Errors = make(map[types.PublicKey]string)
-		for pk, err := range errs {
-			resp.Errors[pk] = err.Error()
-		}
-	}
-	jc.Encode(resp)
-}
-
 func (w *Worker) idHandlerGET(jc jape.Context) {
 	jc.Encode(w.id)
 }
@@ -884,8 +797,6 @@ func (w *Worker) Handler() http.Handler {
 		"POST   /event": w.eventHandlerPOST,
 
 		"GET    /memory": w.memoryGET,
-
-		"GET    /rhp/contracts": w.rhpContractsHandlerGET,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
 		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,

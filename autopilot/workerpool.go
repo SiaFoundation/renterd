@@ -3,7 +3,6 @@ package autopilot
 import (
 	"context"
 	"sync"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
@@ -13,7 +12,6 @@ import (
 
 type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (api.Account, error)
-	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
 	ID(ctx context.Context) (string, error)
 	MigrateSlab(ctx context.Context, s object.Slab, set string) error
 }
