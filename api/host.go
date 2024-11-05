@@ -45,11 +45,6 @@ var (
 )
 
 type (
-	// HostsScanRequest is the request type for the /hosts/scans endpoint.
-	HostsScanRequest struct {
-		Scans []HostScan `json:"scans"`
-	}
-
 	// HostsPriceTablesRequest is the request type for the /hosts/pricetables endpoint.
 	HostsPriceTablesRequest struct {
 		PriceTableUpdates []HostPriceTableUpdate `json:"priceTableUpdates"`
