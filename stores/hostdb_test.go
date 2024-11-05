@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -450,11 +449,7 @@ func TestHosts(t *testing.T) {
 }
 
 func TestUsableHosts(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
-	cfg.dir = "/users/peterjan/testing2"
-	os.RemoveAll(cfg.dir)
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	ctx := context.Background()
 
