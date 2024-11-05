@@ -22,6 +22,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -2769,4 +2770,72 @@ func TestBackup(t *testing.T) {
 	cluster.tt.OK(err)
 	defer dbMetrics.Close()
 	cluster.tt.OK(dbMetrics.Ping())
+}
+
+// TestConsensusResync tests that deleting the consensus db and resyncing it
+// works
+func TestConsensusResync(t *testing.T) {
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: 1,
+	})
+
+	// assert we got a contract
+	if len(cluster.WaitForContracts()) == 0 {
+		t.Fatal("no contracts")
+	}
+
+	// make sure the contract is renewed for some more on-chain traffic
+	cluster.MineToRenewWindow()
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		cluster.tt.OK(err)
+		if contracts[0].RenewedFrom == (types.FileContractID{}) {
+			return errors.New("contract wasn't renewed")
+		}
+		return nil
+	})
+
+	// save blockheight
+	cs, err := cluster.Bus.ConsensusState(context.Background())
+	cluster.tt.OK(err)
+
+	// stop the cluster but not the hosts
+	hosts := cluster.hosts
+	cluster.hosts = nil
+	cluster.Shutdown()
+
+	// start with fresh chain store
+	network, genesis := testNetwork()
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	cluster.tt.OK(err)
+
+	newCluster := newTestCluster(t, testClusterOptions{
+		cm:        chain.NewManager(store, state),
+		dir:       cluster.dir,
+		dbName:    cluster.dbName,
+		funding:   &clusterOptNoFunding,
+		walletKey: &cluster.wk,
+	})
+	newCluster.hosts = hosts
+	defer newCluster.Shutdown()
+
+	// check the chain managers synced up
+	newCluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		oldTip := cluster.cm.Tip()
+		newTip := newCluster.cm.Tip()
+		if oldTip != newTip {
+			return fmt.Errorf("tips don't match: %v != %v", oldTip, newTip)
+		}
+		return nil
+	})
+
+	// the bus state should also be in sync
+	newCS, err := newCluster.Bus.ConsensusState(context.Background())
+	newCluster.tt.OK(err)
+
+	if !newCS.Synced {
+		t.Fatal("not synced")
+	} else if newCS.BlockHeight != cs.BlockHeight {
+		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
+	}
 }
