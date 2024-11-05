@@ -78,8 +78,17 @@ func UpdateContractRevision(ctx context.Context, tx sql.Tx, fcid types.FileContr
 
 func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileContractID, proofHeight uint64, l *zap.SugaredLogger) error {
 	l.Debugw("update contract proof height", "fcid", fcid, "proof_height", proofHeight)
-	_, err := tx.Exec(ctx, `UPDATE contracts SET proof_height = ? WHERE fcid = ?`, proofHeight, FileContractID(fcid))
-	return err
+
+	res, err := tx.Exec(ctx, `UPDATE contracts SET proof_height = ? WHERE fcid = ?`, proofHeight, FileContractID(fcid))
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("expected to update 1 row, but updated %d", n)
+	}
+
+	return nil
 }
 
 func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID, state api.ContractState, l *zap.SugaredLogger) error {
@@ -89,8 +98,17 @@ func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	if err := cs.LoadString(string(state)); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `UPDATE contracts SET state = ? WHERE fcid = ?`, cs, FileContractID(fcid))
-	return err
+
+	res, err := tx.Exec(ctx, `UPDATE contracts SET state = ? WHERE fcid = ?`, cs, FileContractID(fcid))
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("expected to update 1 row, but updated %d", n)
+	}
+
+	return nil
 }
 
 func UpdateFailedContracts(ctx context.Context, tx sql.Tx, blockHeight uint64, l *zap.SugaredLogger) error {
