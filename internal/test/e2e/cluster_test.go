@@ -22,6 +22,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
@@ -2787,6 +2788,13 @@ func TestConsensusResync(t *testing.T) {
 	// upload some data
 	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
 
+	// broadcast the revision for each contract
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	tt.OK(err)
+	for _, c := range contracts {
+		tt.OKAll(cluster.Bus.BroadcastContract(context.Background(), c.ID))
+	}
+
 	// mine to renew the contracts
 	cluster.MineToRenewWindow()
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -2805,8 +2813,18 @@ func TestConsensusResync(t *testing.T) {
 		MaxDownloadPrice: types.NewCurrency64(1),
 	})
 
-	// let them expire
-	cluster.MineBlocks(2 * test.AutopilotConfig.Contracts.Period)
+	// let them expire - we don't check for errors when mining since a few blocks
+	// might be invalid due to a race when broadcasting revisions while mining
+	// blocks rapidly
+	for i := 0; i < int(2*test.AutopilotConfig.Contracts.Period); i++ {
+		b, ok := coreutils.MineBlock(cluster.cm, types.Address{}, 5*time.Second)
+		if !ok {
+			continue
+		}
+		_ = cluster.Bus.AcceptBlock(context.Background(), b)
+	}
+	cluster.sync()
+
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
