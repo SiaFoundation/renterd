@@ -126,9 +126,6 @@ CREATE TABLE `ephemeral_accounts` (`id` integer PRIMARY KEY AUTOINCREMENT,`creat
 CREATE INDEX `idx_ephemeral_accounts_requires_sync` ON `ephemeral_accounts`(`requires_sync`);
 CREATE INDEX `idx_ephemeral_accounts_owner` ON `ephemeral_accounts`(`owner`);
 
--- dbAutopilot
-CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`identifier` text NOT NULL UNIQUE,`config` text,`current_period` integer DEFAULT 0);
-
 -- dbWebhook
 CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL,`headers` text DEFAULT ('{}'));
 CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`);
@@ -177,3 +174,9 @@ CREATE INDEX `idx_wallet_events_block_id_height` ON `wallet_events`(`block_id`,`
 CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`output_id` blob NOT NULL,`leaf_index` integer,`merkle_proof` longblob NOT NULL,`value` text,`address` blob,`maturity_height` integer);
 CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
+
+-- dbAutopilotConfig
+CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, contracts_set text, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);
+
+-- Insert a single row as the starting entry
+INSERT INTO autopilot_config (id, created_at, current_period) VALUES (1, CURRENT_TIMESTAMP, 0);

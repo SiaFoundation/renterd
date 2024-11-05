@@ -388,7 +388,6 @@ CREATE TABLE `host_checks` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
 
-  `db_autopilot_id` bigint unsigned NOT NULL,
   `db_host_id` bigint unsigned NOT NULL,
 
   `usability_blocked` boolean NOT NULL DEFAULT false,
@@ -415,7 +414,7 @@ CREATE TABLE `host_checks` (
   `gouging_upload_err` text,
 
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_host_checks_id` (`db_autopilot_id`, `db_host_id`),
+  UNIQUE KEY `idx_host_checks_id` (`db_host_id`),
   INDEX `idx_host_checks_usability_blocked` (`usability_blocked`),
   INDEX `idx_host_checks_usability_offline` (`usability_offline`),
   INDEX `idx_host_checks_usability_low_score` (`usability_low_score`),
@@ -432,7 +431,6 @@ CREATE TABLE `host_checks` (
   INDEX `idx_host_checks_score_version` (`score_version`),
   INDEX `idx_host_checks_score_prices` (`score_prices`),
 
-  CONSTRAINT `fk_host_checks_autopilot` FOREIGN KEY (`db_autopilot_id`) REFERENCES `autopilots` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_host_checks_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -496,3 +494,28 @@ CREATE TABLE `wallet_outputs` (
   UNIQUE KEY `output_id` (`output_id`),
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- dbAutopilotConfig
+CREATE TABLE `autopilot_config` (
+  `id` bigint unsigned NOT NULL DEFAULT 1,
+  `created_at` datetime(3) DEFAULT NULL,
+  `current_period` bigint unsigned DEFAULT 0,
+
+  `contracts_amount` bigint unsigned DEFAULT NULL,
+  `contracts_period` bigint unsigned DEFAULT NULL,
+  `contracts_renew_window` bigint unsigned DEFAULT NULL,
+  `contracts_download` bigint unsigned DEFAULT NULL,
+  `contracts_upload` bigint unsigned DEFAULT NULL,
+  `contracts_storage` bigint unsigned DEFAULT NULL,
+  `contracts_prune` boolean NOT NULL DEFAULT false,
+
+  `hosts_allow_redundant_ips` boolean NOT NULL DEFAULT false,
+  `hosts_max_downtime_hours` bigint unsigned DEFAULT NULL,
+  `hosts_min_protocol_version` varchar(191) DEFAULT NULL,
+  `hosts_max_consecutive_scan_failures` bigint unsigned DEFAULT NULL,
+
+  PRIMARY KEY (`id`),
+  CHECK (`id` = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT INTO `autopilot_config` (`id`, `created_at`, `current_period`) VALUES (1, NOW(), 0);
