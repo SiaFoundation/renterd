@@ -2773,31 +2773,52 @@ func TestBackup(t *testing.T) {
 }
 
 // TestConsensusResync tests that deleting the consensus db and resyncing it
-// works
+// works. For that reason it simulates some on-chain traffic by uploading to
+// contracts, renewing contracts and letting these contracts expire. That way,
+// renterd has to resync a chain containing regular transactions, contracts and
+// storage proofs.
 func TestConsensusResync(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: 1,
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: false,
+	})
+	tt := cluster.tt
+
+	// upload some data
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
+
+	// mine to renew the contracts
+	cluster.MineToRenewWindow()
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		tt.OK(err)
+		for _, c := range contracts {
+			if c.RenewedFrom == (types.FileContractID{}) {
+				return errors.New("contract wasn't renewed")
+			}
+		}
+		return nil
 	})
 
-	// assert we got a contract
-	if len(cluster.WaitForContracts()) == 0 {
-		t.Fatal("no contracts")
-	}
+	// make sure all hosts are gouging for the contracts to expire
+	cluster.bs.UpdateGougingSettings(context.Background(), api.GougingSettings{
+		MaxDownloadPrice: types.NewCurrency64(1),
+	})
 
-	// make sure the contract is renewed for some more on-chain traffic
-	cluster.MineToRenewWindow()
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+	// let them expire
+	cluster.MineBlocks(2 * test.AutopilotConfig.Contracts.Period)
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
-		cluster.tt.OK(err)
-		if contracts[0].RenewedFrom == (types.FileContractID{}) {
-			return errors.New("contract wasn't renewed")
+		tt.OK(err)
+		if len(contracts) != 0 {
+			return errors.New("not all contracts expired")
 		}
 		return nil
 	})
 
 	// save blockheight
 	cs, err := cluster.Bus.ConsensusState(context.Background())
-	cluster.tt.OK(err)
+	tt.OK(err)
 
 	// stop the cluster but not the hosts
 	hosts := cluster.hosts
@@ -2807,7 +2828,7 @@ func TestConsensusResync(t *testing.T) {
 	// start with fresh chain store
 	network, genesis := testNetwork()
 	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
-	cluster.tt.OK(err)
+	tt.OK(err)
 
 	newCluster := newTestCluster(t, testClusterOptions{
 		cm:        chain.NewManager(store, state),
@@ -2820,7 +2841,7 @@ func TestConsensusResync(t *testing.T) {
 	defer newCluster.Shutdown()
 
 	// check the chain managers synced up
-	newCluster.tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		oldTip := cluster.cm.Tip()
 		newTip := newCluster.cm.Tip()
 		if oldTip != newTip {
@@ -2831,7 +2852,7 @@ func TestConsensusResync(t *testing.T) {
 
 	// the bus state should also be in sync
 	newCS, err := newCluster.Bus.ConsensusState(context.Background())
-	newCluster.tt.OK(err)
+	tt.OK(err)
 
 	if !newCS.Synced {
 		t.Fatal("not synced")
