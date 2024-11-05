@@ -501,25 +501,17 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	hosts, err := b.store.UsableHosts(jc.Request.Context(), offset, limit)
-	if jc.Check("couldn't fetch hosts", err) != nil {
-		return
-	}
-
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
-	filtered := hosts[:0]
-	for _, host := range hosts {
-		if gc.Check(&host.Settings, &host.Prices.HostPriceTable).Gouging() {
-			continue
-		}
-		filtered = append(filtered, host)
+	hosts, err := b.store.UsableHosts(jc.Request.Context(), gc, offset, limit)
+	if jc.Check("couldn't fetch hosts", err) != nil {
+		return
 	}
-	jc.Encode(filtered)
+	jc.Encode(hosts)
 }
 
 func (b *Bus) hostsHandlerPOST(jc jape.Context) {

@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -370,7 +371,7 @@ type (
 		// UsableHosts returns a list of hosts that are ready to be used. That
 		// means they are deemed usable by the autopilot, they are not gouging,
 		// not blocked, not offline, etc.
-		UsableHosts(ctx context.Context, offset, limit int) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context, gc gouging.Checker, offset, limit int) ([]api.HostInfo, error)
 
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)

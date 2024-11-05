@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
@@ -117,9 +118,9 @@ func (s *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api
 	})
 }
 
-func (s *SQLStore) UsableHosts(ctx context.Context, offset, limit int) (hosts []api.HostInfo, err error) {
+func (s *SQLStore) UsableHosts(ctx context.Context, gc gouging.Checker, offset, limit int) (hosts []api.HostInfo, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		hosts, err = tx.UsableHosts(ctx, offset, limit)
+		hosts, err = tx.UsableHosts(ctx, gc, offset, limit)
 		return err
 	})
 	return
