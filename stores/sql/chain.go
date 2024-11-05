@@ -35,18 +35,13 @@ func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID)
 func UpdateChainIndex(ctx context.Context, tx sql.Tx, index types.ChainIndex, l *zap.SugaredLogger) error {
 	l.Debugw("update chain index", "height", index.Height, "block_id", index.ID)
 
-	if res, err := tx.Exec(ctx,
+	if _, err := tx.Exec(ctx,
 		fmt.Sprintf("UPDATE consensus_infos SET height = ?, block_id = ? WHERE id = %d", sql.ConsensusInfoID),
 		index.Height,
 		Hash256(index.ID),
 	); err != nil {
 		return fmt.Errorf("failed to update chain index: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	} else if n != 1 {
-		return fmt.Errorf("failed to update chain index: no rows affected")
 	}
-
 	return nil
 }
 
