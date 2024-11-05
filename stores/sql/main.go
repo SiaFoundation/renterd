@@ -172,13 +172,9 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	}
 
 	// archive contract
-	res, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
+	_, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
 	if err != nil {
 		return fmt.Errorf("failed to archive contract: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to fetch rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("expected to update 1 row, updated %d", n)
 	}
 
 	// delete its sectors
