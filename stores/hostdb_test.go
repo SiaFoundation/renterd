@@ -483,7 +483,6 @@ func TestUsableHosts(t *testing.T) {
 
 		// add host scan
 		hs := test.NewHostSettings()
-		hs.MaxEphemeralAccountBalance = types.Siacoins(1)
 		pt := test.NewHostPriceTable()
 		s1 := newTestScan(hk, time.Now(), hs, pt, true, nil, nil)
 		if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
