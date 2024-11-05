@@ -2787,6 +2787,13 @@ func TestConsensusResync(t *testing.T) {
 	// upload some data
 	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
 
+	// broadcast the revision for each contract
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	tt.OK(err)
+	for _, c := range contracts {
+		tt.OKAll(cluster.Bus.BroadcastContract(context.Background(), c.ID))
+	}
+
 	// mine to renew the contracts
 	cluster.MineToRenewWindow()
 	tt.Retry(100, 100*time.Millisecond, func() error {
