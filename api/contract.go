@@ -35,12 +35,6 @@ var (
 type ContractState string
 
 type (
-	// A Contract wraps the contract metadata with the latest contract revision.
-	Contract struct {
-		ContractMetadata
-		Revision *types.FileContractRevision `json:"revision"`
-	}
-
 	// ContractSize contains information about the size of the contract and
 	// about how much of the contract data can be pruned.
 	ContractSize struct {
@@ -212,29 +206,8 @@ func (x ContractSpending) Add(y ContractSpending) (z ContractSpending) {
 	return
 }
 
-// EndHeight returns the height at which the host is no longer obligated to
-// store contract data.
-func (c Contract) EndHeight() uint64 { return c.WindowStart }
-
-// FileSize returns the current Size of the contract.
-func (c Contract) FileSize() uint64 {
-	if c.Revision == nil {
-		return c.Size // use latest recorded value if we don't have a recent revision
-	}
-	return c.Revision.Filesize
-}
-
-// RenterFunds returns the funds remaining in the contract's Renter payout.
-func (c Contract) RenterFunds() types.Currency {
-	return c.Revision.ValidRenterPayout()
-}
-
-// RemainingCollateral returns the remaining collateral in the contract.
-func (c Contract) RemainingCollateral() types.Currency {
-	if c.Revision.MissedHostPayout().Cmp(c.ContractPrice) < 0 {
-		return types.ZeroCurrency
-	}
-	return c.Revision.MissedHostPayout().Sub(c.ContractPrice)
+func (cm ContractMetadata) EndHeight() uint64 {
+	return cm.WindowStart
 }
 
 // InSet returns whether the contract is in the given set.
@@ -245,4 +218,15 @@ func (cm ContractMetadata) InSet(set string) bool {
 		}
 	}
 	return false
+}
+
+type (
+	Revision struct {
+		ContractID types.FileContractID `json:"contractID"`
+		types.V2FileContract
+	}
+)
+
+func (rev *Revision) EndHeight() uint64 {
+	return rev.ProofHeight
 }

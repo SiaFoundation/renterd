@@ -50,13 +50,6 @@ func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	return
 }
 
-// Contracts returns all contracts from the worker. These contracts decorate a
-// bus contract with the contract's latest revision.
-func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts?hosttimeout=%s", api.DurationMS(hostTimeout)), &resp)
-	return
-}
-
 // DeleteObject deletes the object at the given path.
 func (c *Client) DeleteObject(ctx context.Context, bucket, key string) (err error) {
 	values := url.Values{}
