@@ -189,15 +189,17 @@ func TestNewTestCluster(t *testing.T) {
 	cluster.AddHosts(1)
 
 	// Wait for contracts to form.
-	var contract api.Contract
+	var contract api.ContractMetadata
 	contracts := cluster.WaitForContracts()
 	contract = contracts[0]
+	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
+	tt.OK(err)
 
 	// Verify startHeight and endHeight of the contract.
 	cfg, currentPeriod := cluster.AutopilotConfig(context.Background())
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	if contract.EndHeight() != expectedEndHeight || contract.Revision.EndHeight() != expectedEndHeight {
-		t.Fatal("wrong endHeight", contract.EndHeight(), contract.Revision.EndHeight())
+	if contract.EndHeight() != expectedEndHeight || revision.EndHeight() != expectedEndHeight {
+		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}

@@ -142,6 +142,13 @@ func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileCon
 	return
 }
 
+// ContractRevision fetches the latest revision of a contract directly from the
+// host.
+func (c *Client) ContractRevision(ctx context.Context, contractID types.FileContractID) (resp api.Revision, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/revision", contractID), &resp)
+	return
+}
+
 // PrunableData returns an overview of all contract sizes, the total size and
 // the amount of data that can be pruned.
 func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
