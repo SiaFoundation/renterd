@@ -58,12 +58,6 @@ type (
 		LockID uint64 `json:"lockID"`
 	}
 
-	// ContractsResponse is the response type for the /rhp/contracts endpoint.
-	ContractsResponse struct {
-		Contracts []Contract                 `json:"contracts"`
-		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
-	}
-
 	MemoryResponse struct {
 		Download MemoryStatus `json:"download"`
 		Upload   MemoryStatus `json:"upload"`

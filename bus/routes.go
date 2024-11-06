@@ -507,25 +507,17 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	}
 	minWindowStart := cs.BlockHeight + b.revisionSubmissionBuffer
 
-	hosts, err := b.store.UsableHosts(jc.Request.Context(), minWindowStart, offset, limit)
-	if jc.Check("couldn't fetch hosts", err) != nil {
-		return
-	}
-
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
-	filtered := hosts[:0]
-	for _, host := range hosts {
-		if gc.Check(&host.Settings, &host.Prices.HostPriceTable).Gouging() {
-			continue
-		}
-		filtered = append(filtered, host)
+	hosts, err := b.store.UsableHosts(jc.Request.Context(), gc, minWindowStart, offset, limit)
+	if jc.Check("couldn't fetch hosts", err) != nil {
+		return
 	}
-	jc.Encode(filtered)
+	jc.Encode(hosts)
 }
 
 func (b *Bus) hostsHandlerPOST(jc jape.Context) {
@@ -881,6 +873,49 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	err := b.contractLocker.KeepAlive(id, req.LockID, time.Duration(req.Duration))
 	if jc.Check("failed to extend lock duration", err) != nil {
 		return
+	}
+}
+
+func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+	contract, err := b.store.Contract(jc.Request.Context(), fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch contract", err) != nil {
+		return
+	}
+
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, contract.SiamuxAddr)
+		if jc.Check("failed to fetch revision", err) != nil {
+			return
+		}
+		jc.Encode(api.Revision{
+			ContractID: revision.ParentID,
+			V2FileContract: types.V2FileContract{
+				Capacity:         revision.Filesize, // same as size for v1
+				Filesize:         revision.Filesize,
+				FileMerkleRoot:   revision.FileMerkleRoot,
+				ProofHeight:      revision.WindowStart,
+				ExpirationHeight: revision.WindowEnd,
+				RenterOutput:     revision.ValidRenterOutput(),
+				HostOutput:       revision.ValidHostOutput(),
+				MissedHostValue:  revision.MissedHostPayout(),
+				TotalCollateral:  types.ZeroCurrency, // unknown in v1
+				RenterPublicKey:  types.PublicKey(revision.UnlockConditions.PublicKeys[0].Key),
+				HostPublicKey:    types.PublicKey(revision.UnlockConditions.PublicKeys[1].Key),
+				RevisionNumber:   revision.RevisionNumber,
+
+				RenterSignature: types.Signature{}, // unavailable in v1
+				HostSignature:   types.Signature{}, // unavailable in v1
+			},
+		})
 	}
 }
 

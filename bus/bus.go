@@ -214,7 +214,7 @@ type (
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
-		UsableHosts(ctx context.Context, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context, gc gouging.Checker, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error)
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -434,6 +434,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/broadcast": b.contractIDBroadcastHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"GET    /contract/:id/revision":  b.contractLatestRevisionHandlerGET,
 		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,

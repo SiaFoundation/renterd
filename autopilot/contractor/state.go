@@ -108,8 +108,8 @@ func (ctx *mCtx) Set() string {
 	return ctx.state.ContractsConfig().Set
 }
 
-func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {
-	ctx.state.ContractsConfig().SortContractsForMaintenance(contracts)
+func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
+	sortContractsForMaintenance(ctx.state.ContractsConfig(), contracts)
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {

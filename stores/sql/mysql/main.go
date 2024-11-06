@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
@@ -1242,8 +1243,8 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) UsableHosts(ctx context.Context, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error) {
-	return ssql.UsableHosts(ctx, tx, minWindowStart, offset, limit)
+func (tx *MainDatabaseTx) UsableHosts(ctx context.Context, gc gouging.Checker, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error) {
+	return ssql.UsableHosts(ctx, tx, gc, minWindowStart, offset, limit)
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {

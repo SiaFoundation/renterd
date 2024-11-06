@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -2160,7 +2161,7 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 	return
 }
 
-func UsableHosts(ctx context.Context, tx sql.Tx, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error) {
+func UsableHosts(ctx context.Context, tx sql.Tx, gc gouging.Checker, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error) {
 	// handle input parameters
 	if offset < 0 {
 		return nil, ErrNegativeOffset
@@ -2218,7 +2219,6 @@ EXISTS (
 	COALESCE(h.net_address, ""),
 	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
 	h.price_table,
-	h.price_table_expiry,
 	h.settings,
 	MAX(c.fcid)
 	FROM hosts h
@@ -2239,22 +2239,29 @@ EXISTS (
 		var addr, port string
 		var pt PriceTable
 		var hs HostSettings
-		var pte dsql.NullTime
 		var fcid FileContractID
-		err := rows.Scan(&hk, &addr, &port, &pt, &pte, &hs, &fcid)
+		err := rows.Scan(&hk, &addr, &port, &pt, &hs, &fcid)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
+
+		// exclude hosts that are gouging
+		hss := rhpv2.HostSettings(hs)
+		hpt := rhpv3.HostPriceTable(pt)
+		if gc.Check(&hss, &hpt).Gouging() {
+			continue
+		}
+
+		// exclude hosts with invalid address
 		host, _, err := net.SplitHostPort(addr)
 		if err != nil || host == "" {
 			continue
 		}
+
 		hosts = append(hosts, api.HostInfo{
 			ContractID: types.FileContractID(fcid),
 			PublicKey:  types.PublicKey(hk),
 			SiamuxAddr: net.JoinHostPort(host, port),
-			Prices:     api.HostPriceTable{HostPriceTable: rhpv3.HostPriceTable(pt), Expiry: pte.Time},
-			Settings:   rhpv2.HostSettings(hs),
 		})
 	}
 	return hosts, nil

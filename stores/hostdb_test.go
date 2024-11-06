@@ -14,6 +14,8 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/test"
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
@@ -457,6 +459,10 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	cs := api.ConsensusState{Synced: true}
+	gs := test.GougingSettings
+	gc := gouging.NewChecker(gs, cs, nil, nil)
+
 	// prepare hosts & contracts
 	//
 	// h1: usable
@@ -474,6 +480,14 @@ func TestUsableHosts(t *testing.T) {
 			t.Fatal(err)
 		}
 		hks = append(hks, hk)
+
+		// add host scan
+		hs := test.NewHostSettings()
+		pt := test.NewHostPriceTable()
+		s1 := newTestScan(hk, time.Now(), hs, pt, true, nil, nil)
+		if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
+			t.Fatal(err)
+		}
 
 		// add host check
 		if i != 4 {
@@ -504,14 +518,8 @@ func TestUsableHosts(t *testing.T) {
 		}
 	}
 
-	// set siamux port in settings
-	_, err = ss.DB().Exec(context.Background(), "UPDATE hosts SET settings = ? WHERE 1=1", sql.HostSettings(rhpv2.HostSettings{SiaMuxPort: "9983"}))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// assert h1 and h2 are usable and ordered by score
-	hosts, err := ss.UsableHosts(ctx, 0, 0, -1)
+	hosts, err := ss.UsableHosts(ctx, gc, 0, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
@@ -523,7 +531,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// assert offset and limit
-	hosts, err = ss.UsableHosts(ctx, 0, 1, 1)
+	hosts, err = ss.UsableHosts(ctx, gc, 0, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -531,7 +539,7 @@ func TestUsableHosts(t *testing.T) {
 	} else if hosts[0].PublicKey != hks[0] {
 		t.Fatal("unexpected", hosts)
 	}
-	hosts, err = ss.UsableHosts(ctx, 0, 2, 1)
+	hosts, err = ss.UsableHosts(ctx, gc, 0, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
@@ -539,17 +547,36 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// assert minWindowStart is taken into account
-	hosts, err = ss.UsableHosts(ctx, 9, 0, -1)
+	hosts, err = ss.UsableHosts(ctx, gc, 9, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts))
 	}
-	hosts, err = ss.UsableHosts(ctx, 10, 0, -1)
+	hosts, err = ss.UsableHosts(ctx, gc, 10, 0, -1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
 		t.Fatal("unexpected", len(hosts))
+	}
+
+	// record a scan for h1 to make it gouging
+	hs := test.NewHostSettings()
+	pt := test.NewHostPriceTable()
+	pt.UploadBandwidthCost = gs.MaxUploadPrice
+	s1 := newTestScan(types.PublicKey{1}, time.Now(), hs, pt, true, nil, nil)
+	if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it's no longer in the result set
+	hosts, err = ss.UsableHosts(ctx, gc, 0, 0, -1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != hks[1] {
+		t.Fatal("unexpected", hosts)
 	}
 }
 
