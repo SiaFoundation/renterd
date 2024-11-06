@@ -278,7 +278,7 @@ func (s *chainSubscriber) sync() error {
 
 	// fetch updates until we're caught up
 	var cnt uint64
-	for index != s.cm.Tip() && !s.isClosed() {
+	for index != s.cm.Tip() && index.Height <= s.cm.Tip().Height && !s.isClosed() {
 		// fetch updates
 		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)

@@ -12,6 +12,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/memory"
 )
 
 var (
@@ -59,13 +60,8 @@ type (
 	}
 
 	MemoryResponse struct {
-		Download MemoryStatus `json:"download"`
-		Upload   MemoryStatus `json:"upload"`
-	}
-
-	MemoryStatus struct {
-		Available uint64 `json:"available"`
-		Total     uint64 `json:"total"`
+		Download memory.Status `json:"download"`
+		Upload   memory.Status `json:"upload"`
 	}
 
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
