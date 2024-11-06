@@ -195,8 +195,13 @@ func (h Hash256) Value() (driver.Value, error) {
 
 // Scan scan value into HostSettings, implements sql.Scanner interface.
 func (hs *HostSettings) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
 		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
 	}
 	return json.Unmarshal(bytes, hs)
@@ -212,8 +217,13 @@ func (hs HostSettings) Value() (driver.Value, error) {
 
 // Scan scan value into PriceTable, implements sql.Scanner interface.
 func (pt *PriceTable) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
 		return errors.New(fmt.Sprint("failed to unmarshal PriceTable value:", value))
 	}
 	return json.Unmarshal(bytes, pt)

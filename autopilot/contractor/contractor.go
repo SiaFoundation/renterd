@@ -963,6 +963,15 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 			continue
 		}
 
+		// NOTE: if we have a contract with a host that is not scanned, we either
+		// added the host and contract manually or reset the host scans. In that case,
+		// we ignore the fact that the host is not scanned for now to avoid churn.
+		if inSet && check.Usability.NotCompletingScan {
+			keepContract(c.ContractMetadata, host)
+			logger.Info("ignoring contract with unscanned host")
+			continue // no more checks until host is scanned
+		}
+
 		// check usability
 		if !check.Usability.IsUsable() {
 			reasons := strings.Join(check.Usability.UnusableReasons(), ",")
@@ -1097,9 +1106,10 @@ func performContractFormations(ctx *mCtx, bus Bus, w Worker, cr contractReviser,
 		usedHosts[c.HostKey] = struct{}{}
 	}
 	allHosts, err := bus.SearchHosts(ctx, api.SearchHostOptions{
+		AutopilotID:   ctx.ApID(),
 		Limit:         -1,
 		FilterMode:    api.HostFilterModeAllowed,
-		UsabilityMode: api.UsabilityFilterModeAll,
+		UsabilityMode: api.UsabilityFilterModeUsable,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch usable hosts: %w", err)

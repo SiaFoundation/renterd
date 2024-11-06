@@ -12,8 +12,8 @@ type (
 	// A SiacoinElement is a SiacoinOutput along with its ID.
 	SiacoinElement struct {
 		types.SiacoinOutput
-		ID             types.Hash256 `json:"id"`
-		MaturityHeight uint64        `json:"maturityHeight"`
+		ID             types.SiacoinOutputID `json:"id"`
+		MaturityHeight uint64                `json:"maturityHeight"`
 	}
 
 	// A Transaction is an on-chain transaction relevant to a particular wallet,

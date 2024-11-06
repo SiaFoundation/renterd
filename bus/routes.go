@@ -376,7 +376,7 @@ func (b *Bus) walletOutputsHandler(jc jape.Context) {
 		elements := make([]api.SiacoinElement, len(utxos))
 		for i, sce := range utxos {
 			elements[i] = api.SiacoinElement{
-				ID: sce.StateElement.ID,
+				ID: sce.ID,
 				SiacoinOutput: types.SiacoinOutput{
 					Value:   sce.SiacoinOutput.Value,
 					Address: sce.SiacoinOutput.Address,
