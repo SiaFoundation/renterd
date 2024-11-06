@@ -108,7 +108,7 @@ type (
 		Interactions      HostInteractions   `json:"interactions"`
 		Scanned           bool               `json:"scanned"`
 		Blocked           bool               `json:"blocked"`
-		Check             HostCheck          `json:"check"`
+		Checks            HostChecks         `json:"checks"`
 		StoredData        uint64             `json:"storedData"`
 		ResolvedAddresses []string           `json:"resolvedAddresses"`
 		Subnets           []string           `json:"subnets"`
@@ -149,7 +149,7 @@ type (
 		PriceTable HostPriceTable  `json:"priceTable"`
 	}
 
-	HostCheck struct {
+	HostChecks struct {
 		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
 		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
 		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
@@ -185,8 +185,8 @@ type (
 	}
 )
 
-func (hc HostCheck) MarshalJSON() ([]byte, error) {
-	type check HostCheck
+func (hc HostChecks) MarshalJSON() ([]byte, error) {
+	type check HostChecks
 	return json.Marshal(struct {
 		check
 		Score  float64 `json:"score"`

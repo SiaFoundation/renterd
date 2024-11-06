@@ -60,7 +60,7 @@ type Bus interface {
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostCheck) error
+	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
 
 	// metrics
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
@@ -382,20 +382,14 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 	var once sync.Once
 
 	for {
-		// try and fetch the config
-		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-		_, err := ap.bus.AutopilotState(ctx)
-		cancel()
-
-		// if the config was not found, or we were unable to fetch it, keep blocking
-		if utils.IsErr(err, context.Canceled) {
-			return
-		} else if utils.IsErr(err, api.ErrAutopilotStateNotFound) {
-			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
-		} else if err != nil {
+		state, err := ap.bus.AutopilotState(ap.shutdownCtx)
+		if err != nil && !utils.IsErr(err, api.ErrAutopilotStateNotFound) {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
 		}
-		if err != nil {
+
+		configured = state.AutopilotConfig.Hosts != (api.HostsConfig{}) && state.AutopilotConfig.Contracts != (api.ContractsConfig{})
+		if err != nil || !configured {
+			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
 			select {
 			case <-ap.shutdownCtx.Done():
 				return false, false

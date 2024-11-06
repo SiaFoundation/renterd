@@ -278,14 +278,14 @@ func TestNewTestCluster(t *testing.T) {
 		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		} else if hi.Check == (api.HostCheck{}) {
+		} else if hi.Checks == (api.HostChecks{}) {
 			t.Fatal("host check not found")
-		} else if hi.Check.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.Check.ScoreBreakdown, "", "  ")
+		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !hi.Check.UsabilityBreakdown.IsUsable() {
+		} else if !hi.Checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(hi.Check.UsabilityBreakdown.UnusableReasons()) != 0 {
+		} else if len(hi.Checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
@@ -301,14 +301,14 @@ func TestNewTestCluster(t *testing.T) {
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if hi.Check == (api.HostCheck{}) {
+		if hi.Checks == (api.HostChecks{}) {
 			t.Fatal("host check not found")
-		} else if hi.Check.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(hi.Check.ScoreBreakdown, "", "  ")
+		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !hi.Check.UsabilityBreakdown.IsUsable() {
+		} else if !hi.Checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(hi.Check.UsabilityBreakdown.UnusableReasons()) != 0 {
+		} else if len(hi.Checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")

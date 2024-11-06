@@ -911,11 +911,11 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &resolvedAddresses, &h.Blocked, &h.Check.UsabilityBreakdown.Blocked, &h.Check.UsabilityBreakdown.Offline, &h.Check.UsabilityBreakdown.LowScore, &h.Check.UsabilityBreakdown.RedundantIP,
-			&h.Check.UsabilityBreakdown.Gouging, &h.Check.UsabilityBreakdown.NotAcceptingContracts, &h.Check.UsabilityBreakdown.NotAnnounced, &h.Check.UsabilityBreakdown.NotCompletingScan,
-			&h.Check.ScoreBreakdown.Age, &h.Check.ScoreBreakdown.Collateral, &h.Check.ScoreBreakdown.Interactions, &h.Check.ScoreBreakdown.StorageRemaining, &h.Check.ScoreBreakdown.Uptime,
-			&h.Check.ScoreBreakdown.Version, &h.Check.ScoreBreakdown.Prices, &h.Check.GougingBreakdown.ContractErr, &h.Check.GougingBreakdown.DownloadErr, &h.Check.GougingBreakdown.GougingErr,
-			&h.Check.GougingBreakdown.PruneErr, &h.Check.GougingBreakdown.UploadErr)
+			&h.Scanned, &resolvedAddresses, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
+			&h.Checks.UsabilityBreakdown.Gouging, &h.Checks.UsabilityBreakdown.NotAcceptingContracts, &h.Checks.UsabilityBreakdown.NotAnnounced, &h.Checks.UsabilityBreakdown.NotCompletingScan,
+			&h.Checks.ScoreBreakdown.Age, &h.Checks.ScoreBreakdown.Collateral, &h.Checks.ScoreBreakdown.Interactions, &h.Checks.ScoreBreakdown.StorageRemaining, &h.Checks.ScoreBreakdown.Uptime,
+			&h.Checks.ScoreBreakdown.Version, &h.Checks.ScoreBreakdown.Prices, &h.Checks.GougingBreakdown.ContractErr, &h.Checks.GougingBreakdown.DownloadErr, &h.Checks.GougingBreakdown.GougingErr,
+			&h.Checks.GougingBreakdown.PruneErr, &h.Checks.GougingBreakdown.UploadErr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}

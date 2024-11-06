@@ -1941,7 +1941,7 @@ func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	var hc api.HostCheck
+	var hc api.HostChecks
 	if jc.Check("failed to decode host check", jc.Decode(&hc)) != nil {
 		return
 	}

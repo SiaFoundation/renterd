@@ -353,7 +353,7 @@ type (
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
 		// UpdateHostCheck updates the host check for the given host.
-		UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) error
 
 		// UpdatePeerInfo updates the metadata for the specified peer.
 		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/utils"
 )
 
@@ -51,18 +50,17 @@ type (
 
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
-		AllowRedundantIPs          bool                        `json:"allowRedundantIPs"`
-		MaxDowntimeHours           uint64                      `json:"maxDowntimeHours"`
-		MinProtocolVersion         string                      `json:"minProtocolVersion"`
-		MaxConsecutiveScanFailures uint64                      `json:"maxConsecutiveScanFailures"`
-		ScoreOverrides             map[types.PublicKey]float64 `json:"scoreOverrides"`
+		AllowRedundantIPs          bool   `json:"allowRedundantIPs"`
+		MaxDowntimeHours           uint64 `json:"maxDowntimeHours"`
+		MinProtocolVersion         string `json:"minProtocolVersion"`
+		MaxConsecutiveScanFailures uint64 `json:"maxConsecutiveScanFailures"`
 	}
 )
 
 // EndHeight of a contract taking the current period and renew window into
 // account.
-func (cfg *AutopilotState) EndHeight() uint64 {
-	return cfg.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+func (as *AutopilotState) EndHeight() uint64 {
+	return as.CurrentPeriod + as.Contracts.Period + as.Contracts.RenewWindow
 }
 
 type (
@@ -124,11 +122,11 @@ type (
 	}
 )
 
-func (c HostsConfig) Validate() error {
-	if c.MaxDowntimeHours > 99*365*24 {
+func (hc HostsConfig) Validate() error {
+	if hc.MaxDowntimeHours > 99*365*24 {
 		return ErrMaxDowntimeHoursTooHigh
-	} else if c.MinProtocolVersion != "" && !utils.IsVersion(c.MinProtocolVersion) {
-		return fmt.Errorf("invalid min protocol version '%s'", c.MinProtocolVersion)
+	} else if hc.MinProtocolVersion != "" && !utils.IsVersion(hc.MinProtocolVersion) {
+		return fmt.Errorf("invalid min protocol version '%s'", hc.MinProtocolVersion)
 	}
 	return nil
 }

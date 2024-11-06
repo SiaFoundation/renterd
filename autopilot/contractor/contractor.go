@@ -91,7 +91,7 @@ type Bus interface {
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
-	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostCheck) error
+	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
 }
 
 type HostScanner interface {
@@ -881,15 +881,15 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// get check
-		if host.Check == (api.HostCheck{}) {
+		if host.Checks == (api.HostChecks{}) {
 			logger.Warn("missing host check")
 			churnReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
 			continue
 		}
 
 		// check usability
-		if !host.Check.UsabilityBreakdown.IsUsable() {
-			reasons := strings.Join(host.Check.UsabilityBreakdown.UnusableReasons(), ",")
+		if !host.Checks.UsabilityBreakdown.IsUsable() {
+			reasons := strings.Join(host.Checks.UsabilityBreakdown.UnusableReasons(), ",")
 			logger.With("reasons", reasons).Info("unusable host")
 			churnReasons[c.ID] = reasons
 			continue
@@ -1029,18 +1029,18 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 	var candidates scoredHosts
 	for _, host := range allHosts {
 		logger := logger.With("hostKey", host.PublicKey)
-		if host.Check == (api.HostCheck{}) {
+		if host.Checks == (api.HostChecks{}) {
 			logger.Warnf("missing host check %v", host.PublicKey)
 			continue
 		}
 		if _, used := usedHosts[host.PublicKey]; used {
 			logger.Debug("host already used")
 			continue
-		} else if score := host.Check.ScoreBreakdown.Score(); score == 0 {
+		} else if score := host.Checks.ScoreBreakdown.Score(); score == 0 {
 			logger.Error("host has a score of 0")
 			continue
 		}
-		candidates = append(candidates, newScoredHost(host, host.Check.ScoreBreakdown))
+		candidates = append(candidates, newScoredHost(host, host.Checks.ScoreBreakdown))
 	}
 	logger = logger.With("candidates", len(candidates))
 

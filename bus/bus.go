@@ -213,7 +213,7 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
-		UpdateHostCheck(ctx context.Context, hk types.PublicKey, check api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, check api.HostChecks) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.

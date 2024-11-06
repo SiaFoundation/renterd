@@ -34,7 +34,7 @@ func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host,
 	}
 }
 
-func (s *SQLStore) UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostCheck) (err error) {
+func (s *SQLStore) UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) (err error) {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateHostCheck(ctx, hk, hc)
 	})

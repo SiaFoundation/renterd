@@ -319,10 +319,10 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert h1 and h2 have the expected checks
-	if his[0].Check != h1c {
-		t.Fatal("unexpected", his[0].Check)
-	} else if his[1].Check != h2c {
-		t.Fatal("unexpected", his[1].Check)
+	if his[0].Checks != h1c {
+		t.Fatal("unexpected", his[0].Checks)
+	} else if his[1].Checks != h2c {
+		t.Fatal("unexpected", his[1].Checks)
 	}
 
 	// assert usability filter is taken into account
@@ -1124,8 +1124,8 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 	}
 }
 
-func newTestHostCheck() api.HostCheck {
-	return api.HostCheck{
+func newTestHostCheck() api.HostChecks {
+	return api.HostChecks{
 
 		GougingBreakdown: api.HostGougingBreakdown{
 			ContractErr: "foo",
