@@ -968,6 +968,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, w Worker,
 		// we ignore the fact that the host is not scanned for now to avoid churn.
 		if inSet && check.Usability.NotCompletingScan {
 			keepContract(c.ContractMetadata, host)
+			logger.Info("ignoring contract with unscanned host")
 			continue // no more checks until host is scanned
 		}
 
