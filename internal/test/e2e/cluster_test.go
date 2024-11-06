@@ -181,6 +181,8 @@ func TestNewTestCluster(t *testing.T) {
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
+	b := cluster.Bus
+
 	// See if autopilot is running by triggering the loop.
 	_, err := cluster.Autopilot.Trigger(false)
 	tt.OK(err)
@@ -196,8 +198,9 @@ func TestNewTestCluster(t *testing.T) {
 	tt.OK(err)
 
 	// Verify startHeight and endHeight of the contract.
-	cfg, currentPeriod := cluster.AutopilotConfig(context.Background())
-	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+	cfg, err := b.AutopilotConfig(context.Background())
+	tt.OK(err)
+	expectedEndHeight := cfg.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	if contract.EndHeight() != expectedEndHeight || revision.EndHeight() != expectedEndHeight {
 		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
@@ -275,14 +278,14 @@ func TestNewTestCluster(t *testing.T) {
 		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		} else if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+		} else if hi.Check == (api.HostCheck{}) {
 			t.Fatal("host check not found")
-		} else if checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
+		} else if hi.Check.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Check.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !checks.UsabilityBreakdown.IsUsable() {
+		} else if !hi.Check.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
+		} else if len(hi.Check.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
@@ -298,14 +301,14 @@ func TestNewTestCluster(t *testing.T) {
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+		if hi.Check == (api.HostCheck{}) {
 			t.Fatal("host check not found")
-		} else if checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
+		} else if hi.Check.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Check.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !checks.UsabilityBreakdown.IsUsable() {
+		} else if !hi.Check.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
+		} else if len(hi.Check.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
@@ -314,7 +317,6 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUnusable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
-		AutopilotID:   testApCfg().ID,
 		FilterMode:    api.UsabilityFilterModeAll,
 		UsabilityMode: api.UsabilityFilterModeUnusable,
 	})
@@ -324,7 +326,6 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUsable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
-		AutopilotID:   testApCfg().ID,
 		FilterMode:    api.UsabilityFilterModeAll,
 		UsabilityMode: api.UsabilityFilterModeUsable,
 	})
@@ -339,9 +340,7 @@ func TestNewTestCluster(t *testing.T) {
 	// Fetch the autopilot state
 	state, err := cluster.Autopilot.State()
 	tt.OK(err)
-	if state.ID != api.DefaultAutopilotID {
-		t.Fatal("autopilot should have default id", state.ID)
-	} else if time.Time(state.StartTime).IsZero() {
+	if time.Time(state.StartTime).IsZero() {
 		t.Fatal("autopilot should have start time")
 	} else if time.Time(state.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
@@ -769,7 +768,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), testBucket, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	resp, err := cluster.Bus.Objects(context.Background(), "fileś/", api.ListObjectOptions{
+	resp, err := b.Objects(context.Background(), "fileś/", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -785,7 +784,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "file"
-	res, err := cluster.Bus.Objects(context.Background(), "fileś/file", api.ListObjectOptions{
+	res, err := b.Objects(context.Background(), "fileś/file", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -795,7 +794,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "foo"
-	res, err = cluster.Bus.Objects(context.Background(), "fileś/foo", api.ListObjectOptions{
+	res, err = b.Objects(context.Background(), "fileś/foo", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -821,7 +820,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 			{},                   // any bucket
 			{Bucket: testBucket}, // specific bucket
 		} {
-			info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+			info, err := b.ObjectsStats(context.Background(), opts)
 			tt.OK(err)
 			objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
 			if info.TotalObjectsSize != objectsSize {
@@ -854,35 +853,6 @@ func TestUploadDownloadExtended(t *testing.T) {
 		if !bytes.Equal(data, buffer.Bytes()) {
 			t.Fatal("unexpected")
 		}
-	}
-
-	// update the bus setting and specify a non-existing contract set
-	cfg, _ := cluster.AutopilotConfig(context.Background())
-	cfg.Contracts.Set = t.Name()
-	cluster.UpdateAutopilotConfig(context.Background(), cfg)
-	tt.OK(b.UpdateContractSet(context.Background(), t.Name(), nil, nil))
-
-	// assert there are no contracts in the set
-	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
-	tt.OK(err)
-	if len(csc) != 0 {
-		t.Fatalf("expected no contracts, got %v", len(csc))
-	}
-
-	// download the data again
-	for _, data := range [][]byte{small, large} {
-		path := fmt.Sprintf("data_%v", len(data))
-
-		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, path, api.DownloadObjectOptions{}))
-
-		// assert it matches
-		if !bytes.Equal(data, buffer.Bytes()) {
-			t.Fatal("unexpected")
-		}
-
-		// delete the object
-		tt.OK(w.DeleteObject(context.Background(), testBucket, path))
 	}
 }
 
@@ -2282,7 +2252,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// enable the autopilot by configuring it
-	cluster.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig)
+	tt.OK(b.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig))
 
 	// wait for a contract to form
 	contractsFormed := cluster.WaitForContracts()

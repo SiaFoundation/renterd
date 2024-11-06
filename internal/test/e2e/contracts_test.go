@@ -19,7 +19,7 @@ func TestFormContract(t *testing.T) {
 
 	// create cluster
 	opts := clusterOptsDefault
-	opts.autopilotSettings = &apSettings
+	opts.autopilotConfig = &apSettings
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 
@@ -35,17 +35,13 @@ func TestFormContract(t *testing.T) {
 
 	// form a contract using the bus
 	wallet, _ := b.Wallet(context.Background())
-	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
+	cfg, err := b.AutopilotConfig(context.Background())
 	tt.OK(err)
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), cfg.EndHeight())
 	tt.OK(err)
 
 	// assert the contract was added to the bus
 	_, err = b.Contract(context.Background(), contract.ID)
-	tt.OK(err)
-
-	// fetch autopilot config
-	old, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
 	tt.OK(err)
 
 	// mine to the renew window
@@ -53,7 +49,7 @@ func TestFormContract(t *testing.T) {
 
 	// wait until autopilot updated the current period
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		if curr, _ := b.Autopilot(context.Background(), api.DefaultAutopilotID); curr.CurrentPeriod == old.CurrentPeriod {
+		if curr, _ := b.AutopilotConfig(context.Background()); curr.CurrentPeriod == cfg.CurrentPeriod {
 			return errors.New("autopilot didn't update the current period")
 		}
 		return nil

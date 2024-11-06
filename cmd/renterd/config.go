@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
@@ -111,7 +110,6 @@ func defaultConfig() config.Config {
 		Autopilot: config.Autopilot{
 			Enabled: true,
 
-			ID:                             api.DefaultAutopilotID,
 			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
 			Heartbeat:                      30 * time.Minute,
 			MigrationHealthCutoff:          0.75,

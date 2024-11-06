@@ -166,9 +166,9 @@ type (
 	// Store is a collection of stores used by the bus.
 	Store interface {
 		AccountStore
-		AutopilotStore
 		BackupStore
 		ChainStore
+		ConfigStore
 		HostStore
 		MetadataStore
 		MetricsStore
@@ -183,11 +183,10 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 	}
 
-	// An AutopilotStore stores autopilots.
-	AutopilotStore interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+	// A ConfigStore stores various configuration.
+	ConfigStore interface {
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
 	}
 
 	// BackupStore is the interface of a store that can be backed up.
@@ -213,7 +212,7 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
-		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, check api.HostCheck) error
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -397,11 +396,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /autopilots":    b.autopilotsListHandlerGET,
-		"GET    /autopilot/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
-
-		"PUT    /autopilot/:id/host/:hostkey/check": b.autopilotHostCheckHandlerPUT,
+		"GET    /config/autopilot": b.configAutopilotHandlerGET,
+		"PUT    /config/autopilot": b.configAutopilotHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -445,6 +441,7 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"PUT    /host/:hostkey/check":            b.hostsCheckHandlerPUT,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
 		"POST   /host/:hostkey/scan":             b.hostsScanHandlerPOST,
 

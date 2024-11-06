@@ -91,7 +91,7 @@ type Bus interface {
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
-	UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) error
+	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostCheck) error
 }
 
 type HostScanner interface {
@@ -881,16 +881,15 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// get check
-		check, ok := host.Checks[ctx.ApID()]
-		if !ok {
+		if host.Check == (api.HostCheck{}) {
 			logger.Warn("missing host check")
 			churnReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
 			continue
 		}
 
 		// check usability
-		if !check.UsabilityBreakdown.IsUsable() {
-			reasons := strings.Join(check.UsabilityBreakdown.UnusableReasons(), ",")
+		if !host.Check.UsabilityBreakdown.IsUsable() {
+			reasons := strings.Join(host.Check.UsabilityBreakdown.UnusableReasons(), ",")
 			logger.With("reasons", reasons).Info("unusable host")
 			churnReasons[c.ID] = reasons
 			continue
@@ -1030,18 +1029,18 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 	var candidates scoredHosts
 	for _, host := range allHosts {
 		logger := logger.With("hostKey", host.PublicKey)
-		hc, ok := host.Checks[ctx.ApID()]
-		if !ok {
-			logger.Warn("missing host check")
+		if host.Check == (api.HostCheck{}) {
+			logger.Warnf("missing host check %v", host.PublicKey)
 			continue
-		} else if _, used := usedHosts[host.PublicKey]; used {
+		}
+		if _, used := usedHosts[host.PublicKey]; used {
 			logger.Debug("host already used")
 			continue
-		} else if score := hc.ScoreBreakdown.Score(); score == 0 {
+		} else if score := host.Check.ScoreBreakdown.Score(); score == 0 {
 			logger.Error("host has a score of 0")
 			continue
 		}
-		candidates = append(candidates, newScoredHost(host, hc.ScoreBreakdown))
+		candidates = append(candidates, newScoredHost(host, host.Check.ScoreBreakdown))
 	}
 	logger = logger.With("candidates", len(candidates))
 
@@ -1127,7 +1126,7 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 	for _, h := range scoredHosts {
 		h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
 		hc := checkHost(ctx.GougingChecker(cs), h, minScore)
-		if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
+		if err := bus.UpdateHostCheck(ctx, h.host.PublicKey, *hc); err != nil {
 			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
 		}
 		usabilityBreakdown.track(hc.UsabilityBreakdown)

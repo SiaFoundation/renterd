@@ -60,7 +60,6 @@ type (
 	HostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
-		AutopilotID     string            `json:"autopilotID"`
 		FilterMode      string            `json:"filterMode"`
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
@@ -88,7 +87,6 @@ type (
 // Option types.
 type (
 	HostOptions struct {
-		AutopilotID     string
 		AddressContains string
 		FilterMode      string
 		UsabilityMode   string
@@ -101,19 +99,19 @@ type (
 
 type (
 	Host struct {
-		KnownSince        time.Time            `json:"knownSince"`
-		LastAnnouncement  time.Time            `json:"lastAnnouncement"`
-		PublicKey         types.PublicKey      `json:"publicKey"`
-		NetAddress        string               `json:"netAddress"`
-		PriceTable        HostPriceTable       `json:"priceTable"`
-		Settings          rhpv2.HostSettings   `json:"settings"`
-		Interactions      HostInteractions     `json:"interactions"`
-		Scanned           bool                 `json:"scanned"`
-		Blocked           bool                 `json:"blocked"`
-		Checks            map[string]HostCheck `json:"checks"`
-		StoredData        uint64               `json:"storedData"`
-		ResolvedAddresses []string             `json:"resolvedAddresses"`
-		Subnets           []string             `json:"subnets"`
+		KnownSince        time.Time          `json:"knownSince"`
+		LastAnnouncement  time.Time          `json:"lastAnnouncement"`
+		PublicKey         types.PublicKey    `json:"publicKey"`
+		NetAddress        string             `json:"netAddress"`
+		PriceTable        HostPriceTable     `json:"priceTable"`
+		Settings          rhpv2.HostSettings `json:"settings"`
+		Interactions      HostInteractions   `json:"interactions"`
+		Scanned           bool               `json:"scanned"`
+		Blocked           bool               `json:"blocked"`
+		Check             HostCheck          `json:"check"`
+		StoredData        uint64             `json:"storedData"`
+		ResolvedAddresses []string           `json:"resolvedAddresses"`
+		Subnets           []string           `json:"subnets"`
 	}
 
 	HostInteractions struct {

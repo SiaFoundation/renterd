@@ -12,14 +12,14 @@ const (
 	// BlocksPerDay defines the amount of blocks that are mined in a day (one
 	// block every 10 minutes roughly)
 	BlocksPerDay = 144
-
-	// DefaultAutopilotID is the id of the autopilot.
-	DefaultAutopilotID = "autopilot"
 )
 
 var (
-	// ErrAutopilotNotFound is returned when an autopilot can't be found.
-	ErrAutopilotNotFound = errors.New("couldn't find autopilot")
+	// ErrAutopilotConfigNotFound is returned when it could not be found.
+	ErrAutopilotConfigNotFound = errors.New("couldn't find autopilot config")
+
+	// ErrAutopilotNotConfigured is returned when it is not configured.
+	ErrAutopilotNotConfigured = errors.New("autopilot is not configured")
 
 	// ErrMaxDowntimeHoursTooHigh is returned if the autopilot config is updated
 	// with a value that exceeds the maximum of 99 years.
@@ -27,22 +27,16 @@ var (
 )
 
 type (
-	// Autopilot contains the autopilot's config and current period.
-	Autopilot struct {
-		ID            string          `json:"id"`
-		Config        AutopilotConfig `json:"config"`
-		CurrentPeriod uint64          `json:"currentPeriod"`
-	}
-
 	// AutopilotConfig contains all autopilot configuration.
 	AutopilotConfig struct {
-		Contracts ContractsConfig `json:"contracts"`
-		Hosts     HostsConfig     `json:"hosts"`
+		CurrentPeriod uint64          `json:"currentPeriod"`
+		Contracts     ContractsConfig `json:"contracts"`
+		Hosts         HostsConfig     `json:"hosts"`
 	}
 
 	// ContractsConfig contains all contract settings used in the autopilot.
 	ContractsConfig struct {
-		Set         string `json:"set"`
+		Set         string `json:"set"` // TODO PJ: should be removed, not sure now or later
 		Amount      uint64 `json:"amount"`
 		Period      uint64 `json:"period"`
 		RenewWindow uint64 `json:"renewWindow"`
@@ -64,8 +58,8 @@ type (
 
 // EndHeight of a contract formed using the AutopilotConfig given the current
 // period.
-func (ap *Autopilot) EndHeight() uint64 {
-	return ap.CurrentPeriod + ap.Config.Contracts.Period + ap.Config.Contracts.RenewWindow
+func (cfg *AutopilotConfig) EndHeight() uint64 {
+	return cfg.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 }
 
 type (
@@ -84,7 +78,6 @@ type (
 	// AutopilotStateResponse is the response type for the /autopilot/state
 	// endpoint.
 	AutopilotStateResponse struct {
-		ID                 string      `json:"id"`
 		Configured         bool        `json:"configured"`
 		Migrating          bool        `json:"migrating"`
 		MigratingLastStart TimeRFC3339 `json:"migratingLastStart"`
