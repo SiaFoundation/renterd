@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -123,12 +122,7 @@ func TestSQLHostDB(t *testing.T) {
 
 // TestHosts is a unit test for the Hosts method of the SQLHostDB type.
 func TestHosts(t *testing.T) {
-	cfg := defaultTestSQLStoreConfig
-	cfg.persistent = true
-	cfg.dir = "/users/peterjan/testing2"
-	os.RemoveAll(cfg.dir)
-
-	ss := newTestSQLStore(t, cfg)
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 	ctx := context.Background()
 
