@@ -198,7 +198,7 @@ func TestNewTestCluster(t *testing.T) {
 	tt.OK(err)
 
 	// Verify startHeight and endHeight of the contract.
-	cfg, err := b.AutopilotConfig(context.Background())
+	cfg, err := b.AutopilotState(context.Background())
 	tt.OK(err)
 	expectedEndHeight := cfg.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 	if contract.EndHeight() != expectedEndHeight || revision.EndHeight() != expectedEndHeight {

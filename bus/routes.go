@@ -277,6 +277,15 @@ func (b *Bus) bucketHandlerGET(jc jape.Context) {
 	jc.Encode(bucket)
 }
 
+func (b *Bus) configAutopilotHandlerPUT(jc jape.Context) {
+	var cfg api.AutopilotConfig
+	if jc.Decode(&cfg) != nil {
+		return
+	}
+
+	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
+}
+
 func (b *Bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
 	balance, err := b.w.Balance()
@@ -1720,6 +1729,31 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
+func (b *Bus) stateAutopilotHandlerGET(jc jape.Context) {
+	state, err := b.store.AutopilotState(jc.Request.Context())
+	if errors.Is(err, api.ErrAutopilotStateNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch autopilot config", err) != nil {
+		return
+	}
+	jc.Encode(state)
+}
+
+func (b *Bus) stateAutopilotPeriodHandlerPUT(jc jape.Context) {
+	var period uint64
+	if jc.Decode(&period) != nil {
+		return
+	}
+
+	err := b.store.UpdateAutopilotPeriod(jc.Request.Context(), period)
+	if errors.Is(err, api.ErrAutopilotStateNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	jc.Check("failed to update autopilot period", err)
+}
+
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
@@ -1899,33 +1933,6 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 	}
 	if b.store.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
 		return
-	}
-}
-
-func (b *Bus) configAutopilotHandlerGET(jc jape.Context) {
-	cfg, err := b.store.AutopilotConfig(jc.Request.Context())
-	if errors.Is(err, api.ErrAutopilotConfigNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch autopilot config", err) != nil {
-		return
-	}
-	jc.Encode(cfg)
-}
-
-func (b *Bus) configAutopilotHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	var cfg api.AutopilotConfig
-	if jc.Decode(&cfg) != nil {
-		return
-	}
-
-	if jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg)) == nil {
-		b.pinMgr.TriggerUpdate()
 	}
 }
 

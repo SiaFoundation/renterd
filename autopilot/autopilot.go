@@ -33,10 +33,6 @@ type Bus interface {
 	// Accounts
 	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
 
-	// config
-	AutopilotConfig(ctx context.Context) (cfg api.AutopilotConfig, err error)
-	UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
-
 	// consensus
 	ConsensusNetwork(ctx context.Context) (consensus.Network, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
@@ -80,6 +76,11 @@ type Bus interface {
 	// settings
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
+
+	// state
+	AutopilotState(ctx context.Context) (cfg api.AutopilotState, err error)
+	UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
+	UpdateAutopilotPeriod(ctx context.Context, period uint64) error
 
 	// syncer
 	SyncerPeers(ctx context.Context) (resp []string, err error)
@@ -154,13 +155,13 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"POST   /config":  ap.configHandlerPOST,
-		"GET    /state":   ap.stateHandlerGET,
-		"POST   /trigger": ap.triggerHandlerPOST,
+		"PUT    /config/evaluate": ap.configEvaluateHandlerPOST,
+		"GET    /state":           ap.stateHandlerGET,
+		"POST   /trigger":         ap.triggerHandlerPOST,
 	})
 }
 
-func (ap *Autopilot) configHandlerPOST(jc jape.Context) {
+func (ap *Autopilot) configEvaluateHandlerPOST(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode request
@@ -262,11 +263,12 @@ func (ap *Autopilot) Run() {
 			}
 
 			// fetch configuration
-			cfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
+			state, err := ap.bus.AutopilotState(ap.shutdownCtx)
 			if err != nil {
-				ap.logger.Errorf("aborting maintenance, failed to fetch autopilot config", zap.Error(err))
+				ap.logger.Errorf("aborting maintenance, failed to fetch autopilot state", zap.Error(err))
 				return
 			}
+			cfg := state.AutopilotConfig
 
 			// update the scanner with the hosts config
 			ap.s.UpdateHostsConfig(cfg.Hosts)
@@ -286,14 +288,14 @@ func (ap *Autopilot) Run() {
 			}
 
 			// build maintenance state
-			state, err := ap.buildState(ap.shutdownCtx)
+			buildState, err := ap.buildState(ap.shutdownCtx)
 			if err != nil {
 				ap.logger.Errorf("aborting maintenance, failed to build state, err: %v", err)
 				return
 			}
 
 			// perform maintenance
-			setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, state)
+			setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, buildState)
 			if err != nil && utils.IsErr(err, context.Canceled) {
 				return
 			} else if err != nil {
@@ -382,13 +384,13 @@ func (ap *Autopilot) blockUntilConfigured(interrupt <-chan time.Time) (configure
 	for {
 		// try and fetch the config
 		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-		_, err := ap.bus.AutopilotConfig(ctx)
+		_, err := ap.bus.AutopilotState(ctx)
 		cancel()
 
 		// if the config was not found, or we were unable to fetch it, keep blocking
 		if utils.IsErr(err, context.Canceled) {
 			return
-		} else if utils.IsErr(err, api.ErrAutopilotConfigNotFound) {
+		} else if utils.IsErr(err, api.ErrAutopilotStateNotFound) {
 			once.Do(func() { ap.logger.Info("autopilot is waiting to be configured...") })
 		} else if err != nil {
 			ap.logger.Errorf("autopilot is unable to fetch its configuration from the bus, err: %v", err)
@@ -544,9 +546,9 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 
 	ap.logger.Info("performing wallet maintenance")
 
-	cfg, err := ap.bus.AutopilotConfig(ctx)
+	state, err := ap.bus.AutopilotState(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch autopilot config: %w", err)
+		return fmt.Errorf("failed to fetch autopilot state: %w", err)
 	}
 	w, err := ap.bus.Wallet(ctx)
 	if err != nil {
@@ -556,6 +558,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	// convenience variables
 	b := ap.bus
 	l := ap.logger
+	cfg := state.AutopilotConfig
 	renewWindow := cfg.Contracts.RenewWindow
 
 	// no contracts - nothing to do
@@ -581,7 +584,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 
 	// register an alert if balance is low
 	if balance.Cmp(contractor.InitialContractFunding.Mul64(cfg.Contracts.Amount)) < 0 {
-		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, contractor.InitialContractFunding, cs.BlockHeight, renewWindow, cfg.EndHeight()))
+		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, contractor.InitialContractFunding, cs.BlockHeight, renewWindow, state.EndHeight()))
 	} else {
 		ap.DismissAlert(ctx, alertLowBalanceID)
 	}
@@ -631,8 +634,8 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	ap.mu.Unlock()
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
-	_, err := ap.bus.AutopilotConfig(jc.Request.Context())
-	if err != nil && !strings.Contains(err.Error(), api.ErrAutopilotConfigNotFound.Error()) {
+	_, err := ap.bus.AutopilotState(jc.Request.Context())
+	if err != nil && !strings.Contains(err.Error(), api.ErrAutopilotStateNotFound.Error()) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -659,7 +662,7 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 
 func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
 	// fetch the cfg from the bus
-	cfg, err := ap.bus.AutopilotConfig(ctx)
+	cfg, err := ap.bus.AutopilotState(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -704,20 +707,17 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 	// update current period if necessary
 	if cs.Synced {
 		if cfg.CurrentPeriod == 0 {
-			cfg.CurrentPeriod = cs.BlockHeight
-			err := ap.bus.UpdateAutopilotConfig(ctx, cfg)
+			err := ap.bus.UpdateAutopilotPeriod(ctx, cs.BlockHeight)
 			if err != nil {
 				return nil, err
 			}
-			ap.logger.Infof("initialised current period to %d", cfg.CurrentPeriod)
+			ap.logger.Infof("initialised current period to %d", cs.BlockHeight)
 		} else if nextPeriod := computeNextPeriod(cs.BlockHeight, cfg.CurrentPeriod, cfg.Contracts.Period); nextPeriod != cfg.CurrentPeriod {
-			prevPeriod := cfg.CurrentPeriod
-			cfg.CurrentPeriod = nextPeriod
-			err := ap.bus.UpdateAutopilotConfig(ctx, cfg)
+			err := ap.bus.UpdateAutopilotPeriod(ctx, nextPeriod)
 			if err != nil {
 				return nil, err
 			}
-			ap.logger.Infof("updated current period from %d to %d", prevPeriod, nextPeriod)
+			ap.logger.Infof("updated current period from %d to %d", cfg.CurrentPeriod, nextPeriod)
 		}
 	}
 

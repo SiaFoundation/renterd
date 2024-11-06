@@ -649,7 +649,7 @@ func (c *TestCluster) MineToRenewWindow() {
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	cfg, err := c.Bus.AutopilotConfig(context.Background())
+	cfg, err := c.Bus.AutopilotState(context.Background())
 	c.tt.OK(err)
 
 	renewWindowStart := cfg.CurrentPeriod + cfg.Contracts.Period

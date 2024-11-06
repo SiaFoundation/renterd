@@ -26,7 +26,7 @@ func (c *Client) Config() (cfg api.AutopilotConfig, err error) {
 	return
 }
 
-// UpdateConfig updates the autopilot config.
+// UpdateConfig evaluates the given autopilot config.
 func (c *Client) UpdateConfig(cfg api.AutopilotConfig) error {
 	return c.c.PUT("/config", cfg)
 }

@@ -71,8 +71,8 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
-		// Autopilot returns the autopilot config.
-		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		// AutopilotState returns the autopilot state.
+		AutopilotState(ctx context.Context) (api.AutopilotState, error)
 
 		// BanPeer temporarily bans one or more IPs. The addr should either be a
 		// single IP with port (e.g. 1.2.3.4:5678) or a CIDR subnet (e.g.
@@ -330,6 +330,9 @@ type (
 
 		// UpdateAutopilotConfig updates the autopilot configuration.
 		UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
+
+		// UpdateAutopilotPeriod updates the autopilot period.
+		UpdateAutopilotPeriod(ctx context.Context, period uint64) error
 
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.

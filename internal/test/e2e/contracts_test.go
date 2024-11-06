@@ -35,7 +35,7 @@ func TestFormContract(t *testing.T) {
 
 	// form a contract using the bus
 	wallet, _ := b.Wallet(context.Background())
-	cfg, err := b.AutopilotConfig(context.Background())
+	cfg, err := b.AutopilotState(context.Background())
 	tt.OK(err)
 	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), cfg.EndHeight())
 	tt.OK(err)
@@ -49,7 +49,7 @@ func TestFormContract(t *testing.T) {
 
 	// wait until autopilot updated the current period
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		if curr, _ := b.AutopilotConfig(context.Background()); curr.CurrentPeriod == cfg.CurrentPeriod {
+		if curr, _ := b.AutopilotState(context.Background()); curr.CurrentPeriod == cfg.CurrentPeriod {
 			return errors.New("autopilot didn't update the current period")
 		}
 		return nil

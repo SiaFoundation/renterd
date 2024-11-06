@@ -192,8 +192,8 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
-func (tx *MainDatabaseTx) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error) {
-	return ssql.AutopilotConfig(ctx, tx)
+func (tx *MainDatabaseTx) AutopilotState(ctx context.Context) (api.AutopilotState, error) {
+	return ssql.AutopilotState(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
@@ -1030,6 +1030,10 @@ func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements 
 
 func (tx *MainDatabaseTx) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error {
 	return ssql.UpdateAutopilotConfig(ctx, tx, cfg)
+}
+
+func (tx *MainDatabaseTx) UpdateAutopilotPeriod(ctx context.Context, period uint64) error {
+	return ssql.UpdateAutopilotPeriod(ctx, tx, period)
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {

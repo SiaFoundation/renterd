@@ -15,23 +15,26 @@ const (
 )
 
 var (
-	// ErrAutopilotConfigNotFound is returned when it could not be found.
-	ErrAutopilotConfigNotFound = errors.New("couldn't find autopilot config")
+	// ErrAutopilotStateNotFound is returned when the database is missing the
+	// autopilot state object.
+	ErrAutopilotStateNotFound = errors.New("couldn't find autopilot state")
 
-	// ErrAutopilotNotConfigured is returned when it is not configured.
-	ErrAutopilotNotConfigured = errors.New("autopilot is not configured")
-
-	// ErrMaxDowntimeHoursTooHigh is returned if the autopilot config is updated
+	// ErrMaxDowntimeHoursTooHigh is returned if the contracts config is updated
 	// with a value that exceeds the maximum of 99 years.
 	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
 )
 
 type (
-	// AutopilotConfig contains all autopilot configuration.
+	// AutopilotState contains state related to the autopilot.
+	AutopilotState struct {
+		CurrentPeriod uint64 `json:"currentPeriod"`
+		AutopilotConfig
+	}
+
+	// AutopilotConfig contains configuration settings for the autopilot.
 	AutopilotConfig struct {
-		CurrentPeriod uint64          `json:"currentPeriod"`
-		Contracts     ContractsConfig `json:"contracts"`
-		Hosts         HostsConfig     `json:"hosts"`
+		Contracts ContractsConfig `json:"contracts"`
+		Hosts     HostsConfig     `json:"hosts"`
 	}
 
 	// ContractsConfig contains all contract settings used in the autopilot.
@@ -56,9 +59,9 @@ type (
 	}
 )
 
-// EndHeight of a contract formed using the AutopilotConfig given the current
-// period.
-func (cfg *AutopilotConfig) EndHeight() uint64 {
+// EndHeight of a contract taking the current period and renew window into
+// account.
+func (cfg *AutopilotState) EndHeight() uint64 {
 	return cfg.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
 }
 
@@ -121,11 +124,11 @@ type (
 	}
 )
 
-func (c AutopilotConfig) Validate() error {
-	if c.Hosts.MaxDowntimeHours > 99*365*24 {
+func (c HostsConfig) Validate() error {
+	if c.MaxDowntimeHours > 99*365*24 {
 		return ErrMaxDowntimeHoursTooHigh
-	} else if c.Hosts.MinProtocolVersion != "" && !utils.IsVersion(c.Hosts.MinProtocolVersion) {
-		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
+	} else if c.MinProtocolVersion != "" && !utils.IsVersion(c.MinProtocolVersion) {
+		return fmt.Errorf("invalid min protocol version '%s'", c.MinProtocolVersion)
 	}
 	return nil
 }

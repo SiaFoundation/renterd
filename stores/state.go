@@ -7,19 +7,25 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
-func (s *SQLStore) AutopilotConfig(ctx context.Context) (ap api.AutopilotConfig, _ error) {
+func (s *SQLStore) AutopilotState(ctx context.Context) (ap api.AutopilotState, _ error) {
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		ap, err = tx.AutopilotConfig(ctx)
+		ap, err = tx.AutopilotState(ctx)
 		return
 	})
 	return ap, err
 }
 
 func (s *SQLStore) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error {
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Hosts.Validate(); err != nil {
 		return err
 	}
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.UpdateAutopilotConfig(ctx, cfg)
+	})
+}
+
+func (s *SQLStore) UpdateAutopilotPeriod(ctx context.Context, period uint64) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateAutopilotPeriod(ctx, period)
 	})
 }

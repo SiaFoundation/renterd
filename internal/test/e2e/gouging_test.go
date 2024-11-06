@@ -35,7 +35,7 @@ func TestGouging(t *testing.T) {
 
 	// assert that the current period is greater than the period
 	tt.Retry(10, time.Second, func() error {
-		if curr, _ := b.AutopilotConfig(context.Background()); curr.CurrentPeriod <= cfg.Period {
+		if curr, _ := b.AutopilotState(context.Background()); curr.CurrentPeriod <= cfg.Period {
 			return errors.New("current period is not greater than period")
 		}
 		return nil

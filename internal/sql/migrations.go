@@ -338,24 +338,24 @@ var (
 				},
 			},
 			{
-				ID: "00025_autopilot_config",
+				ID: "00025_autopilot_state",
 				Migrate: func(tx Tx) error {
 					// remove all references to the autopilots table, without dropping the table
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_autopilot_config_1", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_autopilot_state_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
-					// fetch existing config and override the blank config
+					// fetch existing autopilot and override the blank config
 					var cfgraw []byte
 					var period uint64
 					var cfg api.AutopilotConfig
 					err := tx.QueryRow(ctx, `SELECT config, current_period FROM autopilots WHERE identifier = "autopilot"`).Scan(&cfgraw, &period)
 					if errors.Is(dsql.ErrNoRows, err) {
-						log.Warn("existing autopilot config not found, the autopilot will be recreated with default values and the period will be reset")
+						log.Warn("existing autopilot not found, the autopilot will be recreated with default values and the period will be reset")
 					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
 						log.Warnf("existing autopilot config not valid JSON, err %v", err)
 					} else {
-						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET current_period = ?,contracts_amount = ?,contracts_period = ?,contracts_renew_window = ?,contracts_download = ?,contracts_upload = ?,contracts_storage = ?,contracts_prune = ?,hosts_allow_redundant_ips = ?,hosts_max_downtime_hours = ?,hosts_min_protocol_version = ?,hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ?,contracts_amount = ?,contracts_period = ?,contracts_renew_window = ?,contracts_download = ?,contracts_upload = ?,contracts_storage = ?,contracts_prune = ?,hosts_allow_redundant_ips = ?,hosts_max_downtime_hours = ?,hosts_min_protocol_version = ?,hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							period,
 							cfg.Contracts.Amount,
 							cfg.Contracts.Period,
@@ -368,7 +368,7 @@ var (
 							cfg.Hosts.MaxDowntimeHours,
 							cfg.Hosts.MinProtocolVersion,
 							cfg.Hosts.MaxConsecutiveScanFailures,
-							AutopilotConfigID)
+							AutopilotStateID)
 						if err != nil {
 							return fmt.Errorf("failed to update autopilot config: %w", err)
 						} else if n, err := res.RowsAffected(); err != nil {
@@ -379,7 +379,7 @@ var (
 					}
 
 					// drop autopilots table
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_autopilot_config_2", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_autopilot_state_2", log)
 				},
 			},
 		}

@@ -188,7 +188,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
-func AutopilotConfig(ctx context.Context, tx sql.Tx) (cfg api.AutopilotConfig, err error) {
+func AutopilotState(ctx context.Context, tx sql.Tx) (cfg api.AutopilotState, err error) {
 	err = tx.QueryRow(ctx, `
 SELECT
 	current_period,
@@ -203,8 +203,8 @@ SELECT
 	hosts_maxDowntimeHours,
 	hosts_minProtocolVersion,
 	hosts_maxConsecutiveScanFailures
-FROM autopilot_config
-WHERE id = ?`, sql.AutopilotConfigID).Scan(
+FROM autopilot_state
+WHERE id = ?`, sql.AutopilotStateID).Scan(
 		&cfg.CurrentPeriod,
 		&cfg.Contracts.Amount,
 		&cfg.Contracts.Period,
@@ -219,7 +219,7 @@ WHERE id = ?`, sql.AutopilotConfigID).Scan(
 		&cfg.Hosts.MaxConsecutiveScanFailures,
 	)
 	if errors.Is(err, dsql.ErrNoRows) {
-		err = api.ErrAutopilotConfigNotFound
+		err = api.ErrAutopilotStateNotFound
 		return
 	}
 	return
@@ -714,25 +714,6 @@ func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
 		blocklist = append(blocklist, entry)
 	}
 	return blocklist, nil
-}
-
-func debugQuery(query string, args []any) string {
-	for _, v := range args {
-		index := strings.Index(query, "?")
-		if index == -1 {
-			continue
-		}
-
-		var value string
-		if _, ok := v.(string); ok {
-			value = fmt.Sprintf("%q", v)
-		} else {
-			value = fmt.Sprint(v)
-		}
-
-		query = string(query[:index]) + value + string(query[index+1:])
-	}
-	return query
 }
 
 func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, error) {
@@ -2163,9 +2144,8 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 
 func UpdateAutopilotConfig(ctx context.Context, tx sql.Tx, cfg api.AutopilotConfig) error {
 	res, err := tx.Exec(ctx, `
-UPDATE autopilot_config
-SET current_period = ?,
-	contracts_amount = ?,
+UPDATE autopilot_state
+SET contracts_amount = ?,
 	contracts_period = ?,
 	contracts_renew_window = ?,
 	contracts_download = ?,
@@ -2177,7 +2157,6 @@ SET current_period = ?,
 	hosts_min_protocol_version = ?,
 	hosts_max_consecutive_scan_failures = ?
 WHERE id = ?`,
-		cfg.CurrentPeriod,
 		cfg.Contracts.Amount,
 		cfg.Contracts.Period,
 		cfg.Contracts.RenewWindow,
@@ -2189,13 +2168,25 @@ WHERE id = ?`,
 		cfg.Hosts.MaxDowntimeHours,
 		cfg.Hosts.MinProtocolVersion,
 		cfg.Hosts.MaxConsecutiveScanFailures,
-		sql.AutopilotConfigID)
+		sql.AutopilotStateID)
 	if err != nil {
 		return fmt.Errorf("failed to update autopilot config: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	} else if n == 0 {
-		return fmt.Errorf("autopilot config not found: %w", api.ErrAutopilotConfigNotFound)
+		return fmt.Errorf("autopilot state not found: %w", api.ErrAutopilotStateNotFound)
+	}
+	return nil
+}
+
+func UpdateAutopilotPeriod(ctx context.Context, tx sql.Tx, period uint64) error {
+	res, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ? WHERE id = ?`, period, sql.AutopilotStateID)
+	if err != nil {
+		return fmt.Errorf("failed to update autopilot state: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("autopilot state not found: %w", api.ErrAutopilotStateNotFound)
 	}
 	return nil
 }

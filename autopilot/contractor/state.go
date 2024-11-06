@@ -17,7 +17,7 @@ type (
 	MaintenanceState struct {
 		GS api.GougingSettings
 		RS api.RedundancySettings
-		AP api.AutopilotConfig
+		AP api.AutopilotState
 
 		Address                types.Address
 		Fee                    types.Currency
@@ -38,7 +38,7 @@ func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
 }
 
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
-	return ctx.state.AP
+	return ctx.state.AP.AutopilotConfig
 }
 
 func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
@@ -77,7 +77,7 @@ func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
 			err = errors.New("panic while scoring host")
 		}
 	}()
-	return hostScore(ctx.state.AP, ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
+	return hostScore(ctx.AutopilotConfig(), ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
 }
 
 func (ctx *mCtx) Period() uint64 {

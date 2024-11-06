@@ -168,11 +168,11 @@ type (
 		AccountStore
 		BackupStore
 		ChainStore
-		ConfigStore
 		HostStore
 		MetadataStore
 		MetricsStore
 		SettingStore
+		StateStore
 	}
 
 	// AccountStore persists information about accounts. Since accounts
@@ -183,10 +183,11 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 	}
 
-	// A ConfigStore stores various configuration.
-	ConfigStore interface {
-		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+	// A StateStore stores various configuration.
+	StateStore interface {
+		AutopilotState(ctx context.Context) (api.AutopilotState, error)
 		UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
+		UpdateAutopilotPeriod(ctx context.Context, period uint64) error
 	}
 
 	// BackupStore is the interface of a store that can be backed up.
@@ -396,7 +397,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /config/autopilot": b.configAutopilotHandlerGET,
 		"PUT    /config/autopilot": b.configAutopilotHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
@@ -496,6 +496,9 @@ func (b *Bus) Handler() http.Handler {
 
 		"GET    /state":         b.stateHandlerGET,
 		"GET    /stats/objects": b.objectsStatshandlerGET,
+
+		"GET    /state/autopilot":        b.stateAutopilotHandlerGET,
+		"PUT    /state/autopilot/period": b.stateAutopilotPeriodHandlerPUT,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
