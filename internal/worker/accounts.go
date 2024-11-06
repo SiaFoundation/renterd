@@ -351,8 +351,6 @@ func (a *AccountMgr) refillAccounts() {
 
 				if err != nil && shouldLog {
 					a.logger.Error("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
-				} else if err == nil {
-					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				}
 			}(c)
 		}
@@ -409,6 +407,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	if err != nil {
 		return fmt.Errorf("failed to fund account: %w", err)
 	}
+	a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 	return nil
 }
 
