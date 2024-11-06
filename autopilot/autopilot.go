@@ -707,6 +707,7 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 			if err != nil {
 				return nil, err
 			}
+			state.CurrentPeriod = cs.BlockHeight
 			ap.logger.Infof("initialised current period to %d", cs.BlockHeight)
 		} else if nextPeriod := computeNextPeriod(cs.BlockHeight, state.CurrentPeriod, state.Contracts.Period); nextPeriod != state.CurrentPeriod {
 			err := ap.bus.UpdateAutopilotPeriod(ctx, nextPeriod)
@@ -714,6 +715,7 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 				return nil, err
 			}
 			ap.logger.Infof("updated current period from %d to %d", state.CurrentPeriod, nextPeriod)
+			state.CurrentPeriod = nextPeriod
 		}
 	} else if !skipContractFormations {
 		skipContractFormations = true
