@@ -355,8 +355,9 @@ var (
 					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
 						log.Warnf("existing autopilot config not valid JSON, err %v", err)
 					} else {
-						res, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ?,contracts_amount = ?,contracts_period = ?,contracts_renew_window = ?,contracts_download = ?,contracts_upload = ?,contracts_storage = ?,contracts_prune = ?,hosts_allow_redundant_ips = ?,hosts_max_downtime_hours = ?,hosts_min_protocol_version = ?,hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							period,
+							cfg.Contracts.Set,
 							cfg.Contracts.Amount,
 							cfg.Contracts.Period,
 							cfg.Contracts.RenewWindow,

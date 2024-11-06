@@ -166,13 +166,13 @@ type (
 	// Store is a collection of stores used by the bus.
 	Store interface {
 		AccountStore
+		AutopilotStore
 		BackupStore
 		ChainStore
 		HostStore
 		MetadataStore
 		MetricsStore
 		SettingStore
-		StateStore
 	}
 
 	// AccountStore persists information about accounts. Since accounts
@@ -183,8 +183,8 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 	}
 
-	// A StateStore stores various configuration.
-	StateStore interface {
+	// A AutopilotStore stores autopilot state.
+	AutopilotStore interface {
 		AutopilotState(ctx context.Context) (api.AutopilotState, error)
 		UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
 		UpdateAutopilotPeriod(ctx context.Context, period uint64) error

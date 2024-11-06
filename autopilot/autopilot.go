@@ -30,8 +30,13 @@ type Bus interface {
 	alerts.Alerter
 	webhooks.Broadcaster
 
-	// Accounts
+	// accounts
 	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
+
+	// autopilot
+	AutopilotState(ctx context.Context) (cfg api.AutopilotState, err error)
+	UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
+	UpdateAutopilotPeriod(ctx context.Context, period uint64) error
 
 	// consensus
 	ConsensusNetwork(ctx context.Context) (consensus.Network, error)
@@ -76,11 +81,6 @@ type Bus interface {
 	// settings
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
-
-	// state
-	AutopilotState(ctx context.Context) (cfg api.AutopilotState, err error)
-	UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
-	UpdateAutopilotPeriod(ctx context.Context, period uint64) error
 
 	// syncer
 	SyncerPeers(ctx context.Context) (resp []string, err error)
