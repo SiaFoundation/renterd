@@ -71,9 +71,14 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
+func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
+	mtx := b.wrapTxn(tx)
+	return mtx.InsertDirectories(ctx, bucket, path)
+}
+
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPath(ctx, path)
+	return mtx.MakeDirsForPathDeprecated(ctx, path)
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -231,7 +236,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, key)
+	dirID, err := tx.InsertDirectories(ctx, bucket, key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -316,7 +321,11 @@ func (tx *MainDatabaseTx) ContractSizes(ctx context.Context) (map[types.FileCont
 }
 
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
-	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
+	dstDirID, err := tx.InsertDirectories(ctx, dstBucket, dstKey)
+	if err != nil {
+		return api.ObjectMetadata{}, err
+	}
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata, dstDirID)
 }
 
 func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
@@ -411,6 +420,62 @@ func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName strin
 	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
 }
 
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
+	// sanity check input
+	if !strings.HasPrefix(path, "/") {
+		return 0, errors.New("path has to have a leading slash")
+	} else if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
+	}
+
+	// fetch bucket
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// prepare statements
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE db_bucket_id = ? AND name = ? FOR UPDATE")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer queryDirStmt.Close()
+
+	// insert directories for give path
+	var dirID *int64
+	for _, dir := range object.Directories(path) {
+		// check if the directory exists
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if existingID > 0 {
+			dirID = &existingID
+			continue
+		}
+
+		// insert directory
+		var insertedID int64
+		if _, err := insertDirStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		} else if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&insertedID); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if insertedID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		}
+		dirID = &insertedID
+	}
+	return *dirID, nil
+}
+
 func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
@@ -474,9 +539,9 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
+func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {
 	// Create root dir.
-	dirID := int64(sql.DirectoriesRootID)
+	dirID := int64(1)
 	if _, err := tx.Exec(ctx, "INSERT IGNORE INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL)", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
@@ -725,6 +790,10 @@ func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailu
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
 
+func (tx *MainDatabaseTx) RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error) {
+	return ssql.RenameDirectories(ctx, tx, bucket, prefixOld, prefixNew)
+}
+
 func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error {
 	if force {
 		// delete potentially existing object at destination
@@ -752,36 +821,60 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 
 func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
 	if force {
-		_, err := tx.Exec(ctx, `
+		// delete where bucket matches, where object_id is prefixed by the old
+		// prefix (case sensitive) and directories that exactly match the new
+		// prefix, otherwise the update conflicts
+		query := `
 		DELETE
 		FROM objects
-		WHERE object_id IN (
-			SELECT *
-			FROM (
-				SELECT CONCAT(?, SUBSTR(object_id, ?))
-				FROM objects
-				WHERE object_id LIKE ?
-				AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
-			) as i
-		)`,
-			prefixNew,
-			utf8.RuneCountInString(prefixOld)+1,
-			prefixOld+"%",
-			bucket)
+		WHERE
+			db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) AND
+			(
+				object_id IN (
+					SELECT *
+					FROM (
+						SELECT CONCAT(?, SUBSTR(object_id, ?))
+						FROM objects
+						WHERE object_id LIKE ?
+						AND SUBSTR(object_id, 1, ?) = ?
+					) as i
+				) OR (object_id = ? AND size = 0)
+			)`
+		args := []any{
+			bucket,
+			prefixNew, utf8.RuneCountInString(prefixOld) + 1,
+			prefixOld + "%",
+			utf8.RuneCountInString(prefixOld), prefixOld,
+			prefixOld,
+		}
+		_, err := tx.Exec(ctx, query, args...)
 		if err != nil {
 			return err
 		}
 	}
-	resp, err := tx.Exec(ctx, `
+
+	// update objects where bucket matches, where the object_id is prefixed by
+	// the old prefix (case sensitive) and it doesn't exactly match the new
+	// prefix, we update the object_id at all times but only update directory_id
+	// only when the object is an immediate child (no slash in suffix)
+	query := `
 		UPDATE objects
 		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
-		db_directory_id = ?
+		db_directory_id = CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN ? ELSE db_directory_id END
 		WHERE object_id LIKE ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
-		prefixNew, utf8.RuneCountInString(prefixOld)+1,
-		dirID,
-		prefixOld+"%",
-		bucket)
+		AND SUBSTR(object_id, 1, ?) = ?
+		AND object_id != ?
+		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`
+
+	args := []any{
+		prefixNew, utf8.RuneCountInString(prefixOld) + 1,
+		utf8.RuneCountInString(prefixOld) + 1, dirID,
+		prefixOld + "%",
+		utf8.RuneCountInString(prefixOld), prefixOld,
+		prefixNew,
+		bucket,
+	}
+	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
 		return api.ErrObjectExists
 	} else if err != nil {

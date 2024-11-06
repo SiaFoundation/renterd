@@ -38,7 +38,7 @@ func (s *testSQLStore) InsertSlab(slab object.Slab) {
 			},
 		},
 	}
-	err := s.UpdateObject(context.Background(), testBucket, hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
+	err := s.UpdateObject(context.Background(), testBucket, "/"+hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestPrunableContractRoots(t *testing.T) {
 
 	// add 4 objects
 	for i := 1; i <= 4; i++ {
-		if _, err := ss.addTestObject(fmt.Sprintf("%s_%d", t.Name(), i), object.Object{
+		if _, err := ss.addTestObject(fmt.Sprintf("/%s_%d", t.Name(), i), object.Object{
 			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
@@ -166,10 +166,10 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// delete every other object
-	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("%s_1", t.Name())); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("/%s_1", t.Name())); err != nil {
 		t.Fatal(err)
 	}
-	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("%s_3", t.Name())); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, fmt.Sprintf("/%s_3", t.Name())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,7 +240,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	got, err := ss.addTestObject(t.Name(), want)
+	got, err := ss.addTestObject("/"+t.Name(), want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = ss.Object(context.Background(), testBucket, t.Name())
+	_, err = ss.Object(context.Background(), testBucket, "/"+t.Name())
 	if !errors.Is(err, api.ErrObjectCorrupted) {
 		t.Fatal("unexpected err", err)
 	}
@@ -267,7 +267,7 @@ func TestObjectBasic(t *testing.T) {
 	}
 
 	// add the object
-	got2, err := ss.addTestObject(t.Name(), want2)
+	got2, err := ss.addTestObject("/"+t.Name(), want2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// add the object
-	got, err := ss.addTestObject(t.Name(), want)
+	got, err := ss.addTestObject("/"+t.Name(), want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	// remove the object
-	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, t.Name()); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "/"+t.Name()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +514,7 @@ func TestContractRoots(t *testing.T) {
 	}
 
 	// add the object.
-	_, err = ss.addTestObject(t.Name(), obj)
+	_, err = ss.addTestObject("/"+t.Name(), obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +711,7 @@ func TestSQLMetadataStore(t *testing.T) {
 
 	// add it
 	ctx := context.Background()
-	objID := "key1"
+	objID := "/key1"
 	if _, err := ss.addTestObject(objID, obj1); err != nil {
 		t.Fatal(err)
 	}
@@ -1346,7 +1346,8 @@ func TestListObjectsSlabEncryptionKey(t *testing.T) {
 			},
 		},
 	}
-	for _, name := range []string{"obj1", "obj2", "obj3"} {
+	keys := []string{"/obj1", "/obj2", "/obj3"}
+	for _, name := range keys {
 		obj.Slabs[0].Length++
 		if _, err := ss.addTestObject(name, obj); err != nil {
 			t.Fatal(err)
@@ -1358,7 +1359,7 @@ func TestListObjectsSlabEncryptionKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, name := range []string{"obj1", "obj2", "obj3"} {
+	for i, name := range keys {
 		if res.Objects[i].Key != name {
 			t.Fatal("unexpected object name", res.Objects[i].Key, name)
 		}
@@ -1552,7 +1553,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		},
 	}
 
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1657,7 +1658,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	}
 
 	// add the object
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1713,7 +1714,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 
 	// add the object
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1804,7 +1805,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 		},
 	}
 
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1848,13 +1849,13 @@ func TestContractSectors(t *testing.T) {
 	// create two objects
 	obj1 := newTestObject(1)
 	obj1.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hks[0]: {fcids[0]}}
-	if _, err := ss.addTestObject(t.Name()+"_1", obj1); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name()+"_1", obj1); err != nil {
 		t.Fatal(err)
 	}
 
 	obj2 := newTestObject(1)
 	obj2.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hks[1]: {fcids[1]}}
-	if _, err := ss.addTestObject(t.Name()+"_2", obj2); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name()+"_2", obj2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1875,7 +1876,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// delete the object
-	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, t.Name()+"_2"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "/"+t.Name()+"_2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1921,7 +1922,7 @@ func TestUpdateSlab(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2039,7 +2040,7 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal("unexpected number of slabs to migrate", len(toMigrate))
 	}
 
-	if obj, err := ss.Object(context.Background(), testBucket, t.Name()); err != nil {
+	if obj, err := ss.Object(context.Background(), testBucket, "/"+t.Name()); err != nil {
 		t.Fatal(err)
 	} else if len(obj.Slabs) != 1 {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
@@ -2173,6 +2174,8 @@ func TestRenameObjects(t *testing.T) {
 		"/fileś/dir/1b",
 		"/fileś/dir/2b",
 		"/fileś/dir/3b",
+		"/folder/file1",
+		"/folder/foo/file2",
 		"/foo",
 		"/bar",
 		"/baz",
@@ -2195,6 +2198,9 @@ func TestRenameObjects(t *testing.T) {
 	}
 
 	// Perform some renames.
+	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/folder/", "/fileś/", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := ss.RenameObjectsBlocking(ctx, testBucket, "/fileś/dir/", "/fileś/", false); err != nil {
 		t.Fatal(err)
 	}
@@ -2223,6 +2229,8 @@ func TestRenameObjects(t *testing.T) {
 
 	// Paths after.
 	objectsAfter := []string{
+		"/fileś/file1",
+		"/fileś/foo/file2",
 		"/fileś/1a",
 		"/fileś/2a",
 		"/fileś/3a",
@@ -2272,6 +2280,11 @@ func TestRenameObjects(t *testing.T) {
 			parentID: 1,
 			name:     "/fileś/",
 		},
+		{
+			id:       5,
+			parentID: 2,
+			name:     "/fileś/foo/",
+		},
 	}
 
 	var n int64
@@ -2308,6 +2321,90 @@ func TestRenameObjects(t *testing.T) {
 	if len(expectedDirs) != i {
 		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), i)
 	}
+}
+
+func TestRenameObjectsRegression(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// define directory structure
+	objects := []string{
+		"/videos/comedy/",
+		"/videos/horror/",
+		"/audio/classical/",
+		"/pictures/",
+		"/README.md",
+
+		"/videos/trailer",
+		"/videos/comedy/ep1",
+		"/videos/comedy/ep2",
+		"/videos/horror/ep1",
+	}
+
+	// define a helper to assert the number of objects with given prefix
+	ctx := context.Background()
+	assertNumObjects := func(path string, n int) {
+		t.Helper()
+
+		var delimiter string
+		if strings.HasSuffix(path, "/") {
+			delimiter = "/"
+		}
+
+		res, err := ss.Objects(ctx, testBucket, path, "", delimiter, "", "", "", -1, object.EncryptionKey{})
+		if err != nil {
+			t.Fatal(err)
+		} else if len(res.Objects) != n {
+			t.Fatalf("unexpected number of objects %d != %d, objects:\n%+v", len(res.Objects), n, res.Objects)
+		}
+	}
+
+	// persist the structure
+	for _, path := range objects {
+		var s int
+		if !strings.HasSuffix(path, "/") {
+			s = 1
+		}
+		if _, err := ss.addTestObject(path, newTestObject(s)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// assert the structure
+	assertNumObjects("/", 4)
+	assertNumObjects("/videos", 6)
+	assertNumObjects("/videos/", 3)
+	assertNumObjects("/videos/comedy/", 2)
+	assertNumObjects("/videos/horror/", 1)
+	assertNumObjects("/audio/", 1)
+	assertNumObjects("/pictures/", 0)
+
+	// assert we can't rename to an already existing directory without force
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/comedy/", "/videos/horror/", false); !errors.Is(err, api.ErrObjectExists) {
+		t.Fatal("unexpected error", err)
+	}
+
+	// assert we can forcefully rename it
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/comedy/", "/videos/horror/", true); err != nil {
+		t.Fatal(err)
+	}
+	assertNumObjects("/videos/horror/", 2)
+
+	// assert we can rename it and its children still point to the right directory
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/horror/", "/videos/thriller/", false); err != nil {
+		t.Fatal(err)
+	}
+	assertNumObjects("/videos/", 2)
+	assertNumObjects("/videos/horror/", 0)
+	assertNumObjects("/videos/thriller/", 2)
+
+	// assert we rename a grand parent and all children remain intact
+	if err := ss.RenameObjects(ctx, testBucket, "/videos/", "/video/", true); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumObjects("/video/", 2)
+	assertNumObjects("/video/thriller/", 2)
+	assertNumObjects("/", 4)
 }
 
 // TestObjectsStats is a unit test for ObjectsStats.
@@ -2350,7 +2447,7 @@ func TestObjectsStats(t *testing.T) {
 			}
 		}
 
-		key := hex.EncodeToString(frand.Bytes(32))
+		key := "/" + hex.EncodeToString(frand.Bytes(32))
 		if _, err := ss.addTestObject(key, obj); err != nil {
 			t.Fatal(err)
 		}
@@ -2551,7 +2648,7 @@ func TestPartialSlab(t *testing.T) {
 		return obj
 	}
 	obj := testObject(slabs)
-	fetched, err := ss.addTestObject("key", obj)
+	fetched, err := ss.addTestObject("/key", obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2582,7 +2679,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj2 := testObject(slabs)
-	fetched, err = ss.addTestObject("key2", obj2)
+	fetched, err = ss.addTestObject("/key2", obj2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2622,7 +2719,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Create an object again.
 	obj3 := testObject(slabs)
-	fetched, err = ss.addTestObject("key3", obj3)
+	fetched, err = ss.addTestObject("/key3", obj3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2696,7 +2793,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Associate them with an object.
-	if _, err := ss.addTestObject(t.Name(), object.Object{
+	if _, err := ss.addTestObject("/"+t.Name(), object.Object{
 		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: append(slices1, slices2...),
 	}); err != nil {
@@ -2777,7 +2874,7 @@ func TestContractSizes(t *testing.T) {
 
 	// add an object to both contracts
 	for i := 0; i < 2; i++ {
-		if _, err := ss.addTestObject(fmt.Sprintf("obj_%d", i+1), object.Object{
+		if _, err := ss.addTestObject(fmt.Sprintf("/obj_%d", i+1), object.Object{
 			Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			Slabs: []object.SlabSlice{
 				{
@@ -2817,7 +2914,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the first object
-	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "obj_1"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "/obj_1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2829,7 +2926,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// remove the second object
-	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "obj_2"); err != nil {
+	if err := ss.RemoveObjectBlocking(context.Background(), testBucket, "/obj_2"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2862,6 +2959,68 @@ func TestContractSizes(t *testing.T) {
 	// assert there's no data to be pruned
 	if n := prunableData(nil); n != 0 {
 		t.Fatal("expected no prunable data", n)
+	}
+}
+
+func TestObjectsBySlabKey(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create a host
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk1 := hks[0]
+
+	// create a contract
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcid1 := fcids[0]
+
+	// create a slab.
+	slab := object.Slab{
+		Health:        1.0,
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		MinShards:     1,
+		Shards:        newTestShards(hk1, fcid1, types.Hash256{1}),
+	}
+
+	// Add 3 objects that all reference the slab.
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Slabs: []object.SlabSlice{
+			{
+				Slab:   slab,
+				Offset: 1,
+				Length: 0, // incremented later
+			},
+		},
+	}
+	for _, name := range []string{"/obj1", "/obj2", "/obj3"} {
+		obj.Slabs[0].Length++
+		if _, err := ss.addTestObject(name, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Fetch the objects by slab.
+	res, err := ss.Objects(context.Background(), testBucket, "", "", "/", "", "", "", -1, slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"/obj1", "/obj2", "/obj3"} {
+		if res.Objects[i].Key != name {
+			t.Fatal("unexpected object name", res.Objects[i].Key, name)
+		}
+		if res.Objects[i].Size != int64(i)+1 {
+			t.Fatal("unexpected object size", res.Objects[i].Size, i+1)
+		}
+		if res.Objects[i].Health != 1.0 {
+			t.Fatal("unexpected object health", res.Objects[i].Health)
+		}
 	}
 }
 
@@ -2913,7 +3072,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// Adding an object to a bucket that doesn't exist shouldn't work.
 	obj := newTestObject(1)
-	err := ss.UpdateObject(context.Background(), "unknown-bucket", "foo", testContractSet, testETag, testMimeType, testMetadata, obj)
+	err := ss.UpdateObject(context.Background(), "unknown-bucket", "/foo", testContractSet, testETag, testMimeType, testMetadata, obj)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
 	}
@@ -3154,7 +3313,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 
 	// add it to an object to prevent it from getting pruned.
-	_, err = ss.addTestObject(t.Name(), object.Object{
+	_, err = ss.addTestObject("/"+t.Name(), object.Object{
 		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: slabs,
 	})
@@ -3489,7 +3648,7 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	}
 
 	// set slab.
-	_, err = ss.addTestObject(t.Name(), object.Object{
+	_, err = ss.addTestObject("/"+t.Name(), object.Object{
 		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: slab}},
 	})
@@ -3560,7 +3719,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 
 	// prepare a slab with pieces on h1 and h2
 	s1 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
-	_, err = ss.addTestObject("o1", object.Object{
+	_, err = ss.addTestObject("/o1", object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			EncryptionKey: s1,
@@ -3576,7 +3735,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 
 	// prepare a slab with pieces on h3 and h4
 	s2 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
-	err = ss.UpdateObject(context.Background(), testBucket, "o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	err = ss.UpdateObject(context.Background(), testBucket, "/o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			EncryptionKey: s2,
@@ -3730,7 +3889,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// add the object.
-	if _, err := ss.addTestObject(t.Name(), obj); err != nil {
+	if _, err := ss.addTestObject("/"+t.Name(), obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3738,7 +3897,7 @@ func TestRenewedContract(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, t.Name(), 10); err != nil {
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, "/"+t.Name(), 10); err != nil {
 		t.Fatal(err)
 	} else if len(slabs) > 0 {
 		t.Fatal("shouldn't return any slabs", len(slabs))
@@ -3782,7 +3941,7 @@ func TestRenewedContract(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, t.Name(), 10); err != nil {
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, "/"+t.Name(), 10); err != nil {
 		t.Fatal(err)
 	} else if len(slabs) > 0 {
 		t.Fatal("shouldn't return any slabs", len(slabs))
@@ -3868,7 +4027,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// add two test objects
-	o1 := t.Name() + "1"
+	o1 := "/" + t.Name() + "1"
 	if added, err := ss.addTestObject(o1, object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
@@ -3887,7 +4046,7 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", added.Health)
 	}
 
-	o2 := t.Name() + "2"
+	o2 := "/" + t.Name() + "2"
 	if added, err := ss.addTestObject(o2, object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
@@ -3938,7 +4097,7 @@ func TestRefreshHealth(t *testing.T) {
 	}
 
 	// add another object that is empty
-	o3 := t.Name() + "3"
+	o3 := "/" + t.Name() + "3"
 	if added, err := ss.addTestObject(o3, object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 	}); err != nil {
@@ -3977,7 +4136,7 @@ func TestSlabCleanup(t *testing.T) {
 	var dirID int64
 	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		var err error
-		dirID, err = tx.MakeDirsForPath(context.Background(), "1")
+		dirID, err = tx.InsertDirectories(context.Background(), testBucket, "/")
 		return err
 	})
 	if err != nil {
@@ -3997,11 +4156,11 @@ func TestSlabCleanup(t *testing.T) {
 
 	var obj1ID, obj2ID int64
 	obj1Key, obj2Key := randomKey(), randomKey()
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
+	if res, err := insertObjStmt.Exec(context.Background(), dirID, "/1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
 		t.Fatal(err)
 	} else if obj1ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
+	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "/2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
 		t.Fatal(err)
 	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4030,7 +4189,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete the object
-	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "1")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "/1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4041,7 +4200,7 @@ func TestSlabCleanup(t *testing.T) {
 	}
 
 	// delete second object
-	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "2")
+	err = ss.RemoveObjectBlocking(context.Background(), testBucket, "/2")
 	if err != nil {
 		t.Fatal(err)
 	} else if slabCntr := ss.Count("slabs"); slabCntr != 0 {
@@ -4126,7 +4285,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	// add the object
-	_, err = ss.addTestObject("1", obj)
+	_, err = ss.addTestObject("/1", obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4146,12 +4305,12 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	}
 
 	// fetch the object
-	id, bid, oid, health, size := fetchObj(ss.DefaultBucketID(), "1")
+	id, bid, oid, health, size := fetchObj(ss.DefaultBucketID(), "/1")
 	if id != 1 {
 		t.Fatal("unexpected id", id)
 	} else if bid != ss.DefaultBucketID() {
 		t.Fatal("bucket id mismatch", bid)
-	} else if oid != "1" {
+	} else if oid != "/1" {
 		t.Fatal("object id mismatch", oid)
 	} else if health != 1 {
 		t.Fatal("health mismatch", health)
@@ -4303,18 +4462,18 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	obj2.Slabs = append(obj2.Slabs, obj.Slabs[1])
 
 	// add the object
-	_, err = ss.addTestObject("2", obj2)
+	_, err = ss.addTestObject("/2", obj2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch the object
-	id2, bid2, oid2, health2, size2 := fetchObj(ss.DefaultBucketID(), "2")
+	id2, bid2, oid2, health2, size2 := fetchObj(ss.DefaultBucketID(), "/2")
 	if id2 != 2 {
 		t.Fatal("unexpected id", id)
 	} else if bid2 != ss.DefaultBucketID() {
 		t.Fatal("bucket id mismatch", bid)
-	} else if oid2 != "2" {
+	} else if oid2 != "/2" {
 		t.Fatal("object id mismatch", oid)
 	} else if health2 != 1 {
 		t.Fatal("health mismatch", health)
@@ -4496,7 +4655,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 	// create 1000 objects and then overwrite them
 	for i := 0; i < 1000; i++ {
 		select {
-		case c <- fmt.Sprintf("object-%d", i):
+		case c <- fmt.Sprintf("/object-%d", i):
 		case <-ctx.Done():
 			return
 		}
@@ -4510,7 +4669,7 @@ func TestDirectories(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	objects := []string{
+	paths := []string{
 		"/foo",
 		"/bar/baz",
 		"///somefile",
@@ -4519,11 +4678,11 @@ func TestDirectories(t *testing.T) {
 		"/bar/fileinsamedirasbefore",
 	}
 
-	for _, o := range objects {
+	for _, p := range paths {
 		var dirID int64
 		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			var err error
-			dirID, err = tx.MakeDirsForPath(context.Background(), o)
+			dirID, err = tx.InsertDirectories(context.Background(), testBucket, p)
 			return err
 		})
 		if err != nil {

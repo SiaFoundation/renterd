@@ -58,24 +58,28 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatalf("unexpected height %v", curr.Height)
 	}
 
-	// run chain update
-	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		// update chain index
-		if err := tx.UpdateChainIndex(types.ChainIndex{Height: 1}); err != nil {
-			return err
-		}
+	// run chain update, we do it twice to make sure the update is idempotent and
+	// to make sure it doesn't cause issues when being applied twice in some edge
+	// case like a resync
+	for i := 0; i < 2; i++ {
+		if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+			// update chain index
+			if err := tx.UpdateChainIndex(types.ChainIndex{Height: 1}); err != nil {
+				return err
+			}
 
-		if err := tx.UpdateContractRevision(fcid, 1, 2, 3); err != nil {
-			return err
-		} else if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
-			return err
-		} else if err := tx.UpdateContractProofHeight(fcid, 4); err != nil {
-			return err
-		} else {
-			return nil
+			if err := tx.UpdateContractRevision(fcid, 1, 2, 3); err != nil {
+				return err
+			} else if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
+				return err
+			} else if err := tx.UpdateContractProofHeight(fcid, 4); err != nil {
+				return err
+			} else {
+				return nil
+			}
+		}); err != nil {
+			t.Fatal("unexpected error", err)
 		}
-	}); err != nil {
-		t.Fatal("unexpected error", err)
 	}
 
 	// assert updated index

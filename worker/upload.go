@@ -17,6 +17,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -40,7 +41,7 @@ var (
 type (
 	uploadManager struct {
 		hm        HostManager
-		mm        MemoryManager
+		mm        memory.MemoryManager
 		os        ObjectStore
 		cl        ContractLocker
 		cs        ContractStore
@@ -104,7 +105,7 @@ type (
 		numUploaded    uint64
 		numSectors     uint64
 
-		mem Memory
+		mem memory.Memory
 
 		errs HostErrorSet
 	}
@@ -291,7 +292,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	wg.Wait()
 }
 
-func (w *Worker) uploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
+func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
@@ -320,7 +321,7 @@ func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostMa
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
 		hm:        hm,
-		mm:        newMemoryManager(maxMemory, logger),
+		mm:        memory.NewManager(maxMemory, logger),
 		os:        os,
 		cl:        cl,
 		cs:        cs,
@@ -573,7 +574,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	return
 }
 
-func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem Memory, contracts []api.ContractMetadata, bh uint64, lockPriority int) (err error) {
+func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem memory.Memory, contracts []api.ContractMetadata, bh uint64, lockPriority int) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -630,7 +631,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem memory.Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -767,7 +768,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	mgr.uploaders = refreshed
 }
 
-func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem Memory, maxOverdrive uint64) (*slabUpload, chan sectorUploadResp) {
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan sectorUploadResp) {
 	// prepare response channel
 	responseChan := make(chan sectorUploadResp)
 
@@ -823,7 +824,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	}, responseChan
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (int64, float64) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (int64, float64) {
 	// create the response
 	resp := slabUploadResponse{
 		slab: object.SlabSlice{
@@ -861,7 +862,7 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	return uploadSpeed, overdrivePct
 }
 
-func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
