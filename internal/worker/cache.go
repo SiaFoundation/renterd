@@ -217,6 +217,9 @@ func (c *cache) Subscribe(e EventSubscriber) (err error) {
 }
 
 func (c *cache) isReady() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	select {
 	case <-c.readyChan:
 		return true
