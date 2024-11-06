@@ -142,6 +142,13 @@ func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileCon
 	return
 }
 
+// ContractRevision fetches the latest revision of a contract directly from the
+// host.
+func (c *Client) ContractRevision(ctx context.Context, contractID types.FileContractID) (resp api.Revision, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/revision", contractID), &resp)
+	return
+}
+
 // PrunableData returns an overview of all contract sizes, the total size and
 // the amount of data that can be pruned.
 func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
@@ -156,11 +163,10 @@ func (c *Client) PruneContract(ctx context.Context, contractID types.FileContrac
 }
 
 // RenewContract renews an existing contract with a host and adds it to the bus.
-func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
+func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
 	req := api.ContractRenewRequest{
 		EndHeight:          endHeight,
 		ExpectedNewStorage: expectedStorage,
-		MaxFundAmount:      maxFundAmount,
 		MinNewCollateral:   minNewCollateral,
 		RenterFunds:        renterFunds,
 	}

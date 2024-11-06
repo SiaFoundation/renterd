@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
@@ -16,6 +17,33 @@ import (
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+// BenchmarkRenameDirectories benchmarks renaming a directory.
+//
+// M1 Max | 54057 ns/op | 10418 B/op | 251 allocs/op
+func BenchmarkRenameDirectories(b *testing.B) {
+	// create database
+	db, err := newTestDB(context.Background(), b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare database
+	if err := insertDirectories(db, b.Name()); err != nil {
+		b.Fatal(err)
+	}
+
+	// start benchmark
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+			_, err := tx.RenameDirectories(context.Background(), b.Name(), "/a/b/c/", "/c/b/a/")
+			return err
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
 
 // BenchmarkPrunableContractRoots benchmarks diffing the roots of a contract
 // with a given set of roots to determine which roots are prunable.
@@ -36,7 +64,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 
 	// prepare database
 	fcid := types.FileContractID{1}
-	roots, err := prepareDB(db.DB(), fcid, numSectors)
+	roots, err := insertContractSectors(db.DB(), fcid, numSectors)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -65,11 +93,11 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
-func prepareDB(db *isql.DB, fcid types.FileContractID, n int) (roots []types.Hash256, _ error) {
-	// insert contract
+func insertContractSectors(db *isql.DB, fcid types.FileContractID, n int) (roots []types.Hash256, _ error) {
+	// insert host
 	hk := types.PublicKey{1}
 	res, err := db.Exec(context.Background(), `
-INSERT INTO contracts (fcid, host_key, start_height) VALUES (?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0)
+INSERT INTO contracts (fcid, host_key, start_height, v2) VALUES (?, ?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +120,7 @@ INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.Encr
 
 	// insert sectors
 	insertSectorStmt, err := db.Prepare(context.Background(), `
-INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?) RETURNING id`)
+INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?) RETURNING id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -101,7 +129,7 @@ INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?,
 	for i := 0; i < n; i++ {
 		var sectorID int64
 		roots = append(roots, frand.Entropy256())
-		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.PublicKey(hk), sql.Hash256(roots[i])).Scan(&sectorID)
+		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.Hash256(roots[i])).Scan(&sectorID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert sector: %w", err)
 		}
@@ -134,6 +162,16 @@ WHERE c.fcid = ?`, sql.FileContractID(fcid)).Scan(&cnt)
 	}
 
 	return
+}
+
+func insertDirectories(db *sqlite.MainDatabase, bucket string) error {
+	return db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		if err := tx.CreateBucket(context.Background(), bucket, api.BucketPolicy{}); err != nil {
+			return err
+		}
+		_, err := tx.InsertDirectories(context.Background(), bucket, "/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z")
+		return err
+	})
 }
 
 func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {

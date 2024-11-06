@@ -33,7 +33,7 @@ func New(addr, password string) *Client {
 }
 
 // Account returns the account id for a given host.
-func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account rhpv3.Account, err error) {
+func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account api.Account, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
 	return
 }
@@ -47,13 +47,6 @@ func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err erro
 // ResetDrift resets the drift of an account to zero.
 func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
 	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/account/%s/resetdrift", id), nil, nil)
-	return
-}
-
-// Contracts returns all contracts from the worker. These contracts decorate a
-// bus contract with the contract's latest revision.
-func (c *Client) Contracts(ctx context.Context, hostTimeout time.Duration) (resp api.ContractsResponse, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/rhp/contracts?hosttimeout=%s", api.DurationMS(hostTimeout)), &resp)
 	return
 }
 

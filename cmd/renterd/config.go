@@ -286,6 +286,7 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.StringVar(&cfg.Database.MySQL.MetricsDatabase, "db.metricsName", cfg.Database.MySQL.MetricsDatabase, "Database for metrics (overrides with RENTERD_DB_METRICS_NAME)")
 
 	// bus
+	flag.BoolVar(&cfg.Bus.AllowPrivateIPs, "bus.allowPrivateIPs", cfg.Bus.AllowPrivateIPs, "Allows hosts with private IPs")
 	flag.Uint64Var(&cfg.Bus.AnnouncementMaxAgeHours, "bus.announcementMaxAgeHours", cfg.Bus.AnnouncementMaxAgeHours, "Max age for announcements")
 	flag.BoolVar(&cfg.Bus.Bootstrap, "bus.bootstrap", cfg.Bus.Bootstrap, "Bootstraps gateway and consensus modules")
 	flag.StringVar(&cfg.Bus.GatewayAddr, "bus.gatewayAddr", cfg.Bus.GatewayAddr, "Address for Sia peer connections (overrides with RENTERD_BUS_GATEWAY_ADDR)")
@@ -294,7 +295,6 @@ func parseCLIFlags(cfg *config.Config) {
 
 	// worker
 	flag.DurationVar(&cfg.Worker.AccountsRefillInterval, "worker.accountRefillInterval", cfg.Worker.AccountsRefillInterval, "Interval for refilling workers' account balances")
-	flag.BoolVar(&cfg.Worker.AllowPrivateIPs, "worker.allowPrivateIPs", cfg.Worker.AllowPrivateIPs, "Allows hosts with private IPs")
 	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
@@ -404,9 +404,7 @@ func parseEnvironmentVariables(cfg *config.Config) {
 func readPasswordInput(context string) string {
 	fmt.Printf("%s: ", context)
 	input, err := term.ReadPassword(int(os.Stdin.Fd()))
-	if err != nil {
-		stdoutFatalError("Could not read input: " + err.Error())
-	}
+	checkFatalError("Could not read input", err)
 	fmt.Println("")
 	return string(input)
 }
@@ -415,9 +413,7 @@ func readInput(context string) string {
 	fmt.Printf("%s: ", context)
 	r := bufio.NewReader(os.Stdin)
 	input, err := r.ReadString('\n')
-	if err != nil {
-		stdoutFatalError("Could not read input: " + err.Error())
-	}
+	checkFatalError("Could not read input", err)
 	return strings.TrimSpace(input)
 }
 
@@ -471,9 +467,12 @@ func promptYesNo(question string) bool {
 	return strings.EqualFold(answer, "yes")
 }
 
-// stdoutFatalError prints an error message to stdout and exits with a 1 exit code.
-func stdoutFatalError(msg string) {
-	stdoutError(msg)
+// checkFatalError prints an error message to stderr and exits with a 1 exit code. If err is nil, this is a no-op.
+func checkFatalError(context string, err error) {
+	if err == nil {
+		return
+	}
+	os.Stderr.WriteString(fmt.Sprintf("%s: %s\n", context, err))
 	os.Exit(1)
 }
 
@@ -661,6 +660,9 @@ func setStoreConfig(cfg *config.Config) {
 
 func setS3Config(cfg *config.Config) {
 	if !promptYesNo("Would you like to configure S3 settings?") {
+		return
+	} else if !promptYesNo("Would you like to enable the S3 gateway?") {
+		cfg.S3.Enabled = false
 		return
 	}
 

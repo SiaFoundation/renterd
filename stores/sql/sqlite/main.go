@@ -70,9 +70,14 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
+func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
+	mtx := b.wrapTxn(tx)
+	return mtx.InsertDirectories(ctx, bucket, path)
+}
+
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.MakeDirsForPath(ctx, path)
+	return mtx.MakeDirsForPathDeprecated(ctx, path)
 }
 
 func (b *MainDatabase) Migrate(ctx context.Context) error {
@@ -230,7 +235,7 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 	}
 
 	// create the directory.
-	dirID, err := tx.MakeDirsForPath(ctx, key)
+	dirID, err := tx.InsertDirectories(ctx, bucket, key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
 	}
@@ -320,7 +325,11 @@ func (tx *MainDatabaseTx) ContractSizes(ctx context.Context) (map[types.FileCont
 }
 
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
-	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
+	dstDirID, err := tx.InsertDirectories(ctx, dstBucket, dstKey)
+	if err != nil {
+		return api.ObjectMetadata{}, err
+	}
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata, dstDirID)
 }
 
 func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
@@ -350,14 +359,6 @@ func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
 
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
 	return ssql.DeleteWebhook(ctx, tx, wh)
-}
-
-func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
-	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
-}
-
-func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
-	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
@@ -402,6 +403,70 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 
 func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	return ssql.Hosts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
+}
+
+func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
+	// sanity check input
+	if !strings.HasPrefix(path, "/") {
+		return 0, errors.New("path has to have a leading slash")
+	} else if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
+	}
+
+	// fetch bucket
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// prepare statements
+	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertDirStmt.Close()
+
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE db_bucket_id = ? AND name = ?")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer queryDirStmt.Close()
+
+	// insert directories for give path
+	var dirID *int64
+	for _, dir := range object.Directories(path) {
+		// check if the directory exists
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if existingID > 0 {
+			dirID = &existingID
+			continue
+		}
+
+		// insert directory
+		var insertedID int64
+		if _, err := insertDirStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v: %w", dir, err)
+		} else if err := queryDirStmt.QueryRow(ctx, bucketID, dir).Scan(&insertedID); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if insertedID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		}
+		dirID = &insertedID
+	}
+	return *dirID, nil
+}
+
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
@@ -460,7 +525,7 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int64, error) {
+func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {
 	insertDirStmt, err := tx.Prepare(ctx, "INSERT INTO directories (name, db_parent_id) VALUES (?, ?) ON CONFLICT(name) DO NOTHING")
 	if err != nil {
 		return 0, fmt.Errorf("failed to prepare statement: %w", err)
@@ -474,7 +539,7 @@ func (tx *MainDatabaseTx) MakeDirsForPath(ctx context.Context, path string) (int
 	defer queryDirStmt.Close()
 
 	// Create root dir.
-	dirID := int64(sql.DirectoriesRootID)
+	dirID := int64(1)
 	if _, err := tx.Exec(ctx, "INSERT INTO directories (id, name, db_parent_id) VALUES (?, '/', NULL) ON CONFLICT(id) DO NOTHING", dirID); err != nil {
 		return 0, fmt.Errorf("failed to create root directory: %w", err)
 	}
@@ -694,17 +759,17 @@ func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadat
 	// update contract
 	_, err = tx.Exec(ctx, `
 INSERT INTO contracts (
-	created_at, fcid, host_id, host_key,
+	created_at, fcid, host_id, host_key, v2,
 	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
 	contract_price, initial_renter_funds,
 	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(fcid) DO UPDATE SET
-	fcid = EXCLUDED.fcid, host_id = EXCLUDED.host_id, host_key = EXCLUDED.host_key,
+	fcid = EXCLUDED.fcid, host_id = EXCLUDED.host_id, host_key = EXCLUDED.host_key, v2 = EXCLUDED.v2,
 	archival_reason = EXCLUDED.archival_reason, proof_height = EXCLUDED.proof_height, renewed_from = EXCLUDED.renewed_from, renewed_to = EXCLUDED.renewed_to, revision_height = EXCLUDED.revision_height, revision_number = EXCLUDED.revision_number, size = EXCLUDED.size, start_height = EXCLUDED.start_height, state = EXCLUDED.state, window_start = EXCLUDED.window_start, window_end = EXCLUDED.window_end,
 	contract_price = EXCLUDED.contract_price, initial_renter_funds = EXCLUDED.initial_renter_funds,
 	delete_spending = EXCLUDED.delete_spending, fund_account_spending = EXCLUDED.fund_account_spending, sector_roots_spending = EXCLUDED.sector_roots_spending, upload_spending = EXCLUDED.upload_spending`,
-		time.Now(), ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey),
+		time.Now(), ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey), c.V2,
 		ssql.NullableString(c.ArchivalReason), c.ProofHeight, ssql.FileContractID(c.RenewedFrom), ssql.FileContractID(c.RenewedTo), c.RevisionHeight, c.RevisionNumber, c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
 		ssql.Currency(c.ContractPrice), ssql.Currency(c.InitialRenterFunds),
 		ssql.Currency(c.Spending.Deletions), ssql.Currency(c.Spending.FundAccount), ssql.Currency(c.Spending.SectorRoots), ssql.Currency(c.Spending.Uploads),
@@ -735,6 +800,12 @@ func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailu
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
 
+// RenameDirectories renames all directories in the database with the
+// given prefix to the new prefix.
+func (tx *MainDatabaseTx) RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error) {
+	return ssql.RenameDirectories(ctx, tx, bucket, prefixOld, prefixNew)
+}
+
 func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error {
 	if force {
 		// delete potentially existing object at destination
@@ -762,37 +833,56 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 
 func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
 	if force {
-		_, err := tx.Exec(ctx, `
+		// delete where bucket matches, where object_id is prefixed by the old
+		// prefix (case sensitive) and directories that exactly match the new
+		// prefix, otherwise the update conflicts
+		query := `
 		DELETE
 		FROM objects
-		WHERE object_id IN (
-			SELECT CONCAT(?, SUBSTR(object_id, ?))
-			FROM objects
-			WHERE object_id LIKE ?
-			AND SUBSTR(object_id, 1, ?) = ?
-			AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)
-		)`,
-			prefixNew,
-			utf8.RuneCountInString(prefixOld)+1,
-			prefixOld+"%",
+		WHERE
+			db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) AND
+			(
+				object_id IN (
+					SELECT ? || SUBSTR(object_id, ?)
+					FROM objects
+					WHERE object_id LIKE ?
+					AND SUBSTR(object_id, 1, ?) = ?
+				) OR (object_id = ? AND size = 0)
+			)`
+		args := []any{
+			bucket,
+			prefixNew, utf8.RuneCountInString(prefixOld) + 1,
+			prefixOld + "%",
 			utf8.RuneCountInString(prefixOld), prefixOld,
-			bucket)
+			prefixOld,
+		}
+		_, err := tx.Exec(ctx, query, args...)
 		if err != nil {
 			return err
 		}
 	}
-	resp, err := tx.Exec(ctx, `
+
+	// update objects where bucket matches, where the object_id is prefixed by
+	// the old prefix (case sensitive) and it doesn't exactly match the new
+	// prefix, we update the object_id at all times but only update directory_id
+	// only when the object is an immediate child (no slash in suffix)
+	query := `
 		UPDATE objects
 		SET object_id = ? || SUBSTR(object_id, ?),
-		db_directory_id = ?
+		db_directory_id = CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN ? ELSE db_directory_id END
 		WHERE object_id LIKE ?
 		AND SUBSTR(object_id, 1, ?) = ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`,
-		prefixNew, utf8.RuneCountInString(prefixOld)+1,
-		dirID,
-		prefixOld+"%",
+		AND object_id != ?
+		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`
+
+	args := []any{
+		prefixNew, utf8.RuneCountInString(prefixOld) + 1,
+		utf8.RuneCountInString(prefixOld) + 1, dirID,
+		prefixOld + "%",
 		utf8.RuneCountInString(prefixOld), prefixOld,
-		bucket)
+		prefixNew,
+		bucket}
+	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return api.ErrObjectExists
 	} else if err != nil {
@@ -1110,106 +1200,8 @@ func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) 
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
-	// find all used contracts
-	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
-	if err != nil {
-		return fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// update slab
-	var slabID, totalShards int64
-	err = tx.QueryRow(ctx, `
-		UPDATE slabs
-		SET db_contract_set_id = (SELECT id FROM contract_sets WHERE name = ?),
-		health_valid_until = ?,
-		health = ?
-		WHERE key = ?
-		RETURNING id, total_shards
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.EncryptionKey)).
-		Scan(&slabID, &totalShards)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ErrSlabNotFound
-	} else if err != nil {
-		return err
-	}
-
-	// find shards of slab
-	var roots []types.Hash256
-	rows, err := tx.Query(ctx, "SELECT root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch sectors: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var root ssql.Hash256
-		if err := rows.Scan(&root); err != nil {
-			return fmt.Errorf("failed to scan sector id: %w", err)
-		}
-		roots = append(roots, types.Hash256(root))
-	}
-	nSectors := len(roots)
-
-	// make sure the number of shards doesn't change.
-	// NOTE: check both the slice as well as the TotalShards field to be
-	// safe.
-	if len(s.Shards) != int(totalShards) {
-		return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", sql.ErrInvalidNumberOfShards, totalShards, len(s.Shards))
-	} else if len(s.Shards) != nSectors {
-		return fmt.Errorf("%w: expected %v shards (Shards) but got %v", sql.ErrInvalidNumberOfShards, nSectors, len(s.Shards))
-	}
-
-	// make sure the roots stay the same.
-	for i, root := range roots {
-		if root != types.Hash256(s.Shards[i].Root) {
-			return fmt.Errorf("%w: shard %v has changed root from %v to %v", sql.ErrShardRootChanged, i, s.Shards[i].Root, root[:])
-		}
-	}
-
-	// update sectors
-	var upsertSectors []upsertSector
-	for i := range s.Shards {
-		upsertSectors = append(upsertSectors, upsertSector{
-			slabID,
-			i + 1,
-			s.Shards[i].LatestHost,
-			s.Shards[i].Root,
-		})
-	}
-	sectorIDs, err := tx.upsertSectors(ctx, upsertSectors)
-	if err != nil {
-		return fmt.Errorf("failed to insert sectors: %w", err)
-	}
-
-	// build contract <-> sector links
-	var upsertContractSectors []upsertContractSector
-	for i, shard := range s.Shards {
-		sectorID := sectorIDs[i]
-
-		// ensure the associations are updated
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, ok := usedContracts[fcid]; ok {
-					upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-						sectorID,
-						usedContracts[fcid].ID,
-					})
-				} else {
-					tx.log.Named("UpdateSlab").Warn("missing contract for shard",
-						"contract", fcid,
-						"root", shard.Root,
-						"latest_host", shard.LatestHost,
-					)
-				}
-			}
-		}
-	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
-		return err
-	}
-
-	return nil
+func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
+	return ssql.UpdateSlab(ctx, tx, key, sectors)
 }
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
@@ -1240,6 +1232,31 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
+	if len(contractSectors) == 0 {
+		return nil
+	}
+
+	// insert contract <-> sector links
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
+											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
+	}
+	defer insertContractSectorStmt.Close()
+
+	for _, cs := range contractSectors {
+		_, err := insertContractSectorStmt.Exec(ctx,
+			cs.SectorID,
+			cs.ContractID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert contract sector link: %w", err)
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
@@ -1340,7 +1357,6 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			upsertSectors = append(upsertSectors, upsertSector{
 				slabIDs[i],
 				j + 1,
-				ss.Shards[j].LatestHost,
 				ss.Shards[j].Root,
 			})
 		}
@@ -1352,21 +1368,20 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 
 	// insert contract <-> sector links
 	sectorIdx := 0
-	var upsertContractSectors []upsertContractSector
+	var upsertContractSectors []ssql.ContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := usedContracts[fcid]; ok {
-						upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-							sectorIDs[sectorIdx],
-							usedContracts[fcid].ID,
+						upsertContractSectors = append(upsertContractSectors, ssql.ContractSector{
+							ContractID: usedContracts[fcid].ID,
+							SectorID:   sectorIDs[sectorIdx],
 						})
 					} else {
 						tx.log.Named("InsertObject").Warn("missing contract for shard",
 							"contract", fcid,
 							"root", shard.Root,
-							"latest_host", shard.LatestHost,
 						)
 					}
 				}
@@ -1374,47 +1389,16 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			sectorIdx++
 		}
 	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
+	if err := tx.UpsertContractSectors(ctx, upsertContractSectors); err != nil {
 		return err
 	}
 	return nil
 }
 
-type upsertContractSector struct {
-	sectorID   int64
-	contractID int64
-}
-
-func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSectors []upsertContractSector) error {
-	if len(contractSectors) == 0 {
-		return nil
-	}
-
-	// insert contract <-> sector links
-	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
-	}
-	defer insertContractSectorStmt.Close()
-
-	for _, cs := range contractSectors {
-		_, err := insertContractSectorStmt.Exec(ctx,
-			cs.sectorID,
-			cs.contractID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract sector link: %w", err)
-		}
-	}
-	return nil
-}
-
 type upsertSector struct {
-	slabID     int64
-	slabIndex  int
-	latestHost types.PublicKey
-	root       types.Hash256
+	slabID    int64
+	slabIndex int
+	root      types.Hash256
 }
 
 func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSector) ([]int64, error) {
@@ -1424,8 +1408,8 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 
 	// insert sectors - make sure to update last_insert_id in case of a
 	// duplicate key to be able to retrieve the id
-	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
-								VALUES (?, ?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET latest_host = EXCLUDED.latest_host RETURNING id, db_slab_id`)
+	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, root)
+								VALUES (?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET db_slab_id = excluded.db_slab_id RETURNING id, db_slab_id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -1438,7 +1422,6 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 			time.Now(),
 			s.slabID,
 			s.slabIndex,
-			ssql.PublicKey(s.latestHost),
 			s.root[:],
 		).Scan(&sectorID, &slabID)
 		if err != nil {

@@ -27,12 +27,17 @@ jobs:
             worker worker/client
           flags: |
             -japecheck.types=false
-  test:
+
+  test-sqlite: # Run all tests against SQLite
     needs: analyze
-    runs-on: ${{ matrix.os }}
+    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@master
+    secrets: inherit
+
+  test-mysql: # Run all tests against MySQL
+    needs: analyze
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         go-version: ["1.22", "1.23"]
     steps:
       - name: Checkout
@@ -41,44 +46,23 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
-      - name: Configure Windows
-        if: matrix.os == 'windows-latest'
-        run: git config --global core.autocrlf false # fixes go lint fmt error
       - name: Configure MySQL
-        if: matrix.os == 'ubuntu-latest'
         uses: mirromutth/mysql-action@v1.1
         with:
           host port: 3800
           mysql version: "8"
           mysql root password: test
-      - name: Test Stores
-        uses: n8maninger/action-golang-test@v1
-        with:
-          args: "-race;-short"
-      - name: Test Stores - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
+      - name: Test
+        uses: SiaFoundation/workflows/.github/actions/go-test@master
         env:
           RENTERD_DB_URI: 127.0.0.1:3800
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
-          package: "./stores"
-          args: "-race;-short"
-      - name: Test Integration
-        uses: n8maninger/action-golang-test@v1
-        with:
-          package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
-      - name: Test Integration - MySQL
-        if: matrix.os == 'ubuntu-latest'
-        uses: n8maninger/action-golang-test@v1
-        env:
-          RENTERD_DB_URI: 127.0.0.1:3800
-          RENTERD_DB_USER: root
-          RENTERD_DB_PASSWORD: test
-        with:
-          package: "./internal/test/e2e/..."
-          args: "-failfast;-race;-timeout=60m"
-      - name: Build
-        run: go build -o bin/ ./cmd/renterd
+          go-test-args: "-race;-timeout=20m;-tags=netgo"
+
+  success: # Use in branch rulesets to ensure all matrix jobs completed successfully
+    needs: [test-sqlite, test-mysql]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Success!"

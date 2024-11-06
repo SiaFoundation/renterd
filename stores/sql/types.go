@@ -46,6 +46,12 @@ type (
 	UnixTimeMS      time.Time
 	DurationMS      time.Duration
 	Unsigned64      uint64
+
+	StateElement struct {
+		ID          Hash256
+		LeafIndex   uint64
+		MerkleProof MerkleProof
+	}
 )
 
 type scannerValuer interface {

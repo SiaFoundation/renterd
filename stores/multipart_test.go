@@ -18,9 +18,6 @@ import (
 )
 
 func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -152,7 +149,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i, shard := range splitData {
-			ups.Shards = append(ups.Shards, newTestShard(hks[i], fcids[i], types.HashBytes(shard)))
+			ups.Shards = append(ups.Shards, api.UploadedSector{ContractID: fcids[i], Root: types.HashBytes(shard)})
 		}
 		return ups
 	}
@@ -183,9 +180,6 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 }
 
 func TestMultipartUploads(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
@@ -279,9 +273,6 @@ func TestMultipartUploads(t *testing.T) {
 }
 
 func TestMultipartUploadEmptyObjects(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 

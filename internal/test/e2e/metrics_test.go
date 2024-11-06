@@ -15,10 +15,6 @@ import (
 )
 
 func TestMetrics(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// register start time
 	start := time.Now()
 

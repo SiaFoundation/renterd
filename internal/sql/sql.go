@@ -21,14 +21,10 @@ const (
 	factor           = 1.8 // factor ^ retryAttempts = backoff time in milliseconds
 	maxBackoff       = 15 * time.Second
 
-	ConsensusInfoID   = 1
-	DirectoriesRootID = 1
+	ConsensusInfoID = 1
 )
 
 var (
-	ErrInvalidNumberOfShards = errors.New("slab has invalid number of shards")
-	ErrShardRootChanged      = errors.New("shard root changed")
-
 	ErrRunV072               = errors.New("can't upgrade to >=v1.0.0 from your current version - please upgrade to v0.7.2 first (https://github.com/SiaFoundation/renterd/releases/tag/v0.7.2)")
 	ErrMySQLNoSuperPrivilege = errors.New("You do not have the SUPER privilege and binary logging is enabled")
 )
@@ -76,6 +72,10 @@ func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration
 		longQueryDuration: longQueryDuration,
 		longTxDuration:    longTxDuration,
 	}, nil
+}
+
+func (s *DB) DB() *sql.DB {
+	return s.db
 }
 
 // exec executes a query without returning any rows. The args are for

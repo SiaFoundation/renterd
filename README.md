@@ -4,7 +4,7 @@
 
 `renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
 to cater to both casual users seeking straightforward data storage and
-developers requiring a robust API for building apps on Sia.
+developers requiring a robust API for building apps on Sia
 
 ## Overview
 
@@ -61,6 +61,7 @@ overview of all settings configurable through the CLI.
 | `Database.MySQL.MetricsDatabase`     | Database for metrics                                 | `renterd_metrics`                 | `--db.metricsName`              | `RENTERD_DB_METRICS_NAME`                     | `database.mysql.metricsDatabase`    |
 | `Database.SQLite.Database`           | SQLite database name                                 | -                                 | -                               | -                                              | `database.sqlite.database`          |
 | `Database.SQLite.MetricsDatabase`    | SQLite metrics database name                         | -                                 | -                               | -                                              | `database.sqlite.metricsDatabase`   |
+| `Bus.AllowPrivateIPs`                | Allows hosts with private IPs                        | -                                 | `--bus.allowPrivateIPs`         | -                                              | `bus.allowPrivateIPs`            |
 | `Bus.AnnouncementMaxAgeHours`        | Max age for announcements                            | `8760h` (1 year)                  | `--bus.announcementMaxAgeHours` | -                                              | `bus.announcementMaxAgeHours`       |
 | `Bus.Bootstrap`                      | Bootstraps gateway and consensus modules             | `true`                            | `--bus.bootstrap`               | -                                              | `bus.bootstrap`                     |
 | `Bus.GatewayAddr`                    | Address for Sia peer connections                     | `:9981`                          | `--bus.gatewayAddr`             | `RENTERD_BUS_GATEWAY_ADDR`                     | `bus.gatewayAddr`                   |
@@ -68,7 +69,6 @@ overview of all settings configurable through the CLI.
 | `Bus.RemotePassword`                 | Remote password for the bus                          | -                                 | -                               | `RENTERD_BUS_API_PASSWORD`                     | `bus.remotePassword`                |
 | `Bus.UsedUTXOExpiry`                 | Expiry for used UTXOs in transactions                | `24h`                             | `--bus.usedUTXOExpiry`          | -                                              | `bus.usedUtxoExpiry`                |
 | `Bus.SlabBufferCompletionThreshold`  | Threshold for slab buffer upload                     | `4096`                            | `--bus.slabBufferCompletionThreshold` | `RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD` | `bus.slabBufferCompletionThreshold` |
-| `Worker.AllowPrivateIPs`             | Allows hosts with private IPs                        | -                                 | `--worker.allowPrivateIPs`       | -                                              | `worker.allowPrivateIPs`            |
 | `Worker.BusFlushInterval`            | Interval for flushing data to bus                    | `5s`                              | `--worker.busFlushInterval`      | -                                              | `worker.busFlushInterval`           |
 | `Worker.ContractLockTimeout`         | Timeout for locking contracts                        | `30s`                             | -                               | -                                              | `worker.contractLockTimeout`        |
 | `Worker.DownloadMaxOverdrive`        | Max overdrive workers for downloads                  | `5`                               | `--worker.downloadMaxOverdrive`  | -                                              | `worker.downloadMaxOverdrive`       |

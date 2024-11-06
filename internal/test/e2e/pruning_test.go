@@ -13,14 +13,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap"
 )
 
 func TestHostPruning(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
@@ -43,7 +38,7 @@ func TestHostPruning(t *testing.T) {
 				Success:   false,
 			}
 		}
-		tt.OK(b.RecordHostScans(context.Background(), his))
+		tt.OK(cluster.bs.RecordHostScans(context.Background(), his))
 	}
 
 	// shut down the worker manually, this will flush any interactions
@@ -95,13 +90,8 @@ func TestHostPruning(t *testing.T) {
 }
 
 func TestSectorPruning(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a cluster
 	opts := clusterOptsDefault
-	opts.logger = zap.NewNop()
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 

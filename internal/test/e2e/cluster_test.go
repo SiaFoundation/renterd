@@ -22,6 +22,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -30,15 +32,11 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
-	"go.uber.org/zap"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"lukechampine.com/frand"
 )
 
 func TestObjectsWithNoDelimiter(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// assertMetadata asserts ModTime, ETag and MimeType are set and then clears
 	// them afterwards so we can compare without having to specify the metadata
 	start := time.Now()
@@ -193,15 +191,17 @@ func TestNewTestCluster(t *testing.T) {
 	cluster.AddHosts(1)
 
 	// Wait for contracts to form.
-	var contract api.Contract
+	var contract api.ContractMetadata
 	contracts := cluster.WaitForContracts()
 	contract = contracts[0]
+	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
+	tt.OK(err)
 
 	// Verify startHeight and endHeight of the contract.
 	cfg, currentPeriod := cluster.AutopilotConfig(context.Background())
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	if contract.EndHeight() != expectedEndHeight || contract.Revision.EndHeight() != expectedEndHeight {
-		t.Fatal("wrong endHeight", contract.EndHeight(), contract.Revision.EndHeight())
+	if contract.EndHeight() != expectedEndHeight || revision.EndHeight() != expectedEndHeight {
+		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}
@@ -366,10 +366,6 @@ func TestNewTestCluster(t *testing.T) {
 // TestObjectsBucket is a test that verifies whether we properly escape bucket
 // names.
 func TestObjectsBucket(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -404,10 +400,6 @@ func TestObjectsBucket(t *testing.T) {
 // would expect. It is similar to the TestObjectEntries unit test, but uses
 // the worker and bus client to verify paths are passed correctly.
 func TestObjectsWithDelimiterSlash(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// assertMetadata asserts ModTime, ETag and MimeType are set and then clears
 	// them afterwards so we can compare without having to specify the metadata
 	start := time.Now()
@@ -590,10 +582,6 @@ func TestObjectsWithDelimiterSlash(t *testing.T) {
 
 // TestObjectsRename tests renaming objects and downloading them afterwards.
 func TestObjectsRename(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -646,10 +634,6 @@ func TestObjectsRename(t *testing.T) {
 // TestUploadDownloadEmpty is an integration test that verifies empty objects
 // can be uploaded and download correctly.
 func TestUploadDownloadEmpty(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -675,10 +659,6 @@ func TestUploadDownloadEmpty(t *testing.T) {
 // TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
 func TestUploadDownloadBasic(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -711,9 +691,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatal("wrong amount of shards", len(slab.Shards), test.RedundancySettings.TotalShards)
 		}
 		for _, shard := range slab.Shards {
-			if shard.LatestHost == (types.PublicKey{}) {
-				t.Fatal("latest host should be set")
-			} else if len(shard.Contracts) != 1 {
+			if len(shard.Contracts) != 1 {
 				t.Fatal("each shard should have a host")
 			} else if _, found := roots[shard.Root]; found {
 				t.Fatal("each root should only exist once per slab")
@@ -767,10 +745,6 @@ func TestUploadDownloadBasic(t *testing.T) {
 // TestUploadDownloadExtended is an integration test that verifies objects can
 // be uploaded and download correctly.
 func TestUploadDownloadExtended(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -922,8 +896,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: zap.NewNop(),
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
@@ -1072,10 +1045,6 @@ func TestUploadDownloadSpending(t *testing.T) {
 }
 
 func TestContractApplyChainUpdates(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster without autopilot
 	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
 	defer cluster.Shutdown()
@@ -1118,10 +1087,6 @@ func TestContractApplyChainUpdates(t *testing.T) {
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
 func TestEphemeralAccounts(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
@@ -1196,10 +1161,6 @@ func TestEphemeralAccounts(t *testing.T) {
 
 // TestParallelUpload tests uploading multiple files in parallel.
 func TestParallelUpload(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -1272,10 +1233,6 @@ func TestParallelUpload(t *testing.T) {
 
 // TestParallelDownload tests downloading a file in parallel.
 func TestParallelDownload(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -1320,9 +1277,7 @@ func TestParallelDownload(t *testing.T) {
 // TestEphemeralAccountSync verifies that setting the requiresSync flag makes
 // the autopilot resync the balance between renter and host.
 func TestEphemeralAccountSync(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	} else if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
+	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
 		t.Skip("skipping MySQL suite")
 	}
 
@@ -1360,6 +1315,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 	// start the cluster again
 	cluster = newTestCluster(t, testClusterOptions{
+		cm:        cluster.cm,
 		dir:       cluster.dir,
 		logger:    cluster.logger,
 		walletKey: &cluster.wk,
@@ -1372,18 +1328,17 @@ func TestEphemeralAccountSync(t *testing.T) {
 	cluster.sync()
 
 	// ask for the account, this should trigger its creation
-	tt.OKAll(cluster.Worker.Account(context.Background(), hk))
+	account, err := cluster.Worker.Account(context.Background(), hk)
+	tt.OK(err)
+	if account.ID != acc.ID {
+		t.Fatalf("account ID mismatch, expected %v got %v", acc.ID, account.ID)
+	} else if account.CleanShutdown || !account.RequiresSync {
+		t.Fatalf("account shouldn't be marked as clean shutdown or not require a sync, got %v %v", account.CleanShutdown, accounts[0].RequiresSync)
+	}
 
 	// make sure we form a contract
 	cluster.WaitForContracts()
 	cluster.MineBlocks(1)
-
-	accounts = cluster.Accounts()
-	if len(accounts) != 1 || accounts[0].ID != acc.ID {
-		t.Fatal("account should exist")
-	} else if accounts[0].CleanShutdown || !accounts[0].RequiresSync {
-		t.Fatal("account shouldn't be marked as clean shutdown or not require a sync, got", accounts[0].CleanShutdown, accounts[0].RequiresSync)
-	}
 
 	// assert account was funded
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -1392,8 +1347,8 @@ func TestEphemeralAccountSync(t *testing.T) {
 			return errors.New("account should exist")
 		} else if accounts[0].Balance.Cmp(types.ZeroCurrency.Big()) == 0 {
 			return errors.New("account isn't funded")
-		} else if accounts[0].RequiresSync {
-			return fmt.Errorf("account shouldn't require a sync, got %v", accounts[0].RequiresSync)
+		} else if !accounts[0].CleanShutdown || accounts[0].RequiresSync {
+			return fmt.Errorf("account should be marked as clean shutdown and not require a sync, got %v %v", accounts[0].CleanShutdown, accounts[0].RequiresSync)
 		}
 		return nil
 	})
@@ -1402,10 +1357,6 @@ func TestEphemeralAccountSync(t *testing.T) {
 // TestUploadDownloadSameHost uploads a file to the same host through different
 // contracts and tries downloading the file again.
 func TestUploadDownloadSameHost(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -1420,6 +1371,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload 3 objects so every host has 3 sectors
 	var err error
+	var hk types.PublicKey
 	var res api.Object
 	shards := make(map[types.PublicKey][]object.Sector)
 	for i := 0; i < 3; i++ {
@@ -1430,7 +1382,10 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		res, err = b.Object(context.Background(), testBucket, fmt.Sprintf("foo_%d", i), api.GetObjectOptions{})
 		tt.OK(err)
 		for _, shard := range res.Object.Slabs[0].Shards {
-			shards[shard.LatestHost] = append(shards[shard.LatestHost], shard)
+			for hk = range shard.Contracts {
+				shards[hk] = append(shards[hk], shard)
+				break
+			}
 		}
 
 		// delete the object
@@ -1445,7 +1400,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// build a frankenstein object constructed with all sectors on the same host
-	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
+	res.Object.Slabs[0].Shards = shards[hk]
 	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
@@ -1453,10 +1408,6 @@ func TestUploadDownloadSameHost(t *testing.T) {
 }
 
 func TestContractArchival(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
@@ -1501,10 +1452,6 @@ func TestContractArchival(t *testing.T) {
 }
 
 func TestUnconfirmedContractArchival(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
@@ -1558,20 +1505,16 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 }
 
 func TestWalletEvents(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
 	tt := cluster.tt
 
 	// Make sure we get transactions that are spread out over multiple seconds.
-	time.Sleep(time.Second)
-	cluster.MineBlocks(1)
-	time.Sleep(time.Second)
-	cluster.MineBlocks(1)
+	for i := 0; i < 3; i++ {
+		time.Sleep(time.Second)
+		cluster.MineBlocks(1)
+	}
 
 	// Get all events of the wallet.
 	allTxns, err := b.WalletEvents(context.Background())
@@ -1610,10 +1553,6 @@ func TestWalletEvents(t *testing.T) {
 }
 
 func TestUploadPacking(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -1726,10 +1665,28 @@ func TestUploadPacking(t *testing.T) {
 	// upload 2 more files which are half a slab each to test filling up a slab
 	// exactly.
 	data4 := make([]byte, slabSize/2)
-	data5 := make([]byte, slabSize/2)
 	uploadDownload("file4", data4)
-	uploadDownload("file5", data5)
 	download("file4", data4, 0, int64(len(data4)))
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buffers, err := b.SlabBuffers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, buffer := range buffers {
+			if buffer.Locked {
+				return errors.New("buffer locked")
+			}
+		}
+		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), test.ContractSet, 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(ps) > 0 {
+			return errors.New("packed slabs left")
+		}
+		return nil
+	})
+	data5 := make([]byte, slabSize/2)
+	uploadDownload("file5", data5)
 
 	// assert number of objects
 	os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
@@ -1740,7 +1697,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// check the object size stats, we use a retry loop since packed slabs are
 	// uploaded in a separate goroutine, so the object stats might lag a bit
-	tt.Retry(60, time.Second, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		os, err := b.ObjectsStats(context.Background(), api.ObjectsStatsOpts{})
 		if err != nil {
 			t.Fatal(err)
@@ -1783,10 +1740,6 @@ func TestUploadPacking(t *testing.T) {
 }
 
 func TestWallet(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -1863,10 +1816,6 @@ func TestWallet(t *testing.T) {
 }
 
 func TestSlabBufferStats(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -1995,10 +1944,6 @@ func TestSlabBufferStats(t *testing.T) {
 }
 
 func TestAlerts(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -2109,10 +2054,6 @@ func TestAlerts(t *testing.T) {
 }
 
 func TestMultipartUploads(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -2442,10 +2383,6 @@ func TestBusRecordedMetrics(t *testing.T) {
 }
 
 func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -2522,15 +2459,14 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 }
 
 func TestWalletRedistribute(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
+
+	// mine to get more money
+	cluster.MineBlocks(1)
 
 	// redistribute into 2 outputs of 500KS each
 	numOutputs := 2
@@ -2588,7 +2524,6 @@ func TestHostScan(t *testing.T) {
 	defer cluster.Shutdown()
 
 	b := cluster.Bus
-	w := cluster.Worker
 	tt := cluster.tt
 
 	// add 2 hosts to the cluster, 1 to scan and 1 to make sure we always have 1
@@ -2596,11 +2531,7 @@ func TestHostScan(t *testing.T) {
 	hosts := cluster.AddHosts(2)
 	host := hosts[0]
 
-	settings, err := host.RHPv2Settings()
-	tt.OK(err)
-
 	hk := host.PublicKey()
-	hostIP := settings.NetAddress
 
 	assertHost := func(ls time.Time, lss, slss bool, ts uint64) {
 		t.Helper()
@@ -2626,7 +2557,7 @@ func TestHostScan(t *testing.T) {
 		// between scans
 		time.Sleep(time.Millisecond)
 
-		resp, err := w.RHPScan(context.Background(), hk, hostIP, 10*time.Second)
+		resp, err := b.ScanHost(context.Background(), hk, 10*time.Second)
 		tt.OK(err)
 		if resp.ScanError != "" {
 			return errors.New(resp.ScanError)
@@ -2681,5 +2612,271 @@ func TestHostScan(t *testing.T) {
 	tt.OK(err)
 	if len(toScan) != 1 {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
+	}
+}
+
+// TestDownloadAllHosts makes sure we try to download sectors, from all hosts
+// that a sector is stored on.
+func TestDownloadAllHosts(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	// get rid of redundancy
+	rs := test.RedundancySettings
+	rs.MinShards = rs.TotalShards
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         rs.TotalShards,
+		uploadPacking: false, // make sure data is uploaded
+	})
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// update redundancy settings
+	us, err := b.UploadSettings(context.Background())
+	tt.OK(err)
+	us.Redundancy = rs
+	tt.OK(b.UpdateUploadSettings(context.Background(), us))
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload the data
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
+
+	// fetch object
+	obj, err := cluster.Bus.Object(context.Background(), testBucket, path, api.GetObjectOptions{})
+	tt.OK(err)
+
+	// build used hosts
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, s := range obj.Object.Slabs {
+		for _, ss := range s.Shards {
+			for hk := range ss.Contracts {
+				usedHosts[hk] = struct{}{}
+			}
+		}
+	}
+	if len(usedHosts) != rs.TotalShards {
+		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
+	}
+
+	// add a host
+	cluster.AddHosts(1)
+
+	// grab random used host
+	var randomHost string
+	for _, host := range cluster.hosts {
+		if _, used := usedHosts[host.PublicKey()]; used {
+			randomHost = host.settings.Settings().NetAddress
+			break
+		}
+	}
+
+	// add it to the blocklist
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+
+	// wait until we migrated away from that host
+	var newHost types.PublicKey
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		obj, err := cluster.Bus.Object(context.Background(), testBucket, path, api.GetObjectOptions{})
+		tt.OK(err)
+		for _, s := range obj.Object.Slabs {
+			for _, ss := range s.Shards {
+				for hk := range ss.Contracts {
+					if _, used := usedHosts[hk]; !used {
+						newHost = hk
+						return nil
+					}
+				}
+			}
+		}
+		return errors.New("no migration took place")
+	})
+
+	// download the object
+	dst := new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, testBucket, path, api.DownloadObjectOptions{}))
+	if !bytes.Equal(dst.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	// block the new host but unblock the old one
+	for _, host := range cluster.hosts {
+		if host.PublicKey() == newHost {
+			tt.OK(b.UpdateHostBlocklist(context.Background(), []string{host.settings.Settings().NetAddress}, []string{randomHost}, false))
+		}
+	}
+
+	// gouge prices on the new host
+	for _, host := range cluster.hosts {
+		if host.PublicKey() == newHost {
+			settings := host.settings.Settings()
+			settings.StoragePrice = types.Siacoins(1e3)
+			tt.OK(host.UpdateSettings(settings))
+		}
+	}
+
+	// download the object
+	dst = new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), dst, testBucket, path, api.DownloadObjectOptions{}))
+	if !bytes.Equal(dst.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+}
+
+func TestBackup(t *testing.T) {
+	cluster := newTestCluster(t, clusterOptsDefault)
+	defer cluster.Shutdown()
+	bus := cluster.Bus
+
+	// test that backup fails for MySQL
+	isSqlite := config.MySQLConfigFromEnv().URI == ""
+	if !isSqlite {
+		err := bus.Backup(context.Background(), "main", "backup.sql")
+		cluster.tt.AssertIs(err, api.ErrBackupNotSupported)
+		return
+	}
+
+	// test creating a backup
+	tmpDir := t.TempDir()
+	mainDst := filepath.Join(tmpDir, "main.sqlite")
+	metricsDst := filepath.Join(tmpDir, "metrics.sqlite")
+	cluster.tt.OK(bus.Backup(context.Background(), "main", mainDst))
+	cluster.tt.OK(bus.Backup(context.Background(), "metrics", metricsDst))
+	cluster.tt.OKAll(os.Stat(mainDst))
+	cluster.tt.OKAll(os.Stat(metricsDst))
+
+	// test creating backing up an invalid db
+	invalidDst := filepath.Join(tmpDir, "invalid.sqlite")
+	err := bus.Backup(context.Background(), "invalid", invalidDst)
+	cluster.tt.AssertIs(err, api.ErrInvalidDatabase)
+	_, err = os.Stat(invalidDst)
+	if !os.IsNotExist(err) {
+		t.Fatal("expected file to not exist")
+	}
+
+	// ping backups
+	dbMain, err := sqlite.Open(mainDst)
+	cluster.tt.OK(err)
+	defer dbMain.Close()
+	cluster.tt.OK(dbMain.Ping())
+
+	dbMetrics, err := sqlite.Open(metricsDst)
+	cluster.tt.OK(err)
+	defer dbMetrics.Close()
+	cluster.tt.OK(dbMetrics.Ping())
+}
+
+// TestConsensusResync tests that deleting the consensus db and resyncing it
+// works. For that reason it simulates some on-chain traffic by uploading to
+// contracts, renewing contracts and letting these contracts expire. That way,
+// renterd has to resync a chain containing regular transactions, contracts and
+// storage proofs.
+func TestConsensusResync(t *testing.T) {
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: false,
+	})
+	tt := cluster.tt
+
+	// upload some data
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
+
+	// broadcast the revision for each contract
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	tt.OK(err)
+	for _, c := range contracts {
+		tt.OKAll(cluster.Bus.BroadcastContract(context.Background(), c.ID))
+	}
+
+	// mine to renew the contracts
+	cluster.MineToRenewWindow()
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		tt.OK(err)
+		for _, c := range contracts {
+			if c.RenewedFrom == (types.FileContractID{}) {
+				return errors.New("contract wasn't renewed")
+			}
+		}
+		return nil
+	})
+
+	// make sure all hosts are gouging for the contracts to expire
+	cluster.bs.UpdateGougingSettings(context.Background(), api.GougingSettings{
+		MaxDownloadPrice: types.NewCurrency64(1),
+	})
+
+	// let them expire - we don't check for errors when mining since a few blocks
+	// might be invalid due to a race when broadcasting revisions while mining
+	// blocks rapidly
+	for i := 0; i < int(2*test.AutopilotConfig.Contracts.Period); i++ {
+		b, ok := coreutils.MineBlock(cluster.cm, types.Address{}, 5*time.Second)
+		if !ok {
+			continue
+		}
+		_ = cluster.Bus.AcceptBlock(context.Background(), b)
+	}
+	cluster.sync()
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		tt.OK(err)
+		if len(contracts) != 0 {
+			return errors.New("not all contracts expired")
+		}
+		return nil
+	})
+
+	// save blockheight
+	cs, err := cluster.Bus.ConsensusState(context.Background())
+	tt.OK(err)
+
+	// stop the cluster but not the hosts
+	hosts := cluster.hosts
+	cluster.hosts = nil
+	cluster.Shutdown()
+
+	// start with fresh chain store
+	network, genesis := testNetwork()
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	tt.OK(err)
+
+	newCluster := newTestCluster(t, testClusterOptions{
+		cm:        chain.NewManager(store, state),
+		dir:       cluster.dir,
+		dbName:    cluster.dbName,
+		funding:   &clusterOptNoFunding,
+		walletKey: &cluster.wk,
+	})
+	newCluster.hosts = hosts
+	defer newCluster.Shutdown()
+
+	// check the chain managers synced up
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		oldTip := cluster.cm.Tip()
+		newTip := newCluster.cm.Tip()
+		if oldTip != newTip {
+			return fmt.Errorf("tips don't match: %v != %v", oldTip, newTip)
+		}
+		return nil
+	})
+
+	// the bus state should also be in sync
+	newCS, err := newCluster.Bus.ConsensusState(context.Background())
+	tt.OK(err)
+
+	if !newCS.Synced {
+		t.Fatal("not synced")
+	} else if newCS.BlockHeight != cs.BlockHeight {
+		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
 	}
 }

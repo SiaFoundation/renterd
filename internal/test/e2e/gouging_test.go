@@ -17,10 +17,6 @@ import (
 )
 
 func TestGouging(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
@@ -136,10 +132,6 @@ func TestGouging(t *testing.T) {
 }
 
 func TestHostMinVersion(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: int(test.AutopilotConfig.Contracts.Amount),

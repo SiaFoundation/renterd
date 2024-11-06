@@ -42,22 +42,6 @@ func (c *Client) HostBlocklist(ctx context.Context) (blocklist []string, err err
 	return
 }
 
-// RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordHostScans(ctx context.Context, scans []api.HostScan) (err error) {
-	err = c.c.WithContext(ctx).POST("/hosts/scans", api.HostsScanRequest{
-		Scans: scans,
-	}, nil)
-	return
-}
-
-// RecordHostInteraction records an interaction for the supplied host.
-func (c *Client) RecordPriceTables(ctx context.Context, priceTableUpdates []api.HostPriceTableUpdate) (err error) {
-	err = c.c.WithContext(ctx).POST("/hosts/pricetables", api.HostsPriceTablesRequest{
-		PriceTableUpdates: priceTableUpdates,
-	}, nil)
-	return
-}
-
 // RemoveOfflineHosts removes all hosts that have been offline for longer than the given max downtime.
 func (c *Client) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (removed uint64, err error) {
 	err = c.c.WithContext(ctx).POST("/hosts/remove", api.HostsRemoveRequest{

@@ -41,10 +41,6 @@ func (ctx *mCtx) ApID() string {
 	return ctx.state.AP.ID
 }
 
-func (ctx *mCtx) Allowance() types.Currency {
-	return ctx.state.Allowance()
-}
-
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
 	return ctx.state.AP.Config
 }
@@ -85,7 +81,7 @@ func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
 			err = errors.New("panic while scoring host")
 		}
 	}()
-	return hostScore(ctx.state.AP.Config, h, ctx.state.RS.Redundancy()), nil
+	return hostScore(ctx.state.AP.Config, ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
 }
 
 func (ctx *mCtx) Period() uint64 {
@@ -112,12 +108,8 @@ func (ctx *mCtx) Set() string {
 	return ctx.state.ContractsConfig().Set
 }
 
-func (ctx *mCtx) SortContractsForMaintenance(contracts []api.Contract) {
-	ctx.state.ContractsConfig().SortContractsForMaintenance(contracts)
-}
-
-func (state *MaintenanceState) Allowance() types.Currency {
-	return state.AP.Config.Contracts.Allowance
+func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
+	sortContractsForMaintenance(ctx.state.ContractsConfig(), contracts)
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
