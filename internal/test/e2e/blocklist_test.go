@@ -23,7 +23,7 @@ func TestBlocklist(t *testing.T) {
 	tt := cluster.tt
 
 	// fetch contracts
-	opts := api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set}
+	opts := api.ContractsOpts{ContractSet: test.ContractSet}
 	contracts, err := b.Contracts(ctx, opts)
 	tt.OK(err)
 	if len(contracts) != 3 {
@@ -59,7 +59,7 @@ func TestBlocklist(t *testing.T) {
 
 	// assert h1 is no longer in the contract set
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
+		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.ContractSet})
 		tt.OK(err)
 		if len(contracts) != 1 {
 			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 1", opts.ContractSet, len(contracts))

@@ -46,7 +46,7 @@ func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
 }
 
 func (ctx *mCtx) ContractSet() string {
-	return ctx.state.AP.Contracts.Set
+	return ctx.state.ContractsConfig().Set
 }
 
 func (ctx *mCtx) Deadline() (deadline time.Time, ok bool) {
@@ -98,10 +98,6 @@ func (ctx *mCtx) Value(key interface{}) interface{} {
 
 func (ctx *mCtx) WantedContracts() uint64 {
 	return ctx.state.AP.Contracts.Amount
-}
-
-func (ctx *mCtx) Set() string {
-	return ctx.state.ContractsConfig().Set
 }
 
 func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {

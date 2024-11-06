@@ -69,7 +69,7 @@ func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 	}
 
 	// fetch contract set contracts
-	csc, err := ap.bus.Contracts(ctx, api.ContractsOpts{ContractSet: state.AutopilotConfig.Contracts.Set})
+	csc, err := ap.bus.Contracts(ctx, api.ContractsOpts{ContractSet: state.Contracts.Set})
 	if err != nil {
 		return nil, err
 	}

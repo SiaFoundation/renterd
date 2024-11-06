@@ -208,7 +208,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Wait for contract set to form
-	cluster.WaitForContractSetContracts(cfg.Contracts.Set, int(cfg.Contracts.Amount))
+	cluster.WaitForContractSetContracts(test.ContractSet, int(cfg.Contracts.Amount))
 
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
@@ -966,7 +966,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 		}
 
 		// fetch contract set contracts
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
 		tt.OK(err)
 		currentSet := make(map[types.FileContractID]struct{})
 		for _, c := range contracts {

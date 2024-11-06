@@ -192,20 +192,22 @@ func AutopilotState(ctx context.Context, tx sql.Tx) (cfg api.AutopilotState, err
 	err = tx.QueryRow(ctx, `
 SELECT
 	current_period,
+	contracts_set,
 	contracts_amount,
 	contracts_period,
-	contracts_renewWindow,
+	contracts_renew_window,
 	contracts_download,
 	contracts_upload,
 	contracts_storage,
 	contracts_prune,
-	hosts_allowRedundantIPs,
-	hosts_maxDowntimeHours,
-	hosts_minProtocolVersion,
-	hosts_maxConsecutiveScanFailures
+	hosts_allow_redundant_ips,
+	hosts_max_downtime_hours,
+	hosts_min_protocol_version,
+	hosts_max_consecutive_scan_failures
 FROM autopilot_state
 WHERE id = ?`, sql.AutopilotStateID).Scan(
 		&cfg.CurrentPeriod,
+		&cfg.Contracts.Set,
 		&cfg.Contracts.Amount,
 		&cfg.Contracts.Period,
 		&cfg.Contracts.RenewWindow,
@@ -2145,7 +2147,8 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 func UpdateAutopilotConfig(ctx context.Context, tx sql.Tx, cfg api.AutopilotConfig) error {
 	res, err := tx.Exec(ctx, `
 UPDATE autopilot_state
-SET contracts_amount = ?,
+SET contracts_set = ?,
+	contracts_amount = ?,
 	contracts_period = ?,
 	contracts_renew_window = ?,
 	contracts_download = ?,
@@ -2157,6 +2160,7 @@ SET contracts_amount = ?,
 	hosts_min_protocol_version = ?,
 	hosts_max_consecutive_scan_failures = ?
 WHERE id = ?`,
+		cfg.Contracts.Set,
 		cfg.Contracts.Amount,
 		cfg.Contracts.Period,
 		cfg.Contracts.RenewWindow,

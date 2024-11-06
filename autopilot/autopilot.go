@@ -155,7 +155,7 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 // Handler returns an HTTP handler that serves the autopilot api.
 func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
-		"PUT    /config/evaluate": ap.configEvaluateHandlerPOST,
+		"POST   /config/evaluate": ap.configEvaluateHandlerPOST,
 		"GET    /state":           ap.stateHandlerGET,
 		"POST   /trigger":         ap.triggerHandlerPOST,
 	})
@@ -262,7 +262,7 @@ func (ap *Autopilot) Run() {
 				return
 			}
 
-			// fetch configuration
+			// fetch state
 			state, err := ap.bus.AutopilotState(ap.shutdownCtx)
 			if err != nil {
 				ap.logger.Errorf("aborting maintenance, failed to fetch autopilot state", zap.Error(err))

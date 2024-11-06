@@ -39,7 +39,7 @@ type (
 
 	// ContractsConfig contains all contract settings used in the autopilot.
 	ContractsConfig struct {
-		Set         string `json:"set"` // TODO PJ: should be removed, not sure now or later
+		Set         string `json:"set"`
 		Amount      uint64 `json:"amount"`
 		Period      uint64 `json:"period"`
 		RenewWindow uint64 `json:"renewWindow"`

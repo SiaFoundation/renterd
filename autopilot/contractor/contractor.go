@@ -811,7 +811,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 	logger.With("contracts", len(contracts)).Info("checking existing contracts")
 	var renewed, refreshed int
 	for _, c := range contracts {
-		inSet := c.InSet(ctx.Set())
+		inSet := c.InSet(ctx.ContractSet())
 
 		logger := logger.With("contractID", c.ID).
 			With("inSet", inSet).

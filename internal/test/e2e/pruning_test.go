@@ -107,7 +107,6 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// convenience variables
-	cfg := test.AutopilotConfig
 	rs := test.RedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
@@ -122,7 +121,7 @@ func TestSectorPruning(t *testing.T) {
 	cluster.WaitForAccounts()
 
 	// wait until we have a contract set
-	cluster.WaitForContractSetContracts(cfg.Contracts.Set, rs.TotalShards)
+	cluster.WaitForContractSetContracts(test.ContractSet, rs.TotalShards)
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {

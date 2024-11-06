@@ -10,6 +10,7 @@ CREATE TABLE `autopilot_state` (
   `created_at` datetime(3) DEFAULT NULL,
   `current_period` bigint unsigned DEFAULT 0,
 
+  `contracts_set` varchar(191) DEFAULT NULL,
   `contracts_amount` bigint unsigned DEFAULT NULL,
   `contracts_period` bigint unsigned DEFAULT NULL,
   `contracts_renew_window` bigint unsigned DEFAULT NULL,

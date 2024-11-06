@@ -70,7 +70,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// fetch current contract set
-	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: cfg.Set})
+	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
 	tt.OK(err)
 
 	// update one host's settings so it's gouging
@@ -146,9 +146,7 @@ func TestHostMinVersion(t *testing.T) {
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
-			ContractSet: test.AutopilotConfig.Contracts.Set,
-		})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
 		tt.OK(err)
 		if len(contracts) != 0 {
 			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))
