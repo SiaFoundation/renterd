@@ -367,6 +367,12 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 		rhp4Client: rhp4.New(dialer),
 	}
 
+	// ensure autopilot state
+	_, err = store.AutopilotState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 

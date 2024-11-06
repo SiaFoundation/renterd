@@ -2815,7 +2815,6 @@ func TestConsensusResync(t *testing.T) {
 	network, genesis := testNetwork()
 	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
 	tt.OK(err)
-
 	newCluster := newTestCluster(t, testClusterOptions{
 		cm:        chain.NewManager(store, state),
 		dir:       cluster.dir,

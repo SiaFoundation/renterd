@@ -27,5 +27,3 @@ CREATE TABLE `autopilot_state` (
   PRIMARY KEY (`id`),
   CHECK (`id` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-INSERT INTO `autopilot_state` (`id`, `created_at`, `current_period`) VALUES (1, NOW(), 0);

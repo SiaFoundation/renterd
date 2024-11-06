@@ -217,7 +217,7 @@ WHERE id = ?`, sql.AutopilotStateID).Scan(
 		&cfg.Hosts.MaxConsecutiveScanFailures,
 	)
 	if errors.Is(err, dsql.ErrNoRows) {
-		err = api.ErrAutopilotStateNotFound
+		_, err = tx.Exec(ctx, "INSERT INTO autopilot_state (id, created_at, current_period) VALUES (?, ?, 0);", sql.AutopilotStateID, time.Now())
 		return
 	}
 	return
@@ -2141,7 +2141,7 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 }
 
 func UpdateAutopilotConfig(ctx context.Context, tx sql.Tx, cfg api.AutopilotConfig) error {
-	res, err := tx.Exec(ctx, `
+	_, err := tx.Exec(ctx, `
 UPDATE autopilot_state
 SET contracts_set = ?,
 	contracts_amount = ?,
@@ -2169,26 +2169,12 @@ WHERE id = ?`,
 		cfg.Hosts.MinProtocolVersion,
 		cfg.Hosts.MaxConsecutiveScanFailures,
 		sql.AutopilotStateID)
-	if err != nil {
-		return fmt.Errorf("failed to update autopilot config: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("autopilot state not found: %w", api.ErrAutopilotStateNotFound)
-	}
-	return nil
+	return err
 }
 
 func UpdateAutopilotPeriod(ctx context.Context, tx sql.Tx, period uint64) error {
-	res, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ? WHERE id = ?`, period, sql.AutopilotStateID)
-	if err != nil {
-		return fmt.Errorf("failed to update autopilot state: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("autopilot state not found: %w", api.ErrAutopilotStateNotFound)
-	}
-	return nil
+	_, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ? WHERE id = ?`, period, sql.AutopilotStateID)
+	return err
 }
 
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {

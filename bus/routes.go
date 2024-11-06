@@ -1731,10 +1731,7 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 
 func (b *Bus) stateAutopilotHandlerGET(jc jape.Context) {
 	state, err := b.store.AutopilotState(jc.Request.Context())
-	if errors.Is(err, api.ErrAutopilotStateNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to fetch autopilot config", err) != nil {
+	if jc.Check("failed to fetch autopilot state", err) != nil {
 		return
 	}
 	jc.Encode(state)

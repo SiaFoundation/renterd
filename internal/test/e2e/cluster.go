@@ -218,6 +218,8 @@ func newTestLogger(enable bool) *zap.Logger {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
+	t.Helper()
+
 	// Skip any test that requires a cluster when running short tests.
 	tt := test.NewTT(t)
 
