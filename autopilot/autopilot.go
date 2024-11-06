@@ -655,8 +655,8 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 }
 
 func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
-	// fetch the cfg from the bus
-	cfg, err := ap.bus.AutopilotState(ctx)
+	// fetch the state from the bus
+	state, err := ap.bus.AutopilotState(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -665,6 +665,8 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 	cs, err := ap.bus.ConsensusState(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
+	} else if !cs.Synced {
+		return nil, errors.New("consensus not synced")
 	}
 
 	// fetch upload settings
@@ -699,26 +701,28 @@ func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceSta
 	}
 
 	// update current period if necessary
-	if cs.Synced {
-		if cfg.CurrentPeriod == 0 {
+	if cs.BlockHeight > 0 {
+		if state.CurrentPeriod == 0 {
 			err := ap.bus.UpdateAutopilotPeriod(ctx, cs.BlockHeight)
 			if err != nil {
 				return nil, err
 			}
 			ap.logger.Infof("initialised current period to %d", cs.BlockHeight)
-		} else if nextPeriod := computeNextPeriod(cs.BlockHeight, cfg.CurrentPeriod, cfg.Contracts.Period); nextPeriod != cfg.CurrentPeriod {
+		} else if nextPeriod := computeNextPeriod(cs.BlockHeight, state.CurrentPeriod, state.Contracts.Period); nextPeriod != state.CurrentPeriod {
 			err := ap.bus.UpdateAutopilotPeriod(ctx, nextPeriod)
 			if err != nil {
 				return nil, err
 			}
-			ap.logger.Infof("updated current period from %d to %d", cfg.CurrentPeriod, nextPeriod)
+			ap.logger.Infof("updated current period from %d to %d", state.CurrentPeriod, nextPeriod)
 		}
+	} else if !skipContractFormations {
+		skipContractFormations = true
 	}
 
 	return &contractor.MaintenanceState{
 		GS: gs,
 		RS: us.Redundancy,
-		AP: cfg,
+		AP: state,
 
 		Address:                address,
 		Fee:                    fee,

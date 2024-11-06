@@ -181,28 +181,26 @@ func TestNewTestCluster(t *testing.T) {
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
-	b := cluster.Bus
-
-	// See if autopilot is running by triggering the loop.
-	_, err := cluster.Autopilot.Trigger(false)
-	tt.OK(err)
-
-	// Add a host.
+	// add a host & wait for contracts to form
 	cluster.AddHosts(1)
-
-	// Wait for contracts to form.
-	var contract api.ContractMetadata
 	contracts := cluster.WaitForContracts()
-	contract = contracts[0]
+	if len(contracts) != 1 {
+		t.Fatal("expected 1 contract, got", len(contracts))
+	}
+	contract := contracts[0]
+
+	// fetch autopilot state
+	as, err := cluster.Bus.AutopilotState(context.Background())
+	tt.OK(err)
+	cfg := as.AutopilotConfig
+
+	// fetch revision
 	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
 	tt.OK(err)
 
-	// Verify startHeight and endHeight of the contract.
-	cfg, err := b.AutopilotState(context.Background())
-	tt.OK(err)
-	expectedEndHeight := cfg.CurrentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	if contract.EndHeight() != expectedEndHeight || revision.EndHeight() != expectedEndHeight {
-		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight())
+	// verify startHeight and endHeight of the contract.
+	if contract.EndHeight() != as.EndHeight() || revision.EndHeight() != as.EndHeight() {
+		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), as.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}
