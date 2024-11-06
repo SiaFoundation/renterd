@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -293,11 +294,6 @@ func (hs *hostStoreMock) addHost() *hostMock {
 	return hs.hosts[hk]
 }
 
-var (
-	_ MemoryManager = (*memoryManagerMock)(nil)
-	_ Memory        = (*memoryMock)(nil)
-)
-
 type (
 	memoryMock        struct{}
 	memoryManagerMock struct{ memBlockChan chan struct{} }
@@ -312,13 +308,13 @@ func newMemoryManagerMock() *memoryManagerMock {
 func (m *memoryMock) Release()           {}
 func (m *memoryMock) ReleaseSome(uint64) {}
 
-func (mm *memoryManagerMock) Limit(amt uint64) (MemoryManager, error) {
+func (mm *memoryManagerMock) Limit(amt uint64) (memory.MemoryManager, error) {
 	return mm, nil
 }
 
-func (mm *memoryManagerMock) Status() api.MemoryStatus { return api.MemoryStatus{} }
+func (mm *memoryManagerMock) Status() memory.Status { return memory.Status{} }
 
-func (mm *memoryManagerMock) AcquireMemory(ctx context.Context, amt uint64) Memory {
+func (mm *memoryManagerMock) AcquireMemory(ctx context.Context, amt uint64) memory.Memory {
 	<-mm.memBlockChan
 	return &memoryMock{}
 }

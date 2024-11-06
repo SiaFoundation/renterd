@@ -35,18 +35,13 @@ func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID)
 func UpdateChainIndex(ctx context.Context, tx sql.Tx, index types.ChainIndex, l *zap.SugaredLogger) error {
 	l.Debugw("update chain index", "height", index.Height, "block_id", index.ID)
 
-	if res, err := tx.Exec(ctx,
+	if _, err := tx.Exec(ctx,
 		fmt.Sprintf("UPDATE consensus_infos SET height = ?, block_id = ? WHERE id = %d", sql.ConsensusInfoID),
 		index.Height,
 		Hash256(index.ID),
 	); err != nil {
 		return fmt.Errorf("failed to update chain index: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	} else if n != 1 {
-		return fmt.Errorf("failed to update chain index: no rows affected")
 	}
-
 	return nil
 }
 
@@ -78,17 +73,8 @@ func UpdateContractRevision(ctx context.Context, tx sql.Tx, fcid types.FileContr
 
 func UpdateContractProofHeight(ctx context.Context, tx sql.Tx, fcid types.FileContractID, proofHeight uint64, l *zap.SugaredLogger) error {
 	l.Debugw("update contract proof height", "fcid", fcid, "proof_height", proofHeight)
-
-	res, err := tx.Exec(ctx, `UPDATE contracts SET proof_height = ? WHERE fcid = ?`, proofHeight, FileContractID(fcid))
-	if err != nil {
-		return err
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("expected to update 1 row, but updated %d", n)
-	}
-
-	return nil
+	_, err := tx.Exec(ctx, `UPDATE contracts SET proof_height = ? WHERE fcid = ?`, proofHeight, FileContractID(fcid))
+	return err
 }
 
 func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID, state api.ContractState, l *zap.SugaredLogger) error {
@@ -98,17 +84,8 @@ func UpdateContractState(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	if err := cs.LoadString(string(state)); err != nil {
 		return err
 	}
-
-	res, err := tx.Exec(ctx, `UPDATE contracts SET state = ? WHERE fcid = ?`, cs, FileContractID(fcid))
-	if err != nil {
-		return err
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("expected to update 1 row, but updated %d", n)
-	}
-
-	return nil
+	_, err := tx.Exec(ctx, `UPDATE contracts SET state = ? WHERE fcid = ?`, cs, FileContractID(fcid))
+	return err
 }
 
 func UpdateFailedContracts(ctx context.Context, tx sql.Tx, blockHeight uint64, l *zap.SugaredLogger) error {

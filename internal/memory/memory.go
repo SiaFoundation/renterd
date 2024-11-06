@@ -1,11 +1,10 @@
-package worker
+package memory
 
 import (
 	"context"
 	"fmt"
 	"sync"
 
-	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
 
@@ -13,7 +12,7 @@ type (
 	// MemoryManager helps regulate processes that use a lot of memory. Such as
 	// uploads and downloads.
 	MemoryManager interface {
-		Status() api.MemoryStatus
+		Status() Status
 		AcquireMemory(ctx context.Context, amt uint64) Memory
 		Limit(amt uint64) (MemoryManager, error)
 	}
@@ -21,6 +20,11 @@ type (
 	Memory interface {
 		Release()
 		ReleaseSome(amt uint64)
+	}
+
+	Status struct {
+		Available uint64 `json:"available"`
+		Total     uint64 `json:"total"`
 	}
 
 	memoryManager struct {
@@ -41,7 +45,7 @@ type (
 
 var _ MemoryManager = (*memoryManager)(nil)
 
-func newMemoryManager(maxMemory uint64, logger *zap.Logger) MemoryManager {
+func NewManager(maxMemory uint64, logger *zap.Logger) MemoryManager {
 	return newMemoryManagerCustom(maxMemory, logger.Named("memorymanager").Sugar())
 }
 
@@ -68,10 +72,10 @@ func (mm *memoryManager) Limit(amt uint64) (MemoryManager, error) {
 	}, nil
 }
 
-func (mm *memoryManager) Status() api.MemoryStatus {
+func (mm *memoryManager) Status() Status {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
-	return api.MemoryStatus{
+	return Status{
 		Available: mm.available,
 		Total:     mm.totalAvailable,
 	}
@@ -144,7 +148,7 @@ type (
 	}
 )
 
-func (lmm *limitMemoryManager) Status() api.MemoryStatus {
+func (lmm *limitMemoryManager) Status() Status {
 	return lmm.child.Status()
 }
 
