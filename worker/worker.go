@@ -114,7 +114,7 @@ type (
 		Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
 		TrackUpload(ctx context.Context, uID api.UploadID) error
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 
 		// NOTE: used by worker
 		Bucket(_ context.Context, bucket string) (api.Bucket, error)

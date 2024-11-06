@@ -1200,106 +1200,8 @@ func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) 
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
-	// find all used contracts
-	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
-	if err != nil {
-		return fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// update slab
-	var slabID, totalShards int64
-	err = tx.QueryRow(ctx, `
-		UPDATE slabs
-		SET db_contract_set_id = (SELECT id FROM contract_sets WHERE name = ?),
-		health_valid_until = ?,
-		health = ?
-		WHERE key = ?
-		RETURNING id, total_shards
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.EncryptionKey)).
-		Scan(&slabID, &totalShards)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ErrSlabNotFound
-	} else if err != nil {
-		return err
-	}
-
-	// find shards of slab
-	var roots []types.Hash256
-	rows, err := tx.Query(ctx, "SELECT root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch sectors: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var root ssql.Hash256
-		if err := rows.Scan(&root); err != nil {
-			return fmt.Errorf("failed to scan sector id: %w", err)
-		}
-		roots = append(roots, types.Hash256(root))
-	}
-	nSectors := len(roots)
-
-	// make sure the number of shards doesn't change.
-	// NOTE: check both the slice as well as the TotalShards field to be
-	// safe.
-	if len(s.Shards) != int(totalShards) {
-		return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", sql.ErrInvalidNumberOfShards, totalShards, len(s.Shards))
-	} else if len(s.Shards) != nSectors {
-		return fmt.Errorf("%w: expected %v shards (Shards) but got %v", sql.ErrInvalidNumberOfShards, nSectors, len(s.Shards))
-	}
-
-	// make sure the roots stay the same.
-	for i, root := range roots {
-		if root != types.Hash256(s.Shards[i].Root) {
-			return fmt.Errorf("%w: shard %v has changed root from %v to %v", sql.ErrShardRootChanged, i, s.Shards[i].Root, root[:])
-		}
-	}
-
-	// update sectors
-	var upsertSectors []upsertSector
-	for i := range s.Shards {
-		upsertSectors = append(upsertSectors, upsertSector{
-			slabID,
-			i + 1,
-			s.Shards[i].LatestHost,
-			s.Shards[i].Root,
-		})
-	}
-	sectorIDs, err := tx.upsertSectors(ctx, upsertSectors)
-	if err != nil {
-		return fmt.Errorf("failed to insert sectors: %w", err)
-	}
-
-	// build contract <-> sector links
-	var upsertContractSectors []upsertContractSector
-	for i, shard := range s.Shards {
-		sectorID := sectorIDs[i]
-
-		// ensure the associations are updated
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, ok := usedContracts[fcid]; ok {
-					upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-						sectorID,
-						usedContracts[fcid].ID,
-					})
-				} else {
-					tx.log.Named("UpdateSlab").Warn("missing contract for shard",
-						"contract", fcid,
-						"root", shard.Root,
-						"latest_host", shard.LatestHost,
-					)
-				}
-			}
-		}
-	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
-		return err
-	}
-
-	return nil
+func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
+	return ssql.UpdateSlab(ctx, tx, key, sectors)
 }
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
@@ -1330,6 +1232,31 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
+	if len(contractSectors) == 0 {
+		return nil
+	}
+
+	// insert contract <-> sector links
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
+											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
+	}
+	defer insertContractSectorStmt.Close()
+
+	for _, cs := range contractSectors {
+		_, err := insertContractSectorStmt.Exec(ctx,
+			cs.SectorID,
+			cs.ContractID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert contract sector link: %w", err)
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
@@ -1430,7 +1357,6 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			upsertSectors = append(upsertSectors, upsertSector{
 				slabIDs[i],
 				j + 1,
-				ss.Shards[j].LatestHost,
 				ss.Shards[j].Root,
 			})
 		}
@@ -1442,21 +1368,20 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 
 	// insert contract <-> sector links
 	sectorIdx := 0
-	var upsertContractSectors []upsertContractSector
+	var upsertContractSectors []ssql.ContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := usedContracts[fcid]; ok {
-						upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-							sectorIDs[sectorIdx],
-							usedContracts[fcid].ID,
+						upsertContractSectors = append(upsertContractSectors, ssql.ContractSector{
+							ContractID: usedContracts[fcid].ID,
+							SectorID:   sectorIDs[sectorIdx],
 						})
 					} else {
 						tx.log.Named("InsertObject").Warn("missing contract for shard",
 							"contract", fcid,
 							"root", shard.Root,
-							"latest_host", shard.LatestHost,
 						)
 					}
 				}
@@ -1464,47 +1389,16 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			sectorIdx++
 		}
 	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
+	if err := tx.UpsertContractSectors(ctx, upsertContractSectors); err != nil {
 		return err
 	}
 	return nil
 }
 
-type upsertContractSector struct {
-	sectorID   int64
-	contractID int64
-}
-
-func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSectors []upsertContractSector) error {
-	if len(contractSectors) == 0 {
-		return nil
-	}
-
-	// insert contract <-> sector links
-	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
-	}
-	defer insertContractSectorStmt.Close()
-
-	for _, cs := range contractSectors {
-		_, err := insertContractSectorStmt.Exec(ctx,
-			cs.sectorID,
-			cs.contractID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract sector link: %w", err)
-		}
-	}
-	return nil
-}
-
 type upsertSector struct {
-	slabID     int64
-	slabIndex  int
-	latestHost types.PublicKey
-	root       types.Hash256
+	slabID    int64
+	slabIndex int
+	root      types.Hash256
 }
 
 func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSector) ([]int64, error) {
@@ -1514,8 +1408,8 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 
 	// insert sectors - make sure to update last_insert_id in case of a
 	// duplicate key to be able to retrieve the id
-	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
-								VALUES (?, ?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET latest_host = EXCLUDED.latest_host RETURNING id, db_slab_id`)
+	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, root)
+								VALUES (?, ?, ?, ?) ON CONFLICT(root) DO UPDATE SET db_slab_id = excluded.db_slab_id RETURNING id, db_slab_id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -1528,7 +1422,6 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 			time.Now(),
 			s.slabID,
 			s.slabIndex,
-			ssql.PublicKey(s.latestHost),
 			s.root[:],
 		).Scan(&sectorID, &slabID)
 		if err != nil {

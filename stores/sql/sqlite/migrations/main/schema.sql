@@ -71,7 +71,7 @@ CREATE INDEX `idx_slabs_health` ON `slabs`(`health`);
 CREATE INDEX `idx_slabs_db_buffered_slab_id` ON `slabs`(`db_buffered_slab_id`);
 
 -- dbSector
-CREATE TABLE `sectors` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_slab_id` integer NOT NULL,`slab_index` integer NOT NULL,`latest_host` blob NOT NULL,`root` blob NOT NULL UNIQUE,CONSTRAINT `fk_slabs_shards` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`) ON DELETE CASCADE);
+CREATE TABLE `sectors` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_slab_id` integer NOT NULL,`slab_index` integer NOT NULL,`root` blob NOT NULL UNIQUE,CONSTRAINT `fk_slabs_shards` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`) ON DELETE CASCADE);
 CREATE INDEX `idx_sectors_slab_index` ON `sectors`(`slab_index`);
 CREATE UNIQUE INDEX `idx_sectors_slab_id_slab_index` ON `sectors`(`db_slab_id`,`slab_index`);
 CREATE INDEX `idx_sectors_db_slab_id` ON `sectors`(`db_slab_id`);

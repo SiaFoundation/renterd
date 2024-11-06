@@ -754,8 +754,7 @@ func TestSQLMetadataStore(t *testing.T) {
 						MinShards:     1,
 						Shards: []object.Sector{
 							{
-								LatestHost: hk1,
-								Root:       types.Hash256{1},
+								Root: types.Hash256{1},
 								Contracts: map[types.PublicKey][]types.FileContractID{
 									hk1: {fcid1},
 								},
@@ -772,8 +771,7 @@ func TestSQLMetadataStore(t *testing.T) {
 						MinShards:     2,
 						Shards: []object.Sector{
 							{
-								LatestHost: hk2,
-								Root:       types.Hash256{2},
+								Root: types.Hash256{2},
 								Contracts: map[types.PublicKey][]types.FileContractID{
 									hk2: {fcid2},
 								},
@@ -828,8 +826,7 @@ func TestSQLMetadataStore(t *testing.T) {
 				Contracts: map[types.PublicKey][]types.FileContractID{
 					hk1: {fcid1},
 				},
-				LatestHost: hk1,
-				Root:       types.Hash256{1},
+				Root: types.Hash256{1},
 			},
 		},
 	}
@@ -851,8 +848,7 @@ func TestSQLMetadataStore(t *testing.T) {
 				Contracts: map[types.PublicKey][]types.FileContractID{
 					hk2: {fcid2},
 				},
-				LatestHost: hk2,
-				Root:       types.Hash256{2},
+				Root: types.Hash256{2},
 			},
 		},
 	}
@@ -1853,14 +1849,12 @@ func TestContractSectors(t *testing.T) {
 	// create two objects
 	obj1 := newTestObject(1)
 	obj1.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hks[0]: {fcids[0]}}
-	obj1.Slabs[0].Shards[1].LatestHost = hks[0]
 	if _, err := ss.addTestObject("/"+t.Name()+"_1", obj1); err != nil {
 		t.Fatal(err)
 	}
 
 	obj2 := newTestObject(1)
 	obj2.Slabs[0].Shards[0].Contracts = map[types.PublicKey][]types.FileContractID{hks[1]: {fcids[1]}}
-	obj2.Slabs[0].Shards[1].LatestHost = hks[1]
 	if _, err := ss.addTestObject("/"+t.Name()+"_2", obj2); err != nil {
 		t.Fatal(err)
 	}
@@ -1932,12 +1926,6 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// extract the slab key
-	key, err := obj.Slabs[0].EncryptionKey.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// helper to fetch a slab from the database
 	fetchSlab := func() (slab object.Slab) {
 		t.Helper()
@@ -1971,6 +1959,12 @@ func TestUpdateSlab(t *testing.T) {
 		return
 	}
 
+	fcidToHks := map[types.FileContractID]types.PublicKey{
+		fcid1: hk1,
+		fcid2: hk2,
+		fcid3: hk3,
+	}
+
 	// fetch inserted slab
 	inserted := fetchSlab()
 
@@ -1978,7 +1972,7 @@ func TestUpdateSlab(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if cids := contractIds(types.Hash256(inserted.Shards[i].Root)); len(cids) != 1 {
 			t.Fatalf("sector %d was uploaded to unexpected amount of contracts, %v!=1", i+1, len(cids))
-		} else if inserted.Shards[i].LatestHost != hks[i] {
+		} else if hk, ok := fcidToHks[cids[0]]; !ok || hk != hks[i] {
 			t.Fatalf("sector %d was uploaded to unexpected amount of hosts, %v!=1", i+1, len(hks))
 		}
 	}
@@ -2002,11 +1996,10 @@ func TestUpdateSlab(t *testing.T) {
 	}
 
 	// migrate the sector from h2 to h3
-	slab := obj.Slabs[0].Slab
-	slab.Shards[1] = newTestShard(hk3, fcid3, types.Hash256{2})
+	sectors := []api.UploadedSector{{ContractID: fcid3, Root: types.Hash256{2}}}
 
 	// update the slab to reflect the migration
-	err = ss.UpdateSlab(ctx, slab, testContractSet)
+	err = ss.UpdateSlab(ctx, obj.Slabs[0].Slab.EncryptionKey, sectors)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2019,8 +2012,6 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=1", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid1 {
 		t.Fatal("sector 1 was uploaded to unexpected contract", cids[0])
-	} else if updated.Shards[0].LatestHost != hks[0] {
-		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, sql.PublicKey(hks[0]))
 	} else if hks[0] != hk1 {
 		t.Fatal("sector 1 was uploaded to unexpected host", hks[0])
 	}
@@ -2030,8 +2021,6 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatalf("sector 1 was uploaded to unexpected amount of contracts, %v!=2", len(cids))
 	} else if types.FileContractID(cids[0]) != fcid2 || types.FileContractID(cids[1]) != fcid3 {
 		t.Fatal("sector 1 was uploaded to unexpected contracts", cids[0], cids[1])
-	} else if updated.Shards[0].LatestHost != hks[0] {
-		t.Fatal("host key was invalid", updated.Shards[0].LatestHost, sql.PublicKey(hks[0]))
 	}
 
 	// assert there's still only one entry in the dbslab table
@@ -2057,22 +2046,6 @@ func TestUpdateSlab(t *testing.T) {
 		t.Fatalf("unexpected number of slabs, %v != 1", len(obj.Slabs))
 	} else if obj.Slabs[0].EncryptionKey.String() != updated.EncryptionKey.String() {
 		t.Fatalf("unexpected slab, %v != %v", obj.Slabs[0].EncryptionKey, updated.EncryptionKey)
-	}
-
-	// update the slab to change its contract set.
-	if err := ss.UpdateContractSet(ctx, "other", nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	err = ss.UpdateSlab(ctx, slab, "other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var csID int64
-	if err := ss.DB().QueryRow(context.Background(), "SELECT db_contract_set_id FROM slabs WHERE `key` = ?", key).
-		Scan(&csID); err != nil {
-		t.Fatal(err)
-	} else if csID != ss.ContractSetID("other") {
-		t.Fatal("contract set was not updated")
 	}
 }
 
@@ -2774,9 +2747,9 @@ func TestPartialSlab(t *testing.T) {
 	err = ss.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
 		{
 			BufferID: buffer.ID,
-			Shards: []object.Sector{
-				newTestShard(hk1, fcid1, types.Hash256{3}),
-				newTestShard(hk2, fcid2, types.Hash256{4}),
+			Shards: []api.UploadedSector{
+				{ContractID: fcid1, Root: types.Hash256{3}},
+				{ContractID: fcid2, Root: types.Hash256{4}},
 			},
 		},
 	})
@@ -3368,7 +3341,9 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	err = ss.MarkPackedSlabsUploaded(context.Background(), []api.UploadedPackedSlab{
 		{
 			BufferID: packedSlabs[0].BufferID,
-			Shards:   newTestShards(hk, fcid, types.Hash256{1}),
+			Shards: []api.UploadedSector{
+				{ContractID: fcid, Root: types.Hash256{1}},
+			},
 		},
 	})
 	if err != nil {
@@ -3512,11 +3487,8 @@ func TestDeleteHostSector(t *testing.T) {
 		MinShards:     1,
 		Shards: []object.Sector{
 			{
-				Contracts: map[types.PublicKey][]types.FileContractID{
-					hk1: fcids,
-				},
-				Root:       root,
-				LatestHost: hk1,
+				Contracts: map[types.PublicKey][]types.FileContractID{hk1: fcids},
+				Root:      root,
 			},
 		},
 	})
@@ -3563,20 +3535,19 @@ func TestDeleteHostSector(t *testing.T) {
 
 	// helper to fetch sectors
 	type sector struct {
-		LatestHost types.PublicKey
-		Root       types.Hash256
-		SlabID     int64
+		Root   types.Hash256
+		SlabID int64
 	}
 	fetchSectors := func() (sectors []sector) {
 		t.Helper()
-		rows, err := ss.DB().Query(context.Background(), "SELECT root, latest_host, db_slab_id FROM sectors")
+		rows, err := ss.DB().Query(context.Background(), "SELECT root, db_slab_id FROM sectors")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var s sector
-			if err := rows.Scan((*sql.PublicKey)(&s.Root), (*sql.Hash256)(&s.LatestHost), &s.SlabID); err != nil {
+			if err := rows.Scan((*sql.PublicKey)(&s.Root), &s.SlabID); err != nil {
 				t.Fatal(err)
 			}
 			sectors = append(sectors, s)
@@ -3589,8 +3560,6 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal("expected 1 sector", len(sectors))
 	} else if cnt := sectorContractCnt(types.Hash256(sectors[0].Root)); cnt != 2 {
 		t.Fatal("expected 2 contracts", cnt)
-	} else if sectors[0].LatestHost != hk2 {
-		t.Fatalf("expected latest host to be hk2, got %v", sectors[0].LatestHost)
 	} else if sectors[0].SlabID != slabID {
 		t.Fatalf("expected slab id to be %v, got %v", slabID, sectors[0].SlabID)
 	}
@@ -3633,8 +3602,6 @@ func TestDeleteHostSector(t *testing.T) {
 		t.Fatal("expected 1 sector", len(sectors))
 	} else if cnt := sectorContractCnt(types.Hash256(sectors[0].Root)); cnt != 0 {
 		t.Fatal("expected 0 contracts", cnt)
-	} else if sector := sectors[0]; sector.LatestHost != [32]byte{} {
-		t.Fatal("expected latest host to be empty", sector.LatestHost)
 	} else if sectors[0].SlabID != slabID {
 		t.Fatalf("expected slab id to be %v, got %v", slabID, sectors[0].SlabID)
 	}
@@ -3648,7 +3615,6 @@ func newTestShards(hk types.PublicKey, fcid types.FileContractID, root types.Has
 
 func newTestShard(hk types.PublicKey, fcid types.FileContractID, root types.Hash256) object.Sector {
 	return object.Sector{
-		LatestHost: hk,
 		Contracts: map[types.PublicKey][]types.FileContractID{
 			hk: {fcid},
 		},
@@ -3698,25 +3664,13 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
-	// change the length to fail the update.
-	if err := ss.UpdateSlab(context.Background(), object.Slab{
-		EncryptionKey: slab.EncryptionKey,
-		Shards:        shards[:len(shards)-1],
-	}, testContractSet); !errors.Is(err, isql.ErrInvalidNumberOfShards) {
+	// assert root checks
+	sectors := []api.UploadedSector{{ContractID: contracts[0].ID}}
+	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
 	}
-
-	// reverse the order of the shards to fail the update.
-	reversedShards := append([]object.Sector{}, shards...)
-	for i := 0; i < len(reversedShards)/2; i++ {
-		j := len(reversedShards) - i - 1
-		reversedShards[i], reversedShards[j] = reversedShards[j], reversedShards[i]
-	}
-	reversedSlab := object.Slab{
-		EncryptionKey: slab.EncryptionKey,
-		Shards:        reversedShards,
-	}
-	if err := ss.UpdateSlab(context.Background(), reversedSlab, testContractSet); !errors.Is(err, isql.ErrShardRootChanged) {
+	sectors = []api.UploadedSector{{ContractID: contracts[0].ID, Root: types.Hash256{6}}}
+	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
 	}
 }
@@ -4325,8 +4279,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 						fcids[i*totalShards+j],
 					},
 				},
-				LatestHost: hks[i*totalShards+j],
-				Root:       frand.Entropy256(),
+				Root: frand.Entropy256(),
 			})
 		}
 	}
@@ -4398,21 +4351,20 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 
 	// helper to fetch sectors
 	type sector struct {
-		ID         int64
-		SlabID     int64
-		LatestHost types.PublicKey
-		Root       types.Hash256
+		ID     int64
+		SlabID int64
+		Root   types.Hash256
 	}
 	fetchSectorsBySlabID := func(slabID int64) (sectors []sector) {
 		t.Helper()
-		rows, err := ss.DB().Query(context.Background(), "SELECT id, db_slab_id, root, latest_host FROM sectors WHERE db_slab_id = ?", slabID)
+		rows, err := ss.DB().Query(context.Background(), "SELECT id, db_slab_id, root FROM sectors WHERE db_slab_id = ?", slabID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var s sector
-			if err := rows.Scan(&s.ID, &s.SlabID, (*sql.PublicKey)(&s.Root), (*sql.Hash256)(&s.LatestHost)); err != nil {
+			if err := rows.Scan(&s.ID, &s.SlabID, (*sql.PublicKey)(&s.Root)); err != nil {
 				t.Fatal(err)
 			}
 			sectors = append(sectors, s)
@@ -4477,8 +4429,6 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 				t.Fatal("invalid id", sector.ID)
 			} else if sector.SlabID != int64(slab.ID) {
 				t.Fatal("invalid slab id", sector.SlabID)
-			} else if sector.LatestHost != hks[i*totalShards+j] {
-				t.Fatal("invalid host")
 			} else if sector.Root != obj.Slabs[i].Shards[j].Root {
 				t.Fatal("invalid root")
 			}
@@ -4505,8 +4455,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 					fcids[len(obj.Slabs)*totalShards+i],
 				},
 			},
-			LatestHost: hks[len(obj.Slabs)*totalShards+i],
-			Root:       frand.Entropy256(),
+			Root: frand.Entropy256(),
 		})
 	}
 	// add the second slab of the first object too
@@ -4580,8 +4529,6 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			t.Fatal("invalid id", sector.ID)
 		} else if sector.SlabID != int64(slab2.ID) {
 			t.Fatal("invalid slab id", sector.SlabID)
-		} else if sector.LatestHost != hks[(len(obj.Slabs))*totalShards+j] {
-			t.Fatal("invalid host")
 		} else if sector.Root != obj2.Slabs[0].Shards[j].Root {
 			t.Fatal("invalid root")
 		}

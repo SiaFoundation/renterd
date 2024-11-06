@@ -172,12 +172,19 @@ func newContractStoreMock() *contractStoreMock {
 	}
 }
 
-func (*contractStoreMock) RenewedContract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
-	return api.ContractMetadata{}, nil
+func (cs *contractStoreMock) RenewedContract(ctx context.Context, fcid types.FileContractID) (api.ContractMetadata, error) {
+	return cs.Contract(ctx, fcid)
 }
 
-func (*contractStoreMock) Contract(context.Context, types.FileContractID) (api.ContractMetadata, error) {
-	return api.ContractMetadata{}, nil
+func (cs *contractStoreMock) Contract(_ context.Context, fcid types.FileContractID) (api.ContractMetadata, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	contract, ok := cs.contracts[fcid]
+	if !ok {
+		return api.ContractMetadata{}, api.ErrContractNotFound
+	}
+	return contract.metadata, nil
 }
 
 func (*contractStoreMock) ContractSize(context.Context, types.FileContractID) (api.ContractSize, error) {
@@ -323,6 +330,8 @@ var _ ObjectStore = (*objectStoreMock)(nil)
 
 type (
 	objectStoreMock struct {
+		cs ContractStore
+
 		mu                    sync.Mutex
 		objects               map[string]map[string]object.Object
 		partials              map[string]*packedSlabMock
@@ -339,8 +348,9 @@ type (
 	}
 )
 
-func newObjectStoreMock(bucket string) *objectStoreMock {
+func newObjectStoreMock(bucket string, cs ContractStore) *objectStoreMock {
 	os := &objectStoreMock{
+		cs:                    cs,
 		objects:               make(map[string]map[string]object.Object),
 		partials:              make(map[string]*packedSlabMock),
 		slabBufferMaxSizeSoft: math.MaxInt64,
@@ -486,35 +496,37 @@ func (os *objectStoreMock) Slab(ctx context.Context, key object.EncryptionKey) (
 	return
 }
 
-func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error {
+func (os *objectStoreMock) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
+	updated := make(map[types.Hash256]types.FileContractID)
+	for _, sector := range sectors {
+		_, exists := updated[sector.Root]
+		if exists {
+			return errors.New("duplicate sector")
+		}
+		updated[sector.Root] = sector.ContractID
+	}
+
+	var err error
 	os.forEachObject(func(bucket, objKey string, o object.Object) {
 		for i, slab := range o.Slabs {
-			if slab.EncryptionKey.String() != s.EncryptionKey.String() {
+			if slab.EncryptionKey.String() != key.String() {
 				continue
 			}
-			// update slab
-			shards := os.objects[bucket][objKey].Slabs[i].Slab.Shards
-			for sI := range shards {
-				// overwrite latest host
-				shards[sI].LatestHost = s.Shards[sI].LatestHost
 
-				// merge contracts for each shard
-				existingContracts := make(map[types.FileContractID]struct{})
-				for _, fcids := range shards[sI].Contracts {
-					for _, fcid := range fcids {
-						existingContracts[fcid] = struct{}{}
+			shards := os.objects[bucket][objKey].Slabs[i].Slab.Shards
+			for _, shard := range shards {
+				if contract, ok := updated[shard.Root]; !ok {
+					continue // not updated
+				} else {
+					var hk types.PublicKey
+					hk, err = os.hostForContract(ctx, contract)
+					if err != nil {
+						return
 					}
-				}
-				for hk, fcids := range s.Shards[sI].Contracts {
-					for _, fcid := range fcids {
-						if _, exists := existingContracts[fcid]; exists {
-							continue
-						}
-						shards[sI].Contracts[hk] = append(shards[sI].Contracts[hk], fcids...)
-					}
+					shard.Contracts[hk] = append(shard.Contracts[hk], contract)
 				}
 			}
 			os.objects[bucket][objKey].Slabs[i].Slab.Shards = shards
@@ -522,7 +534,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 		}
 	})
 
-	return nil
+	return err
 }
 
 func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (pss []api.PackedSlab, _ error) {
@@ -571,8 +583,19 @@ func (os *objectStoreMock) MarkPackedSlabsUploaded(ctx context.Context, slabs []
 	})
 
 	for _, slab := range slabs {
+		var sectors []object.Sector
+		for _, shard := range slab.Shards {
+			hk, err := os.hostForContract(ctx, shard.ContractID)
+			if err != nil {
+				return err
+			}
+			sectors = append(sectors, object.Sector{
+				Contracts: map[types.PublicKey][]types.FileContractID{hk: {shard.ContractID}},
+				Root:      shard.Root,
+			})
+		}
 		key := bufferIDToKey[slab.BufferID]
-		slabKeyToSlab[key].Shards = slab.Shards
+		slabKeyToSlab[key].Shards = sectors
 		delete(os.partials, key)
 	}
 
@@ -612,6 +635,21 @@ func (os *objectStoreMock) forEachObject(fn func(bucket, key string, o object.Ob
 			fn(bucket, path, object)
 		}
 	}
+}
+
+func (os *objectStoreMock) hostForContract(ctx context.Context, fcid types.FileContractID) (types.PublicKey, error) {
+	c, err := os.cs.Contract(ctx, fcid)
+	if err != nil && !errors.Is(err, api.ErrContractNotFound) {
+		return types.PublicKey{}, err
+	} else if err == nil {
+		return c.HostKey, nil
+	}
+
+	c, err = os.cs.RenewedContract(ctx, fcid)
+	if err != nil {
+		return types.PublicKey{}, err
+	}
+	return c.HostKey, nil
 }
 
 type s3Mock struct{}

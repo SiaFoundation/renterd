@@ -691,9 +691,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatal("wrong amount of shards", len(slab.Shards), test.RedundancySettings.TotalShards)
 		}
 		for _, shard := range slab.Shards {
-			if shard.LatestHost == (types.PublicKey{}) {
-				t.Fatal("latest host should be set")
-			} else if len(shard.Contracts) != 1 {
+			if len(shard.Contracts) != 1 {
 				t.Fatal("each shard should have a host")
 			} else if _, found := roots[shard.Root]; found {
 				t.Fatal("each root should only exist once per slab")
@@ -1373,6 +1371,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload 3 objects so every host has 3 sectors
 	var err error
+	var hk types.PublicKey
 	var res api.Object
 	shards := make(map[types.PublicKey][]object.Sector)
 	for i := 0; i < 3; i++ {
@@ -1383,7 +1382,10 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		res, err = b.Object(context.Background(), testBucket, fmt.Sprintf("foo_%d", i), api.GetObjectOptions{})
 		tt.OK(err)
 		for _, shard := range res.Object.Slabs[0].Shards {
-			shards[shard.LatestHost] = append(shards[shard.LatestHost], shard)
+			for hk = range shard.Contracts {
+				shards[hk] = append(shards[hk], shard)
+				break
+			}
 		}
 
 		// delete the object
@@ -1398,7 +1400,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// build a frankenstein object constructed with all sectors on the same host
-	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
+	res.Object.Slabs[0].Shards = shards[hk]
 	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
@@ -2637,8 +2639,8 @@ func TestDownloadAllHosts(t *testing.T) {
 
 	// update redundancy settings
 	us, err := b.UploadSettings(context.Background())
-	us.Redundancy = rs
 	tt.OK(err)
+	us.Redundancy = rs
 	tt.OK(b.UpdateUploadSettings(context.Background(), us))
 
 	// prepare a file

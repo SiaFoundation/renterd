@@ -141,8 +141,7 @@ type (
 
 		// DeleteHostSector deletes all contract sector links that a host has
 		// with the given root incrementing the lost sector count in the
-		// process. If another contract with a different host exists that
-		// contains the root, latest_host is updated to that host.
+		// process.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		// DeleteObject deletes an object from the database and returns true if
@@ -365,18 +364,20 @@ type (
 		UpdateSetting(ctx context.Context, key, value string) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
-		// - Optimistically set health to 100%
-		// - Invalidate health_valid_until
-		// - Update LatestHost for every shard
-		// The operation is not allowed to update the number of shards
-		// associated with a slab or the root/slabIndex of any shard.
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
+		// - optimistically set health to 100%
+		// - invalidate health_valid_until
+		// - adds a contract<->sector link for the given sectors
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 
 		// UpdateSlabHealth updates the health of up to 'limit' slab in the
 		// database if their health is not valid anymore. A random interval
 		// between 'minValidity' and 'maxValidity' is used to determine the time
 		// the health of the updated slabs becomes invalid
 		UpdateSlabHealth(ctx context.Context, limit int64, minValidity, maxValidity time.Duration) (int64, error)
+
+		// UpsertContractSectors ensures the given contract-sector links are
+		// present in the database.
+		UpsertContractSectors(ctx context.Context, contractSectors []ContractSector) error
 
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
@@ -455,5 +456,10 @@ type (
 		ID          int64
 		FCID        FileContractID
 		RenewedFrom FileContractID
+	}
+
+	ContractSector struct {
+		ContractID int64
+		SectorID   int64
 	}
 )

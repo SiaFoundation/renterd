@@ -1,0 +1,1 @@
+ALTER TABLE `sectors` DROP COLUMN `latest_host`;
