@@ -97,18 +97,7 @@ func insertContractSectors(db *isql.DB, fcid types.FileContractID, n int) (roots
 	// insert host
 	hk := types.PublicKey{1}
 	res, err := db.Exec(context.Background(), `
-INSERT INTO hosts (public_key) VALUES (?)`, sql.PublicKey(hk))
-	if err != nil {
-		return nil, err
-	}
-	hostID, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// insert contract
-	res, err = db.Exec(context.Background(), `
-INSERT INTO contracts (host_id, fcid,start_height) VALUES (?, ?, ?)`, hostID, sql.FileContractID(fcid), 0)
+INSERT INTO contracts (fcid, host_key, start_height, v2) VALUES (?, ?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +107,7 @@ INSERT INTO contracts (host_id, fcid,start_height) VALUES (?, ?, ?)`, hostID, sq
 	}
 
 	// insert slab
-	key := object.GenerateEncryptionKey()
+	key := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	res, err = db.Exec(context.Background(), `
 INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
 	if err != nil {
@@ -131,7 +120,7 @@ INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.Encr
 
 	// insert sectors
 	insertSectorStmt, err := db.Prepare(context.Background(), `
-INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?) RETURNING id`)
+INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?) RETURNING id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -140,7 +129,7 @@ INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?,
 	for i := 0; i < n; i++ {
 		var sectorID int64
 		roots = append(roots, frand.Entropy256())
-		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.PublicKey(hk), sql.Hash256(roots[i])).Scan(&sectorID)
+		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.Hash256(roots[i])).Scan(&sectorID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert sector: %w", err)
 		}

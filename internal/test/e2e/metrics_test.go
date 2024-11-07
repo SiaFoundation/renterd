@@ -15,10 +15,6 @@ import (
 )
 
 func TestMetrics(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// register start time
 	start := time.Now()
 
@@ -40,9 +36,9 @@ func TestMetrics(t *testing.T) {
 
 	// upload, download, delete
 	data := frand.Bytes(rhpv2.SectorSize)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
-	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "foo", api.DownloadObjectOptions{}))
-	tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, "foo", api.DeleteObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{}))
+	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "foo", api.DownloadObjectOptions{}))
+	tt.OK(w.DeleteObject(context.Background(), testBucket, "foo"))
 
 	tt.Retry(30, time.Second, func() (err error) {
 		defer func() {

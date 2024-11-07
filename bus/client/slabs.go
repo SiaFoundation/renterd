@@ -19,9 +19,9 @@ import (
 func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
 	c.c.Custom("POST", "/slabs/partial", nil, &api.AddPartialSlabResponse{})
 	values := url.Values{}
-	values.Set("minShards", fmt.Sprint(minShards))
-	values.Set("totalShards", fmt.Sprint(totalShards))
-	values.Set("contractSet", contractSet)
+	values.Set("minshards", fmt.Sprint(minShards))
+	values.Set("totalshards", fmt.Sprint(totalShards))
+	values.Set("contractset", contractSet)
 
 	u, err := url.Parse(fmt.Sprintf("%v/slabs/partial", c.c.BaseURL))
 	if err != nil {
@@ -120,11 +120,9 @@ func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, se
 	return usr.Slabs, nil
 }
 
-// UpdateSlab updates the given slab in the database.
-func (c *Client) UpdateSlab(ctx context.Context, slab object.Slab, contractSet string) (err error) {
-	err = c.c.WithContext(ctx).PUT("/slab", api.UpdateSlabRequest{
-		ContractSet: contractSet,
-		Slab:        slab,
-	})
+// UpdateSlab updates a slab with given key, adding the given contract sector
+// links to the database.
+func (c *Client) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/slab/%s", key), sectors)
 	return
 }

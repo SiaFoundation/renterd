@@ -17,6 +17,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -39,12 +40,13 @@ var (
 
 type (
 	uploadManager struct {
-		hm     HostManager
-		mm     MemoryManager
-		os     ObjectStore
-		cl     ContractLocker
-		cs     ContractStore
-		logger *zap.SugaredLogger
+		hm        HostManager
+		mm        memory.MemoryManager
+		os        ObjectStore
+		cl        ContractLocker
+		cs        ContractStore
+		uploadKey *utils.UploadKey
+		logger    *zap.SugaredLogger
 
 		contractLockDuration time.Duration
 
@@ -80,6 +82,12 @@ type (
 		shutdownCtx context.Context
 	}
 
+	uploadedSector struct {
+		hk   types.PublicKey
+		fcid types.FileContractID
+		root types.Hash256
+	}
+
 	slabUpload struct {
 		uploadID             api.UploadID
 		contractLockPriority int
@@ -97,7 +105,7 @@ type (
 		numUploaded    uint64
 		numSectors     uint64
 
-		mem Memory
+		mem memory.Memory
 
 		errs HostErrorSet
 	}
@@ -121,7 +129,7 @@ type (
 		cancel context.CancelCauseFunc
 
 		mu       sync.Mutex
-		uploaded object.Sector
+		uploaded uploadedSector
 		data     *[rhpv2.SectorSize]byte
 	}
 
@@ -146,24 +154,31 @@ type (
 	}
 )
 
-func (w *Worker) initUploadManager(maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
+func (us uploadedSector) toObjectSector() object.Sector {
+	return object.Sector{
+		Contracts: map[types.PublicKey][]types.FileContractID{us.hk: {us.fcid}},
+		Root:      us.root,
+	}
+}
+
+func (w *Worker) initUploadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
 	if w.uploadManager != nil {
 		panic("upload manager already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w.shutdownCtx, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, uploadKey, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, w.contractLockingDuration, logger)
 }
 
-func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
+func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
 	// apply the options
-	up := defaultParameters(bucket, path, rs)
+	up := defaultParameters(bucket, key, rs)
 	for _, opt := range opts {
 		opt(&up)
 	}
 
 	// if not given, try decide on a mime type using the file extension
 	if !up.multipart && up.mimeType == "" {
-		up.mimeType = mime.TypeByExtension(filepath.Ext(up.path))
+		up.mimeType = mime.TypeByExtension(filepath.Ext(up.key))
 
 		// if mime type is still not known, wrap the reader with a mime reader
 		if up.mimeType == "" {
@@ -198,7 +213,7 @@ func (w *Worker) upload(ctx context.Context, bucket, path string, rs api.Redunda
 				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
 			} else if len(packedSlabs) > 0 {
 				// upload packed slab
-				if err := w.tryUploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
+				if err := w.uploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet, lockingPriorityBlockedUpload); err != nil {
 					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
 			}
@@ -265,8 +280,8 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			ctx, cancel := context.WithTimeout(context.Background(), defaultPackedSlabsUploadTimeout)
 			defer cancel()
 
-			// try to upload a packed slab, if there were no packed slabs left to upload ok is false
-			if err := w.tryUploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
+			// upload packed slab
+			if err := w.uploadPackedSlab(ctx, mem, ps, rs, contractSet, lockPriority); err != nil {
 				w.logger.Error(err)
 				interruptCancel() // prevent new uploads from being launched
 			}
@@ -277,7 +292,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	wg.Wait()
 }
 
-func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
+func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string, lockPriority int) error {
 	// fetch contracts
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
 	if err != nil {
@@ -302,15 +317,16 @@ func (w *Worker) tryUploadPackedSlab(ctx context.Context, mem Memory, ps api.Pac
 	return nil
 }
 
-func newUploadManager(ctx context.Context, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
+func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, contractLockDuration time.Duration, logger *zap.Logger) *uploadManager {
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
-		hm:     hm,
-		mm:     newMemoryManager(maxMemory, logger),
-		os:     os,
-		cl:     cl,
-		cs:     cs,
-		logger: logger.Sugar(),
+		hm:        hm,
+		mm:        memory.NewManager(maxMemory, logger),
+		os:        os,
+		cl:        cl,
+		cs:        cs,
+		uploadKey: uploadKey,
+		logger:    logger.Sugar(),
 
 		contractLockDuration: contractLockDuration,
 
@@ -397,7 +413,10 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	r = io.TeeReader(r, hasher)
 
 	// create the cipher reader
-	cr, err := o.Encrypt(r, up.encryptionOffset)
+	cr, err := o.Encrypt(r, object.EncryptionOptions{
+		Offset: up.encryptionOffset,
+		Key:    mgr.uploadKey,
+	})
 	if err != nil {
 		return false, "", err
 	}
@@ -540,13 +559,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 
 	if up.multipart {
 		// persist the part
-		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.path, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
+		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.key, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}
 	} else {
 		// persist the object
-		err = mgr.os.AddObject(ctx, up.bucket, up.path, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
+		err = mgr.os.AddObject(ctx, up.bucket, up.key, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add object: %w", err)
 		}
@@ -555,13 +574,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	return
 }
 
-func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem Memory, contracts []api.ContractMetadata, bh uint64, lockPriority int) (err error) {
+func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem memory.Memory, contracts []api.ContractMetadata, bh uint64, lockPriority int) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// build the shards
-	shards := encryptPartialSlab(ps.Data, ps.Key, uint8(rs.MinShards), uint8(rs.TotalShards))
+	shards := encryptPartialSlab(ps.Data, ps.EncryptionKey, uint8(rs.MinShards), uint8(rs.TotalShards))
 
 	// create the upload
 	upload, err := mgr.newUpload(len(shards), contracts, bh, lockPriority)
@@ -584,9 +603,18 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	}()
 
 	// upload the shards
-	sectors, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
 	if err != nil {
 		return err
+	}
+
+	// build sectors
+	var sectors []api.UploadedSector
+	for _, sector := range uploaded {
+		sectors = append(sectors, api.UploadedSector{
+			ContractID: sector.fcid,
+			Root:       sector.root,
+		})
 	}
 
 	// track stats
@@ -603,7 +631,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem Memory) (err error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, lockPriority int, mem memory.Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -634,21 +662,21 @@ func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shard
 		return err
 	}
 
+	// build sectors
+	var sectors []api.UploadedSector
+	for _, sector := range uploaded {
+		sectors = append(sectors, api.UploadedSector{
+			ContractID: sector.fcid,
+			Root:       sector.root,
+		})
+	}
+
 	// track stats
 	mgr.statsOverdrivePct.Track(overdrivePct)
 	mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
 
-	// overwrite the shards with the newly uploaded ones
-	for i, si := range shardIndices {
-		s.Shards[si].LatestHost = uploaded[i].LatestHost
-		s.Shards[si].Contracts = make(map[types.PublicKey][]types.FileContractID)
-		for hk, fcids := range uploaded[i].Contracts {
-			s.Shards[si].Contracts[hk] = append(s.Shards[si].Contracts[hk], fcids...)
-		}
-	}
-
 	// update the slab
-	return mgr.os.UpdateSlab(ctx, s, contractSet)
+	return mgr.os.UpdateSlab(ctx, s.EncryptionKey, sectors)
 }
 
 func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader) {
@@ -740,7 +768,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	mgr.uploaders = refreshed
 }
 
-func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem Memory, maxOverdrive uint64) (*slabUpload, chan sectorUploadResp) {
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan sectorUploadResp) {
 	// prepare response channel
 	responseChan := make(chan sectorUploadResp)
 
@@ -796,7 +824,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	}, responseChan
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (uploadSpeed int64, overdrivePct float64) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (int64, float64) {
 	// create the response
 	resp := slabUploadResponse{
 		slab: object.SlabSlice{
@@ -813,7 +841,17 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	resp.slab.Slab.Encrypt(shards)
 
 	// upload the shards
-	resp.slab.Slab.Shards, uploadSpeed, overdrivePct, resp.err = u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout)
+
+	// build the sectors
+	var sectors []object.Sector
+	for _, sector := range uploaded {
+		sectors = append(sectors, sector.toObjectSector())
+	}
+
+	// decorate the response
+	resp.err = err
+	resp.slab.Shards = sectors
 
 	// send the response
 	select {
@@ -821,10 +859,10 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	case respChan <- resp:
 	}
 
-	return
+	return uploadSpeed, overdrivePct
 }
 
-func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []object.Sector, uploadSpeed int64, overdrivePct float64, err error) {
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1069,11 +1107,7 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	}
 
 	// store the sector
-	sector.finish(object.Sector{
-		Contracts:  map[types.PublicKey][]types.FileContractID{req.hk: {req.fcid}},
-		LatestHost: req.hk,
-		Root:       req.sector.root,
-	})
+	sector.finish(req)
 
 	// update uploaded sectors
 	s.numUploaded++
@@ -1084,17 +1118,21 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	return true, s.numUploaded == s.numSectors
 }
 
-func (s *sectorUpload) finish(sector object.Sector) {
+func (s *sectorUpload) finish(req *sectorUploadReq) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.cancel(errSectorUploadFinished)
-	s.uploaded = sector
+	s.uploaded = uploadedSector{
+		hk:   req.hk,
+		fcid: req.fcid,
+		root: req.sector.root,
+	}
 	s.data = nil
 }
 
 func (s *sectorUpload) isUploaded() bool {
-	return s.uploaded.Root != (types.Hash256{})
+	return s.uploaded.root != (types.Hash256{})
 }
 
 func (s *sectorUpload) sectorData() *[rhpv2.SectorSize]byte {

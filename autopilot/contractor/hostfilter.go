@@ -30,13 +30,14 @@ const (
 )
 
 var (
-	errContractOutOfCollateral   = errors.New("contract is out of collateral")
-	errContractOutOfFunds        = errors.New("contract is out of funds")
-	errContractUpForRenewal      = errors.New("contract is up for renewal")
-	errContractMaxRevisionNumber = errors.New("contract has reached max revision number")
-	errContractNoRevision        = errors.New("contract has no revision")
-	errContractExpired           = errors.New("contract has expired")
-	errContractNotConfirmed      = errors.New("contract hasn't been confirmed on chain in time")
+	errContractBeyondV2RequireHeight = errors.New("contract is beyond v2 require height")
+	errContractOutOfCollateral       = errors.New("contract is out of collateral")
+	errContractOutOfFunds            = errors.New("contract is out of funds")
+	errContractUpForRenewal          = errors.New("contract is up for renewal")
+	errContractMaxRevisionNumber     = errors.New("contract has reached max revision number")
+	errContractNoRevision            = errors.New("contract has no revision")
+	errContractExpired               = errors.New("contract has expired")
+	errContractNotConfirmed          = errors.New("contract hasn't been confirmed on chain in time")
 )
 
 type unusableHostsBreakdown struct {
@@ -102,7 +103,7 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract api.Contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
 	usable = true
 	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
@@ -137,10 +138,10 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSetti
 	return
 }
 
-func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contract) bool {
-	// TotalCost should never be zero but for legacy reasons we check and return
-	// true should it be the case
-	if c.TotalCost.IsZero() {
+func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c contract) bool {
+	// InitialRenterFunds should never be zero but for legacy reasons we check
+	// and return true should it be the case
+	if c.InitialRenterFunds.IsZero() {
 		return true
 	}
 
@@ -148,7 +149,7 @@ func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contra
 		Add(pt.AppendSectorCost(cfg.Contracts.Period)).
 		Add(pt.ReadSectorCost(rhpv2.SectorSize)).
 		Total()
-	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.TotalCost.Big()).Float64()
+	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.InitialRenterFunds.Big()).Float64()
 
 	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
 }
@@ -156,7 +157,7 @@ func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c api.Contra
 // isOutOfCollateral returns 'true' if the remaining/unallocated collateral in
 // the contract is below a certain threshold of the collateral we would try to
 // put into a contract upon renew.
-func isOutOfCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, c api.Contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) bool {
+func isOutOfCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, c contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) bool {
 	minCollateral := minRemainingCollateral(cfg, rs, c.RenterFunds(), s, pt)
 	return c.RemainingCollateral().Cmp(minCollateral) < 0
 }
@@ -213,7 +214,7 @@ func minRemainingCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, 
 	return minCollateral
 }
 
-func isUpForRenewal(cfg api.AutopilotConfig, r types.FileContractRevision, blockHeight uint64) (shouldRenew, secondHalf bool) {
+func isUpForRenewal(cfg api.AutopilotConfig, r api.Revision, blockHeight uint64) (shouldRenew, secondHalf bool) {
 	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
 	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
 	return
@@ -258,9 +259,9 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostChe
 	}
 
 	return &api.HostCheck{
-		Usability: ub,
-		Gouging:   gb,
-		Score:     sh.sb,
+		UsabilityBreakdown: ub,
+		GougingBreakdown:   gb,
+		ScoreBreakdown:     sh.sb,
 	}
 }
 
@@ -272,6 +273,6 @@ func newScoredHost(h api.Host, sb api.HostScoreBreakdown) scoredHost {
 	}
 }
 
-func scoreHost(h api.Host, cfg api.AutopilotConfig, expectedRedundancy float64) scoredHost {
-	return newScoredHost(h, hostScore(cfg, h, expectedRedundancy))
+func scoreHost(h api.Host, cfg api.AutopilotConfig, gs api.GougingSettings, expectedRedundancy float64) scoredHost {
+	return newScoredHost(h, hostScore(cfg, gs, h, expectedRedundancy))
 }

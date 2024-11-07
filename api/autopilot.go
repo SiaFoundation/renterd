@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"sort"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/utils"
@@ -43,15 +42,14 @@ type (
 
 	// ContractsConfig contains all contract settings used in the autopilot.
 	ContractsConfig struct {
-		Set         string         `json:"set"`
-		Amount      uint64         `json:"amount"`
-		Allowance   types.Currency `json:"allowance"`
-		Period      uint64         `json:"period"`
-		RenewWindow uint64         `json:"renewWindow"`
-		Download    uint64         `json:"download"`
-		Upload      uint64         `json:"upload"`
-		Storage     uint64         `json:"storage"`
-		Prune       bool           `json:"prune"`
+		Set         string `json:"set"`
+		Amount      uint64 `json:"amount"`
+		Period      uint64 `json:"period"`
+		RenewWindow uint64 `json:"renewWindow"`
+		Download    uint64 `json:"download"`
+		Upload      uint64 `json:"upload"`
+		Storage     uint64 `json:"storage"`
+		Prune       bool   `json:"prune"`
 	}
 
 	// HostsConfig contains all hosts settings used in the autopilot.
@@ -86,6 +84,7 @@ type (
 	// AutopilotStateResponse is the response type for the /autopilot/state
 	// endpoint.
 	AutopilotStateResponse struct {
+		ID                 string      `json:"id"`
 		Configured         bool        `json:"configured"`
 		Migrating          bool        `json:"migrating"`
 		MigratingLastStart TimeRFC3339 `json:"migratingLastStart"`
@@ -136,15 +135,4 @@ func (c AutopilotConfig) Validate() error {
 		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
 	}
 	return nil
-}
-
-func (c ContractsConfig) SortContractsForMaintenance(contracts []Contract) {
-	sort.SliceStable(contracts, func(i, j int) bool {
-		iInSet := contracts[i].InSet(c.Set)
-		jInSet := contracts[j].InSet(c.Set)
-		if iInSet != jInSet {
-			return iInSet
-		}
-		return contracts[i].FileSize() > contracts[j].FileSize()
-	})
 }

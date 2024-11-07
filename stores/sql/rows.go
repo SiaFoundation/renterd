@@ -11,38 +11,48 @@ type Scanner interface {
 }
 
 type ContractRow struct {
-	FCID        FileContractID
-	RenewedFrom FileContractID
+	FCID    FileContractID
+	HostID  *int64
+	HostKey PublicKey
+	V2      bool
 
-	ContractPrice  Currency
-	State          ContractState
-	TotalCost      Currency
+	// state fields
+	ArchivalReason NullableString
 	ProofHeight    uint64
+	RenewedFrom    FileContractID
+	RenewedTo      FileContractID
 	RevisionHeight uint64
 	RevisionNumber uint64
 	Size           uint64
 	StartHeight    uint64
+	State          ContractState
 	WindowStart    uint64
 	WindowEnd      uint64
 
-	// spending fields
-	UploadSpending      Currency
-	DownloadSpending    Currency
-	FundAccountSpending Currency
-	DeleteSpending      Currency
-	ListSpending        Currency
+	// cost fields
+	ContractPrice      Currency
+	InitialRenterFunds Currency
 
+	// spending fields
+	DeleteSpending      Currency
+	FundAccountSpending Currency
+	SectorRootsSpending Currency
+	UploadSpending      Currency
+
+	// decorated fields
 	ContractSet string
 	NetAddress  string
-	PublicKey   PublicKey
 	SiamuxPort  string
 }
 
 func (r *ContractRow) Scan(s Scanner) error {
-	return s.Scan(&r.FCID, &r.RenewedFrom, &r.ContractPrice, &r.State, &r.TotalCost, &r.ProofHeight,
-		&r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.WindowStart, &r.WindowEnd,
-		&r.UploadSpending, &r.DownloadSpending, &r.FundAccountSpending, &r.DeleteSpending, &r.ListSpending,
-		&r.ContractSet, &r.NetAddress, &r.PublicKey, &r.SiamuxPort)
+	return s.Scan(
+		&r.FCID, &r.HostID, &r.HostKey, &r.V2,
+		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
+		&r.ContractPrice, &r.InitialRenterFunds,
+		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
+		&r.ContractSet, &r.NetAddress, &r.SiamuxPort,
+	)
 }
 
 func (r *ContractRow) ContractMetadata() api.ContractMetadata {
@@ -50,30 +60,41 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 	if r.ContractSet != "" {
 		sets = append(sets, r.ContractSet)
 	}
-	return api.ContractMetadata{
-		ContractPrice: types.Currency(r.ContractPrice),
-		ID:            types.FileContractID(r.FCID),
-		HostIP:        r.NetAddress,
-		HostKey:       types.PublicKey(r.PublicKey),
-		SiamuxAddr: rhpv2.HostSettings{
+
+	var siamuxAddr string
+	if r.NetAddress != "" && r.SiamuxPort != "" {
+		siamuxAddr = rhpv2.HostSettings{
 			NetAddress: r.NetAddress,
 			SiaMuxPort: r.SiamuxPort,
-		}.SiamuxAddr(),
+		}.SiamuxAddr()
+	}
 
-		RenewedFrom: types.FileContractID(r.RenewedFrom),
-		TotalCost:   types.Currency(r.TotalCost),
-		Spending: api.ContractSpending{
-			Uploads:     types.Currency(r.UploadSpending),
-			Downloads:   types.Currency(r.DownloadSpending),
-			FundAccount: types.Currency(r.FundAccountSpending),
-			Deletions:   types.Currency(r.DeleteSpending),
-			SectorRoots: types.Currency(r.ListSpending),
-		},
+	spending := api.ContractSpending{
+		Uploads:     types.Currency(r.UploadSpending),
+		FundAccount: types.Currency(r.FundAccountSpending),
+		Deletions:   types.Currency(r.DeleteSpending),
+		SectorRoots: types.Currency(r.SectorRootsSpending),
+	}
+
+	return api.ContractMetadata{
+		ID:      types.FileContractID(r.FCID),
+		HostIP:  r.NetAddress,
+		HostKey: types.PublicKey(r.HostKey),
+		V2:      r.V2,
+
+		ContractPrice:      types.Currency(r.ContractPrice),
+		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
+
+		ArchivalReason: string(r.ArchivalReason),
+		ContractSets:   sets,
 		ProofHeight:    r.ProofHeight,
+		RenewedFrom:    types.FileContractID(r.RenewedFrom),
+		RenewedTo:      types.FileContractID(r.RenewedTo),
 		RevisionHeight: r.RevisionHeight,
 		RevisionNumber: r.RevisionNumber,
-		ContractSets:   sets,
+		SiamuxAddr:     siamuxAddr,
 		Size:           r.Size,
+		Spending:       spending,
 		StartHeight:    r.StartHeight,
 		State:          r.State.String(),
 		WindowStart:    r.WindowStart,

@@ -55,7 +55,6 @@ func newMockBus() *mockBus {
 		gougingParams: api.GougingParams{
 			RedundancySettings: test.RedundancySettings,
 			GougingSettings:    test.GougingSettings,
-			TransactionFee:     types.Siacoins(1),
 			ConsensusState: api.ConsensusState{
 				BlockHeight:   1,
 				LastBlockTime: api.TimeRFC3339{},
@@ -92,8 +91,6 @@ func TestWorkerCache(t *testing.T) {
 		t.Fatal("expected redundancy settings to match", gp.RedundancySettings, test.RedundancySettings)
 	} else if gp.GougingSettings != test.GougingSettings {
 		t.Fatal("expected gouging settings to match", gp.GougingSettings, test.GougingSettings)
-	} else if !gp.TransactionFee.Equals(types.Siacoins(1)) {
-		t.Fatal("expected transaction fee to match", gp.TransactionFee, types.Siacoins(1))
 	}
 
 	// assert warnings are printed when the cache is not ready yet
@@ -143,7 +140,7 @@ func TestWorkerCache(t *testing.T) {
 	}
 
 	// update gouging params & expire cache entry manually
-	b.gougingParams.TransactionFee = b.gougingParams.TransactionFee.Mul64(2)
+	b.gougingParams.ConsensusState.BlockHeight += 1
 
 	// expire cache entry manually
 	mc.mu.Lock()
@@ -154,8 +151,6 @@ func TestWorkerCache(t *testing.T) {
 	gp, err = c.GougingParams(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if !gp.TransactionFee.Equals(b.gougingParams.TransactionFee) {
-		t.Fatal("expected transaction fee to be updated, got", gp.TransactionFee)
 	} else if logs := observedLogs.FilterLevelExact(zap.WarnLevel); logs.Len() != 1 {
 		t.Fatal("expected 1 warning, got", logs.Len(), logs.All())
 	} else if lines := observedLogs.TakeAll(); !strings.Contains(lines[0].Message, errCacheOutdated.Error()) || !strings.Contains(lines[0].Message, cacheKeyGougingParams) {
@@ -170,7 +165,6 @@ func TestWorkerCache(t *testing.T) {
 		{Module: api.ModuleContract, Event: api.EventRenew, Payload: nil},
 		{Module: api.ModuleHost, Event: api.EventUpdate, Payload: nil},
 		{Module: api.ModuleSetting, Event: api.EventUpdate, Payload: nil},
-		{Module: api.ModuleSetting, Event: api.EventDelete, Payload: nil},
 	} {
 		if err := c.HandleEvent(event); err != nil {
 			t.Fatal(err)

@@ -2,65 +2,74 @@ package client
 
 import (
 	"context"
-	"fmt"
 
 	"go.sia.tech/renterd/api"
 )
 
-// ContractSetSettings returns the contract set settings.
-func (c *Client) ContractSetSettings(ctx context.Context) (gs api.ContractSetSetting, err error) {
-	err = c.Setting(ctx, api.SettingContractSet, &gs)
-	return
-}
-
-// DeleteSetting will delete the setting with given key.
-func (c *Client) DeleteSetting(ctx context.Context, key string) error {
-	return c.c.WithContext(ctx).DELETE(fmt.Sprintf("/setting/%s", key))
-}
-
 // GougingSettings returns the gouging settings.
 func (c *Client) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	err = c.Setting(ctx, api.SettingGouging, &gs)
+	err = c.c.WithContext(ctx).GET("/settings/gouging", &gs)
 	return
 }
 
-// PricePinningSettings returns the contract set settings.
-func (c *Client) PricePinningSettings(ctx context.Context) (pps api.PricePinSettings, err error) {
-	err = c.Setting(ctx, api.SettingPricePinning, &pps)
+// PatchGougingSettings applies the given patch to the gouging settings.
+func (c *Client) PatchGougingSettings(ctx context.Context, patch map[string]any) (gs api.GougingSettings, err error) {
+	err = c.c.WithContext(ctx).PATCH("/settings/gouging", patch, &gs)
 	return
 }
 
-// RedundancySettings returns the redundancy settings.
-func (c *Client) RedundancySettings(ctx context.Context) (rs api.RedundancySettings, err error) {
-	err = c.Setting(ctx, api.SettingRedundancy, &rs)
+// UpdateGougingSettings updates the given setting.
+func (c *Client) UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error {
+	return c.c.WithContext(ctx).PUT("/settings/gouging", gs)
+}
+
+// PatchPinnedSettings applies the given patch to the pinned settings.
+func (c *Client) PatchPinnedSettings(ctx context.Context, patch map[string]any) (ps api.PinnedSettings, err error) {
+	err = c.c.WithContext(ctx).PATCH("/settings/pinned", patch, &ps)
 	return
 }
 
-// S3AuthenticationSettings returns the S3 authentication settings.
-func (c *Client) S3AuthenticationSettings(ctx context.Context) (as api.S3AuthenticationSettings, err error) {
-	err = c.Setting(ctx, api.SettingS3Authentication, &as)
+// PinnedSettings returns the pinned settings.
+func (c *Client) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
+	err = c.c.WithContext(ctx).GET("/settings/pinned", &ps)
 	return
 }
 
-// Setting returns the value for the setting with given key.
-func (c *Client) Setting(ctx context.Context, key string, value interface{}) (err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/setting/%s", key), &value)
+// UpdatePinnedSettings updates the given setting.
+func (c *Client) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
+	return c.c.WithContext(ctx).PUT("/settings/pinned", ps)
+}
+
+// S3Settings returns the S3 settings.
+func (c *Client) S3Settings(ctx context.Context) (as api.S3Settings, err error) {
+	err = c.c.WithContext(ctx).GET("/settings/s3", &as)
 	return
 }
 
-// Settings returns the keys of all settings.
-func (c *Client) Settings(ctx context.Context) (settings []string, err error) {
-	err = c.c.WithContext(ctx).GET("/settings", &settings)
+// PatchS3Settings applies the given patch to the S3 settings.
+func (c *Client) PatchS3Settings(ctx context.Context, patch map[string]any) (as api.S3Settings, err error) {
+	err = c.c.WithContext(ctx).PATCH("/settings/s3", patch, &as)
 	return
 }
 
-// UpdateSetting will update the given setting under the given key.
-func (c *Client) UpdateSetting(ctx context.Context, key string, value interface{}) error {
-	return c.c.WithContext(ctx).PUT(fmt.Sprintf("/setting/%s", key), value)
+// UpdateS3Settings updates the given setting.
+func (c *Client) UpdateS3Settings(ctx context.Context, as api.S3Settings) error {
+	return c.c.WithContext(ctx).PUT("/settings/s3", as)
 }
 
-// UploadPackingSettings returns the upload packing settings.
-func (c *Client) UploadPackingSettings(ctx context.Context) (ups api.UploadPackingSettings, err error) {
-	err = c.Setting(ctx, api.SettingUploadPacking, &ups)
+// UploadSettings returns the upload settings.
+func (c *Client) UploadSettings(ctx context.Context) (css api.UploadSettings, err error) {
+	err = c.c.WithContext(ctx).GET("/settings/upload", &css)
 	return
+}
+
+// PatchUploadSettings applies the given patch to the upload settings.
+func (c *Client) PatchUploadSettings(ctx context.Context, patch map[string]any) (us api.UploadSettings, err error) {
+	err = c.c.WithContext(ctx).PATCH("/settings/upload", patch, &us)
+	return
+}
+
+// UpdateUploadSettings update the given setting.
+func (c *Client) UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error {
+	return c.c.WithContext(ctx).PUT("/settings/upload", us)
 }

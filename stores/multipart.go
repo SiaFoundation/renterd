@@ -10,10 +10,10 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
-func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error) {
+func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error) {
 	var uploadID string
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		uploadID, err = tx.InsertMultipartUpload(ctx, bucket, path, ec, mimeType, metadata)
+		uploadID, err = tx.InsertMultipartUpload(ctx, bucket, key, ec, mimeType, metadata)
 		return
 	})
 	if err != nil {
@@ -24,9 +24,9 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, path strin
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.AddMultipartPart(ctx, bucket, path, contractSet, eTag, uploadID, partNumber, slices)
+		return tx.AddMultipartPart(ctx, bucket, key, contractSet, eTag, uploadID, partNumber, slices)
 	})
 }
 
@@ -54,9 +54,9 @@ func (s *SQLStore) MultipartUploadParts(ctx context.Context, bucket, object stri
 	return resp, err
 }
 
-func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
+func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error {
 	err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.AbortMultipartUpload(ctx, bucket, path, uploadID)
+		return tx.AbortMultipartUpload(ctx, bucket, key, uploadID)
 	})
 	if err != nil {
 		return err
@@ -65,7 +65,7 @@ func (s *SQLStore) AbortMultipartUpload(ctx context.Context, bucket, path string
 	return nil
 }
 
-func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path string, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error) {
+func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, key string, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error) {
 	// Sanity check input parts.
 	if !sort.SliceIsSorted(parts, func(i, j int) bool {
 		return parts[i].PartNumber < parts[j].PartNumber
@@ -82,13 +82,13 @@ func (s *SQLStore) CompleteMultipartUpload(ctx context.Context, bucket, path str
 	var prune bool
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		// Delete potentially existing object.
-		prune, err = tx.DeleteObject(ctx, bucket, path)
+		prune, err = tx.DeleteObject(ctx, bucket, key)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
 
 		// Complete upload
-		eTag, err = tx.CompleteMultipartUpload(ctx, bucket, path, uploadID, parts, opts)
+		eTag, err = tx.CompleteMultipartUpload(ctx, bucket, key, uploadID, parts, opts)
 		if err != nil {
 			return fmt.Errorf("failed to complete multipart upload: %w", err)
 		}

@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
-	"go.uber.org/zap/zapcore"
 )
 
 func TestFormContract(t *testing.T) {
@@ -21,7 +20,6 @@ func TestFormContract(t *testing.T) {
 	// create cluster
 	opts := clusterOptsDefault
 	opts.autopilotSettings = &apSettings
-	opts.logger = newTestLoggerCustom(zapcore.DebugLevel)
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 

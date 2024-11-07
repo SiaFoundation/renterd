@@ -3,13 +3,20 @@ package api
 import (
 	"errors"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 )
 
 var (
+	ErrInvalidOffset         = errors.New("offset must be non-negative")
+	ErrInvalidLength         = errors.New("length must be positive")
+	ErrInvalidLimit          = errors.New("limit must be -1 or bigger")
 	ErrMarkerNotFound        = errors.New("marker not found")
 	ErrMaxFundAmountExceeded = errors.New("renewal exceeds max fund amount")
+	ErrInvalidDatabase       = errors.New("invalid database type")
+	ErrBackupNotSupported    = errors.New("backups not supported for used database")
+	ErrExplorerDisabled      = errors.New("explorer is disabled")
 )
 
 type (
@@ -18,11 +25,6 @@ type (
 		BlockHeight   uint64      `json:"blockHeight"`
 		LastBlockTime TimeRFC3339 `json:"lastBlockTime"`
 		Synced        bool        `json:"synced"`
-	}
-
-	// ConsensusNetwork holds the name of the network.
-	ConsensusNetwork struct {
-		Name string
 	}
 )
 
@@ -41,7 +43,6 @@ type (
 		ConsensusState     ConsensusState
 		GougingSettings    GougingSettings
 		RedundancySettings RedundancySettings
-		TransactionFee     types.Currency
 	}
 )
 
@@ -60,15 +61,40 @@ type (
 		Accounts []Account `json:"accounts"`
 	}
 
+	BackupRequest struct {
+		Database string `json:"database"`
+		Path     string `json:"path"`
+	}
+
 	// BusStateResponse is the response type for the /bus/state endpoint.
 	BusStateResponse struct {
 		StartTime TimeRFC3339 `json:"startTime"`
 		Network   string      `json:"network"`
 		BuildState
+		Explorer ExplorerState `json:"explorer"`
+	}
+
+	// ExplorerState contains static information about explorer data sources.
+	ExplorerState struct {
+		Enabled bool   `json:"enabled"`
+		URL     string `json:"url,omitempty"`
 	}
 
 	ContractSetUpdateRequest struct {
 		ToAdd    []types.FileContractID `json:"toAdd"`
 		ToRemove []types.FileContractID `json:"toRemove"`
+	}
+
+	// HostScanRequest is the request type for the /host/scan endpoint.
+	HostScanRequest struct {
+		Timeout DurationMS `json:"timeout"`
+	}
+
+	// HostScanResponse is the response type for the /host/scan endpoint.
+	HostScanResponse struct {
+		Ping       DurationMS           `json:"ping"`
+		ScanError  string               `json:"scanError,omitempty"`
+		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 	}
 )

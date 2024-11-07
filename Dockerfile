@@ -22,7 +22,7 @@ RUN if [ "$BUILD_RUN_GO_GENERATE" = "true" ] ; then go generate ./... ; fi
 # Build renterd.
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags='-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
+    CGO_ENABLED=1 go build -tags='netgo timetzdata' -ldflags='-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
 
 # Build image that will be used to run renterd.
 FROM scratch
@@ -37,7 +37,7 @@ ENV PUID=0
 ENV PGID=0
 
 # Renterd env args
-ENV RENTERD_API_PASSWORD= 
+ENV RENTERD_API_PASSWORD=
 ENV RENTERD_SEED=
 ENV RENTERD_CONFIG_FILE=/data/renterd.yml
 ENV RENTERD_NETWORK='mainnet'

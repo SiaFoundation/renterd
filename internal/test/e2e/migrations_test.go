@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -19,10 +20,6 @@ import (
 )
 
 func TestMigrations(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// configure the cluster to use one extra host
 	rs := test.RedundancySettings
 	cfg := test.AutopilotConfig
@@ -41,15 +38,18 @@ func TestMigrations(t *testing.T) {
 	tt := cluster.tt
 
 	// create a helper to fetch used hosts
-	usedHosts := func(path string) map[types.PublicKey]struct{} {
-		res, _ := b.Object(context.Background(), api.DefaultBucketName, path, api.GetObjectOptions{})
+	usedHosts := func(key string) map[types.PublicKey]struct{} {
+		res, _ := b.Object(context.Background(), testBucket, key, api.GetObjectOptions{})
 		if res.Object == nil {
 			t.Fatal("object not found")
 		}
 		used := make(map[types.PublicKey]struct{})
 		for _, slab := range res.Object.Slabs {
 			for _, sector := range slab.Shards {
-				used[sector.LatestHost] = struct{}{}
+				for hk := range sector.Contracts {
+					used[hk] = struct{}{}
+					break
+				}
 			}
 		}
 		return used
@@ -58,7 +58,7 @@ func TestMigrations(t *testing.T) {
 	// add an object
 	data := make([]byte, rhpv2.SectorSize)
 	frand.Read(data)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, t.Name(), api.UploadObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, t.Name(), api.UploadObjectOptions{}))
 
 	// assert amount of hosts used
 	used := usedHosts(t.Name())
@@ -83,7 +83,7 @@ func TestMigrations(t *testing.T) {
 		}
 		return nil
 	})
-	res, err := cluster.Bus.Object(context.Background(), api.DefaultBucketName, t.Name(), api.GetObjectOptions{})
+	res, err := cluster.Bus.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	tt.OK(err)
 
 	// check slabs
@@ -92,9 +92,7 @@ func TestMigrations(t *testing.T) {
 		hosts := make(map[types.PublicKey]struct{})
 		roots := make(map[types.Hash256]struct{})
 		for _, shard := range slab.Shards {
-			if shard.LatestHost == (types.PublicKey{}) {
-				t.Fatal("latest host should be set")
-			} else if len(shard.Contracts) == 0 {
+			if len(shard.Contracts) == 0 {
 				t.Fatal("each shard should have > 0 hosts")
 			}
 			for hpk, contracts := range shard.Contracts {
@@ -138,18 +136,17 @@ func TestMigrations(t *testing.T) {
 		tt.OK(err)
 		for _, alert := range ress.Alerts {
 			// skip if not a migration alert
-			data, ok := alert.Data["objectIDs"].(map[string]interface{})
+			_, ok := alert.Data["objects"]
 			if !ok {
 				continue
 			}
 
 			// collect all object ids per bucket
-			for bucket, ids := range data {
-				if objectIDs, ok := ids.([]interface{}); ok {
-					for _, id := range objectIDs {
-						got[bucket] = append(got[bucket], id.(string))
-					}
-				}
+			var objects []api.ObjectMetadata
+			b, _ := json.Marshal(alert.Data["objects"])
+			_ = json.Unmarshal(b, &objects)
+			for _, object := range objects {
+				got[object.Bucket] = append(got[object.Bucket], object.Key)
 			}
 		}
 		if len(got) != 2 {
@@ -160,8 +157,8 @@ func TestMigrations(t *testing.T) {
 
 	// assert we found our two objects across two buckets
 	if want := map[string][]string{
-		api.DefaultBucketName: {fmt.Sprintf("/%s", t.Name())},
-		"newbucket":           {fmt.Sprintf("/%s", t.Name())},
+		testBucket:  {fmt.Sprintf("/%s", t.Name())},
+		"newbucket": {fmt.Sprintf("/%s", t.Name())},
 	}; !reflect.DeepEqual(want, got) {
 		t.Fatal("unexpected", cmp.Diff(want, got))
 	}

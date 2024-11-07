@@ -11,7 +11,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -92,6 +91,11 @@ func (b *MainDatabase) Transaction(ctx context.Context, fn func(tx ssql.Database
 	})
 }
 
+func (b *MainDatabase) UpdateSetting(ctx context.Context, tx sql.Tx, key, value string) error {
+	mtx := b.wrapTxn(tx)
+	return mtx.UpdateSetting(ctx, key, value)
+}
+
 func (b *MainDatabase) Version(ctx context.Context) (string, string, error) {
 	return version(ctx, b.db)
 }
@@ -100,8 +104,8 @@ func (b *MainDatabase) wrapTxn(tx sql.Tx) *MainDatabaseTx {
 	return &MainDatabaseTx{tx, b.log.Named(hex.EncodeToString(frand.Bytes(16)))}
 }
 
-func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, path string, uploadID string) error {
-	return ssql.AbortMultipartUpload(ctx, tx, bucket, path, uploadID)
+func (tx *MainDatabaseTx) AbortMultipartUpload(ctx context.Context, bucket, key string, uploadID string) error {
+	return ssql.AbortMultipartUpload(ctx, tx, bucket, key, uploadID)
 }
 
 func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Account, error) {
@@ -181,7 +185,7 @@ func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) e
 	return nil
 }
 
-func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ArchivedContract, error) {
+func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error) {
 	return ssql.AncestorContracts(ctx, tx, fcid, startHeight)
 }
 
@@ -215,6 +219,10 @@ func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration tim
 
 func (tx *MainDatabaseTx) Bucket(ctx context.Context, bucket string) (api.Bucket, error) {
 	return ssql.Bucket(ctx, tx, bucket)
+}
+
+func (tx *MainDatabaseTx) Buckets(ctx context.Context) ([]api.Bucket, error) {
+	return ssql.Buckets(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) CharLengthExpr() string {
@@ -341,8 +349,8 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 	return ssql.DeleteHostSector(ctx, tx, hk, root)
 }
 
-func (tx *MainDatabaseTx) DeleteSettings(ctx context.Context, key string) error {
-	return ssql.DeleteSettings(ctx, tx, key)
+func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
+	return ssql.DeleteSetting(ctx, tx, key)
 }
 
 func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
@@ -404,16 +412,12 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 	return ssql.HostBlocklist(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error) {
-	return ssql.HostsForScanning(ctx, tx, maxLastScan, offset, limit)
+func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
+	return ssql.Hosts(ctx, tx, opts)
 }
 
 func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
 	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
-}
-
-func (tx *MainDatabaseTx) InsertContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	return ssql.InsertContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
 }
 
 func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
@@ -535,14 +539,6 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 	return res.RowsAffected()
 }
 
-func (tx *MainDatabaseTx) ListBuckets(ctx context.Context) ([]api.Bucket, error) {
-	return ssql.ListBuckets(ctx, tx)
-}
-
-func (tx *MainDatabaseTx) ListObjects(ctx context.Context, bucket, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error) {
-	return ssql.ListObjects(ctx, tx, bucket, prefix, sortBy, sortDir, marker, limit)
-}
-
 func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {
 	// Create root dir.
 	dirID := int64(1)
@@ -599,16 +595,12 @@ func (tx *MainDatabaseTx) Object(ctx context.Context, bucket, key string) (api.O
 	return ssql.Object(ctx, tx, bucket, key)
 }
 
-func (tx *MainDatabaseTx) ObjectEntries(ctx context.Context, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
-	return ssql.ObjectEntries(ctx, tx, bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
+func (tx *MainDatabaseTx) Objects(ctx context.Context, bucket, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error) {
+	return ssql.Objects(ctx, tx, bucket, prefix, substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
 }
 
-func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, path string) (api.Object, error) {
-	return ssql.ObjectMetadata(ctx, tx, bucket, path)
-}
-
-func (tx *MainDatabaseTx) ObjectsBySlabKey(ctx context.Context, bucket string, slabKey object.EncryptionKey) (metadata []api.ObjectMetadata, err error) {
-	return ssql.ObjectsBySlabKey(ctx, tx, bucket, slabKey)
+func (tx *MainDatabaseTx) ObjectMetadata(ctx context.Context, bucket, key string) (api.Object, error) {
+	return ssql.ObjectMetadata(ctx, tx, bucket, key)
 }
 
 func (tx *MainDatabaseTx) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error) {
@@ -736,6 +728,48 @@ func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, e
 	return res.RowsAffected()
 }
 
+func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadata) error {
+	// validate metadata
+	var state ssql.ContractState
+	if err := state.LoadString(c.State); err != nil {
+		return err
+	} else if c.ID == (types.FileContractID{}) {
+		return errors.New("contract id is required")
+	} else if c.HostKey == (types.PublicKey{}) {
+		return errors.New("host key is required")
+	}
+
+	// fetch host id
+	var hostID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = ?`, ssql.PublicKey(c.HostKey)).Scan(&hostID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrHostNotFound
+	}
+
+	// update contract
+	_, err = tx.Exec(ctx, `
+INSERT INTO contracts (
+	created_at, fcid, host_id, host_key, v2,
+	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, window_start, window_end,
+	contract_price, initial_renter_funds,
+	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	created_at = VALUES(created_at), fcid = VALUES(fcid), host_id = VALUES(host_id), host_key = VALUES(host_key), v2 = VALUES(v2),
+	archival_reason = VALUES(archival_reason), proof_height = VALUES(proof_height), renewed_from = VALUES(renewed_from), renewed_to = VALUES(renewed_to), revision_height = VALUES(revision_height), revision_number = VALUES(revision_number), size = VALUES(size), start_height = VALUES(start_height), state = VALUES(state), window_start = VALUES(window_start), window_end = VALUES(window_end),
+	contract_price = VALUES(contract_price), initial_renter_funds = VALUES(initial_renter_funds),
+	delete_spending = VALUES(delete_spending), fund_account_spending = VALUES(fund_account_spending), sector_roots_spending = VALUES(sector_roots_spending), upload_spending = VALUES(upload_spending)`,
+		time.Now(), ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey), c.V2,
+		ssql.NullableString(c.ArchivalReason), c.ProofHeight, ssql.FileContractID(c.RenewedFrom), ssql.FileContractID(c.RenewedTo), c.RevisionHeight, c.RevisionNumber, c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
+		ssql.Currency(c.ContractPrice), ssql.Currency(c.InitialRenterFunds),
+		ssql.Currency(c.Spending.Deletions), ssql.Currency(c.Spending.FundAccount), ssql.Currency(c.Spending.SectorRoots), ssql.Currency(c.Spending.Uploads),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update contract: %w", err)
+	}
+	return nil
+}
+
 func (tx *MainDatabaseTx) RecordContractSpending(ctx context.Context, fcid types.FileContractID, revisionNumber, size uint64, newSpending api.ContractSpending) error {
 	return ssql.RecordContractSpending(ctx, tx, fcid, revisionNumber, size, newSpending)
 }
@@ -853,12 +887,8 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	return nil
 }
 
-func (tx *MainDatabaseTx) RenewContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {
-	return ssql.RenewContract(ctx, tx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
-}
-
-func (tx *MainDatabaseTx) RenewedContract(ctx context.Context, renwedFrom types.FileContractID) (api.ContractMetadata, error) {
-	return ssql.RenewedContract(ctx, tx, renwedFrom)
+func (tx *MainDatabaseTx) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+	return ssql.RenewedContract(ctx, tx, renewedFrom)
 }
 
 func (tx *MainDatabaseTx) ResetChainState(ctx context.Context) error {
@@ -901,7 +931,7 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 }
 
 func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md api.ObjectMetadata, err error) {
-	dst := []any{&md.Name, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag}
+	dst := []any{&md.Key, &md.Size, &md.Health, &md.MimeType, &md.ModTime, &md.ETag, &md.Bucket}
 	dst = append(dst, others...)
 	if err := s.Scan(dst...); err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to scan object metadata: %w", err)
@@ -909,24 +939,12 @@ func (tx *MainDatabaseTx) ScanObjectMetadata(s ssql.Scanner, others ...any) (md 
 	return md, nil
 }
 
-func (tx *MainDatabaseTx) SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error) {
-	return ssql.SearchHosts(ctx, tx, autopilotID, filterMode, usabilityMode, addressContains, keyIn, offset, limit)
-}
-
-func (tx *MainDatabaseTx) SearchObjects(ctx context.Context, bucket, substring string, offset, limit int) ([]api.ObjectMetadata, error) {
-	return ssql.SearchObjects(ctx, tx, bucket, substring, offset, limit)
-}
-
 func (tx *MainDatabaseTx) SelectObjectMetadataExpr() string {
-	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag"
+	return "o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag, b.name"
 }
 
 func (tx *MainDatabaseTx) Setting(ctx context.Context, key string) (string, error) {
 	return ssql.Setting(ctx, tx, key)
-}
-
-func (tx *MainDatabaseTx) Settings(ctx context.Context) ([]string, error) {
-	return ssql.Settings(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error) {
@@ -962,6 +980,10 @@ func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot)
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, bp api.BucketPolicy) error {
 	return ssql.UpdateBucketPolicy(ctx, tx, bucket, bp)
+}
+
+func (tx *MainDatabaseTx) UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error {
+	return ssql.UpdateContract(ctx, tx, fcid, c)
 }
 
 func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
@@ -1146,10 +1168,10 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 			score_storage_remaining = VALUES(score_storage_remaining), score_uptime = VALUES(score_uptime), score_version = VALUES(score_version),
 			score_prices = VALUES(score_prices), gouging_contract_err = VALUES(gouging_contract_err), gouging_download_err = VALUES(gouging_download_err),
 			gouging_gouging_err = VALUES(gouging_gouging_err), gouging_prune_err = VALUES(gouging_prune_err), gouging_upload_err = VALUES(gouging_upload_err)
-	`, time.Now(), autopilot, ssql.PublicKey(hk), hc.Usability.Blocked, hc.Usability.Offline, hc.Usability.LowScore,
-		hc.Usability.RedundantIP, hc.Usability.Gouging, hc.Usability.NotAcceptingContracts, hc.Usability.NotAnnounced, hc.Usability.NotCompletingScan,
-		hc.Score.Age, hc.Score.Collateral, hc.Score.Interactions, hc.Score.StorageRemaining, hc.Score.Uptime, hc.Score.Version, hc.Score.Prices,
-		hc.Gouging.ContractErr, hc.Gouging.DownloadErr, hc.Gouging.GougingErr, hc.Gouging.PruneErr, hc.Gouging.UploadErr,
+	`, time.Now(), autopilot, ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
+		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
+		hc.ScoreBreakdown.Age, hc.ScoreBreakdown.Collateral, hc.ScoreBreakdown.Interactions, hc.ScoreBreakdown.StorageRemaining, hc.ScoreBreakdown.Uptime, hc.ScoreBreakdown.Version, hc.ScoreBreakdown.Prices,
+		hc.GougingBreakdown.ContractErr, hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)
@@ -1170,113 +1192,8 @@ func (tx *MainDatabaseTx) UpdateSetting(ctx context.Context, key, value string) 
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, s object.Slab, contractSet string, fcids []types.FileContractID) error {
-	// find all used contracts
-	usedContracts, err := ssql.FetchUsedContracts(ctx, tx, fcids)
-	if err != nil {
-		return fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// update slab
-	res, err := tx.Exec(ctx, `
-		UPDATE slabs
-		SET db_contract_set_id = (SELECT id FROM contract_sets WHERE name = ?),
-		health_valid_until = ?,
-		health = ?
-		WHERE `+"`key`"+` = ?
-	`, contractSet, time.Now().Unix(), 1, ssql.EncryptionKey(s.Key))
-	if err != nil {
-		return err
-	} else if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n == 0 {
-		return api.ErrSlabNotFound
-	}
-
-	// fetch slab id and total shards
-	var slabID, totalShards int64
-	err = tx.QueryRow(ctx, "SELECT id, total_shards FROM slabs WHERE `key` = ?", ssql.EncryptionKey(s.Key)).
-		Scan(&slabID, &totalShards)
-	if err != nil {
-		return err
-	}
-
-	// find shards of slab
-	var roots []types.Hash256
-	rows, err := tx.Query(ctx, "SELECT root FROM sectors WHERE db_slab_id = ? ORDER BY sectors.slab_index ASC", slabID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch sectors: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var root ssql.Hash256
-		if err := rows.Scan(&root); err != nil {
-			return fmt.Errorf("failed to scan sector id: %w", err)
-		}
-		roots = append(roots, types.Hash256(root))
-	}
-	nSectors := len(roots)
-
-	// make sure the number of shards doesn't change.
-	// NOTE: check both the slice as well as the TotalShards field to be
-	// safe.
-	if len(s.Shards) != int(totalShards) {
-		return fmt.Errorf("%w: expected %v shards (TotalShards) but got %v", sql.ErrInvalidNumberOfShards, totalShards, len(s.Shards))
-	} else if len(s.Shards) != nSectors {
-		return fmt.Errorf("%w: expected %v shards (Shards) but got %v", sql.ErrInvalidNumberOfShards, nSectors, len(s.Shards))
-	}
-
-	// make sure the roots stay the same.
-	for i, root := range roots {
-		if root != types.Hash256(s.Shards[i].Root) {
-			return fmt.Errorf("%w: shard %v has changed root from %v to %v", sql.ErrShardRootChanged, i, s.Shards[i].Root, root[:])
-		}
-	}
-
-	// update sectors
-	var upsertSectors []upsertSector
-	for i := range s.Shards {
-		upsertSectors = append(upsertSectors, upsertSector{
-			slabID,
-			i + 1,
-			s.Shards[i].LatestHost,
-			s.Shards[i].Root,
-		})
-	}
-	sectorIDs, err := tx.upsertSectors(ctx, upsertSectors)
-	if err != nil {
-		return fmt.Errorf("failed to insert sectors: %w", err)
-	}
-
-	// build contract <-> sector links
-	var upsertContractSectors []upsertContractSector
-	for i, shard := range s.Shards {
-		sectorID := sectorIDs[i]
-
-		// ensure the associations are updated
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, ok := usedContracts[fcid]; ok {
-					upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-						sectorID,
-						usedContracts[fcid].ID,
-					})
-				} else {
-					tx.log.Named("UpdateSlab").Warn("missing contract for shard",
-						"contract", fcid,
-						"root", shard.Root,
-						"latest_host", shard.LatestHost,
-					)
-				}
-			}
-		}
-	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
-		return err
-	}
-
-	return nil
+func (tx *MainDatabaseTx) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error {
+	return ssql.UpdateSlab(ctx, tx, key, sectors)
 }
 
 func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, minDuration, maxDuration time.Duration) (int64, error) {
@@ -1311,6 +1228,31 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
+	if len(contractSectors) == 0 {
+		return nil
+	}
+
+	// insert contract <-> sector links
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT IGNORE INTO contract_sectors (db_sector_id, db_contract_id)
+											VALUES (?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
+	}
+	defer insertContractSectorStmt.Close()
+
+	for _, cs := range contractSectors {
+		_, err := insertContractSectorStmt.Exec(ctx,
+			cs.SectorID,
+			cs.ContractID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert contract sector link: %w", err)
+		}
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
@@ -1364,7 +1306,7 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		res, err := insertSlabStmt.Exec(ctx,
 			time.Now(),
 			contractSetID,
-			ssql.EncryptionKey(slices[i].Key),
+			ssql.EncryptionKey(slices[i].EncryptionKey),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),
 		)
@@ -1411,7 +1353,6 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			upsertSectors = append(upsertSectors, upsertSector{
 				slabIDs[i],
 				j + 1,
-				ss.Shards[j].LatestHost,
 				ss.Shards[j].Root,
 			})
 		}
@@ -1423,21 +1364,20 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 
 	// insert contract <-> sector links
 	sectorIdx := 0
-	var upsertContractSectors []upsertContractSector
+	var upsertContractSectors []ssql.ContractSector
 	for _, ss := range slices {
 		for _, shard := range ss.Shards {
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
 					if _, ok := usedContracts[fcid]; ok {
-						upsertContractSectors = append(upsertContractSectors, upsertContractSector{
-							sectorIDs[sectorIdx],
-							usedContracts[fcid].ID,
+						upsertContractSectors = append(upsertContractSectors, ssql.ContractSector{
+							ContractID: usedContracts[fcid].ID,
+							SectorID:   sectorIDs[sectorIdx],
 						})
 					} else {
 						tx.log.Named("InsertObject").Warn("missing contract for shard",
 							"contract", fcid,
 							"root", shard.Root,
-							"latest_host", shard.LatestHost,
 						)
 					}
 				}
@@ -1445,47 +1385,16 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 			sectorIdx++
 		}
 	}
-	if err := tx.upsertContractSectors(ctx, upsertContractSectors); err != nil {
+	if err := tx.UpsertContractSectors(ctx, upsertContractSectors); err != nil {
 		return err
 	}
 	return nil
 }
 
-type upsertContractSector struct {
-	sectorID   int64
-	contractID int64
-}
-
-func (tx *MainDatabaseTx) upsertContractSectors(ctx context.Context, contractSectors []upsertContractSector) error {
-	if len(contractSectors) == 0 {
-		return nil
-	}
-
-	// insert contract <-> sector links
-	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT IGNORE INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?)`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
-	}
-	defer insertContractSectorStmt.Close()
-
-	for _, cs := range contractSectors {
-		_, err := insertContractSectorStmt.Exec(ctx,
-			cs.sectorID,
-			cs.contractID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract sector link: %w", err)
-		}
-	}
-	return nil
-}
-
 type upsertSector struct {
-	slabID     int64
-	slabIndex  int
-	latestHost types.PublicKey
-	root       types.Hash256
+	slabID    int64
+	slabIndex int
+	root      types.Hash256
 }
 
 func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSector) ([]int64, error) {
@@ -1495,8 +1404,8 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 
 	// insert sectors - make sure to update last_insert_id in case of a
 	// duplicate key to be able to retrieve the id
-	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, latest_host, root)
-								VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE latest_host = VALUES(latest_host), id = last_insert_id(id)`)
+	insertSectorStmt, err := tx.Prepare(ctx, `INSERT INTO sectors (created_at, db_slab_id, slab_index, root)
+								VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -1515,7 +1424,6 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 			time.Now(),
 			s.slabID,
 			s.slabIndex,
-			ssql.PublicKey(s.latestHost),
 			s.root[:],
 		)
 		if err != nil {

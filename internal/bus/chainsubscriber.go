@@ -278,7 +278,7 @@ func (s *chainSubscriber) sync() error {
 
 	// fetch updates until we're caught up
 	var cnt uint64
-	for index != s.cm.Tip() && !s.isClosed() {
+	for index != s.cm.Tip() && index.Height <= s.cm.Tip().Height && !s.isClosed() {
 		// fetch updates
 		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
@@ -407,7 +407,7 @@ func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.Chain
 
 		// reverted renewal: 'complete' -> 'active'
 		if curr != nil {
-			if err := tx.UpdateContract(fcid, index.Height, prev.revisionNumber, prev.fileSize); err != nil {
+			if err := tx.UpdateContractRevision(fcid, index.Height, prev.revisionNumber, prev.fileSize); err != nil {
 				return fmt.Errorf("failed to revert contract: %w", err)
 			}
 			if state == api.ContractStateComplete {
@@ -440,7 +440,7 @@ func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.Chain
 	}
 
 	// handle apply
-	if err := tx.UpdateContract(fcid, index.Height, curr.revisionNumber, curr.fileSize); err != nil {
+	if err := tx.UpdateContractRevision(fcid, index.Height, curr.revisionNumber, curr.fileSize); err != nil {
 		return fmt.Errorf("failed to update contract %v: %w", fcid, err)
 	}
 

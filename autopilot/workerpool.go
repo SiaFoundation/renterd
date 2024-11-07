@@ -3,9 +3,7 @@ package autopilot
 import (
 	"context"
 	"sync"
-	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -13,13 +11,9 @@ import (
 )
 
 type Worker interface {
-	Account(ctx context.Context, hostKey types.PublicKey) (rhpv3.Account, error)
-	Contracts(ctx context.Context, hostTimeout time.Duration) (api.ContractsResponse, error)
+	Account(ctx context.Context, hostKey types.PublicKey) (api.Account, error)
 	ID(ctx context.Context) (string, error)
-	MigrateSlab(ctx context.Context, s object.Slab, set string) (api.MigrateSlabResponse, error)
-
-	RHPPriceTable(ctx context.Context, hostKey types.PublicKey, siamuxAddr string, timeout time.Duration) (api.HostPriceTable, error)
-	RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
+	MigrateSlab(ctx context.Context, s object.Slab, set string) error
 }
 
 // workerPool contains all workers known to the autopilot.  Users can call

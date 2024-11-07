@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 )
@@ -29,11 +28,11 @@ func WithGougingChecker(ctx context.Context, cs gouging.ConsensusState, gp api.G
 		if err != nil {
 			return nil, fmt.Errorf("failed to get consensus state: %w", err)
 		}
-		return newGougingChecker(gp.GougingSettings, cs, gp.TransactionFee, criticalMigration), nil
+		return newGougingChecker(gp.GougingSettings, cs, criticalMigration), nil
 	})
 }
 
-func newGougingChecker(settings api.GougingSettings, cs api.ConsensusState, txnFee types.Currency, criticalMigration bool) gouging.Checker {
+func newGougingChecker(settings api.GougingSettings, cs api.ConsensusState, criticalMigration bool) gouging.Checker {
 	// adjust the max download price if we are dealing with a critical
 	// migration that might be failing due to gouging checks
 	if criticalMigration && settings.MigrationSurchargeMultiplier > 0 {
@@ -41,5 +40,5 @@ func newGougingChecker(settings api.GougingSettings, cs api.ConsensusState, txnF
 			settings.MaxDownloadPrice = adjustedMaxDownloadPrice
 		}
 	}
-	return gouging.NewChecker(settings, cs, txnFee, nil, nil)
+	return gouging.NewChecker(settings, cs, nil, nil)
 }

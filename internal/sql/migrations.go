@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
@@ -30,6 +31,7 @@ type (
 		Migrator
 		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
 
@@ -289,6 +291,54 @@ var (
 				},
 			},
 			{
+				ID: "00018_gouging_units", // NOTE: duplicate ID (00018) due to directories hotfix
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_gouging_units", log)
+				},
+			},
+			{
+				ID: "00019_settings",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_settings", log)
+				},
+			},
+			{
+				ID: "00020_idx_db_directory",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_idx_db_directory", log)
+				},
+			},
+			{
+				ID: "00021_archived_contracts",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00021_archived_contracts", log)
+				},
+			},
+			{
+				ID: "00022_remove_triggers",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00022_remove_triggers", log)
+				},
+			},
+			{
+				ID: "00023_key_prefix",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00023_key_prefix", log)
+				},
+			},
+			{
+				ID: "00024_contract_v2",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00024_contract_v2", log)
+				},
+			},
+			{
+				ID: "00025_latest_host",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_latest_host", log)
+				},
+			},
+			{
 				ID: "00019_scan_reset",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_scan_reset", log)
@@ -319,6 +369,12 @@ var (
 				ID: "00003_unix_ms",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
+				},
+			},
+			{
+				ID: "00004_contract_spending",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_contract_spending", log)
 				},
 			},
 		}
@@ -374,6 +430,8 @@ func execSQLFile(ctx context.Context, tx Tx, fs embed.FS, folder, filename strin
 	file, err := fs.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", path, err)
+	} else if len(bytes.TrimSpace(file)) == 0 {
+		return nil
 	}
 
 	// execute it

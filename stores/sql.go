@@ -26,9 +26,12 @@ type (
 		WalletAddress                 types.Address
 		SlabBufferCompletionThreshold int64
 		Logger                        *zap.Logger
-		RetryTransactionIntervals     []time.Duration
 		LongQueryDuration             time.Duration
 		LongTxDuration                time.Duration
+	}
+
+	Explorer interface {
+		Enabled() bool
 	}
 
 	// SQLStore is a helper type for interacting with a SQL-based backend.
@@ -46,8 +49,6 @@ type (
 		// SettingsDB related fields
 		settingsMu sync.Mutex
 		settings   map[string]string
-
-		retryTransactionIntervals []time.Duration
 
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
@@ -98,9 +99,8 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
 
-		slabPruneSigChan:          make(chan struct{}, 1),
-		lastPrunedAt:              time.Now(),
-		retryTransactionIntervals: cfg.RetryTransactionIntervals,
+		slabPruneSigChan: make(chan struct{}, 1),
+		lastPrunedAt:     time.Now(),
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,

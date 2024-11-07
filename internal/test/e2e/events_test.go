@@ -26,7 +26,6 @@ func TestEvents(t *testing.T) {
 		api.WebhookContractRenew,
 		api.WebhookContractSetUpdate,
 		api.WebhookHostUpdate,
-		api.WebhookSettingDelete,
 		api.WebhookSettingUpdate,
 	}
 
@@ -125,10 +124,7 @@ func TestEvents(t *testing.T) {
 	// update settings
 	gs := gp.GougingSettings
 	gs.HostBlockHeightLeeway = 100
-	tt.OK(b.UpdateSetting(context.Background(), api.SettingGouging, gs))
-
-	// delete setting
-	tt.OK(b.DeleteSetting(context.Background(), api.SettingRedundancy))
+	tt.OK(b.UpdateGougingSettings(context.Background(), gs))
 
 	// update host setting
 	h := cluster.hosts[0]
@@ -137,7 +133,7 @@ func TestEvents(t *testing.T) {
 	tt.OK(h.UpdateSettings(settings))
 
 	// wait until we received the events
-	tt.Retry(10, time.Second, func() error {
+	tt.Retry(100, 100*time.Millisecond, func() error {
 		mu.Lock()
 		defer mu.Unlock()
 		if len(received) < len(allEvents) {
@@ -161,7 +157,7 @@ func TestEvents(t *testing.T) {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventContractSetUpdate:
-			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || e.ToAdd[0] != c.ID || len(e.ToRemove) != 0 || e.Timestamp.IsZero() {
+			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || (e.ToAdd[0] != c.ID && e.ToAdd[0] != renewed.ID) || len(e.ToRemove) != 0 || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventConsensusUpdate:
@@ -173,17 +169,7 @@ func TestEvents(t *testing.T) {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventSettingUpdate:
-			if e.Key != api.SettingGouging || e.Timestamp.IsZero() {
-				t.Fatalf("unexpected event %+v", e)
-			}
-			var update api.GougingSettings
-			bytes, _ := json.Marshal(e.Update)
-			tt.OK(json.Unmarshal(bytes, &update))
-			if update.HostBlockHeightLeeway != 100 {
-				t.Fatalf("unexpected update %+v", update)
-			}
-		case api.EventSettingDelete:
-			if e.Key != api.SettingRedundancy || e.Timestamp.IsZero() {
+			if e.GougingSettings == nil || e.GougingSettings.HostBlockHeightLeeway != 100 || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		}

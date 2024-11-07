@@ -2,14 +2,12 @@ package autopilot
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
-	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -49,20 +47,15 @@ type (
 	}
 )
 
-func (j *job) execute(ctx context.Context, w Worker) (_ api.MigrateSlabResponse, err error) {
-	slab, err := j.b.Slab(ctx, j.Key)
+func (j *job) execute(ctx context.Context, w Worker) (time.Duration, error) {
+	start := time.Now()
+	slab, err := j.b.Slab(ctx, j.EncryptionKey)
 	if err != nil {
-		return api.MigrateSlabResponse{}, fmt.Errorf("failed to fetch slab; %w", err)
+		return 0, fmt.Errorf("failed to fetch slab; %w", err)
 	}
 
-	res, err := w.MigrateSlab(ctx, slab, j.set)
-	if err != nil {
-		return api.MigrateSlabResponse{}, fmt.Errorf("failed to migrate slab; %w", err)
-	} else if res.Error != "" {
-		return res, fmt.Errorf("failed to migrate slab; %w", errors.New(res.Error))
-	}
-
-	return res, nil
+	err = w.MigrateSlab(ctx, slab, j.set)
+	return time.Since(start), err
 }
 
 func newMigrator(ap *Autopilot, healthCutoff float64, parallelSlabsPerWorker uint64) *migrator {
@@ -157,44 +150,20 @@ func (m *migrator) performMigrations(p *workerPool) {
 
 					// process jobs
 					for j := range jobs {
-						start := time.Now()
-						res, err := j.execute(ctx, w)
-						m.statsSlabMigrationSpeedMS.Track(float64(time.Since(start).Milliseconds()))
-						if err != nil {
-							m.logger.Errorf("%v: migration %d/%d failed, key: %v, health: %v, overpaid: %v, err: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, err)
-							if utils.IsErr(err, api.ErrConsensusNotSynced) {
-								// interrupt migrations if consensus is not synced
-								select {
-								case m.signalConsensusNotSynced <- struct{}{}:
-								default:
-								}
-								return
-							} else if !utils.IsErr(err, api.ErrSlabNotFound) {
-								// fetch all object IDs for the slab we failed to migrate
-								var objectIds map[string][]string
-								if res, err := m.objectIDsForSlabKey(ctx, j.Key); err != nil {
-									m.logger.Errorf("failed to fetch object ids for slab key; %w", err)
-								} else {
-									objectIds = res
-								}
-
-								// register the alert
-								if res.SurchargeApplied {
-									m.ap.RegisterAlert(ctx, newCriticalMigrationFailedAlert(j.Key, j.Health, objectIds, err))
-								} else {
-									m.ap.RegisterAlert(ctx, newMigrationFailedAlert(j.Key, j.Health, objectIds, err))
-								}
+						duration, err := j.execute(ctx, w)
+						m.statsSlabMigrationSpeedMS.Track(float64(duration.Milliseconds()))
+						if utils.IsErr(err, api.ErrConsensusNotSynced) {
+							// interrupt migrations if consensus is not synced
+							select {
+							case m.signalConsensusNotSynced <- struct{}{}:
+							default:
 							}
-						} else {
-							m.logger.Infof("%v: migration %d/%d succeeded, key: %v, health: %v, overpaid: %v, shards migrated: %v", id, j.slabIdx+1, j.batchSize, j.Key, j.Health, res.SurchargeApplied, res.NumShardsMigrated)
-							m.ap.DismissAlert(ctx, alerts.IDForSlab(alertMigrationID, j.Key))
-							if res.SurchargeApplied {
-								// this alert confirms the user his gouging
-								// settings are working, it will be dismissed
-								// automatically the next time this slab is
-								// successfully migrated
-								m.ap.RegisterAlert(ctx, newCriticalMigrationSucceededAlert(j.Key))
-							}
+							return
+						} else if err != nil {
+							m.logger.Errorw("migration failed",
+								zap.Float64("health", j.Health),
+								zap.Stringer("slab", j.EncryptionKey),
+								zap.String("worker", id))
 						}
 					}
 				}(w)
@@ -238,13 +207,13 @@ func (m *migrator) performMigrations(p *workerPool) {
 		// starvation.
 		migrateNewMap := make(map[object.EncryptionKey]*api.UnhealthySlab)
 		for i, slab := range toMigrateNew {
-			migrateNewMap[slab.Key] = &toMigrateNew[i]
+			migrateNewMap[slab.EncryptionKey] = &toMigrateNew[i]
 		}
 		removed := 0
 		for i := 0; i < len(toMigrate)-removed; {
 			slab := toMigrate[i]
-			if _, exists := migrateNewMap[slab.Key]; exists {
-				delete(migrateNewMap, slab.Key) // delete from map to leave only new slabs
+			if _, exists := migrateNewMap[slab.EncryptionKey]; exists {
+				delete(migrateNewMap, slab.EncryptionKey) // delete from map to leave only new slabs
 				i++
 			} else {
 				toMigrate[i] = toMigrate[len(toMigrate)-1-removed]
@@ -263,8 +232,8 @@ func (m *migrator) performMigrations(p *workerPool) {
 		})
 	}
 
-	// unregister the migration alert when we're done
-	defer m.ap.alerts.DismissAlerts(m.ap.shutdownCtx, alertMigrationID)
+	// unregister the ongoing migrations alert when we're done
+	defer m.ap.alerts.DismissAlerts(m.ap.shutdownCtx, alertOngoingMigrationsID)
 
 OUTER:
 	for {
@@ -311,35 +280,4 @@ OUTER:
 		// all slabs migrated
 		return
 	}
-}
-
-func (m *migrator) objectIDsForSlabKey(ctx context.Context, key object.EncryptionKey) (map[string][]string, error) {
-	// fetch all buckets
-	//
-	// NOTE:at the time of writing the bus does not support fetching objects by
-	// slab key across all buckets at once, therefor we have to list all buckets
-	// and loop over them, revisit on the next major release
-	buckets, err := m.ap.bus.ListBuckets(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%w; failed to list buckets", err)
-	}
-
-	// fetch all objects per bucket
-	idsPerBucket := make(map[string][]string)
-	for _, bucket := range buckets {
-		objects, err := m.ap.bus.ObjectsBySlabKey(ctx, bucket.Name, key)
-		if err != nil {
-			m.logger.Errorf("failed to fetch objects for slab key in bucket %v; %w", bucket, err)
-			continue
-		} else if len(objects) == 0 {
-			continue
-		}
-
-		idsPerBucket[bucket.Name] = make([]string, len(objects))
-		for i, object := range objects {
-			idsPerBucket[bucket.Name][i] = object.Name
-		}
-	}
-
-	return idsPerBucket, nil
 }

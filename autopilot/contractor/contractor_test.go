@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
@@ -87,6 +88,80 @@ func TestRenewFundingEstimate(t *testing.T) {
 				t.Errorf("expected %v but got %v", test.expected, renterFunds)
 			}
 		})
+	}
+}
+
+func TestShouldArchive(t *testing.T) {
+	c := Contractor{revisionSubmissionBuffer: 5}
+
+	// dummy network
+	var n consensus.Network
+	n.HardforkV2.AllowHeight = 10
+	n.HardforkV2.RequireHeight = 20
+
+	// dummy contract
+	c1 := contract{
+		ContractMetadata: api.ContractMetadata{
+			State:          api.ContractStateActive,
+			StartHeight:    0,
+			WindowStart:    30,
+			WindowEnd:      35,
+			RevisionNumber: 1,
+			V2:             true,
+		},
+		Revision: &api.Revision{
+			V2FileContract: types.V2FileContract{
+				RevisionNumber: 1,
+			},
+		},
+	}
+
+	err := c.shouldArchive(c1, 25, n)
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	}
+	err = c.shouldArchive(c1, 26, n)
+	if err != errContractExpired {
+		t.Fatal("unexpected error", err)
+	}
+
+	// max revision number
+	c1.Revision.RevisionNumber = math.MaxUint64
+	err = c.shouldArchive(c1, 2, n)
+	if err != errContractMaxRevisionNumber {
+		t.Fatal("unexpected error", err)
+	}
+	c1.Revision.RevisionNumber = 1
+
+	// max revision number
+	c1.RevisionNumber = math.MaxUint64
+	err = c.shouldArchive(c1, 2, n)
+	if err != errContractMaxRevisionNumber {
+		t.Fatal("unexpected error", err)
+	}
+	c1.RevisionNumber = 1
+
+	// not confirmed
+	c1.State = api.ContractStatePending
+	err = c.shouldArchive(c1, ContractConfirmationDeadline, n)
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	}
+	err = c.shouldArchive(c1, ContractConfirmationDeadline+1, n)
+	if err != errContractNotConfirmed {
+		t.Fatal("unexpected error", err)
+	}
+	c1.State = api.ContractStateActive
+
+	// passed v2 require height
+	c1.V2 = false
+	err = c.shouldArchive(c1, 19, n)
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	}
+	err = c.shouldArchive(c1, 20, n)
+	if err != errContractBeyondV2RequireHeight {
+		t.Fatal("unexpected error", err)
 	}
 }
 
