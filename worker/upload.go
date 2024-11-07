@@ -107,7 +107,7 @@ type (
 
 		mem memory.Memory
 
-		errs HostErrorSet
+		errs utils.HostErrorSet
 	}
 
 	candidate struct {
@@ -820,7 +820,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 		candidates: candidates,
 		numSectors: uint64(len(shards)),
 
-		errs: make(HostErrorSet),
+		errs: make(utils.HostErrorSet),
 	}, responseChan
 }
 

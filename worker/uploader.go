@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/locking"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
@@ -273,7 +274,7 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	}
 
 	// defer the release
-	lock := newContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
+	lock := locking.NewContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
 	defer func() {
 		ctx, cancel := context.WithTimeout(u.shutdownCtx, 10*time.Second)
 		lock.Release(ctx)
