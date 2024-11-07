@@ -263,7 +263,7 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	}()
 
 	// acquire contract lock
-	lock, err := locking.NewContractLock(u.shutdownCtx, fcid, lockingPriorityUpload, u.cl, u.logger)
+	lock, err := locking.NewContractLock(req.sector.ctx, fcid, lockingPriorityUpload, u.cl, u.logger)
 	if err != nil {
 		return 0, fmt.Errorf("%w; %w", errAcquireContractFailed, err)
 	}

@@ -80,7 +80,7 @@ func NewContractLock(ctx context.Context, fcid types.FileContractID, priority in
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
 	cl := &ContractLock{
 		lockID: lockID,
 		fcid:   fcid,
