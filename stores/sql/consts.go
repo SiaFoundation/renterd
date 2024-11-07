@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	ErrInvalidContractState = errors.New("invalid contract state")
+	ErrInvalidContractState     = errors.New("invalid contract state")
+	ErrInvalidContractUsability = errors.New("invalid contract usability")
 )
 
 type ContractState uint8
@@ -40,8 +41,6 @@ func ContractStateFromString(state string) ContractState {
 
 func (s *ContractState) LoadString(state string) error {
 	switch strings.ToLower(state) {
-	case api.ContractStateInvalid:
-		*s = contractStateInvalid
 	case api.ContractStatePending:
 		*s = contractStatePending
 	case api.ContractStateActive:
@@ -71,5 +70,51 @@ func (s ContractState) String() string {
 		return api.ContractStateFailed
 	default:
 		return api.ContractStateUnknown
+	}
+}
+
+type ContractUsability uint8
+
+const (
+	contractUsabilityInvalid ContractUsability = iota
+	contractUsabilityBad
+	contractUsabilityGoodForRenew
+)
+
+func ContractUsabilityFromString(usability string) ContractUsability {
+	switch strings.ToLower(usability) {
+	case api.ContractUsabilityBad:
+		return contractUsabilityBad
+	case api.ContractUsabilityGoodForRenew:
+		return contractUsabilityGoodForRenew
+	default:
+		return contractUsabilityInvalid
+	}
+}
+
+func (s *ContractUsability) LoadString(usability string) error {
+	switch strings.ToLower(usability) {
+	case api.ContractUsabilityInvalid:
+		*s = contractUsabilityInvalid
+	case api.ContractUsabilityBad:
+		*s = contractUsabilityBad
+	case api.ContractUsabilityGoodForRenew:
+		*s = contractUsabilityGoodForRenew
+	default:
+		return ErrInvalidContractUsability
+	}
+	return nil
+}
+
+func (s ContractUsability) String() string {
+	switch s {
+	case contractUsabilityInvalid:
+		return api.ContractUsabilityInvalid
+	case contractUsabilityBad:
+		return api.ContractUsabilityBad
+	case contractUsabilityGoodForRenew:
+		return api.ContractUsabilityGoodForRenew
+	default:
+		return api.ContractUsabilityInvalid
 	}
 }

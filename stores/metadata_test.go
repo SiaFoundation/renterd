@@ -389,6 +389,7 @@ func TestSQLContractStore(t *testing.T) {
 		Size:           4,
 		StartHeight:    5,
 		State:          api.ContractStateActive,
+		Usability:      api.ContractUsabilityInvalid,
 		WindowStart:    6,
 		WindowEnd:      7,
 
@@ -658,6 +659,7 @@ func newTestContract(fcid types.FileContractID, hk types.PublicKey) api.Contract
 		ID:                 fcid,
 		HostKey:            hk,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityInvalid,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
 	}
@@ -835,6 +837,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		ID:                 fcid1,
 		HostKey:            hk1,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityInvalid,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
 	}
@@ -857,6 +860,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		ID:                 fcid2,
 		HostKey:            hk2,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityInvalid,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
 	}
@@ -4783,6 +4787,7 @@ func TestPutContract(t *testing.T) {
 		Size:           6,
 		StartHeight:    7,
 		State:          api.ContractStateComplete,
+		Usability:      api.ContractUsabilityInvalid,
 		WindowStart:    8,
 		WindowEnd:      9,
 
@@ -4822,6 +4827,7 @@ func TestPutContract(t *testing.T) {
 		Size:           21,
 		StartHeight:    22,
 		State:          api.ContractStateFailed,
+		Usability:      api.ContractUsabilityInvalid,
 		WindowStart:    23,
 		WindowEnd:      24,
 
