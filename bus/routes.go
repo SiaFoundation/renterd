@@ -1629,9 +1629,40 @@ func (b *Bus) slabHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) slabHandlerPUT(jc jape.Context) {
-	var usr api.UpdateSlabRequest
-	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.store.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet))
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	var sectors []api.UploadedSector
+	if jc.Decode(&sectors) != nil {
+		return
+	}
+
+	// validate the sectors
+	for _, s := range sectors {
+		if s.Root == (types.Hash256{}) {
+			jc.Error(errors.New("root can not be empty"), http.StatusBadRequest)
+			return
+		} else if s.ContractID == (types.FileContractID{}) {
+			jc.Error(errors.New("contractID can not be empty"), http.StatusBadRequest)
+			return
+		}
+	}
+
+	err := b.store.UpdateSlab(jc.Request.Context(), key, sectors)
+	if errors.Is(err, api.ErrSlabNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrUnknownSector) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(fmt.Errorf("%v: %w", "couldn't update slab", err), http.StatusInternalServerError)
+		return
 	}
 }
 

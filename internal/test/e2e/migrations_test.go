@@ -46,7 +46,10 @@ func TestMigrations(t *testing.T) {
 		used := make(map[types.PublicKey]struct{})
 		for _, slab := range res.Object.Slabs {
 			for _, sector := range slab.Shards {
-				used[sector.LatestHost] = struct{}{}
+				for hk := range sector.Contracts {
+					used[hk] = struct{}{}
+					break
+				}
 			}
 		}
 		return used
@@ -89,9 +92,7 @@ func TestMigrations(t *testing.T) {
 		hosts := make(map[types.PublicKey]struct{})
 		roots := make(map[types.Hash256]struct{})
 		for _, shard := range slab.Shards {
-			if shard.LatestHost == (types.PublicKey{}) {
-				t.Fatal("latest host should be set")
-			} else if len(shard.Contracts) == 0 {
+			if len(shard.Contracts) == 0 {
 				t.Fatal("each shard should have > 0 hosts")
 			}
 			for hpk, contracts := range shard.Contracts {

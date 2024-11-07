@@ -13,9 +13,8 @@ import (
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Contracts  map[types.PublicKey][]types.FileContractID `json:"contracts"`
-	LatestHost types.PublicKey                            `json:"latestHost"`
-	Root       types.Hash256                              `json:"root"`
+	Contracts map[types.PublicKey][]types.FileContractID `json:"contracts"`
+	Root      types.Hash256                              `json:"root"`
 }
 
 // A Slab is raw data that has been erasure-encoded into sector-sized shards,
@@ -49,24 +48,6 @@ func NewPartialSlab(ec EncryptionKey, minShards uint8) Slab {
 		MinShards:     minShards,
 		Shards:        nil,
 	}
-}
-
-// ContractsFromShards is a helper to extract all contracts used by a set of
-// shards.
-func ContractsFromShards(shards []Sector) []types.FileContractID {
-	var usedContracts []types.FileContractID
-	usedMap := make(map[types.FileContractID]struct{})
-	for _, shard := range shards {
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, exists := usedMap[fcid]; !exists {
-					usedContracts = append(usedContracts, fcid)
-				}
-				usedMap[fcid] = struct{}{}
-			}
-		}
-	}
-	return usedContracts
 }
 
 func (s Slab) Contracts() []types.FileContractID {

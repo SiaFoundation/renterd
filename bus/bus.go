@@ -273,7 +273,7 @@ type (
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 	}
 
 	// A MetricsStore stores metrics.
@@ -498,7 +498,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
+		"PUT    /slab/:key":           b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,
 		"GET    /stats/objects": b.objectsStatshandlerGET,
