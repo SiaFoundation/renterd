@@ -41,7 +41,7 @@ func TestUpload(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestUpload(t *testing.T) {
 
 	// try and upload into a bucket that does not exist
 	params.bucket = "doesnotexist"
-	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected bucket not found error", err)
 	}
@@ -120,7 +120,7 @@ func TestUpload(t *testing.T) {
 	// upload data using a cancelled context - assert we don't hang
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = ul.Upload(ctx, bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err = ul.Upload(ctx, bytes.NewReader(data), w.Contracts(), params)
 	if err == nil || !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	data := frand.Bytes(128)
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// upload the packed slab
 	mem := mm.AcquireMemory(context.Background(), params.rs.SlabSize())
-	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.Contracts(), 0, lockingPriorityUpload)
+	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.Contracts(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestMigrateLostSector(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestMigrateLostSector(t *testing.T) {
 
 	// migrate the shard away from the bad host
 	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestUploadShards(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestUploadShards(t *testing.T) {
 
 	// migrate those shards away from bad hosts
 	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +685,7 @@ func TestUploadSingleSectorSlowHosts(t *testing.T) {
 	params.rs.TotalShards = totalShards
 
 	// upload data
-	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}

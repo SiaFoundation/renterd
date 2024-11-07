@@ -74,12 +74,17 @@ func (cl *ContractLock) Release(ctx context.Context) error {
 	return cl.locker.ReleaseContract(ctx, cl.fcid, cl.lockID)
 }
 
-func NewContractLock(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration, locker ContractLocker, logger *zap.SugaredLogger) *ContractLock {
+func NewContractLock(ctx context.Context, fcid types.FileContractID, priority int, locker ContractLocker, logger *zap.SugaredLogger) (*ContractLock, error) {
+	duration := 30 * time.Second
+	lockID, err := locker.AcquireContract(ctx, fcid, priority, duration)
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	cl := &ContractLock{
 		lockID: lockID,
 		fcid:   fcid,
-		d:      d,
+		d:      duration,
 		locker: locker,
 		logger: logger,
 
@@ -91,5 +96,5 @@ func NewContractLock(ctx context.Context, fcid types.FileContractID, lockID uint
 		cl.keepaliveLoop()
 		cl.stopWG.Done()
 	}()
-	return cl
+	return cl, nil
 }

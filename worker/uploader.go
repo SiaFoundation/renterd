@@ -113,11 +113,6 @@ outer:
 				continue
 			}
 
-			// sanity check lock duration and priority are set
-			if req.contractLockDuration == 0 || req.contractLockPriority == 0 {
-				panic("lock duration and priority can't be 0") // developer error
-			}
-
 			// execute it
 			start := time.Now()
 			duration, err := u.execute(req)
@@ -268,13 +263,10 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 	}()
 
 	// acquire contract lock
-	lockID, err := u.cl.AcquireContract(req.sector.ctx, fcid, req.contractLockPriority, req.contractLockDuration)
+	lock, err := locking.NewContractLock(u.shutdownCtx, fcid, lockingPriorityUpload, u.cl, u.logger)
 	if err != nil {
 		return 0, fmt.Errorf("%w; %w", errAcquireContractFailed, err)
 	}
-
-	// defer the release
-	lock := locking.NewContractLock(u.shutdownCtx, fcid, lockID, req.contractLockDuration, u.cl, u.logger)
 	defer func() {
 		ctx, cancel := context.WithTimeout(u.shutdownCtx, 10*time.Second)
 		lock.Release(ctx)

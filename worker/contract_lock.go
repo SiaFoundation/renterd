@@ -17,11 +17,7 @@ type ContractLocker interface {
 var _ ContractLocker = (Bus)(nil)
 
 func (w *Worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ *locking.ContractLock, err error) {
-	lockID, err := w.bus.AcquireContract(ctx, fcid, priority, w.contractLockingDuration)
-	if err != nil {
-		return nil, err
-	}
-	return locking.NewContractLock(w.shutdownCtx, fcid, lockID, w.contractLockingDuration, w.bus, w.logger), nil
+	return locking.NewContractLock(w.shutdownCtx, fcid, priority, w.bus, w.logger)
 }
 
 func (w *Worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
