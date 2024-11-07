@@ -4,11 +4,12 @@ ALTER TABLE host_checks DROP COLUMN db_autopilot_id;
 ALTER TABLE host_checks DROP INDEX idx_host_checks_id;
 ALTER TABLE host_checks ADD UNIQUE INDEX idx_host_checks_id (db_host_id);
 
--- create autopilot_state table & insert blank state object
-CREATE TABLE `autopilot_state` (
+-- create autopilot table & insert blank state object
+CREATE TABLE `autopilot` (
   `id` bigint unsigned NOT NULL DEFAULT 1,
   `created_at` datetime(3) DEFAULT NULL,
   `current_period` bigint unsigned DEFAULT 0,
+  `enabled` boolean NOT NULL DEFAULT false,
 
   `contracts_set` varchar(191) DEFAULT NULL,
   `contracts_amount` bigint unsigned DEFAULT NULL,

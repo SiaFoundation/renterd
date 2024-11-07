@@ -21,8 +21,8 @@ const (
 	factor           = 1.8 // factor ^ retryAttempts = backoff time in milliseconds
 	maxBackoff       = 15 * time.Second
 
-	AutopilotStateID = 1
-	ConsensusInfoID  = 1
+	AutopilotID     = 1
+	ConsensusInfoID = 1
 )
 
 var (

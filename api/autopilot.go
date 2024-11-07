@@ -14,24 +14,15 @@ const (
 )
 
 var (
-	// ErrAutopilotStateNotFound is returned when the database is missing the
-	// autopilot state object.
-	ErrAutopilotStateNotFound = errors.New("couldn't find autopilot state")
-
 	// ErrMaxDowntimeHoursTooHigh is returned if the contracts config is updated
 	// with a value that exceeds the maximum of 99 years.
 	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
 )
 
 type (
-	// AutopilotState contains state related to the autopilot.
-	AutopilotState struct {
-		CurrentPeriod uint64 `json:"currentPeriod"`
-		AutopilotConfig
-	}
-
 	// AutopilotConfig contains configuration settings for the autopilot.
 	AutopilotConfig struct {
+		Enabled   bool            `json:"enabled"`
 		Contracts ContractsConfig `json:"contracts"`
 		Hosts     HostsConfig     `json:"hosts"`
 	}
@@ -57,12 +48,6 @@ type (
 	}
 )
 
-// EndHeight of a contract taking the current period and renew window into
-// account.
-func (as *AutopilotState) EndHeight() uint64 {
-	return as.CurrentPeriod + as.Contracts.Period + as.Contracts.RenewWindow
-}
-
 type (
 	// AutopilotTriggerRequest is the request object used by the /trigger
 	// endpoint
@@ -79,7 +64,7 @@ type (
 	// AutopilotStateResponse is the response type for the /autopilot/state
 	// endpoint.
 	AutopilotStateResponse struct {
-		Configured         bool        `json:"configured"`
+		Enabled            bool        `json:"enabled"`
 		Migrating          bool        `json:"migrating"`
 		MigratingLastStart TimeRFC3339 `json:"migratingLastStart"`
 		Pruning            bool        `json:"pruning"`
@@ -121,6 +106,17 @@ type (
 		Recommendation *ConfigRecommendation `json:"recommendation,omitempty"`
 	}
 )
+
+func (cc ContractsConfig) Validate() error {
+	if cc.Amount == 0 {
+		return errors.New("amount must be greater than 0")
+	} else if cc.Period == 0 {
+		return errors.New("period must be greater than 0")
+	} else if cc.RenewWindow == 0 {
+		return errors.New("renewWindow must be greater than 0")
+	}
+	return nil
+}
 
 func (hc HostsConfig) Validate() error {
 	if hc.MaxDowntimeHours > 99*365*24 {

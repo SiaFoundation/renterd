@@ -185,7 +185,9 @@ type (
 
 	// A AutopilotStore stores autopilot state.
 	AutopilotStore interface {
-		AutopilotState(ctx context.Context) (api.AutopilotState, error)
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		AutopilotPeriod(ctx context.Context) (uint64, error)
+		InitAutopilot(ctx context.Context) error
 		UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
 		UpdateAutopilotPeriod(ctx context.Context, period uint64) error
 	}
@@ -368,7 +370,7 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 	}
 
 	// ensure autopilot state
-	_, err = store.AutopilotState(ctx)
+	err = store.InitAutopilot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +405,10 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"PUT    /config/autopilot": b.configAutopilotHandlerPUT,
+		"GET    /autopilot/config": b.autopilotConfigHandlerGET,
+		"PUT    /autopilot/config": b.autopilotConfigHandlerPUT,
+		"GET    /autopilot/period": b.autopilotPeriodHandlerGET,
+		"PUT    /autopilot/period": b.autopilotPeriodHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -502,9 +507,6 @@ func (b *Bus) Handler() http.Handler {
 
 		"GET    /state":         b.stateHandlerGET,
 		"GET    /stats/objects": b.objectsStatshandlerGET,
-
-		"GET    /state/autopilot":        b.stateAutopilotHandlerGET,
-		"PUT    /state/autopilot/period": b.stateAutopilotPeriodHandlerPUT,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,

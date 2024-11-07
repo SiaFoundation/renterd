@@ -108,7 +108,7 @@ type (
 		Interactions      HostInteractions   `json:"interactions"`
 		Scanned           bool               `json:"scanned"`
 		Blocked           bool               `json:"blocked"`
-		Checks            HostChecks         `json:"checks"`
+		Checks            *HostChecks        `json:"checks,omitempty"`
 		StoredData        uint64             `json:"storedData"`
 		ResolvedAddresses []string           `json:"resolvedAddresses"`
 		Subnets           []string           `json:"subnets"`

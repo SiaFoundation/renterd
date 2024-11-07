@@ -651,12 +651,15 @@ func (c *TestCluster) MineToRenewWindow() {
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	cfg, err := c.Bus.AutopilotState(context.Background())
+	period, err := c.Bus.AutopilotPeriod(context.Background())
 	c.tt.OK(err)
 
-	renewWindowStart := cfg.CurrentPeriod + cfg.Contracts.Period
+	cfg, err := c.Bus.AutopilotConfig(context.Background())
+	c.tt.OK(err)
+
+	renewWindowStart := period + cfg.Contracts.Period
 	if cs.BlockHeight >= renewWindowStart {
-		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, cfg.CurrentPeriod, cfg.Contracts.Period, renewWindowStart)
+		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, period, cfg.Contracts.Period, renewWindowStart)
 	}
 	c.MineBlocks(renewWindowStart - cs.BlockHeight)
 }

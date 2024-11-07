@@ -191,18 +191,22 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	contract := contracts[0]
 
-	// fetch autopilot state
-	as, err := cluster.Bus.AutopilotState(context.Background())
+	// fetch autopilot config
+	cfg, err := cluster.Bus.AutopilotConfig(context.Background())
 	tt.OK(err)
-	cfg := as.AutopilotConfig
+
+	// fetch current period
+	period, err := cluster.Bus.AutopilotPeriod(context.Background())
+	tt.OK(err)
 
 	// fetch revision
 	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
 	tt.OK(err)
 
 	// verify startHeight and endHeight of the contract.
-	if contract.EndHeight() != as.EndHeight() || revision.EndHeight() != as.EndHeight() {
-		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), as.EndHeight())
+	endHeight := period + cfg.Contracts.Period + cfg.Contracts.RenewWindow
+	if contract.EndHeight() != endHeight || revision.EndHeight() != endHeight {
+		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), endHeight)
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}
@@ -278,7 +282,7 @@ func TestNewTestCluster(t *testing.T) {
 		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		} else if hi.Checks == (api.HostChecks{}) {
+		} else if hi.Checks == nil {
 			t.Fatal("host check not found")
 		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
@@ -301,7 +305,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if hi.Checks == (api.HostChecks{}) {
+		if hi.Checks == nil {
 			t.Fatal("host check not found")
 		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
@@ -348,8 +352,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("autopilot should have completed a scan")
 	} else if state.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
-	} else if !state.Configured {
-		t.Fatal("autopilot should be configured")
+	} else if !state.Enabled {
+		t.Fatal("autopilot should be enabled")
 	}
 
 	// Fetch host

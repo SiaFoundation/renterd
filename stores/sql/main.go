@@ -186,10 +186,10 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
-func AutopilotState(ctx context.Context, tx sql.Tx) (cfg api.AutopilotState, err error) {
+func AutopilotConfig(ctx context.Context, tx sql.Tx) (cfg api.AutopilotConfig, err error) {
 	err = tx.QueryRow(ctx, `
 SELECT
-	current_period,
+	enabled,
 	contracts_set,
 	contracts_amount,
 	contracts_period,
@@ -202,9 +202,9 @@ SELECT
 	hosts_max_downtime_hours,
 	hosts_min_protocol_version,
 	hosts_max_consecutive_scan_failures
-FROM autopilot_state
-WHERE id = ?`, sql.AutopilotStateID).Scan(
-		&cfg.CurrentPeriod,
+FROM autopilot
+WHERE id = ?`, sql.AutopilotID).Scan(
+		&cfg.Enabled,
 		&cfg.Contracts.Set,
 		&cfg.Contracts.Amount,
 		&cfg.Contracts.Period,
@@ -218,10 +218,11 @@ WHERE id = ?`, sql.AutopilotStateID).Scan(
 		&cfg.Hosts.MinProtocolVersion,
 		&cfg.Hosts.MaxConsecutiveScanFailures,
 	)
-	if errors.Is(err, dsql.ErrNoRows) {
-		_, err = tx.Exec(ctx, "INSERT INTO autopilot_state (id, created_at, current_period) VALUES (?, ?, 0);", sql.AutopilotStateID, time.Now())
-		return
-	}
+	return
+}
+
+func AutopilotPeriod(ctx context.Context, tx sql.Tx) (period uint64, err error) {
+	err = tx.QueryRow(ctx, `SELECT current_period FROM autopilot WHERE id = ?`, sql.AutopilotID).Scan(&period)
 	return
 }
 
@@ -823,7 +824,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 SELECT
-	h.id,
 	h.created_at,
 	h.last_announcement,
 	h.public_key,
@@ -881,11 +881,10 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 
 	var hosts []api.Host
 	for rows.Next() {
-		var h api.Host
-		var hostID int64
+		h := api.Host{Checks: &api.HostChecks{}}
 		var pte dsql.NullTime
 		var resolvedAddresses string
-		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
+		err := rows.Scan(&h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
@@ -2125,8 +2124,9 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 
 func UpdateAutopilotConfig(ctx context.Context, tx sql.Tx, cfg api.AutopilotConfig) error {
 	_, err := tx.Exec(ctx, `
-UPDATE autopilot_state
-SET contracts_set = ?,
+UPDATE autopilot
+SET enabled = ?,
+	contracts_set = ?,
 	contracts_amount = ?,
 	contracts_period = ?,
 	contracts_renew_window = ?,
@@ -2139,6 +2139,7 @@ SET contracts_set = ?,
 	hosts_min_protocol_version = ?,
 	hosts_max_consecutive_scan_failures = ?
 WHERE id = ?`,
+		cfg.Enabled,
 		cfg.Contracts.Set,
 		cfg.Contracts.Amount,
 		cfg.Contracts.Period,
@@ -2151,12 +2152,12 @@ WHERE id = ?`,
 		cfg.Hosts.MaxDowntimeHours,
 		cfg.Hosts.MinProtocolVersion,
 		cfg.Hosts.MaxConsecutiveScanFailures,
-		sql.AutopilotStateID)
+		sql.AutopilotID)
 	return err
 }
 
 func UpdateAutopilotPeriod(ctx context.Context, tx sql.Tx, period uint64) error {
-	_, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ? WHERE id = ?`, period, sql.AutopilotStateID)
+	_, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ? WHERE id = ?`, period, sql.AutopilotID)
 	return err
 }
 

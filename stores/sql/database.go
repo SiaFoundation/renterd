@@ -71,8 +71,11 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
-		// AutopilotState returns the autopilot state.
-		AutopilotState(ctx context.Context) (api.AutopilotState, error)
+		// AutopilotConfig returns the autopilot config.
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+
+		// AutopilotPeriod returns the current period.
+		AutopilotPeriod(ctx context.Context) (uint64, error)
 
 		// BanPeer temporarily bans one or more IPs. The addr should either be a
 		// single IP with port (e.g. 1.2.3.4:5678) or a CIDR subnet (e.g.
@@ -165,6 +168,9 @@ type (
 
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
+
+		// InitAutopilot initializes the autopilot state in the database.
+		InitAutopilot(ctx context.Context) error
 
 		// InsertBufferedSlab inserts a buffered slab into the database. This
 		// includes the creation of a buffered slab as well as the corresponding

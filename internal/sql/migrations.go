@@ -344,10 +344,10 @@ var (
 				},
 			},
 			{
-				ID: "00026_autopilot_state",
+				ID: "00026_autopilot",
 				Migrate: func(tx Tx) error {
 					// remove all references to the autopilots table, without dropping the table
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_autopilot_state_1", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_autopilot_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
@@ -361,7 +361,7 @@ var (
 					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
 						log.Warnf("existing autopilot config not valid JSON, err %v", err)
 					} else {
-						res, err := tx.Exec(ctx, `UPDATE autopilot_state SET current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							period,
 							cfg.Contracts.Set,
 							cfg.Contracts.Amount,
@@ -375,7 +375,7 @@ var (
 							cfg.Hosts.MaxDowntimeHours,
 							cfg.Hosts.MinProtocolVersion,
 							cfg.Hosts.MaxConsecutiveScanFailures,
-							AutopilotStateID)
+							AutopilotID)
 						if err != nil {
 							return fmt.Errorf("failed to update autopilot config: %w", err)
 						} else if n, err := res.RowsAffected(); err != nil {
@@ -386,7 +386,7 @@ var (
 					}
 
 					// drop autopilots table
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_autopilot_state_2", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_autopilot_2", log)
 				},
 			},
 		}

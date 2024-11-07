@@ -277,15 +277,6 @@ func (b *Bus) bucketHandlerGET(jc jape.Context) {
 	jc.Encode(bucket)
 }
 
-func (b *Bus) configAutopilotHandlerPUT(jc jape.Context) {
-	var cfg api.AutopilotConfig
-	if jc.Decode(&cfg) != nil {
-		return
-	}
-
-	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
-}
-
 func (b *Bus) walletHandler(jc jape.Context) {
 	address := b.w.Address()
 	balance, err := b.w.Balance()
@@ -1760,26 +1751,46 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (b *Bus) stateAutopilotHandlerGET(jc jape.Context) {
-	state, err := b.store.AutopilotState(jc.Request.Context())
-	if jc.Check("failed to fetch autopilot state", err) != nil {
+func (b *Bus) autopilotConfigHandlerGET(jc jape.Context) {
+	cfg, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot config", err) != nil {
 		return
 	}
-	jc.Encode(state)
+	jc.Encode(cfg)
 }
 
-func (b *Bus) stateAutopilotPeriodHandlerPUT(jc jape.Context) {
+func (b *Bus) autopilotConfigHandlerPUT(jc jape.Context) {
+	var cfg api.AutopilotConfig
+	if jc.Decode(&cfg) != nil {
+		return
+	}
+
+	if cfg.Enabled {
+		err := errors.Join(cfg.Contracts.Validate(), cfg.Hosts.Validate())
+		if err != nil {
+			jc.Error(err, http.StatusBadRequest)
+			return
+		}
+	}
+
+	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
+}
+
+func (b *Bus) autopilotPeriodHandlerGET(jc jape.Context) {
+	period, err := b.store.AutopilotPeriod(jc.Request.Context())
+	if jc.Check("failed to fetch current period", err) != nil {
+		return
+	}
+	jc.Encode(period)
+}
+
+func (b *Bus) autopilotPeriodHandlerPUT(jc jape.Context) {
 	var period uint64
 	if jc.Decode(&period) != nil {
 		return
 	}
 
-	err := b.store.UpdateAutopilotPeriod(jc.Request.Context(), period)
-	if errors.Is(err, api.ErrAutopilotStateNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	jc.Check("failed to update autopilot period", err)
+	jc.Check("failed to update autopilot period", b.store.UpdateAutopilotPeriod(jc.Request.Context(), period))
 }
 
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {

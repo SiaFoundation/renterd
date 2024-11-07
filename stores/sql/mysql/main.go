@@ -193,8 +193,12 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
-func (tx *MainDatabaseTx) AutopilotState(ctx context.Context) (api.AutopilotState, error) {
-	return ssql.AutopilotState(ctx, tx)
+func (tx *MainDatabaseTx) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error) {
+	return ssql.AutopilotConfig(ctx, tx)
+}
+
+func (tx *MainDatabaseTx) AutopilotPeriod(ctx context.Context) (uint64, error) {
+	return ssql.AutopilotPeriod(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
@@ -410,6 +414,11 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 
 func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	return ssql.Hosts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) InitAutopilot(ctx context.Context) error {
+	_, err := tx.Exec(ctx, "INSERT IGNORE INTO autopilot (id, created_at, current_period) VALUES (?, ?, 0);", sql.AutopilotID, time.Now())
+	return err
 }
 
 func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
