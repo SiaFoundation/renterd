@@ -290,9 +290,14 @@ func (k EncryptionKey) String() string {
 
 // Scan scans value into key, implements sql.Scanner interface.
 func (k *EncryptionKey) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal EncryptionKey value:", value))
+	var bytes []byte
+	switch value.(type) {
+	case []byte:
+		bytes = value.([]byte)
+	case string:
+		bytes = []byte(value.(string))
+	default:
+		return errors.New(fmt.Sprintf("failed to unmarshal EncryptionKey value from %t", value))
 	}
 	var ec object.EncryptionKey
 	if err := ec.UnmarshalBinary(bytes); err != nil {
