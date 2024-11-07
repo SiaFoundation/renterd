@@ -301,11 +301,11 @@ func (k EncryptionKey) String() string {
 // Scan scans value into key, implements sql.Scanner interface.
 func (k *EncryptionKey) Scan(value interface{}) error {
 	var bytes []byte
-	switch value.(type) {
+	switch v := value.(type) {
 	case []byte:
-		bytes = value.([]byte)
+		bytes = v
 	case string:
-		bytes = []byte(value.(string))
+		bytes = []byte(v)
 	default:
 		return errors.New(fmt.Sprintf("failed to unmarshal EncryptionKey value from %t", value))
 	}
