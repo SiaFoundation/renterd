@@ -339,6 +339,12 @@ var (
 				},
 			},
 			{
+				ID: "00019_scan_reset",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_scan_reset", log)
+				},
+			},
+			{
 				ID: "00026_key_prefix",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_key_prefix", log)
