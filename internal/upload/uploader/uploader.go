@@ -218,6 +218,7 @@ outer:
 				FCID: u.fcid,
 				HK:   u.hk,
 				Err:  err,
+				Req:  req,
 			}:
 			}
 		}
@@ -451,6 +452,7 @@ func (req *SectorUploadReq) finish(err error) {
 	case <-req.Ctx.Done():
 	case req.ResponseChan <- SectorUploadResp{
 		Err: err,
+		Req: req,
 	}:
 	}
 }
