@@ -2628,8 +2628,7 @@ func TestDownloadAllHosts(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		logger:        newTestLogger(false),
-		hosts:         test.RedundancySettings.TotalShards,
+		hosts:         rs.TotalShards,
 		uploadPacking: false, // make sure data is uploaded
 	})
 	defer cluster.Shutdown()
@@ -2665,7 +2664,7 @@ func TestDownloadAllHosts(t *testing.T) {
 			}
 		}
 	}
-	if len(usedHosts) != test.RedundancySettings.TotalShards {
+	if len(usedHosts) != rs.TotalShards {
 		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
 	}
 
