@@ -7,14 +7,13 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"lukechampine.com/frand"
 )
 
 func TestUploadingSectorsCache(t *testing.T) {
 	sc := NewSectorsCache()
 
-	uID1 := newTestUploadID()
-	uID2 := newTestUploadID()
+	uID1 := api.UploadID{1}
+	uID2 := api.UploadID{2}
 
 	sc.StartUpload(uID1)
 	sc.StartUpload(uID2)
@@ -33,12 +32,25 @@ func TestUploadingSectorsCache(t *testing.T) {
 			t.Fatal("wrong sectors")
 		}
 	}
+	assertAllSectors := func(expected []types.Hash256) {
+		t.Helper()
+		expectedMap := make(map[types.Hash256]struct{})
+		for _, root := range expected {
+			expectedMap[root] = struct{}{}
+		}
+		if sectors := sc.Sectors(); len(sectors) != len(expected) {
+			t.Fatalf("unexpected num of sectors: %v %v", len(sectors), len(expected))
+		}
+		for _, root := range sc.Sectors() {
+			if _, exists := expectedMap[root]; !exists {
+				t.Fatalf("unexpected sector: %v", root)
+			}
+		}
+	}
 
 	assertSectors(uID1, []types.Hash256{{1}, {2}})
 	assertSectors(uID2, []types.Hash256{{3}})
-	if !reflect.DeepEqual(sc.Sectors(), []types.Hash256{{1}, {2}, {3}}) {
-		t.Fatal("wrong sectors")
-	}
+	assertAllSectors([]types.Hash256{{1}, {2}, {3}})
 	if o1, exists := sc.uploads[uID1]; !exists || o1.started.IsZero() {
 		t.Fatal("unexpected")
 	}
@@ -67,10 +79,4 @@ func TestUploadingSectorsCache(t *testing.T) {
 	if len(sc.Sectors()) != 0 {
 		t.Fatal("shouldn't have any sectors")
 	}
-}
-
-func newTestUploadID() api.UploadID {
-	var uID api.UploadID
-	frand.Read(uID[:])
-	return uID
 }
