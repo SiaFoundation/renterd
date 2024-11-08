@@ -214,7 +214,7 @@ type (
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
-		UsableHosts(ctx context.Context, gc gouging.Checker, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context, minWindowStart uint64) ([]sql.HostInfo, error)
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -274,7 +274,7 @@ type (
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
 		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 	}
 
 	// A MetricsStore stores metrics.
@@ -499,7 +499,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
+		"PUT    /slab/:key":           b.slabHandlerPUT,
 
 		"GET    /state":         b.stateHandlerGET,
 		"GET    /stats/objects": b.objectsStatshandlerGET,

@@ -34,7 +34,7 @@ func TestGouging(t *testing.T) {
 	cluster.WaitForAccounts()
 
 	// assert all hosts are usable
-	h, err := b.UsableHosts(context.Background(), api.UsableHostOptions{})
+	h, err := b.UsableHosts(context.Background())
 	tt.OK(err)
 	if len(h) != n {
 		t.Fatal("unexpected number of hosts")
@@ -88,8 +88,8 @@ func TestGouging(t *testing.T) {
 	// again, this is necessary for the host to be considered price gouging
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
-	// assert all hosts are usable
-	h, err = b.UsableHosts(context.Background(), api.UsableHostOptions{})
+	// assert all but one host are usable
+	h, err = b.UsableHosts(context.Background())
 	tt.OK(err)
 	if len(h) != n-1 {
 		t.Fatal("unexpected number of hosts", len(h))

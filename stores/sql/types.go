@@ -207,8 +207,13 @@ func (h Hash256) Value() (driver.Value, error) {
 
 // Scan scan value into HostSettings, implements sql.Scanner interface.
 func (hs *HostSettings) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
 		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
 	}
 	return json.Unmarshal(bytes, hs)
@@ -224,8 +229,13 @@ func (hs HostSettings) Value() (driver.Value, error) {
 
 // Scan scan value into PriceTable, implements sql.Scanner interface.
 func (pt *PriceTable) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
 		return errors.New(fmt.Sprint("failed to unmarshal PriceTable value:", value))
 	}
 	return json.Unmarshal(bytes, pt)
@@ -290,9 +300,14 @@ func (k EncryptionKey) String() string {
 
 // Scan scans value into key, implements sql.Scanner interface.
 func (k *EncryptionKey) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal EncryptionKey value:", value))
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New(fmt.Sprintf("failed to unmarshal EncryptionKey value from %t", value))
 	}
 	var ec object.EncryptionKey
 	if err := ec.UnmarshalBinary(bytes); err != nil {

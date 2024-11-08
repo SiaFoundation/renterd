@@ -22,7 +22,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -38,6 +37,12 @@ var (
 
 // helper types
 type (
+	HostInfo struct {
+		api.HostInfo
+		HS rhpv2.HostSettings
+		PT rhpv3.HostPriceTable
+	}
+
 	multipartUpload struct {
 		ID       int64
 		Key      string
@@ -67,6 +72,8 @@ type (
 		// selected and scanned by passing them to the method as 'others'.
 		ScanObjectMetadata(s Scanner, others ...any) (md api.ObjectMetadata, err error)
 		SelectObjectMetadataExpr() string
+
+		UpsertContractSectors(ctx context.Context, contractSectors []ContractSector) error
 	}
 )
 
@@ -174,13 +181,9 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	}
 
 	// archive contract
-	res, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
+	_, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
 	if err != nil {
 		return fmt.Errorf("failed to archive contract: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to fetch rows affected: %w", err)
-	} else if n == 0 {
-		return fmt.Errorf("expected to update 1 row, updated %d", n)
 	}
 
 	// delete its sectors
@@ -409,7 +412,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	return sizes, nil
 }
 
-func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata, dstDirID int64) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
 	if err != nil {
@@ -468,9 +471,9 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 
 	// copy object
 	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
-						SELECT ?, ?, db_directory_id, ?, `+"`key`"+`, size, ?, etag
+						SELECT ?, ?, ?, ?, `+"`key`"+`, size, ?, etag
 						FROM objects
-						WHERE id = ?`, time.Now(), dstKey, dstBID, mimeType, srcObjID)
+						WHERE id = ?`, time.Now(), dstKey, dstDirID, dstBID, mimeType, srcObjID)
 	if err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -512,6 +515,10 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 	} else if !empty {
 		return api.ErrBucketNotEmpty
 	}
+	_, err = tx.Exec(ctx, "DELETE FROM directories WHERE db_bucket_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete bucket: %w", err)
+	}
 	_, err = tx.Exec(ctx, "DELETE FROM buckets WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete bucket: %w", err)
@@ -520,25 +527,6 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 }
 
 func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root types.Hash256) (int, error) {
-	// update the latest_host field of the sector
-	_, err := tx.Exec(ctx, `
-		UPDATE sectors
-		SET latest_host = COALESCE((
-			SELECT * FROM (
-				SELECT c.host_key
-				FROM contracts c
-				INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-				INNER JOIN sectors s ON s.id = cs.db_sector_id
-				WHERE s.root = ? AND c.host_key != ? AND c.archival_reason IS NULL
-				LIMIT 1
-			) AS _
-		), ?)
-		WHERE root = ? AND latest_host = ?
-	`, Hash256(root), PublicKey(hk), PublicKey{}, Hash256(root), PublicKey(hk))
-	if err != nil {
-		return 0, fmt.Errorf("failed to update sector: %w", err)
-	}
-
 	// remove potential links between the host's contracts and the sector
 	res, err := tx.Exec(ctx, `
 		DELETE FROM contract_sectors
@@ -1442,19 +1430,17 @@ func NormalizePeer(peer string) (string, error) {
 	return normalized.String(), nil
 }
 
-func dirID(ctx context.Context, tx sql.Tx, dirPath string) (int64, error) {
-	if !strings.HasPrefix(dirPath, "/") {
+func dirID(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
+	if bucket == "" {
+		return 0, fmt.Errorf("bucket must be set")
+	} else if !strings.HasPrefix(path, "/") {
 		return 0, fmt.Errorf("path must start with /")
-	} else if !strings.HasSuffix(dirPath, "/") {
+	} else if !strings.HasSuffix(path, "/") {
 		return 0, fmt.Errorf("path must end with /")
 	}
 
-	if dirPath == "/" {
-		return 1, nil // root dir returned
-	}
-
 	var id int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE name = ?", dirPath).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE db_bucket_id = (SELECT id FROM buckets WHERE name = ?) AND name = ?", bucket, path).Scan(&id); err != nil {
 		return 0, fmt.Errorf("failed to fetch directory: %w", err)
 	}
 	return id, nil
@@ -1815,6 +1801,112 @@ WHERE h.recent_downtime >= ? AND h.recent_scan_failures >= ?`, DurationMS(maxDow
 	return res.RowsAffected()
 }
 
+// RenameDirectories renames all directories in the database with the given
+// prefix to the new prefix.
+func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefixNew string) (int64, error) {
+	// sanity check input
+	if !strings.HasPrefix(prefixNew, "/") {
+		return 0, errors.New("paths has to have a leading slash")
+	} else if bucket == "" {
+		return 0, errors.New("bucket cannot be empty")
+	}
+
+	// prepare statements
+	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer queryDirStmt.Close()
+
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer insertStmt.Close()
+
+	updateNameStmt, err := tx.Prepare(ctx, "UPDATE directories SET name = ? WHERE id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateNameStmt.Close()
+
+	updateParentStmt, err := tx.Prepare(ctx, "UPDATE directories SET db_parent_id = ? WHERE db_parent_id = ?")
+	if err != nil {
+		return 0, err
+	}
+	defer updateParentStmt.Close()
+
+	// fetch bucket id
+	var bucketID int64
+	err = tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// fetch destination directories
+	directories := make(map[int64]string)
+	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = ? ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucketID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return 0, err
+		}
+		directories[id] = strings.Replace(name, prefixOld, prefixNew, 1)
+	}
+
+	// update existing directories
+	for id, name := range directories {
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, name, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, err
+		} else if existingID > 0 {
+			if _, err := updateParentStmt.Exec(ctx, existingID, id); err != nil {
+				return 0, err
+			}
+		} else {
+			if _, err := updateNameStmt.Exec(ctx, name, id); err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	// insert new directories
+	var dirID *int64
+	dirs := object.Directories(prefixNew)
+	if strings.HasSuffix(prefixNew, "/") {
+		dirs = append(dirs, prefixNew)
+	}
+	for _, dir := range dirs {
+		// check if the directory exists
+		var existingID int64
+		if err := queryDirStmt.QueryRow(ctx, dir, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if existingID > 0 {
+			dirID = &existingID
+			continue
+		}
+
+		// insert directory
+		if res, err := insertStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
+			return 0, fmt.Errorf("failed to create directory %v %v: %w", dirID, dir, err)
+		} else if insertedID, err := res.LastInsertId(); err != nil {
+			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
+		} else if insertedID == 0 {
+			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
+		} else {
+			dirID = &insertedID
+		}
+	}
+	return *dirID, nil
+}
+
 func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereArgs []any) ([]api.ContractMetadata, error) {
 	var whereExpr string
 	if len(whereExprs) > 0 {
@@ -1926,7 +2018,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 
 	// fetch sectors
 	rows, err := tx.Query(ctx, `
-		SELECT id, latest_host, root
+		SELECT id, root
 		FROM sectors s
 		WHERE s.db_slab_id = ?
 		ORDER BY s.slab_index
@@ -1940,7 +2032,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	for rows.Next() {
 		var sectorID int64
 		var sector object.Sector
-		if err := rows.Scan(&sectorID, (*PublicKey)(&sector.LatestHost), (*Hash256)(&sector.Root)); err != nil {
+		if err := rows.Scan(&sectorID, (*Hash256)(&sector.Root)); err != nil {
 			return object.Slab{}, fmt.Errorf("failed to scan sector: %w", err)
 		}
 		slab.Shards = append(slab.Shards, sector)
@@ -2123,6 +2215,72 @@ func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer
 	return nil
 }
 
+func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []api.UploadedSector) error {
+	// update slab
+	res, err := tx.Exec(ctx, `
+		UPDATE slabs
+		SET health_valid_until = ?, health = ?
+		WHERE `+"`key`"+` = ?
+	`, time.Now().Unix(), 1, EncryptionKey(key))
+	if err != nil {
+		return err
+	} else if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return api.ErrSlabNotFound
+	}
+
+	// fetch sectors
+	rows, err := tx.Query(ctx, "SELECT s.id, s.root FROM sectors s INNER JOIN slabs sl ON s.db_slab_id = sl.id WHERE sl.key = ? ORDER BY s.slab_index ASC", EncryptionKey(key))
+	if err != nil {
+		return fmt.Errorf("failed to fetch sectors: %w", err)
+	}
+	defer rows.Close()
+
+	sectors := make(map[types.Hash256]int64)
+	for rows.Next() {
+		var id int64
+		var root Hash256
+		if err := rows.Scan(&id, &root); err != nil {
+			return fmt.Errorf("failed to scan sector id: %w", err)
+		}
+		sectors[types.Hash256(root)] = id
+	}
+
+	// check sectors
+	var fcids []types.FileContractID
+	for _, s := range updated {
+		if _, ok := sectors[s.Root]; !ok {
+			return api.ErrUnknownSector
+		}
+		fcids = append(fcids, s.ContractID)
+	}
+
+	// fetch contracts
+	contracts, err := FetchUsedContracts(ctx, tx, fcids)
+	if err != nil {
+		return err
+	}
+
+	// build contract <-> sector links
+	var upsert []ContractSector
+	for _, sector := range updated {
+		contract, ok := contracts[sector.ContractID]
+		if !ok {
+			return api.ErrContractNotFound
+		}
+		sectorID, ok := sectors[sector.Root]
+		if !ok {
+			panic("sector not found") // developer error (already asserted)
+		}
+		upsert = append(upsert, ContractSector{
+			ContractID: contract.ID,
+			SectorID:   sectorID,
+		})
+	}
+	return tx.UpsertContractSectors(ctx, upsert)
+}
+
 func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
 	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
 	if err != nil {
@@ -2161,14 +2319,7 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 	return
 }
 
-func UsableHosts(ctx context.Context, tx sql.Tx, gc gouging.Checker, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error) {
-	// handle input parameters
-	if offset < 0 {
-		return nil, ErrNegativeOffset
-	} else if limit == 0 || limit == -1 {
-		limit = math.MaxInt64
-	}
-
+func UsableHosts(ctx context.Context, tx sql.Tx, minWindowStart uint64) ([]HostInfo, error) {
 	// only include contracts with a window start greater than the given value
 	var whereExprs []string
 	whereExprs = append(whereExprs, "c.window_start > ?")
@@ -2225,15 +2376,13 @@ EXISTS (
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
 	WHERE %s
-	GROUP by h.id
-	ORDER BY MAX(hc.score_age) * MAX(hc.score_collateral) * MAX(hc.score_interactions) * MAX(hc.score_storage_remaining) * MAX(hc.score_uptime) * MAX(hc.score_version) * MAX(hc.score_prices) DESC
-	LIMIT ? OFFSET ?`, strings.Join(whereExprs, " AND ")), autopilotID, minWindowStart, autopilotID, limit, offset)
+	GROUP by h.id`, strings.Join(whereExprs, " AND ")), autopilotID, minWindowStart, autopilotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
 	defer rows.Close()
 
-	var hosts []api.HostInfo
+	var hosts []HostInfo
 	for rows.Next() {
 		var hk PublicKey
 		var addr, port string
@@ -2245,23 +2394,20 @@ EXISTS (
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		// exclude hosts that are gouging
-		hss := rhpv2.HostSettings(hs)
-		hpt := rhpv3.HostPriceTable(pt)
-		if gc.Check(&hss, &hpt).Gouging() {
-			continue
-		}
-
 		// exclude hosts with invalid address
 		host, _, err := net.SplitHostPort(addr)
 		if err != nil || host == "" {
 			continue
 		}
 
-		hosts = append(hosts, api.HostInfo{
-			ContractID: types.FileContractID(fcid),
-			PublicKey:  types.PublicKey(hk),
-			SiamuxAddr: net.JoinHostPort(host, port),
+		hosts = append(hosts, HostInfo{
+			api.HostInfo{
+				ContractID: types.FileContractID(fcid),
+				PublicKey:  types.PublicKey(hk),
+				SiamuxAddr: net.JoinHostPort(host, port),
+			},
+			rhpv2.HostSettings(hs),
+			rhpv3.HostPriceTable(pt),
 		})
 	}
 	return hosts, nil
@@ -2433,7 +2579,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	}
 
 	// stmt to add sector
-	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?)")
+	sectorStmt, err := tx.Prepare(ctx, "INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?)")
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare statement to insert sectors: %w", err)
 	}
@@ -2449,7 +2595,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	// insert shards
 	for i := range slab.Shards {
 		// insert shard
-		res, err := sectorStmt.Exec(ctx, slabID, i+1, PublicKey(slab.Shards[i].LatestHost), slab.Shards[i].Root[:])
+		res, err := sectorStmt.Exec(ctx, slabID, i+1, slab.Shards[i].Root[:])
 		if err != nil {
 			return "", fmt.Errorf("failed to insert sector: %w", err)
 		}
@@ -2458,17 +2604,15 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 			return "", fmt.Errorf("failed to get sector id: %w", err)
 		}
 
-		// insert contracts for shard
-		for _, fcids := range slab.Shards[i].Contracts {
-			for _, fcid := range fcids {
-				uc, ok := usedContracts[fcid]
-				if !ok {
-					continue
-				}
-				// insert contract sector
-				if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
-					return "", fmt.Errorf("failed to insert contract sector: %w", err)
-				}
+		// insert contract sector links
+		for _, sector := range slab.Shards {
+			uc, ok := usedContracts[sector.ContractID]
+			if !ok {
+				continue
+			}
+
+			if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
+				return "", fmt.Errorf("failed to insert contract sector: %w", err)
 			}
 		}
 	}
@@ -2550,7 +2694,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(sec.latest_host, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
+		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
 		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
@@ -2558,7 +2702,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		LEFT JOIN contracts c ON c.id = csec.db_contract_id
 		WHERE sli.db_object_id = ?
 		ORDER BY sli.object_index ASC, sec.slab_index ASC
-	`, Hash256{}, PublicKey{}, FileContractID{}, PublicKey{}, objID)
+	`, Hash256{}, FileContractID{}, PublicKey{}, objID)
 	if err != nil {
 		return api.Object{}, fmt.Errorf("failed to fetch slabs: %w", err)
 	}
@@ -2578,7 +2722,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
 			&objectIndex, &ss.Offset, &ss.Length, // slice info
 			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
-			&slabIndex, (*Hash256)(&sector.Root), (*PublicKey)(&sector.LatestHost), // sector info
+			&slabIndex, (*Hash256)(&sector.Root), // sector info
 			(*PublicKey)(&fcid), // contract info
 			(*PublicKey)(&hk),   // host info
 		); err != nil {
@@ -2794,7 +2938,7 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	}
 
 	// fetch directory id
-	dirID, err := dirID(ctx, tx, path)
+	dirID, err := dirID(ctx, tx, bucket, path)
 	if errors.Is(err, dsql.ErrNoRows) {
 		return api.ObjectsResponse{}, nil
 	} else if err != nil {

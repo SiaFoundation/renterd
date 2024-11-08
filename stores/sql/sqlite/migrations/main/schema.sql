@@ -35,9 +35,10 @@ CREATE TABLE `buckets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` date
 CREATE INDEX `idx_buckets_name` ON `buckets`(`name`);
 
 -- dbDirectory
-CREATE TABLE `directories` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_parent_id` integer,`name` text, CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories`(`id`));
+CREATE TABLE `directories` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_bucket_id` integer NOT NULL,`db_parent_id` integer,`name` text,CONSTRAINT `fk_directories_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`),CONSTRAINT `fk_directories_db_directories` FOREIGN KEY (`db_parent_id`) REFERENCES `directories`(`id`));
 CREATE INDEX `idx_directories_parent_id` ON `directories`(`db_parent_id`);
-CREATE UNIQUE INDEX `idx_directories_name` ON `directories`(`name`);
+CREATE INDEX `idx_directories_name` ON `directories`(`name`);
+CREATE UNIQUE INDEX `idx_directories_bucket_name` ON `directories`(`db_bucket_id`,`name`);
 
 -- dbObject
 CREATE TABLE `objects` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_bucket_id` integer NOT NULL, `db_directory_id` integer NOT NULL, `object_id` text,`key` blob,`health` real NOT NULL DEFAULT 1,`size` integer,`mime_type` text,`etag` text,CONSTRAINT `fk_objects_db_bucket` FOREIGN KEY (`db_bucket_id`) REFERENCES `buckets`(`id`),CONSTRAINT `fk_objects_db_directories` FOREIGN KEY (`db_directory_id`) REFERENCES `directories`(`id`));
@@ -70,7 +71,7 @@ CREATE INDEX `idx_slabs_health` ON `slabs`(`health`);
 CREATE INDEX `idx_slabs_db_buffered_slab_id` ON `slabs`(`db_buffered_slab_id`);
 
 -- dbSector
-CREATE TABLE `sectors` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_slab_id` integer NOT NULL,`slab_index` integer NOT NULL,`latest_host` blob NOT NULL,`root` blob NOT NULL UNIQUE,CONSTRAINT `fk_slabs_shards` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`) ON DELETE CASCADE);
+CREATE TABLE `sectors` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_slab_id` integer NOT NULL,`slab_index` integer NOT NULL,`root` blob NOT NULL UNIQUE,CONSTRAINT `fk_slabs_shards` FOREIGN KEY (`db_slab_id`) REFERENCES `slabs`(`id`) ON DELETE CASCADE);
 CREATE INDEX `idx_sectors_slab_index` ON `sectors`(`slab_index`);
 CREATE UNIQUE INDEX `idx_sectors_slab_id_slab_index` ON `sectors`(`db_slab_id`,`slab_index`);
 CREATE INDEX `idx_sectors_db_slab_id` ON `sectors`(`db_slab_id`);

@@ -10,7 +10,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 )
@@ -142,8 +141,7 @@ type (
 
 		// DeleteHostSector deletes all contract sector links that a host has
 		// with the given root incrementing the lost sector count in the
-		// process. If another contract with a different host exists that
-		// contains the root, latest_host is updated to that host.
+		// process.
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		// DeleteObject deletes an object from the database and returns true if
@@ -178,6 +176,10 @@ type (
 		// that was created.
 		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
+		// InsertDirectories inserts the directories for the given path and
+		// returns the ID of the immediate parent directory.
+		InsertDirectories(ctx context.Context, bucket, path string) (int64, error)
+
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
@@ -189,8 +191,11 @@ type (
 		// are associated with any of the provided contracts.
 		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
 
-		// MakeDirsForPath creates all directories for a given object's path.
-		MakeDirsForPath(ctx context.Context, path string) (int64, error)
+		// MakeDirsForPathDeprecated creates all directories for a given
+		// object's path. This method is deprecated and should not be used, it's
+		// used by migration 00008_directories and should be removed when that
+		// migration is squashed.
+		MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error)
 
 		// MarkPackedSlabUploaded marks the packed slab as uploaded in the
 		// database, causing the provided shards to be associated with the slab.
@@ -271,6 +276,10 @@ type (
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
 		RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error)
+
+		// RenameDirectories renames all directories in the database with the
+		// given prefix to the new prefix.
+		RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error)
 
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an
@@ -355,12 +364,10 @@ type (
 		UpdateSetting(ctx context.Context, key, value string) error
 
 		// UpdateSlab updates the slab in the database. That includes the following:
-		// - Optimistically set health to 100%
-		// - Invalidate health_valid_until
-		// - Update LatestHost for every shard
-		// The operation is not allowed to update the number of shards
-		// associated with a slab or the root/slabIndex of any shard.
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string, usedContracts []types.FileContractID) error
+		// - optimistically set health to 100%
+		// - invalidate health_valid_until
+		// - adds a contract<->sector link for the given sectors
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 
 		// UpdateSlabHealth updates the health of up to 'limit' slab in the
 		// database if their health is not valid anymore. A random interval
@@ -368,10 +375,14 @@ type (
 		// the health of the updated slabs becomes invalid
 		UpdateSlabHealth(ctx context.Context, limit int64, minValidity, maxValidity time.Duration) (int64, error)
 
+		// UpsertContractSectors ensures the given contract-sector links are
+		// present in the database.
+		UpsertContractSectors(ctx context.Context, contractSectors []ContractSector) error
+
 		// UsableHosts returns a list of hosts that are ready to be used. That
 		// means they are deemed usable by the autopilot, they are not gouging,
 		// not blocked, not offline, etc.
-		UsableHosts(ctx context.Context, gc gouging.Checker, minWindowStart uint64, offset, limit int) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context, minWindowStart uint64) ([]HostInfo, error)
 
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
@@ -450,5 +461,10 @@ type (
 		ID          int64
 		FCID        FileContractID
 		RenewedFrom FileContractID
+	}
+
+	ContractSector struct {
+		ContractID int64
+		SectorID   int64
 	}
 )

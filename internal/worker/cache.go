@@ -83,7 +83,7 @@ func (c *memoryCache) Invalidate(key string) {
 
 type (
 	Bus interface {
-		UsableHosts(ctx context.Context, opts api.UsableHostOptions) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context) ([]api.HostInfo, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 	}
 
@@ -119,14 +119,14 @@ func (c *cache) UsableHosts(ctx context.Context) (hosts []api.HostInfo, err erro
 	// fetch directly from bus if the cache is not ready
 	if !c.isReady() {
 		c.logger.Warn(errCacheNotReady)
-		hosts, err = c.b.UsableHosts(ctx, api.UsableHostOptions{})
+		hosts, err = c.b.UsableHosts(ctx)
 		return
 	}
 
 	// fetch from bus if it's not cached or expired
 	value, found, expired := c.cache.Get(cacheKeyUsableHosts)
 	if !found || expired {
-		hosts, err = c.b.UsableHosts(ctx, api.UsableHostOptions{})
+		hosts, err = c.b.UsableHosts(ctx)
 		if err == nil {
 			c.cache.Set(cacheKeyUsableHosts, hosts)
 		}

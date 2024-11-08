@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -80,13 +79,7 @@ func (c *Client) UpdateHostCheck(ctx context.Context, autopilotID string, hostKe
 // UsableHosts returns a list of hosts that are ready to be used. That means
 // they are deemed usable by the autopilot, they are not gouging, not blocked,
 // not offline, etc.
-func (c *Client) UsableHosts(ctx context.Context, opts api.UsableHostOptions) (hosts []api.HostInfo, err error) {
-	values := url.Values{}
-	values.Set("offset", fmt.Sprint(opts.Offset))
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-
-	err = c.c.WithContext(ctx).GET("/hosts?"+values.Encode(), &hosts)
+func (c *Client) UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error) {
+	err = c.c.WithContext(ctx).GET("/hosts", &hosts)
 	return
 }

@@ -22,6 +22,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -689,9 +691,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 			t.Fatal("wrong amount of shards", len(slab.Shards), test.RedundancySettings.TotalShards)
 		}
 		for _, shard := range slab.Shards {
-			if shard.LatestHost == (types.PublicKey{}) {
-				t.Fatal("latest host should be set")
-			} else if len(shard.Contracts) != 1 {
+			if len(shard.Contracts) != 1 {
 				t.Fatal("each shard should have a host")
 			} else if _, found := roots[shard.Root]; found {
 				t.Fatal("each root should only exist once per slab")
@@ -1371,6 +1371,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// upload 3 objects so every host has 3 sectors
 	var err error
+	var hk types.PublicKey
 	var res api.Object
 	shards := make(map[types.PublicKey][]object.Sector)
 	for i := 0; i < 3; i++ {
@@ -1381,7 +1382,10 @@ func TestUploadDownloadSameHost(t *testing.T) {
 		res, err = b.Object(context.Background(), testBucket, fmt.Sprintf("foo_%d", i), api.GetObjectOptions{})
 		tt.OK(err)
 		for _, shard := range res.Object.Slabs[0].Shards {
-			shards[shard.LatestHost] = append(shards[shard.LatestHost], shard)
+			for hk = range shard.Contracts {
+				shards[hk] = append(shards[hk], shard)
+				break
+			}
 		}
 
 		// delete the object
@@ -1396,7 +1400,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// build a frankenstein object constructed with all sectors on the same host
-	res.Object.Slabs[0].Shards = shards[res.Object.Slabs[0].Shards[0].LatestHost]
+	res.Object.Slabs[0].Shards = shards[hk]
 	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
@@ -2618,6 +2622,10 @@ func TestDownloadAllHosts(t *testing.T) {
 		t.SkipNow()
 	}
 
+	// get rid of redundancy
+	rs := test.RedundancySettings
+	rs.MinShards = rs.TotalShards
+
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		logger:        newTestLogger(false),
@@ -2629,6 +2637,12 @@ func TestDownloadAllHosts(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
+
+	// update redundancy settings
+	us, err := b.UploadSettings(context.Background())
+	tt.OK(err)
+	us.Redundancy = rs
+	tt.OK(b.UpdateUploadSettings(context.Background(), us))
 
 	// prepare a file
 	data := make([]byte, 128)
@@ -2761,4 +2775,110 @@ func TestBackup(t *testing.T) {
 	cluster.tt.OK(err)
 	defer dbMetrics.Close()
 	cluster.tt.OK(dbMetrics.Ping())
+}
+
+// TestConsensusResync tests that deleting the consensus db and resyncing it
+// works. For that reason it simulates some on-chain traffic by uploading to
+// contracts, renewing contracts and letting these contracts expire. That way,
+// renterd has to resync a chain containing regular transactions, contracts and
+// storage proofs.
+func TestConsensusResync(t *testing.T) {
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:         test.RedundancySettings.TotalShards,
+		uploadPacking: false,
+	})
+	tt := cluster.tt
+
+	// upload some data
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
+
+	// broadcast the revision for each contract
+	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	tt.OK(err)
+	for _, c := range contracts {
+		tt.OKAll(cluster.Bus.BroadcastContract(context.Background(), c.ID))
+	}
+
+	// mine to renew the contracts
+	cluster.MineToRenewWindow()
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		tt.OK(err)
+		for _, c := range contracts {
+			if c.RenewedFrom == (types.FileContractID{}) {
+				return errors.New("contract wasn't renewed")
+			}
+		}
+		return nil
+	})
+
+	// make sure all hosts are gouging for the contracts to expire
+	cluster.bs.UpdateGougingSettings(context.Background(), api.GougingSettings{
+		MaxDownloadPrice: types.NewCurrency64(1),
+	})
+
+	// let them expire - we don't check for errors when mining since a few blocks
+	// might be invalid due to a race when broadcasting revisions while mining
+	// blocks rapidly
+	for i := 0; i < int(2*test.AutopilotConfig.Contracts.Period); i++ {
+		b, ok := coreutils.MineBlock(cluster.cm, types.Address{}, 5*time.Second)
+		if !ok {
+			continue
+		}
+		_ = cluster.Bus.AcceptBlock(context.Background(), b)
+	}
+	cluster.sync()
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		tt.OK(err)
+		if len(contracts) != 0 {
+			return errors.New("not all contracts expired")
+		}
+		return nil
+	})
+
+	// save blockheight
+	cs, err := cluster.Bus.ConsensusState(context.Background())
+	tt.OK(err)
+
+	// stop the cluster but not the hosts
+	hosts := cluster.hosts
+	cluster.hosts = nil
+	cluster.Shutdown()
+
+	// start with fresh chain store
+	network, genesis := testNetwork()
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	tt.OK(err)
+
+	newCluster := newTestCluster(t, testClusterOptions{
+		cm:        chain.NewManager(store, state),
+		dir:       cluster.dir,
+		dbName:    cluster.dbName,
+		funding:   &clusterOptNoFunding,
+		walletKey: &cluster.wk,
+	})
+	newCluster.hosts = hosts
+	defer newCluster.Shutdown()
+
+	// check the chain managers synced up
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		oldTip := cluster.cm.Tip()
+		newTip := newCluster.cm.Tip()
+		if oldTip != newTip {
+			return fmt.Errorf("tips don't match: %v != %v", oldTip, newTip)
+		}
+		return nil
+	})
+
+	// the bus state should also be in sync
+	newCS, err := newCluster.Bus.ConsensusState(context.Background())
+	tt.OK(err)
+
+	if !newCS.Synced {
+		t.Fatal("not synced")
+	} else if newCS.BlockHeight != cs.BlockHeight {
+		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
+	}
 }

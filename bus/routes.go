@@ -485,27 +485,16 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 }
 
 func (b *Bus) hostsHandlerGET(jc jape.Context) {
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
-		return
-	} else if offset < 0 {
-		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
-		return
-	}
-
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	} else if limit < -1 {
-		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
-		return
-	}
-
 	cs, err := b.consensusState(jc.Request.Context())
 	if jc.Check("couldn't fetch consensus state", err) != nil {
 		return
 	}
 	minWindowStart := cs.BlockHeight + b.revisionSubmissionBuffer
+
+	hosts, err := b.store.UsableHosts(jc.Request.Context(), minWindowStart)
+	if jc.Check("couldn't fetch hosts", err) != nil {
+		return
+	}
 
 	gp, err := b.gougingParams(jc.Request.Context())
 	if jc.Check("could not get gouging parameters", err) != nil {
@@ -513,11 +502,13 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
-	hosts, err := b.store.UsableHosts(jc.Request.Context(), gc, minWindowStart, offset, limit)
-	if jc.Check("couldn't fetch hosts", err) != nil {
-		return
+	var infos []api.HostInfo
+	for _, h := range hosts {
+		if !gc.Check(&h.HS, &h.PT).Gouging() {
+			infos = append(infos, h.HostInfo)
+		}
 	}
-	jc.Encode(hosts)
+	jc.Encode(infos)
 }
 
 func (b *Bus) hostsHandlerPOST(jc jape.Context) {
@@ -1690,9 +1681,40 @@ func (b *Bus) slabHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) slabHandlerPUT(jc jape.Context) {
-	var usr api.UpdateSlabRequest
-	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.store.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet))
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	var sectors []api.UploadedSector
+	if jc.Decode(&sectors) != nil {
+		return
+	}
+
+	// validate the sectors
+	for _, s := range sectors {
+		if s.Root == (types.Hash256{}) {
+			jc.Error(errors.New("root can not be empty"), http.StatusBadRequest)
+			return
+		} else if s.ContractID == (types.FileContractID{}) {
+			jc.Error(errors.New("contractID can not be empty"), http.StatusBadRequest)
+			return
+		}
+	}
+
+	err := b.store.UpdateSlab(jc.Request.Context(), key, sectors)
+	if errors.Is(err, api.ErrSlabNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrUnknownSector) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(fmt.Errorf("%v: %w", "couldn't update slab", err), http.StatusInternalServerError)
+		return
 	}
 }
 

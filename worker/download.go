@@ -14,6 +14,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/memory"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -33,7 +34,7 @@ var (
 type (
 	downloadManager struct {
 		hm        HostManager
-		mm        MemoryManager
+		mm        memory.MemoryManager
 		os        ObjectStore
 		uploadKey *utils.UploadKey
 		logger    *zap.SugaredLogger
@@ -77,11 +78,11 @@ type (
 		numRelaunched  uint64
 
 		sectors []*sectorInfo
-		errs    HostErrorSet
+		errs    utils.HostErrorSet
 	}
 
 	slabDownloadResponse struct {
-		mem              Memory
+		mem              memory.Memory
 		surchargeApplied bool
 		shards           [][]byte
 		index            int
@@ -151,7 +152,7 @@ func newDownloadManager(ctx context.Context, uploadKey *utils.UploadKey, hm Host
 	logger = logger.Named("downloadmanager")
 	return &downloadManager{
 		hm:        hm,
-		mm:        newMemoryManager(maxMemory, logger),
+		mm:        memory.NewManager(maxMemory, logger),
 		os:        os,
 		uploadKey: uploadKey,
 		logger:    logger.Sugar(),
@@ -546,7 +547,7 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bo
 		overpay: migration && slice.Health <= downloadOverpayHealthThreshold,
 
 		sectors: sectors,
-		errs:    make(HostErrorSet),
+		errs:    make(utils.HostErrorSet),
 	}
 }
 

@@ -41,7 +41,7 @@ func TestUpload(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,9 @@ func TestUpload(t *testing.T) {
 	// build used hosts
 	used := make(map[types.PublicKey]struct{})
 	for _, shard := range o.Object.Slabs[0].Shards {
-		used[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			used[hk] = struct{}{}
+		}
 	}
 
 	// download the data and assert it matches
@@ -110,7 +112,7 @@ func TestUpload(t *testing.T) {
 
 	// try and upload into a bucket that does not exist
 	params.bucket = "doesnotexist"
-	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected bucket not found error", err)
 	}
@@ -118,7 +120,7 @@ func TestUpload(t *testing.T) {
 	// upload data using a cancelled context - assert we don't hang
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = ul.Upload(ctx, bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err = ul.Upload(ctx, bytes.NewReader(data), w.Contracts(), params)
 	if err == nil || !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -147,7 +149,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	data := frand.Bytes(128)
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +185,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// upload the packed slab
 	mem := mm.AcquireMemory(context.Background(), params.rs.SlabSize())
-	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.Contracts(), 0, lockingPriorityUpload)
+	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.Contracts(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +287,7 @@ func TestMigrateLostSector(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,11 +304,17 @@ func TestMigrateLostSector(t *testing.T) {
 	// build usedHosts hosts
 	usedHosts := make(map[types.PublicKey]struct{})
 	for _, shard := range slab.Shards {
-		usedHosts[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			usedHosts[hk] = struct{}{}
+		}
 	}
 
 	// assume the host of the first shard lost its sector
-	badHost := slab.Shards[0].LatestHost
+	var badHost types.PublicKey
+	for hk := range slab.Shards[0].Contracts {
+		badHost = hk
+		break
+	}
 	badContract := slab.Shards[0].Contracts[badHost][0]
 	err = os.DeleteHostSector(context.Background(), badHost, slab.Shards[0].Root)
 	if err != nil {
@@ -334,9 +342,15 @@ func TestMigrateLostSector(t *testing.T) {
 		}
 	}
 
+	// re-grab the slab
+	o, err = os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// migrate the shard away from the bad host
 	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,10 +366,13 @@ func TestMigrateLostSector(t *testing.T) {
 
 	// assert the bad shard is on a good host now
 	shard := slab.Shards[0]
-	if shard.LatestHost == badHost {
-		t.Fatal("latest host is bad")
-	} else if len(shard.Contracts) != 1 {
+	if len(shard.Contracts) != 1 {
 		t.Fatal("expected 1 contract")
+	}
+	for hk := range shard.Contracts {
+		if hk == badHost {
+			t.Fatal("shard is on bad host")
+		}
 	}
 	for _, fcids := range shard.Contracts {
 		for _, fcid := range fcids {
@@ -386,7 +403,7 @@ func TestUploadShards(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +420,9 @@ func TestUploadShards(t *testing.T) {
 	// build usedHosts hosts
 	usedHosts := make(map[types.PublicKey]struct{})
 	for _, shard := range slab.Shards {
-		usedHosts[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			usedHosts[hk] = struct{}{}
+		}
 	}
 
 	// mark odd shards as bad
@@ -412,7 +431,9 @@ func TestUploadShards(t *testing.T) {
 	for i, shard := range slab.Shards {
 		if i%2 != 0 {
 			badIndices = append(badIndices, i)
-			badHosts[shard.LatestHost] = struct{}{}
+			for hk := range shard.Contracts {
+				badHosts[hk] = struct{}{}
+			}
 		}
 	}
 
@@ -443,7 +464,7 @@ func TestUploadShards(t *testing.T) {
 
 	// migrate those shards away from bad hosts
 	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,15 +478,25 @@ func TestUploadShards(t *testing.T) {
 	}
 	slab = o.Object.Slabs[0]
 
-	// assert none of the shards are on bad hosts
+	// assert every shard that was on a bad host was migrated
 	for i, shard := range slab.Shards {
 		if i%2 == 0 && len(shard.Contracts) != 1 {
 			t.Fatalf("expected 1 contract, got %v", len(shard.Contracts))
 		} else if i%2 != 0 && len(shard.Contracts) != 2 {
 			t.Fatalf("expected 2 contracts, got %v", len(shard.Contracts))
 		}
-		if _, bad := badHosts[shard.LatestHost]; bad {
-			t.Fatal("shard is on bad host", shard.LatestHost)
+		var bc, gc int
+		for hk := range shard.Contracts {
+			if _, bad := badHosts[hk]; bad {
+				bc++
+			} else {
+				gc++
+			}
+		}
+		if i%2 == 0 && bc != 0 && gc != 1 {
+			t.Fatal("expected shard to be one 1 good host")
+		} else if i%2 != 0 && bc != 1 && gc != 1 {
+			t.Fatal("expected shard to be on 1 bad host and 1 good host")
 		}
 	}
 
@@ -654,7 +685,7 @@ func TestUploadSingleSectorSlowHosts(t *testing.T) {
 	params.rs.TotalShards = totalShards
 
 	// upload data
-	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}

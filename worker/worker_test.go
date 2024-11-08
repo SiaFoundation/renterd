@@ -34,7 +34,7 @@ type (
 func newTestWorker(t test.TestingCommon) *testWorker {
 	// create bus dependencies
 	cs := newContractStoreMock()
-	os := newObjectStoreMock(testBucket)
+	os := newObjectStoreMock(testBucket, cs)
 	hs := newHostStoreMock()
 
 	// create worker dependencies
@@ -145,7 +145,6 @@ func newTestWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   time.Second,
 		ID:                       "test",
-		ContractLockTimeout:      time.Second,
 		BusFlushInterval:         time.Second,
 		DownloadOverdriveTimeout: time.Second,
 		UploadOverdriveTimeout:   time.Second,

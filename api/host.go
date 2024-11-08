@@ -97,11 +97,6 @@ type (
 		MaxLastScan     TimeRFC3339
 		Offset          int
 	}
-
-	UsableHostOptions struct {
-		Limit  int
-		Offset int
-	}
 )
 
 type (

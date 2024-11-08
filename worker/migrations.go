@@ -60,9 +60,11 @@ SHARDS:
 	// which we have a contract (so hosts from which we can download)
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
-		if _, exists := usableHosts[s.Shards[si].LatestHost]; exists {
-			missingShards--
-			continue
+		for hk := range s.Shards[si].Contracts {
+			if _, ok := usableHosts[hk]; ok {
+				missingShards--
+				break
+			}
 		}
 	}
 
@@ -110,7 +112,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, lockingPriorityUpload, mem)
+	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, mem)
 	if err != nil {
 		w.logger.Debugw("slab migration failed",
 			zap.Error(err),

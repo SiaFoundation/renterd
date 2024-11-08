@@ -58,7 +58,6 @@ type (
 
 		acc                      *worker.Account
 		client                   *rhp3.Client
-		bus                      Bus
 		contractSpendingRecorder ContractSpendingRecorder
 		logger                   *zap.SugaredLogger
 		priceTables              *priceTables
@@ -86,7 +85,6 @@ func (w *Worker) Host(hi api.HostInfo) Host {
 		client:                   w.rhp3Client,
 		hk:                       hi.PublicKey,
 		acc:                      w.accounts.ForHost(hi.PublicKey),
-		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
 		logger:                   w.logger.Named(hi.PublicKey.String()[:4]),
 		fcid:                     hi.ContractID,
