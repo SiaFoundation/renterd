@@ -13,6 +13,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/host"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
@@ -38,7 +39,7 @@ func newTestHostManager(t test.TestingCommon) *testHostManager {
 	return &testHostManager{tt: test.NewTT(t), hosts: make(map[types.PublicKey]*testHost)}
 }
 
-func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
+func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 

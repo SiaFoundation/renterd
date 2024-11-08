@@ -42,7 +42,7 @@ var (
 
 type (
 	uploadManager struct {
-		hm        HostManager
+		hm        host.HostManager
 		mm        memory.MemoryManager
 		os        ObjectStore
 		cl        ContractLocker
@@ -309,7 +309,7 @@ func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api
 	return nil
 }
 
-func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *uploadManager {
+func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *uploadManager {
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
 		hm:        hm,
@@ -343,7 +343,7 @@ func (mgr *uploadManager) Stats() uploadManagerStats {
 	var numHealthy uint64
 	speeds := make(map[types.PublicKey]float64)
 	for _, u := range mgr.uploaders {
-		speeds[u.hk] = u.statsSectorUploadSpeedBytesPerMS.Average() * 0.008
+		speeds[u.PublicKey()] = u.AvgUploadSpeedBytesPerMS() * 0.008
 		if u.Healthy() {
 			numHealthy++
 		}

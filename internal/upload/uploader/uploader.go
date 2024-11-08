@@ -107,8 +107,12 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
 		fcid:      c.ID,
 		endHeight: c.WindowEnd,
-		queue:     make([]*sectorUploadReq, 0),
+		queue:     make([]*SectorUploadReq, 0),
 	}
+}
+
+func (u *Uploader) AvgUploadSpeedBytesPerMS() float64 {
+	return u.statsSectorUploadSpeedBytesPerMS.Average()
 }
 
 func (u *Uploader) ContractID() types.FileContractID {
