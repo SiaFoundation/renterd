@@ -9,13 +9,14 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 // TestUploadFailedAlertErrorSet is a test to verify that an upload failing with
 // a HostErrorSet error registers an alert with all the individual errors of any
 // host in the payload.
 func TestUploadFailedAlertErrorSet(t *testing.T) {
-	hostErrSet := HostErrorSet{
+	hostErrSet := utils.HostErrorSet{
 		types.PublicKey{1, 1, 1}: errors.New("test"),
 	}
 	wrapped := fmt.Errorf("wrapped error: %w", hostErrSet)
