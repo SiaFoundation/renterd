@@ -81,40 +81,26 @@ const (
 	contractUsabilityGoodForRenew
 )
 
-func ContractUsabilityFromString(usability string) ContractUsability {
-	switch strings.ToLower(usability) {
-	case api.ContractUsabilityBad:
-		return contractUsabilityBad
-	case api.ContractUsabilityGoodForRenew:
-		return contractUsabilityGoodForRenew
-	default:
-		return contractUsabilityInvalid
-	}
-}
-
 func (s *ContractUsability) LoadString(usability string) error {
 	switch strings.ToLower(usability) {
-	case api.ContractUsabilityInvalid:
-		*s = contractUsabilityInvalid
 	case api.ContractUsabilityBad:
 		*s = contractUsabilityBad
 	case api.ContractUsabilityGoodForRenew:
 		*s = contractUsabilityGoodForRenew
 	default:
-		return ErrInvalidContractUsability
+		*s = contractUsabilityInvalid
+		return ErrInvalidContractState
 	}
 	return nil
 }
 
 func (s ContractUsability) String() string {
 	switch s {
-	case contractUsabilityInvalid:
-		return api.ContractUsabilityInvalid
 	case contractUsabilityBad:
 		return api.ContractUsabilityBad
 	case contractUsabilityGoodForRenew:
 		return api.ContractUsabilityGoodForRenew
 	default:
-		return api.ContractUsabilityInvalid
+		return "invalid"
 	}
 }

@@ -88,7 +88,7 @@ CREATE TABLE `contracts` (
   `size` bigint unsigned DEFAULT NULL,
   `start_height` bigint unsigned NOT NULL,
   `state` tinyint unsigned NOT NULL DEFAULT '0',
-  `usability` tinyint unsigned NOT NULL DEFAULT '0',
+  `usability` tinyint unsigned NOT NULL,
   `window_start` bigint unsigned NOT NULL DEFAULT '0',
   `window_end` bigint unsigned NOT NULL DEFAULT '0',
 

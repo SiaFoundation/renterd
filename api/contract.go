@@ -17,7 +17,6 @@ const (
 )
 
 const (
-	ContractUsabilityInvalid      = "invalid"
 	ContractUsabilityBad          = "bad"
 	ContractUsabilityGoodForRenew = "goodforrenew"
 )
