@@ -149,7 +149,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i, shard := range splitData {
-			ups.Shards = append(ups.Shards, newTestShard(hks[i], fcids[i], types.HashBytes(shard)))
+			ups.Shards = append(ups.Shards, api.UploadedSector{ContractID: fcids[i], Root: types.HashBytes(shard)})
 		}
 		return ups
 	}

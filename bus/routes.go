@@ -842,6 +842,49 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+	contract, err := b.store.Contract(jc.Request.Context(), fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch contract", err) != nil {
+		return
+	}
+
+	if b.isPassedV2AllowHeight() {
+		panic("not implemented")
+	} else {
+		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, contract.SiamuxAddr)
+		if jc.Check("failed to fetch revision", err) != nil {
+			return
+		}
+		jc.Encode(api.Revision{
+			ContractID: revision.ParentID,
+			V2FileContract: types.V2FileContract{
+				Capacity:         revision.Filesize, // same as size for v1
+				Filesize:         revision.Filesize,
+				FileMerkleRoot:   revision.FileMerkleRoot,
+				ProofHeight:      revision.WindowStart,
+				ExpirationHeight: revision.WindowEnd,
+				RenterOutput:     revision.ValidRenterOutput(),
+				HostOutput:       revision.ValidHostOutput(),
+				MissedHostValue:  revision.MissedHostPayout(),
+				TotalCollateral:  types.ZeroCurrency, // unknown in v1
+				RenterPublicKey:  types.PublicKey(revision.UnlockConditions.PublicKeys[0].Key),
+				HostPublicKey:    types.PublicKey(revision.UnlockConditions.PublicKeys[1].Key),
+				RevisionNumber:   revision.RevisionNumber,
+
+				RenterSignature: types.Signature{}, // unavailable in v1
+				HostSignature:   types.Signature{}, // unavailable in v1
+			},
+		})
+	}
+}
+
 func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -1613,9 +1656,40 @@ func (b *Bus) slabHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) slabHandlerPUT(jc jape.Context) {
-	var usr api.UpdateSlabRequest
-	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.store.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet))
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	var sectors []api.UploadedSector
+	if jc.Decode(&sectors) != nil {
+		return
+	}
+
+	// validate the sectors
+	for _, s := range sectors {
+		if s.Root == (types.Hash256{}) {
+			jc.Error(errors.New("root can not be empty"), http.StatusBadRequest)
+			return
+		} else if s.ContractID == (types.FileContractID{}) {
+			jc.Error(errors.New("contractID can not be empty"), http.StatusBadRequest)
+			return
+		}
+	}
+
+	err := b.store.UpdateSlab(jc.Request.Context(), key, sectors)
+	if errors.Is(err, api.ErrSlabNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrUnknownSector) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(fmt.Errorf("%v: %w", "couldn't update slab", err), http.StatusInternalServerError)
+		return
 	}
 }
 

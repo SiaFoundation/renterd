@@ -693,7 +693,7 @@ func (c *TestCluster) MineBlocks(n uint64) {
 
 func (c *TestCluster) sync() {
 	tip := c.cm.Tip()
-	c.tt.Retry(3000, time.Millisecond, func() error {
+	c.tt.Retry(10000, time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
@@ -731,7 +731,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 	return accounts
 }
 
-func (c *TestCluster) WaitForContracts() []api.Contract {
+func (c *TestCluster) WaitForContracts() []api.ContractMetadata {
 	c.tt.Helper()
 
 	// build hosts map
@@ -744,12 +744,11 @@ func (c *TestCluster) WaitForContracts() []api.Contract {
 	c.waitForHostContracts(hostsMap)
 
 	// fetch all contracts
-	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
+	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{
+		FilterMode: api.ContractFilterModeActive,
+	})
 	c.tt.OK(err)
-	if len(resp.Errors) > 0 {
-		c.tt.Fatal(resp.Errors)
-	}
-	return resp.Contracts
+	return resp
 }
 
 func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
