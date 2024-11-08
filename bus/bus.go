@@ -214,7 +214,7 @@ type (
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
-		UsableHosts(ctx context.Context, gc gouging.Checker, offset, limit int) ([]api.HostInfo, error)
+		UsableHosts(ctx context.Context) ([]sql.HostInfo, error)
 	}
 
 	// A MetadataStore stores information about contracts and objects.

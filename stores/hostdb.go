@@ -8,13 +8,16 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
 var (
 	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
+
+type Host struct {
+	api.HostInfo
+}
 
 // Host returns information about a host.
 func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
@@ -118,9 +121,9 @@ func (s *SQLStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api
 	})
 }
 
-func (s *SQLStore) UsableHosts(ctx context.Context, gc gouging.Checker, offset, limit int) (hosts []api.HostInfo, err error) {
+func (s *SQLStore) UsableHosts(ctx context.Context) (hosts []sql.HostInfo, err error) {
 	err = s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		hosts, err = tx.UsableHosts(ctx, gc, offset, limit)
+		hosts, err = tx.UsableHosts(ctx)
 		return err
 	})
 	return

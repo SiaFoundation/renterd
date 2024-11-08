@@ -485,19 +485,8 @@ func (b *Bus) walletPendingHandler(jc jape.Context) {
 }
 
 func (b *Bus) hostsHandlerGET(jc jape.Context) {
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
-		return
-	} else if offset < 0 {
-		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
-		return
-	}
-
-	limit := -1
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	} else if limit < -1 {
-		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+	hosts, err := b.store.UsableHosts(jc.Request.Context())
+	if jc.Check("couldn't fetch hosts", err) != nil {
 		return
 	}
 
@@ -507,11 +496,13 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
 
-	hosts, err := b.store.UsableHosts(jc.Request.Context(), gc, offset, limit)
-	if jc.Check("couldn't fetch hosts", err) != nil {
-		return
+	var infos []api.HostInfo
+	for _, h := range hosts {
+		if !gc.Check(&h.HS, &h.PT).Gouging() {
+			infos = append(infos, h.HostInfo)
+		}
 	}
-	jc.Encode(hosts)
+	jc.Encode(infos)
 }
 
 func (b *Bus) hostsHandlerPOST(jc jape.Context) {

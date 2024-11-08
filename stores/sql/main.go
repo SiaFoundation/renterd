@@ -22,7 +22,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -38,6 +37,12 @@ var (
 
 // helper types
 type (
+	HostInfo struct {
+		api.HostInfo
+		HS rhpv2.HostSettings
+		PT rhpv3.HostPriceTable
+	}
+
 	multipartUpload struct {
 		ID       int64
 		Key      string
@@ -2314,14 +2319,7 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 	return
 }
 
-func UsableHosts(ctx context.Context, tx sql.Tx, gc gouging.Checker, offset, limit int) ([]api.HostInfo, error) {
-	// handle input parameters
-	if offset < 0 {
-		return nil, ErrNegativeOffset
-	} else if limit == 0 || limit == -1 {
-		limit = math.MaxInt64
-	}
-
+func UsableHosts(ctx context.Context, tx sql.Tx) ([]HostInfo, error) {
 	// only include allowed hosts
 	var whereExprs []string
 	var hasAllowlist bool
@@ -2374,15 +2372,13 @@ EXISTS (
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
 	WHERE %s
-	GROUP by h.id
-	ORDER BY MAX(hc.score_age) * MAX(hc.score_collateral) * MAX(hc.score_interactions) * MAX(hc.score_storage_remaining) * MAX(hc.score_uptime) * MAX(hc.score_version) * MAX(hc.score_prices) DESC
-	LIMIT ? OFFSET ?`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID, limit, offset)
+	GROUP by h.id`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
 	defer rows.Close()
 
-	var hosts []api.HostInfo
+	var hosts []HostInfo
 	for rows.Next() {
 		var hk PublicKey
 		var addr, port string
@@ -2393,22 +2389,19 @@ EXISTS (
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		// exclude hosts that are gouging
-		hss := rhpv2.HostSettings(hs)
-		hpt := rhpv3.HostPriceTable(pt)
-		if gc.Check(&hss, &hpt).Gouging() {
-			continue
-		}
-
 		// exclude hosts with invalid address
 		host, _, err := net.SplitHostPort(addr)
 		if err != nil || host == "" {
 			continue
 		}
 
-		hosts = append(hosts, api.HostInfo{
-			PublicKey:  types.PublicKey(hk),
-			SiamuxAddr: net.JoinHostPort(host, port),
+		hosts = append(hosts, HostInfo{
+			api.HostInfo{
+				PublicKey:  types.PublicKey(hk),
+				SiamuxAddr: net.JoinHostPort(host, port),
+			},
+			rhpv2.HostSettings(hs),
+			rhpv3.HostPriceTable(pt),
 		})
 	}
 	return hosts, nil

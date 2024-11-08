@@ -459,19 +459,14 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs := api.ConsensusState{Synced: true}
-	gs := test.GougingSettings
-	gc := gouging.NewChecker(gs, cs, nil, nil)
-
 	// prepare hosts & contracts
 	//
 	// h1: usable
-	// h2: usable - best one
-	// h3: not usable - blocked
-	// h4: not usable - no host check
-	// h5: not usable - no contract
+	// h2: not usable - blocked
+	// h3: not usable - no host check
+	// h4: not usable - no contract
 	var hks []types.PublicKey
-	for i := 1; i <= 5; i++ {
+	for i := 1; i <= 4; i++ {
 		// add host
 		hk := types.PublicKey{byte(i)}
 		addr := fmt.Sprintf("foo.com:100%d", i)
@@ -490,11 +485,8 @@ func TestUsableHosts(t *testing.T) {
 		}
 
 		// add host check
-		if i != 4 {
+		if i != 3 {
 			hc := newTestHostCheck()
-			if i == 2 {
-				hc.ScoreBreakdown.Age = .2
-			}
 			err = ss.UpdateHostCheck(context.Background(), api.DefaultAutopilotID, hk, hc)
 			if err != nil {
 				t.Fatal(err)
@@ -502,7 +494,7 @@ func TestUsableHosts(t *testing.T) {
 		}
 
 		// add contract
-		if i != 5 {
+		if i != 4 {
 			_, err = ss.addTestContract(types.FileContractID{byte(i)}, hk)
 			if err != nil {
 				t.Fatal(err)
@@ -510,7 +502,7 @@ func TestUsableHosts(t *testing.T) {
 		}
 
 		// block host
-		if i == 3 {
+		if i == 2 {
 			err = ss.UpdateHostBlocklistEntries(context.Background(), []string{addr}, nil, false)
 			if err != nil {
 				t.Fatal(err)
@@ -518,52 +510,91 @@ func TestUsableHosts(t *testing.T) {
 		}
 	}
 
-	// assert h1 and h2 are usable and ordered by score
-	hosts, err := ss.UsableHosts(ctx, gc, 0, -1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hosts) != 2 {
-		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != hks[1] || hosts[1].PublicKey != hks[0] {
-		t.Fatal("unexpected", hosts)
-	} else if hosts[0].SiamuxAddr != "foo.com:9983" || hosts[1].SiamuxAddr != "foo.com:9983" {
-		t.Fatal("unexpected", hosts)
-	}
-
-	// assert offset and limit
-	hosts, err = ss.UsableHosts(ctx, gc, 1, 1)
+	// assert h1 is usable
+	hosts, err := ss.UsableHosts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != hks[0] {
 		t.Fatal("unexpected", hosts)
+	} else if hosts[0].SiamuxAddr != "foo.com:9983" {
+		t.Fatal("unexpected", hosts)
 	}
-	hosts, err = ss.UsableHosts(ctx, gc, 2, 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hosts) != 0 {
-		t.Fatal("unexpected", len(hosts))
+
+	// create gouging checker
+	gs := test.GougingSettings
+	cs := api.ConsensusState{Synced: true}
+	gc := gouging.NewChecker(gs, cs, nil, nil)
+
+	// assert h1 is not gouging
+	h1 := hosts[0]
+	if gc.Check(&h1.HS, &h1.PT).Gouging() {
+		t.Fatal("unexpected")
 	}
 
 	// record a scan for h1 to make it gouging
 	hs := test.NewHostSettings()
 	pt := test.NewHostPriceTable()
 	pt.UploadBandwidthCost = gs.MaxUploadPrice
-	s1 := newTestScan(types.PublicKey{1}, time.Now(), hs, pt, true, nil, nil)
+	s1 := newTestScan(h1.PublicKey, time.Now(), hs, pt, true, nil, nil)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 		t.Fatal(err)
 	}
 
-	// assert it's no longer in the result set
-	hosts, err = ss.UsableHosts(ctx, gc, 0, -1)
+	// fetch it again
+	hosts, err = ss.UsableHosts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != hks[1] {
-		t.Fatal("unexpected", hosts)
 	}
+
+	// assert h1 is now gouging
+	h1 = hosts[0]
+	if !gc.Check(&h1.HS, &h1.PT).Gouging() {
+		t.Fatal("unexpected")
+	}
+
+	// create helper to assert number of usable hosts
+	assertNumUsableHosts := func(n int) {
+		t.Helper()
+		hosts, err = ss.UsableHosts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(hosts) != n {
+			t.Fatal("unexpected", len(hosts))
+		}
+	}
+
+	// unblock h2
+	if err := ss.UpdateHostBlocklistEntries(context.Background(), nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumUsableHosts(2)
+
+	// add host check for h3
+	hc := newTestHostCheck()
+	err = ss.UpdateHostCheck(context.Background(), api.DefaultAutopilotID, types.PublicKey{3}, hc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumUsableHosts(3)
+
+	// add contract for h4
+	_, err = ss.addTestContract(types.FileContractID{byte(4)}, types.PublicKey{4})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumUsableHosts(4)
+
+	// add an allowlist
+	ss.UpdateHostAllowlistEntries(context.Background(), []types.PublicKey{{9}}, nil, false)
+
+	assertNumUsableHosts(0)
 }
 
 // TestRecordScan is a test for recording scans.

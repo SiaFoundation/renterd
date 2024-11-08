@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	ssql "go.sia.tech/renterd/stores/sql"
@@ -1260,8 +1259,8 @@ func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSec
 	return nil
 }
 
-func (tx *MainDatabaseTx) UsableHosts(ctx context.Context, gc gouging.Checker, offset, limit int) ([]api.HostInfo, error) {
-	return ssql.UsableHosts(ctx, tx, gc, offset, limit)
+func (tx *MainDatabaseTx) UsableHosts(ctx context.Context) ([]ssql.HostInfo, error) {
+	return ssql.UsableHosts(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
