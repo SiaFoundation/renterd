@@ -1266,6 +1266,10 @@ func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSec
 	return nil
 }
 
+func (tx *MainDatabaseTx) UsableHosts(ctx context.Context) ([]ssql.HostInfo, error) {
+	return ssql.UsableHosts(ctx, tx)
+}
+
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
 	return ssql.WalletEvents(ctx, tx.Tx, offset, limit)
 }

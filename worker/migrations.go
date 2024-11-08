@@ -117,7 +117,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, lockingPriorityUpload, mem)
+	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, mem)
 	if err != nil {
 		w.logger.Debugw("slab migration failed",
 			zap.Error(err),

@@ -1047,7 +1047,6 @@ func testDBCfg() dbConfig {
 func testWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   10 * time.Millisecond,
-		ContractLockTimeout:      5 * time.Second,
 		ID:                       "worker",
 		BusFlushInterval:         testBusFlushInterval,
 		DownloadOverdriveTimeout: 500 * time.Millisecond,

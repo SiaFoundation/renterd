@@ -7,6 +7,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
 )
@@ -52,7 +53,7 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objec
 	for errors.Unwrap(hostErr) != nil {
 		hostErr = errors.Unwrap(hostErr)
 	}
-	if set, ok := hostErr.(HostErrorSet); ok {
+	if set, ok := hostErr.(utils.HostErrorSet); ok {
 		hostErrors := make(map[string]string, len(set))
 		for hk, err := range set {
 			hostErrors[hk.String()] = err.Error()
@@ -98,7 +99,7 @@ func newUploadFailedAlert(bucket, path, contractSet, mimeType string, minShards,
 	for errors.Unwrap(hostErr) != nil {
 		hostErr = errors.Unwrap(hostErr)
 	}
-	if set, ok := hostErr.(HostErrorSet); ok {
+	if set, ok := hostErr.(utils.HostErrorSet); ok {
 		hostErrors := make(map[string]string, len(set))
 		for hk, err := range set {
 			hostErrors[hk.String()] = err.Error()

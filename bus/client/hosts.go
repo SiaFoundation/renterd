@@ -74,3 +74,11 @@ func (c *Client) UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, h
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/host/%s/check", hostKey), hostCheck)
 	return
 }
+
+// UsableHosts returns a list of hosts that are ready to be used. That means
+// they are deemed usable by the autopilot, they are not gouging, not blocked,
+// not offline, etc.
+func (c *Client) UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error) {
+	err = c.c.WithContext(ctx).GET("/hosts", &hosts)
+	return
+}

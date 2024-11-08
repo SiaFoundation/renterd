@@ -17,6 +17,7 @@ import (
 	dsql "database/sql"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -35,6 +36,12 @@ var (
 
 // helper types
 type (
+	HostInfo struct {
+		api.HostInfo
+		HS rhpv2.HostSettings
+		PT rhpv3.HostPriceTable
+	}
+
 	multipartUpload struct {
 		ID       int64
 		Key      string
@@ -2357,6 +2364,88 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 		elements = append(elements, element)
 	}
 	return
+}
+
+func UsableHosts(ctx context.Context, tx sql.Tx) ([]HostInfo, error) {
+	// only include allowed hosts
+	var whereExprs []string
+	var hasAllowlist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
+		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
+	} else if hasAllowlist {
+		whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM host_allowlist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+
+	// exclude blocked hosts
+	var hasBlocklist bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_blocklist_entries)").Scan(&hasBlocklist); err != nil {
+		return nil, fmt.Errorf("failed to check for blocklist: %w", err)
+	} else if hasBlocklist {
+		whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
+	}
+
+	// only include usable hosts
+	whereExprs = append(whereExprs, `
+EXISTS (
+	SELECT 1
+	FROM hosts h2
+	INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id
+	WHERE
+		hc.usability_blocked = 0 AND
+		hc.usability_offline = 0 AND
+		hc.usability_low_score = 0 AND
+		hc.usability_redundant_ip = 0 AND
+		hc.usability_gouging = 0 AND
+		hc.usability_not_accepting_contracts = 0 AND
+		hc.usability_not_announced = 0 AND
+		hc.usability_not_completing_scan = 0
+)`)
+
+	// query hosts
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+	SELECT
+	h.public_key,
+	COALESCE(h.net_address, ""),
+	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
+	h.price_table,
+	h.settings
+	FROM hosts h
+	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
+	INNER JOIN host_checks hc on hc.db_host_id = h.id
+	WHERE %s
+	GROUP by h.id`, strings.Join(whereExprs, "AND")))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
+	}
+	defer rows.Close()
+
+	var hosts []HostInfo
+	for rows.Next() {
+		var hk PublicKey
+		var addr, port string
+		var pt PriceTable
+		var hs HostSettings
+		err := rows.Scan(&hk, &addr, &port, &pt, &hs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan host: %w", err)
+		}
+
+		// exclude hosts with invalid address
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil || host == "" {
+			continue
+		}
+
+		hosts = append(hosts, HostInfo{
+			api.HostInfo{
+				PublicKey:  types.PublicKey(hk),
+				SiamuxAddr: net.JoinHostPort(host, port),
+			},
+			rhpv2.HostSettings(hs),
+			rhpv3.HostPriceTable(pt),
+		})
+	}
+	return hosts, nil
 }
 
 func WalletEvents(ctx context.Context, tx sql.Tx, offset, limit int) (events []wallet.Event, _ error) {
