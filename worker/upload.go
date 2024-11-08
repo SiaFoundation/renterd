@@ -1074,9 +1074,3 @@ func (s *sectorUpload) finish(resp uploader.SectorUploadResp) {
 func (s *sectorUpload) isUploaded() bool {
 	return s.uploaded.root != (types.Hash256{})
 }
-
-func (s *sectorUpload) sectorData() *[rhpv2.SectorSize]byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.data
-}
