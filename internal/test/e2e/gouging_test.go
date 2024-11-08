@@ -88,7 +88,7 @@ func TestGouging(t *testing.T) {
 	// again, this is necessary for the host to be considered price gouging
 	time.Sleep(defaultHostSettings.PriceTableValidity)
 
-	// assert all hosts are usable
+	// assert all but one host are usable
 	h, err = b.UsableHosts(context.Background())
 	tt.OK(err)
 	if len(h) != n-1 {

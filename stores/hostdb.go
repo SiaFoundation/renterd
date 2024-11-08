@@ -15,10 +15,6 @@ var (
 	ErrNegativeMaxDowntime = errors.New("max downtime can not be negative")
 )
 
-type Host struct {
-	api.HostInfo
-}
-
 // Host returns information about a host.
 func (s *SQLStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error) {
 	hosts, err := s.Hosts(ctx, api.HostOptions{
