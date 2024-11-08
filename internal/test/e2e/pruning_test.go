@@ -139,7 +139,7 @@ func TestSectorPruning(t *testing.T) {
 	// compare database against roots returned by the host
 	var n int
 	for _, c := range contracts {
-		dbRoots, _, err := b.ContractRoots(context.Background(), c.ID)
+		dbRoots, err := b.ContractRoots(context.Background(), c.ID)
 		tt.OK(err)
 
 		cRoots, err := cluster.ContractRoots(context.Background(), c.ID)

@@ -88,7 +88,7 @@ type (
 	ContractStore interface {
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error)
-		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, []types.Hash256, error)
+		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	}
@@ -109,7 +109,7 @@ type (
 		AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) error
 		AddMultipartPart(ctx context.Context, bucket, key, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
-		AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error
+		AddUploadingSectors(ctx context.Context, uID api.UploadID, root []types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
 		Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error

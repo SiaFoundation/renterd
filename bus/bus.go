@@ -114,11 +114,9 @@ type (
 	}
 
 	UploadingSectorsCache interface {
-		AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error
+		AddSectors(uID api.UploadID, roots ...types.Hash256) error
 		FinishUpload(uID api.UploadID)
-		HandleRenewal(fcid, renewedFrom types.FileContractID)
-		Pending(fcid types.FileContractID) (size uint64)
-		Sectors(fcid types.FileContractID) (roots []types.Hash256)
+		Sectors() (sectors []types.Hash256)
 		StartUpload(uID api.UploadID) error
 	}
 
@@ -588,7 +586,6 @@ func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, 
 		return api.ContractMetadata{}, err
 	}
 
-	b.sectors.HandleRenewal(renewal.ID, renewal.RenewedFrom)
 	b.broadcastAction(webhooks.Event{
 		Module: api.ModuleContract,
 		Event:  api.EventRenew,

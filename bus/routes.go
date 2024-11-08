@@ -907,7 +907,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// build map of uploading sectors
 	pending := make(map[types.Hash256]struct{})
-	for _, root := range b.sectors.Sectors(fcid) {
+	for _, root := range b.sectors.Sectors() {
 		pending[root] = struct{}{}
 	}
 
@@ -979,16 +979,6 @@ func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// build the response
 	for fcid, size := range sizes {
-		// adjust the amount of prunable data with the pending uploads, due to
-		// how we record contract spending a contract's size might already
-		// include pending sectors
-		pending := b.sectors.Pending(fcid)
-		if pending > size.Prunable {
-			size.Prunable = 0
-		} else {
-			size.Prunable -= pending
-		}
-
 		contracts = append(contracts, api.ContractPrunableData{
 			ID:           fcid,
 			ContractSize: size,
@@ -1025,17 +1015,6 @@ func (b *Bus) contractSizeHandlerGET(jc jape.Context) {
 	} else if jc.Check("failed to fetch contract size", err) != nil {
 		return
 	}
-
-	// adjust the amount of prunable data with the pending uploads, due to how
-	// we record contract spending a contract's size might already include
-	// pending sectors
-	pending := b.sectors.Pending(id)
-	if pending > size.Prunable {
-		size.Prunable = 0
-	} else {
-		size.Prunable -= pending
-	}
-
 	jc.Encode(size)
 }
 
@@ -1168,8 +1147,7 @@ func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
 	roots, err := b.store.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
 		jc.Encode(api.ContractRootsResponse{
-			Roots:     roots,
-			Uploading: b.sectors.Sectors(id),
+			Roots: roots,
 		})
 	}
 }
@@ -2058,7 +2036,7 @@ func (b *Bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	jc.Check("failed to add sector", b.sectors.AddSector(id, req.ContractID, req.Root))
+	jc.Check("failed to add sectors", b.sectors.AddSectors(id, req.Roots...))
 }
 
 func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {
