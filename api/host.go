@@ -116,6 +116,11 @@ type (
 		Subnets           []string             `json:"subnets"`
 	}
 
+	HostInfo struct {
+		PublicKey  types.PublicKey `json:"publicKey"`
+		SiamuxAddr string          `json:"siamuxAddr"`
+	}
+
 	HostInteractions struct {
 		TotalScans              uint64        `json:"totalScans"`
 		LastScan                time.Time     `json:"lastScan"`
