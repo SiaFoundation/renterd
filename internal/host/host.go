@@ -12,8 +12,6 @@ import (
 
 type (
 	Host interface {
-		UploadHost
-
 		PublicKey() types.PublicKey
 
 		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
@@ -24,11 +22,6 @@ type (
 
 		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
-	}
-
-	UploadHost interface {
-		FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error)
-		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 	}
 
 	HostManager interface {
