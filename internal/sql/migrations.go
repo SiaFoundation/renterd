@@ -344,10 +344,22 @@ var (
 				},
 			},
 			{
-				ID: "00026_autopilot",
+				ID: "00019_scan_reset",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_scan_reset", log)
+				},
+			},
+			{
+				ID: "00026_key_prefix",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_key_prefix", log)
+				},
+			},
+			{
+				ID: "00027_autopilot",
 				Migrate: func(tx Tx) error {
 					// remove all references to the autopilots table, without dropping the table
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_autopilot_1", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_autopilot_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
@@ -386,7 +398,7 @@ var (
 					}
 
 					// drop autopilots table
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_autopilot_2", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_autopilot_2", log)
 				},
 			},
 		}
