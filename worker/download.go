@@ -78,7 +78,7 @@ type (
 		numRelaunched  uint64
 
 		sectors []*sectorInfo
-		errs    HostErrorSet
+		errs    utils.HostErrorSet
 	}
 
 	slabDownloadResponse struct {
@@ -550,7 +550,7 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice, migration bo
 		overpay: migration && slice.Health <= downloadOverpayHealthThreshold,
 
 		sectors: sectors,
-		errs:    make(HostErrorSet),
+		errs:    make(utils.HostErrorSet),
 	}
 }
 

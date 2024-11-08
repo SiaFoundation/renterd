@@ -123,7 +123,6 @@ type (
 		Remotes                       []RemoteWorker `yaml:"remotes,omitempty"`
 		AccountsRefillInterval        time.Duration  `yaml:"accountsRefillInterval,omitempty"`
 		BusFlushInterval              time.Duration  `yaml:"busFlushInterval,omitempty"`
-		ContractLockTimeout           time.Duration  `yaml:"contractLockTimeout,omitempty"`
 		DownloadOverdriveTimeout      time.Duration  `yaml:"downloadOverdriveTimeout,omitempty"`
 		UploadOverdriveTimeout        time.Duration  `yaml:"uploadOverdriveTimeout,omitempty"`
 		DownloadMaxOverdrive          uint64         `yaml:"downloadMaxOverdrive,omitempty"`

@@ -44,7 +44,6 @@ type (
 
 		acc                      *worker.Account
 		client                   *rhp3.Client
-		bus                      Bus
 		contractSpendingRecorder ContractSpendingRecorder
 		logger                   *zap.SugaredLogger
 		priceTables              *priceTables
@@ -61,7 +60,6 @@ func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 		client:                   w.rhp3Client,
 		hk:                       hk,
 		acc:                      w.accounts.ForHost(hk),
-		bus:                      w.bus,
 		contractSpendingRecorder: w.contractSpendingRecorder,
 		logger:                   w.logger.Named(hk.String()[:4]),
 		fcid:                     fcid,

@@ -42,9 +42,7 @@ const (
 	lockingPrioritySyncing                = 30
 	lockingPriorityActiveContractRevision = 100
 
-	lockingPriorityBlockedUpload    = 15
-	lockingPriorityUpload           = 10
-	lockingPriorityBackgroundUpload = 5
+	lockingPriorityUpload = 10
 )
 
 var (
@@ -184,7 +182,6 @@ type Worker struct {
 	uploadingPackedSlabs map[string]struct{}
 
 	contractSpendingRecorder ContractSpendingRecorder
-	contractLockingDuration  time.Duration
 
 	shutdownCtx       context.Context
 	shutdownCtxCancel context.CancelFunc
@@ -731,9 +728,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	l = l.Named("worker").Named(cfg.ID)
 
-	if cfg.ContractLockTimeout == 0 {
-		return nil, errors.New("contract lock duration must be positive")
-	}
 	if cfg.BusFlushInterval == 0 {
 		return nil, errors.New("bus flush interval must be positive")
 	}
@@ -755,22 +749,21 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
-		alerts:                  a,
-		contractLockingDuration: cfg.ContractLockTimeout,
-		cache:                   iworker.NewCache(b, l),
-		dialer:                  dialer,
-		eventSubscriber:         iworker.NewEventSubscriber(a, b, l, 10*time.Second),
-		id:                      cfg.ID,
-		bus:                     b,
-		masterKey:               masterKey,
-		logger:                  l.Sugar(),
-		rhp2Client:              rhp2.New(dialer, l),
-		rhp3Client:              rhp3.New(dialer, l),
-		rhp4Client:              rhp4.New(dialer),
-		startTime:               time.Now(),
-		uploadingPackedSlabs:    make(map[string]struct{}),
-		shutdownCtx:             shutdownCtx,
-		shutdownCtxCancel:       shutdownCancel,
+		alerts:               a,
+		cache:                iworker.NewCache(b, l),
+		dialer:               dialer,
+		eventSubscriber:      iworker.NewEventSubscriber(a, b, l, 10*time.Second),
+		id:                   cfg.ID,
+		bus:                  b,
+		masterKey:            masterKey,
+		logger:               l.Sugar(),
+		rhp2Client:           rhp2.New(dialer, l),
+		rhp3Client:           rhp3.New(dialer, l),
+		rhp4Client:           rhp4.New(dialer),
+		startTime:            time.Now(),
+		uploadingPackedSlabs: make(map[string]struct{}),
+		shutdownCtx:          shutdownCtx,
+		shutdownCtxCancel:    shutdownCancel,
 	}
 
 	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
@@ -1129,33 +1122,4 @@ func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, contrac
 		return api.UploadParams{}, err
 	}
 	return up, nil
-}
-
-// A HostErrorSet is a collection of errors from various hosts.
-type HostErrorSet map[types.PublicKey]error
-
-// NumGouging returns numbers of host that errored out due to price gouging.
-func (hes HostErrorSet) NumGouging() (n int) {
-	for _, he := range hes {
-		if errors.Is(he, gouging.ErrPriceTableGouging) {
-			n++
-		}
-	}
-	return
-}
-
-// Error implements error.
-func (hes HostErrorSet) Error() string {
-	if len(hes) == 0 {
-		return ""
-	}
-
-	var strs []string
-	for hk, he := range hes {
-		strs = append(strs, fmt.Sprintf("%x: %v", hk[:4], he.Error()))
-	}
-
-	// include a leading newline so that the first error isn't printed on the
-	// same line as the error context
-	return "\n" + strings.Join(strs, "\n")
 }
