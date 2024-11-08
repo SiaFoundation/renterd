@@ -303,6 +303,12 @@ var (
 				},
 			},
 			{
+				ID: "00019_scan_reset",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_scan_reset", log)
+				},
+			}, // NOTE: duplicate ID (00019) due to updating core deps directly on master
+			{
 				ID: "00020_idx_db_directory",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_idx_db_directory", log)
@@ -339,9 +345,9 @@ var (
 				},
 			},
 			{
-				ID: "00019_scan_reset",
+				ID: "00026_key_prefix",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_scan_reset", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_key_prefix", log)
 				},
 			},
 			{

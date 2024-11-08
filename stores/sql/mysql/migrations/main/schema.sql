@@ -259,7 +259,7 @@ CREATE TABLE `host_blocklist_entry_hosts` (
 CREATE TABLE `multipart_uploads` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `key` longblob,
+  `key` binary(33) NOT NULL,
   `upload_id` varchar(64) NOT NULL,
   `object_id` varchar(766) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,
   `db_bucket_id` bigint unsigned NOT NULL,

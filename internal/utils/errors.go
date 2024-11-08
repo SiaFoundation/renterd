@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"go.sia.tech/core/types"
 )
 
 // Common i/o related errors
@@ -41,4 +43,23 @@ func WrapErr(ctx context.Context, fnName string, err *error) {
 			*err = fmt.Errorf("%w; %w", cause, *err)
 		}
 	}
+}
+
+// A HostErrorSet is a collection of errors from various hosts.
+type HostErrorSet map[types.PublicKey]error
+
+// Error implements error.
+func (hes HostErrorSet) Error() string {
+	if len(hes) == 0 {
+		return ""
+	}
+
+	var strs []string
+	for hk, he := range hes {
+		strs = append(strs, fmt.Sprintf("%x: %v", hk[:4], he.Error()))
+	}
+
+	// include a leading newline so that the first error isn't printed on the
+	// same line as the error context
+	return "\n" + strings.Join(strs, "\n")
 }

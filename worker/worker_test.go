@@ -134,7 +134,6 @@ func newTestWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   time.Second,
 		ID:                       "test",
-		ContractLockTimeout:      time.Second,
 		BusFlushInterval:         time.Second,
 		DownloadOverdriveTimeout: time.Second,
 		UploadOverdriveTimeout:   time.Second,
