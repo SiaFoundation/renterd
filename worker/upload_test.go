@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/upload/uploader"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
 )
@@ -579,12 +580,17 @@ func TestRefreshUploaders(t *testing.T) {
 	}
 
 	// manually add a request to the queue of one of the uploaders we're about to expire
-	responseChan := make(chan sectorUploadResp, 1)
+	responseChan := make(chan uploader.SectorUploadResp, 1)
 	for _, ul := range ul.uploaders {
-		if ul.fcid == hNew.metadata.ID {
-			ul.mu.Lock()
-			ul.queue = append(ul.queue, &sectorUploadReq{responseChan: responseChan, sector: &sectorUpload{ctx: context.Background()}})
-			ul.mu.Unlock()
+		if ul.ContractID() == hNew.metadata.ID {
+			ul.Enqueue(uploader.NewUploadRequest(
+				context.Background(),
+				&[rhpv2.SectorSize]byte{},
+				0,
+				responseChan,
+				types.Hash256{},
+				false,
+			))
 			break
 		}
 	}
@@ -602,8 +608,8 @@ func TestRefreshUploaders(t *testing.T) {
 	// assert all queued requests failed with an error indicating the underlying
 	// contract expired
 	res := <-responseChan
-	if !errors.Is(res.err, errContractExpired) {
-		t.Fatal("expected contract expired error", res.err)
+	if !errors.Is(res.Err, errContractExpired) {
+		t.Fatal("expected contract expired error", res.Err)
 	}
 }
 

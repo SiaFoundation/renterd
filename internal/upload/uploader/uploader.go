@@ -28,7 +28,7 @@ const (
 var (
 	errAcquireContractFailed = errors.New("failed to acquire contract lock")
 	errFetchRevisionFailed   = errors.New("failed to fetch revision")
-	errUploaderStopped       = errors.New("uploader was stopped")
+	ErrStopped               = errors.New("uploader was stopped")
 )
 
 var (
@@ -37,26 +37,38 @@ var (
 
 type (
 	ContractStore interface {
-		// TODO: REMOVE
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	}
 )
 
 type (
 	SectorUploadReq struct {
-		ctx          context.Context
-		responseChan chan SectorUploadResp
-		root         types.Hash256
-		data         *[rhpv2.SectorSize]byte
-		overdrive    bool
+		Ctx          context.Context
+		Data         *[rhpv2.SectorSize]byte
+		Idx          int
+		ResponseChan chan SectorUploadResp
+		Root         types.Hash256
+		Overdrive    bool
 	}
 
 	SectorUploadResp struct {
-		fcid types.FileContractID
-		hk   types.PublicKey
-		err  error
+		FCID types.FileContractID
+		HK   types.PublicKey
+		Req  *SectorUploadReq
+		Err  error
 	}
 )
+
+func NewUploadRequest(ctx context.Context, data *[rhpv2.SectorSize]byte, idx int, respChan chan SectorUploadResp, root types.Hash256, overdrive bool) *SectorUploadReq {
+	return &SectorUploadReq{
+		Ctx:          ctx,
+		Data:         data,
+		Idx:          idx,
+		ResponseChan: respChan,
+		Root:         root,
+		Overdrive:    overdrive,
+	}
+}
 
 type (
 	Uploader struct {
@@ -181,31 +193,31 @@ outer:
 			duration, err := u.execute(req)
 			elapsed := time.Since(start)
 			if errors.Is(err, rhp3.ErrMaxRevisionReached) {
-				if u.tryRefresh(req.ctx) {
+				if u.tryRefresh(req.Ctx) {
 					u.Enqueue(req)
 					continue outer
 				}
 			}
 
 			// track stats
-			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, elapsed, req.overdrive)
+			success, failure, uploadEstimateMS, uploadSpeedBytesPerMS := handleSectorUpload(err, duration, elapsed, req.Overdrive)
 			u.trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS)
 			u.trackConsecutiveFailures(success, failure)
 
 			// debug log
 			if uploadEstimateMS > 0 && !success {
-				u.logger.Debugw("sector upload failure was penalised", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.overdrive, "penalty", uploadEstimateMS, "hk", u.hk)
+				u.logger.Debugw("sector upload failure was penalised", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.Overdrive, "penalty", uploadEstimateMS, "hk", u.hk)
 			} else if uploadEstimateMS == 0 && err != nil && !utils.IsErr(err, ErrSectorUploadFinished) {
-				u.logger.Debugw("sector upload failure was ignored", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.overdrive, "hk", u.hk)
+				u.logger.Debugw("sector upload failure was ignored", "uploadError", err, "uploadDuration", duration, "totalDuration", elapsed, "overdrive", req.Overdrive, "hk", u.hk)
 			}
 
 			// send the response
 			select {
-			case <-req.ctx.Done():
-			case req.responseChan <- SectorUploadResp{
-				fcid: u.fcid,
-				hk:   u.hk,
-				err:  err,
+			case <-req.Ctx.Done():
+			case req.ResponseChan <- SectorUploadResp{
+				FCID: u.fcid,
+				HK:   u.hk,
+				Err:  err,
 			}:
 			}
 		}
@@ -275,7 +287,7 @@ func (u *Uploader) Enqueue(req *SectorUploadReq) {
 	// check for stopped
 	if u.stopped {
 		u.mu.Unlock()
-		go req.finish(errUploaderStopped) // don't block the caller
+		go req.finish(ErrStopped) // don't block the caller
 		return
 	}
 
@@ -313,7 +325,7 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 
 	// wrap cause
 	defer func() {
-		if cause := context.Cause(req.ctx); cause != nil && !utils.IsErr(err, cause) {
+		if cause := context.Cause(req.Ctx); cause != nil && !utils.IsErr(err, cause) {
 			if err != nil {
 				err = fmt.Errorf("%w; %w", cause, err)
 			} else {
@@ -323,7 +335,7 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 	}()
 
 	// acquire contract lock
-	lock, err := locking.NewContractLock(req.ctx, fcid, lockingPriorityUpload, u.cl, u.logger)
+	lock, err := locking.NewContractLock(req.Ctx, fcid, lockingPriorityUpload, u.cl, u.logger)
 	if err != nil {
 		return 0, fmt.Errorf("%w; %w", errAcquireContractFailed, err)
 	}
@@ -334,7 +346,7 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 	}()
 
 	// apply sane timeout
-	ctx, cancel := context.WithTimeout(req.ctx, sectorUploadTimeout)
+	ctx, cancel := context.WithTimeout(req.Ctx, sectorUploadTimeout)
 	defer cancel()
 
 	// fetch the revision
@@ -347,7 +359,7 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 
 	// upload the sector
 	start := time.Now()
-	err = host.UploadSector(ctx, req.root, req.data, rev)
+	err = host.UploadSector(ctx, req.Root, req.Data, rev)
 	if err != nil {
 		return 0, fmt.Errorf("failed to upload sector to contract %v; %w", fcid, err)
 	}
@@ -427,7 +439,7 @@ func (u *Uploader) tryRefresh(ctx context.Context) bool {
 
 func (req *SectorUploadReq) done() bool {
 	select {
-	case <-req.ctx.Done():
+	case <-req.Ctx.Done():
 		return true
 	default:
 		return false
@@ -436,9 +448,9 @@ func (req *SectorUploadReq) done() bool {
 
 func (req *SectorUploadReq) finish(err error) {
 	select {
-	case <-req.ctx.Done():
-	case req.responseChan <- SectorUploadResp{
-		err: err,
+	case <-req.Ctx.Done():
+	case req.ResponseChan <- SectorUploadResp{
+		Err: err,
 	}:
 	}
 }

@@ -106,7 +106,7 @@ type (
 
 	candidate struct {
 		uploader *uploader.Uploader
-		req      *sectorUploadReq
+		req      *uploader.SectorUploadReq
 	}
 
 	slabUploadResponse struct {
@@ -125,24 +125,6 @@ type (
 		mu       sync.Mutex
 		uploaded uploadedSector
 		data     *[rhpv2.SectorSize]byte
-	}
-
-	sectorUploadReq struct {
-		// upload fields
-		uploadID api.UploadID
-
-		sector       *sectorUpload
-		overdrive    bool
-		responseChan chan sectorUploadResp
-
-		// set by the uploader performing the upload
-		fcid types.FileContractID
-		hk   types.PublicKey
-	}
-
-	sectorUploadResp struct {
-		req *sectorUploadReq
-		err error
 	}
 )
 
@@ -735,9 +717,9 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	mgr.uploaders = refreshed
 }
 
-func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan sectorUploadResp) {
+func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan uploader.SectorUploadResp) {
 	// prepare response channel
-	responseChan := make(chan sectorUploadResp)
+	responseChan := make(chan uploader.SectorUploadResp)
 
 	// prepare sectors
 	var wg sync.WaitGroup
@@ -835,15 +817,11 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	slab, respChan := u.newSlabUpload(ctx, shards, candidates, mem, maxOverdrive)
 
 	// prepare requests
-	requests := make([]*sectorUploadReq, len(shards))
+	requests := make([]*uploader.SectorUploadReq, len(shards))
 	roots := make([]types.Hash256, len(shards))
 	for sI := range shards {
-		requests[sI] = &sectorUploadReq{
-			uploadID:     slab.uploadID,
-			sector:       slab.sectors[sI],
-			overdrive:    false,
-			responseChan: respChan,
-		}
+		s := slab.sectors[sI]
+		requests[sI] = uploader.NewUploadRequest(s.ctx, s.data, sI, respChan, s.root, false)
 		roots[sI] = slab.sectors[sI].root
 	}
 
@@ -866,7 +844,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	timer := time.NewTimer(overdriveTimeout)
 
 	// create a request buffer
-	var buffer []*sectorUploadReq
+	var buffer []*uploader.SectorUploadReq
 
 	// start the timer after the upload has started
 	// newSlabUpload is quite slow due to computing the sector roots
@@ -890,15 +868,15 @@ loop:
 			}
 
 			// relaunch non-overdrive uploads
-			if resp.err != nil && !resp.req.overdrive {
-				if err := slab.launch(resp.req); err != nil {
+			if resp.Err != nil && !resp.Req.Overdrive {
+				if err := slab.launch(resp.Req); err != nil {
 					// a failure to relaunch non-overdrive uploads is bad, but
 					// we need to keep them around because an overdrive upload
 					// might've been redundant, in which case we can re-use the
 					// host to launch this request
-					buffer = append(buffer, resp.req)
+					buffer = append(buffer, resp.Req)
 				}
-			} else if resp.err == nil && !used {
+			} else if resp.Err == nil && !used {
 				if len(buffer) > 0 {
 					// relaunch buffered upload request
 					if err := slab.launch(buffer[0]); err == nil {
@@ -976,7 +954,7 @@ func (s *slabUpload) canOverdrive(overdriveTimeout time.Duration) bool {
 	return true
 }
 
-func (s *slabUpload) launch(req *sectorUploadReq) error {
+func (s *slabUpload) launch(req *uploader.SectorUploadReq) error {
 	// nothing to do
 	if req == nil {
 		return nil
@@ -999,7 +977,7 @@ func (s *slabUpload) launch(req *sectorUploadReq) error {
 
 	// update the candidate
 	candidate.req = req
-	if req.overdrive {
+	if req.Overdrive {
 		s.lastOverdrive = time.Now()
 		s.numOverdriving++
 	}
@@ -1012,12 +990,12 @@ func (s *slabUpload) launch(req *sectorUploadReq) error {
 	return nil
 }
 
-func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUploadReq {
+func (s *slabUpload) nextRequest(responseChan chan uploader.SectorUploadResp) *uploader.SectorUploadReq {
 	// count overdrives
 	overdriveCnts := make(map[int]int)
 	for _, c := range s.candidates {
-		if c.req != nil && c.req.overdrive {
-			overdriveCnts[c.req.sector.index]++
+		if c.req != nil && c.req.Overdrive {
+			overdriveCnts[c.req.Idx]++
 		}
 	}
 
@@ -1034,21 +1012,16 @@ func (s *slabUpload) nextRequest(responseChan chan sectorUploadResp) *sectorUplo
 		return nil
 	}
 
-	return &sectorUploadReq{
-		overdrive:    true,
-		responseChan: responseChan,
-		sector:       nextSector,
-		uploadID:     s.uploadID,
-	}
+	return uploader.NewUploadRequest(nextSector.ctx, nextSector.data, nextSector.index, responseChan, nextSector.root, true)
 }
 
-func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
+func (s *slabUpload) receive(resp uploader.SectorUploadResp) (bool, bool) {
 	// convenience variable
-	req := resp.req
-	sector := req.sector
+	req := resp.Req
+	sector := s.sectors[req.Idx]
 
 	// update the state
-	if req.overdrive {
+	if req.Overdrive {
 		s.numOverdriving--
 	}
 	s.numInflight--
@@ -1068,13 +1041,13 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	// failed reqs can't complete the upload, we do this after the isUploaded
 	// check since any error returned for a redundant sector is probably a
 	// result of the sector ctx being closed
-	if resp.err != nil {
-		s.errs[req.hk] = resp.err
+	if resp.Err != nil {
+		s.errs[resp.HK] = resp.Err
 		return false, false
 	}
 
 	// store the sector
-	sector.finish(req)
+	sector.finish(resp)
 
 	// update uploaded sectors
 	s.numUploaded++
@@ -1085,15 +1058,15 @@ func (s *slabUpload) receive(resp sectorUploadResp) (bool, bool) {
 	return true, s.numUploaded == s.numSectors
 }
 
-func (s *sectorUpload) finish(req *sectorUploadReq) {
+func (s *sectorUpload) finish(resp uploader.SectorUploadResp) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.cancel(errSectorUploadFinished)
 	s.uploaded = uploadedSector{
-		hk:   req.hk,
-		fcid: req.fcid,
-		root: req.sector.root,
+		hk:   resp.HK,
+		fcid: resp.FCID,
+		root: resp.Req.Root,
 	}
 	s.data = nil
 }
@@ -1106,23 +1079,4 @@ func (s *sectorUpload) sectorData() *[rhpv2.SectorSize]byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data
-}
-
-func (req *sectorUploadReq) done() bool {
-	select {
-	case <-req.sector.ctx.Done():
-		return true
-	default:
-		return false
-	}
-}
-
-func (req *sectorUploadReq) finish(err error) {
-	select {
-	case <-req.sector.ctx.Done():
-	case req.responseChan <- sectorUploadResp{
-		req: req,
-		err: err,
-	}:
-	}
 }
