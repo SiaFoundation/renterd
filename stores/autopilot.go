@@ -7,17 +7,9 @@ import (
 	sql "go.sia.tech/renterd/stores/sql"
 )
 
-func (s *SQLStore) AutopilotConfig(ctx context.Context) (cfg api.AutopilotConfig, err error) {
+func (s *SQLStore) Autopilot(ctx context.Context) (ap api.Autopilot, err error) {
 	s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		cfg, err = tx.AutopilotConfig(ctx)
-		return
-	})
-	return
-}
-
-func (s *SQLStore) AutopilotPeriod(ctx context.Context) (period uint64, err error) {
-	s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		period, err = tx.AutopilotPeriod(ctx)
+		ap, err = tx.Autopilot(ctx)
 		return
 	})
 	return
@@ -29,17 +21,26 @@ func (s *SQLStore) InitAutopilot(ctx context.Context) error {
 	})
 }
 
-func (s *SQLStore) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error {
-	if err := cfg.Hosts.Validate(); err != nil {
-		return err
-	}
+func (s *SQLStore) EnableAutopilot(ctx context.Context, enable bool) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateAutopilotConfig(ctx, cfg)
+		return tx.EnableAutopilot(ctx, enable)
 	})
 }
 
-func (s *SQLStore) UpdateAutopilotPeriod(ctx context.Context, period uint64) error {
+func (s *SQLStore) UpdateContractsConfig(ctx context.Context, cfg api.ContractsConfig) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateAutopilotPeriod(ctx, period)
+		return tx.UpdateContractsConfig(ctx, cfg)
+	})
+}
+
+func (s *SQLStore) UpdateHostsConfig(ctx context.Context, cfg api.HostsConfig) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateHostsConfig(ctx, cfg)
+	})
+}
+
+func (s *SQLStore) UpdateCurrentPeriod(ctx context.Context, period uint64) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateCurrentPeriod(ctx, period)
 	})
 }

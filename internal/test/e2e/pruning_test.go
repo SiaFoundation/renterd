@@ -76,17 +76,6 @@ func TestHostPruning(t *testing.T) {
 		}
 		return nil
 	})
-
-	// assert validation on MaxDowntimeHours
-	cfg, err := b.AutopilotConfig(context.Background())
-	tt.OK(err)
-
-	cfg.Hosts.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
-	if err = b.UpdateAutopilotConfig(context.Background(), cfg); !strings.Contains(err.Error(), api.ErrMaxDowntimeHoursTooHigh.Error()) {
-		t.Fatal(err)
-	}
-	cfg.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
-	tt.OK(b.UpdateAutopilotConfig(context.Background(), cfg))
 }
 
 func TestSectorPruning(t *testing.T) {

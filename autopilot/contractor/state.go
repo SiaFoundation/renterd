@@ -17,11 +17,10 @@ type (
 	MaintenanceState struct {
 		GS api.GougingSettings
 		RS api.RedundancySettings
-		AP api.AutopilotConfig
+		AP api.Autopilot
 
 		Address                types.Address
 		Fee                    types.Currency
-		Period                 uint64
 		SkipContractFormations bool
 	}
 
@@ -39,7 +38,7 @@ func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
 }
 
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
-	return ctx.state.AP
+	return ctx.state.AP.AutopilotConfig
 }
 
 func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
@@ -59,7 +58,7 @@ func (ctx *mCtx) Done() <-chan struct{} {
 }
 
 func (ctx *mCtx) EndHeight() uint64 {
-	return ctx.state.Period + ctx.state.AP.Contracts.Period + ctx.state.AP.Contracts.RenewWindow
+	return ctx.state.AP.CurrentPeriod + ctx.state.AP.Contracts.Period + ctx.state.AP.Contracts.RenewWindow
 }
 
 func (ctx *mCtx) Err() error {
@@ -82,7 +81,7 @@ func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
 }
 
 func (ctx *mCtx) Period() uint64 {
-	return ctx.state.Period
+	return ctx.state.AP.Contracts.Period
 }
 
 func (ctx *mCtx) RenewWindow() uint64 {

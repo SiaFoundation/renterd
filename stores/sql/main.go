@@ -186,10 +186,11 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
-func AutopilotConfig(ctx context.Context, tx sql.Tx) (cfg api.AutopilotConfig, err error) {
+func Autopilot(ctx context.Context, tx sql.Tx) (ap api.Autopilot, err error) {
 	err = tx.QueryRow(ctx, `
 SELECT
 	enabled,
+	current_period,
 	contracts_set,
 	contracts_amount,
 	contracts_period,
@@ -204,19 +205,20 @@ SELECT
 	hosts_max_consecutive_scan_failures
 FROM autopilot
 WHERE id = ?`, sql.AutopilotID).Scan(
-		&cfg.Enabled,
-		&cfg.Contracts.Set,
-		&cfg.Contracts.Amount,
-		&cfg.Contracts.Period,
-		&cfg.Contracts.RenewWindow,
-		&cfg.Contracts.Download,
-		&cfg.Contracts.Upload,
-		&cfg.Contracts.Storage,
-		&cfg.Contracts.Prune,
-		&cfg.Hosts.AllowRedundantIPs,
-		&cfg.Hosts.MaxDowntimeHours,
-		&cfg.Hosts.MinProtocolVersion,
-		&cfg.Hosts.MaxConsecutiveScanFailures,
+		&ap.Enabled,
+		&ap.CurrentPeriod,
+		&ap.Contracts.Set,
+		&ap.Contracts.Amount,
+		&ap.Contracts.Period,
+		&ap.Contracts.RenewWindow,
+		&ap.Contracts.Download,
+		&ap.Contracts.Upload,
+		&ap.Contracts.Storage,
+		&ap.Contracts.Prune,
+		&ap.Hosts.AllowRedundantIPs,
+		&ap.Hosts.MaxDowntimeHours,
+		&ap.Hosts.MinProtocolVersion,
+		&ap.Hosts.MaxConsecutiveScanFailures,
 	)
 	return
 }
@@ -601,6 +603,11 @@ func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 		return webhooks.ErrWebhookNotFound
 	}
 	return nil
+}
+
+func EnableAutopilot(ctx context.Context, tx sql.Tx, enable bool) error {
+	_, err := tx.Exec(ctx, "UPDATE autopilot SET enabled = ? WHERE id = ?", enable, sql.AutopilotID)
+	return err
 }
 
 func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (map[types.FileContractID]UsedContract, error) {
@@ -2122,45 +2129,6 @@ func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set st
 	return slabs, nil
 }
 
-func UpdateAutopilotConfig(ctx context.Context, tx sql.Tx, cfg api.AutopilotConfig) error {
-	_, err := tx.Exec(ctx, `
-UPDATE autopilot
-SET enabled = ?,
-	contracts_set = ?,
-	contracts_amount = ?,
-	contracts_period = ?,
-	contracts_renew_window = ?,
-	contracts_download = ?,
-	contracts_upload = ?,
-	contracts_storage = ?,
-	contracts_prune = ?,
-	hosts_allow_redundant_ips = ?,
-	hosts_max_downtime_hours = ?,
-	hosts_min_protocol_version = ?,
-	hosts_max_consecutive_scan_failures = ?
-WHERE id = ?`,
-		cfg.Enabled,
-		cfg.Contracts.Set,
-		cfg.Contracts.Amount,
-		cfg.Contracts.Period,
-		cfg.Contracts.RenewWindow,
-		cfg.Contracts.Download,
-		cfg.Contracts.Upload,
-		cfg.Contracts.Storage,
-		cfg.Contracts.Prune,
-		cfg.Hosts.AllowRedundantIPs,
-		cfg.Hosts.MaxDowntimeHours,
-		cfg.Hosts.MinProtocolVersion,
-		cfg.Hosts.MaxConsecutiveScanFailures,
-		sql.AutopilotID)
-	return err
-}
-
-func UpdateAutopilotPeriod(ctx context.Context, tx sql.Tx, period uint64) error {
-	_, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ? WHERE id = ?`, period, sql.AutopilotID)
-	return err
-}
-
 func UpdateBucketPolicy(ctx context.Context, tx sql.Tx, bucket string, bp api.BucketPolicy) error {
 	policy, err := json.Marshal(bp)
 	if err != nil {
@@ -2206,6 +2174,61 @@ WHERE fcid = ?`,
 		return fmt.Errorf("failed to update contract: %w", err)
 	}
 	return nil
+}
+
+func UpdateContractsConfig(ctx context.Context, tx sql.Tx, cfg api.ContractsConfig) error {
+	// sanity check config is valid
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(ctx, `
+UPDATE autopilot
+SET contracts_set = ?,
+	contracts_amount = ?,
+	contracts_period = ?,
+	contracts_renew_window = ?,
+	contracts_download = ?,
+	contracts_upload = ?,
+	contracts_storage = ?,
+	contracts_prune = ?
+WHERE id = ?`,
+		cfg.Set,
+		cfg.Amount,
+		cfg.Period,
+		cfg.RenewWindow,
+		cfg.Download,
+		cfg.Upload,
+		cfg.Storage,
+		cfg.Prune,
+		sql.AutopilotID)
+	return err
+}
+
+func UpdateCurrentPeriod(ctx context.Context, tx sql.Tx, period uint64) error {
+	_, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ? WHERE id = ?`, period, sql.AutopilotID)
+	return err
+}
+
+func UpdateHostsConfig(ctx context.Context, tx sql.Tx, cfg api.HostsConfig) error {
+	// sanity check config is valid
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(ctx, `
+UPDATE autopilot
+SET hosts_allow_redundant_ips = ?,
+	hosts_max_downtime_hours = ?,
+	hosts_min_protocol_version = ?,
+	hosts_max_consecutive_scan_failures = ?
+WHERE id = ?`,
+		cfg.AllowRedundantIPs,
+		cfg.MaxDowntimeHours,
+		cfg.MinProtocolVersion,
+		cfg.MaxConsecutiveScanFailures,
+		sql.AutopilotID)
+	return err
 }
 
 func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer.PeerInfo)) error {

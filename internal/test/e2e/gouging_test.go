@@ -35,7 +35,7 @@ func TestGouging(t *testing.T) {
 
 	// assert that the current period is greater than the period
 	tt.Retry(10, time.Second, func() error {
-		if curr, _ := b.AutopilotPeriod(context.Background()); curr <= cfg.Period {
+		if ap, _ := b.Autopilot(context.Background()); ap.CurrentPeriod <= cfg.Period {
 			return errors.New("current period is not greater than period")
 		}
 		return nil
@@ -140,9 +140,9 @@ func TestHostMinVersion(t *testing.T) {
 	tt := cluster.tt
 
 	// set min version to a high value
-	cfg := test.AutopilotConfig
-	cfg.Hosts.MinProtocolVersion = "99.99.99"
-	tt.OK(cluster.Bus.UpdateAutopilotConfig(context.Background(), cfg))
+	cfg := test.AutopilotConfig.Hosts
+	cfg.MinProtocolVersion = "99.99.99"
+	tt.OK(cluster.Bus.UpdateHostsConfig(context.Background(), cfg))
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {

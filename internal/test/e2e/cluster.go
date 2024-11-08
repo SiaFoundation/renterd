@@ -451,7 +451,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
-		tt.OK(busClient.UpdateAutopilotConfig(ctx, apConfig))
+		tt.OKAll(
+			busClient.UpdateContractsConfig(ctx, apConfig.Contracts),
+			busClient.UpdateHostsConfig(ctx, apConfig.Hosts),
+			busClient.EnableAutopilot(ctx, true),
+		)
 	}
 
 	// Build upload settings.
@@ -651,15 +655,12 @@ func (c *TestCluster) MineToRenewWindow() {
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	period, err := c.Bus.AutopilotPeriod(context.Background())
+	ap, err := c.Bus.Autopilot(context.Background())
 	c.tt.OK(err)
 
-	cfg, err := c.Bus.AutopilotConfig(context.Background())
-	c.tt.OK(err)
-
-	renewWindowStart := period + cfg.Contracts.Period
+	renewWindowStart := ap.CurrentPeriod + ap.Contracts.Period
 	if cs.BlockHeight >= renewWindowStart {
-		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, period, cfg.Contracts.Period, renewWindowStart)
+		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Contracts.Period, renewWindowStart)
 	}
 	c.MineBlocks(renewWindowStart - cs.BlockHeight)
 }

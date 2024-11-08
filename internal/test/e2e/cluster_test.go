@@ -191,12 +191,8 @@ func TestNewTestCluster(t *testing.T) {
 	}
 	contract := contracts[0]
 
-	// fetch autopilot config
-	cfg, err := cluster.Bus.AutopilotConfig(context.Background())
-	tt.OK(err)
-
-	// fetch current period
-	period, err := cluster.Bus.AutopilotPeriod(context.Background())
+	// fetch autopilot
+	ap, err := cluster.Bus.Autopilot(context.Background())
 	tt.OK(err)
 
 	// fetch revision
@@ -204,15 +200,14 @@ func TestNewTestCluster(t *testing.T) {
 	tt.OK(err)
 
 	// verify startHeight and endHeight of the contract.
-	endHeight := period + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	if contract.EndHeight() != endHeight || revision.EndHeight() != endHeight {
-		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), endHeight)
+	if contract.EndHeight() != ap.EndHeight() || revision.EndHeight() != ap.EndHeight() {
+		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), ap.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	}
 
 	// Wait for contract set to form
-	cluster.WaitForContractSetContracts(test.ContractSet, int(cfg.Contracts.Amount))
+	cluster.WaitForContractSetContracts(test.ContractSet, int(ap.Contracts.Amount))
 
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
@@ -2258,7 +2253,11 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// enable the autopilot by configuring it
-	tt.OK(b.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig))
+	tt.OKAll(
+		b.UpdateContractsConfig(context.Background(), test.AutopilotConfig.Contracts),
+		b.UpdateHostsConfig(context.Background(), test.AutopilotConfig.Hosts),
+		b.EnableAutopilot(context.Background(), true),
+	)
 
 	// wait for a contract to form
 	contractsFormed := cluster.WaitForContracts()

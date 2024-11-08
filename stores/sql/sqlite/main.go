@@ -192,12 +192,8 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
-func (tx *MainDatabaseTx) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error) {
-	return ssql.AutopilotConfig(ctx, tx)
-}
-
-func (tx *MainDatabaseTx) AutopilotPeriod(ctx context.Context) (uint64, error) {
-	return ssql.AutopilotPeriod(ctx, tx)
+func (tx *MainDatabaseTx) Autopilot(ctx context.Context) (api.Autopilot, error) {
+	return ssql.Autopilot(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
@@ -393,6 +389,10 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
+func (tx *MainDatabaseTx) EnableAutopilot(ctx context.Context, enable bool) error {
+	return ssql.EnableAutopilot(ctx, tx, enable)
+}
+
 func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey, error) {
 	return ssql.HostAllowlist(ctx, tx)
 }
@@ -406,8 +406,14 @@ func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]ap
 }
 
 func (tx *MainDatabaseTx) InitAutopilot(ctx context.Context) error {
-	_, err := tx.Exec(ctx, "INSERT OR IGNORE INTO autopilot (id, created_at, current_period) VALUES (?, ?, 0);", sql.AutopilotID, time.Now())
-	return err
+	if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO autopilot (id, created_at, current_period) VALUES (?, ?, 0);`, sql.AutopilotID, time.Now()); err != nil {
+		return err
+	} else if err := tx.UpdateContractsConfig(ctx, api.DefaultContractsConfig); err != nil {
+		return err
+	} else if err := tx.UpdateHostsConfig(ctx, api.DefaultHostsConfig); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
@@ -1037,12 +1043,16 @@ func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements 
 	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
 
-func (tx *MainDatabaseTx) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error {
-	return ssql.UpdateAutopilotConfig(ctx, tx, cfg)
+func (tx *MainDatabaseTx) UpdateContractsConfig(ctx context.Context, cfg api.ContractsConfig) error {
+	return ssql.UpdateContractsConfig(ctx, tx, cfg)
 }
 
-func (tx *MainDatabaseTx) UpdateAutopilotPeriod(ctx context.Context, period uint64) error {
-	return ssql.UpdateAutopilotPeriod(ctx, tx, period)
+func (tx *MainDatabaseTx) UpdateHostsConfig(ctx context.Context, cfg api.HostsConfig) error {
+	return ssql.UpdateHostsConfig(ctx, tx, cfg)
+}
+
+func (tx *MainDatabaseTx) UpdateCurrentPeriod(ctx context.Context, period uint64) error {
+	return ssql.UpdateCurrentPeriod(ctx, tx, period)
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {

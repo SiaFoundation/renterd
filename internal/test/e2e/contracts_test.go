@@ -34,11 +34,9 @@ func TestFormContract(t *testing.T) {
 
 	// form a contract using the bus
 	wallet, _ := b.Wallet(context.Background())
-	cfg, err := b.AutopilotConfig(context.Background())
+	ap, err := b.Autopilot(context.Background())
 	tt.OK(err)
-	period, err := b.AutopilotPeriod(context.Background())
-	tt.OK(err)
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), period+cfg.Contracts.Period+cfg.Contracts.RenewWindow)
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
 	tt.OK(err)
 
 	// assert the contract was added to the bus
@@ -50,7 +48,7 @@ func TestFormContract(t *testing.T) {
 
 	// wait until autopilot updated the current period
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		if curr, _ := b.AutopilotPeriod(context.Background()); curr == period {
+		if curr, _ := b.Autopilot(context.Background()); curr.CurrentPeriod == ap.CurrentPeriod {
 			return errors.New("autopilot didn't update the current period")
 		}
 		return nil
@@ -59,8 +57,9 @@ func TestFormContract(t *testing.T) {
 	// update autopilot config to allow for 1 contract, this won't form a
 	// contract but will ensure we don't skip contract maintenance, which should
 	// renew the contract we formed
-	cfg.Contracts.Amount = 1
-	tt.OK(b.UpdateAutopilotConfig(context.Background(), cfg))
+	cfg := ap.Contracts
+	cfg.Amount = 1
+	tt.OK(b.UpdateContractsConfig(context.Background(), cfg))
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID

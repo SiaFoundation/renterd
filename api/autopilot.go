@@ -17,9 +17,19 @@ var (
 	// ErrMaxDowntimeHoursTooHigh is returned if the contracts config is updated
 	// with a value that exceeds the maximum of 99 years.
 	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
+
+	// ErrInvalidReleaseVersion is returned if the version is an invalid release
+	// string.
+	ErrInvalidReleaseVersion = errors.New("invalid release version")
 )
 
 type (
+	// Autopilot contains its configuration as well as the current period.
+	Autopilot struct {
+		CurrentPeriod uint64 `json:"currentPeriod"`
+		AutopilotConfig
+	}
+
 	// AutopilotConfig contains configuration settings for the autopilot.
 	AutopilotConfig struct {
 		Enabled   bool            `json:"enabled"`
@@ -42,9 +52,26 @@ type (
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
 		AllowRedundantIPs          bool   `json:"allowRedundantIPs"`
+		MaxConsecutiveScanFailures uint64 `json:"maxConsecutiveScanFailures"`
 		MaxDowntimeHours           uint64 `json:"maxDowntimeHours"`
 		MinProtocolVersion         string `json:"minProtocolVersion"`
-		MaxConsecutiveScanFailures uint64 `json:"maxConsecutiveScanFailures"`
+	}
+)
+
+var (
+	DefaultContractsConfig = ContractsConfig{
+		Amount:      50,
+		Period:      144 * 7 * 6,
+		RenewWindow: 144 * 7 * 2,
+		Download:    1e12, // 1 TB
+		Upload:      1e12, // 1 TB
+		Storage:     4e12, // 4 TB
+	}
+
+	DefaultHostsConfig = HostsConfig{
+		MaxConsecutiveScanFailures: 10,
+		MaxDowntimeHours:           24 * 7 * 2,
+		MinProtocolVersion:         "1.6.0",
 	}
 )
 
@@ -107,10 +134,12 @@ type (
 	}
 )
 
+func (ap Autopilot) EndHeight() uint64 {
+	return ap.CurrentPeriod + ap.Contracts.Period + ap.Contracts.RenewWindow
+}
+
 func (cc ContractsConfig) Validate() error {
-	if cc.Amount == 0 {
-		return errors.New("amount must be greater than 0")
-	} else if cc.Period == 0 {
+	if cc.Period == 0 {
 		return errors.New("period must be greater than 0")
 	} else if cc.RenewWindow == 0 {
 		return errors.New("renewWindow must be greater than 0")
@@ -122,7 +151,7 @@ func (hc HostsConfig) Validate() error {
 	if hc.MaxDowntimeHours > 99*365*24 {
 		return ErrMaxDowntimeHoursTooHigh
 	} else if hc.MinProtocolVersion != "" && !utils.IsVersion(hc.MinProtocolVersion) {
-		return fmt.Errorf("invalid min protocol version '%s'", hc.MinProtocolVersion)
+		return fmt.Errorf("%w: '%s'", ErrInvalidReleaseVersion, hc.MinProtocolVersion)
 	}
 	return nil
 }

@@ -322,7 +322,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	// sanity check the endheight is not the same on renewals
 	endHeight := ctx.EndHeight()
 	if endHeight <= rev.ProofHeight {
-		logger.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
+		logger.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.ContractsConfig().Period, "bh", cs.BlockHeight)
 		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
 	}
 

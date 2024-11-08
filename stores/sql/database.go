@@ -71,11 +71,8 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
-		// AutopilotConfig returns the autopilot config.
-		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
-
-		// AutopilotPeriod returns the current period.
-		AutopilotPeriod(ctx context.Context) (uint64, error)
+		// Autopilot returns the autopilot.
+		Autopilot(ctx context.Context) (api.Autopilot, error)
 
 		// BanPeer temporarily bans one or more IPs. The addr should either be a
 		// single IP with port (e.g. 1.2.3.4:5678) or a CIDR subnet (e.g.
@@ -158,6 +155,9 @@ type (
 		// URL of the provided webhook. If the webhook doesn't exist,
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
+
+		// EnableAutopilot enables or disables the autopilot.
+		EnableAutopilot(ctx context.Context, enabled bool) error
 
 		// Hosts returns a list of hosts that match the provided filters
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
@@ -333,12 +333,6 @@ type (
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
 
-		// UpdateAutopilotConfig updates the autopilot configuration.
-		UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error
-
-		// UpdateAutopilotPeriod updates the autopilot period.
-		UpdateAutopilotPeriod(ctx context.Context, period uint64) error
-
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
@@ -351,6 +345,12 @@ type (
 		// it doesn't exist already.
 		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
+		// UpdateContractsConfig updates the autopilot's contracts configuration.
+		UpdateContractsConfig(ctx context.Context, cfg api.ContractsConfig) error
+
+		// UpdateCurrentPeriod updates the current period in the database.
+		UpdateCurrentPeriod(ctx context.Context, period uint64) error
+
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 
@@ -359,6 +359,9 @@ type (
 
 		// UpdateHostCheck updates the host check for the given host.
 		UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) error
+
+		// UpdateHostsConfig updates the autopilot's hosts configuration.
+		UpdateHostsConfig(ctx context.Context, cfg api.HostsConfig) error
 
 		// UpdatePeerInfo updates the metadata for the specified peer.
 		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error

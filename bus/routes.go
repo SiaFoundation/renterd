@@ -1751,37 +1751,72 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (b *Bus) autopilotConfigHandlerGET(jc jape.Context) {
-	cfg, err := b.store.AutopilotConfig(jc.Request.Context())
-	if jc.Check("failed to fetch autopilot config", err) != nil {
+func (b *Bus) autopilotHandlerGET(jc jape.Context) {
+	ap, err := b.store.Autopilot(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot", err) != nil {
 		return
 	}
-	jc.Encode(cfg)
+	jc.Encode(ap)
 }
 
-func (b *Bus) autopilotConfigHandlerPUT(jc jape.Context) {
-	var cfg api.AutopilotConfig
+func (b *Bus) autopilotConfigContractsHandlerPUT(jc jape.Context) {
+	var cfg api.ContractsConfig
 	if jc.Decode(&cfg) != nil {
 		return
-	}
-
-	if cfg.Enabled {
-		err := errors.Join(cfg.Contracts.Validate(), cfg.Hosts.Validate())
-		if err != nil {
-			jc.Error(err, http.StatusBadRequest)
-			return
-		}
-	}
-
-	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
-}
-
-func (b *Bus) autopilotPeriodHandlerGET(jc jape.Context) {
-	period, err := b.store.AutopilotPeriod(jc.Request.Context())
-	if jc.Check("failed to fetch current period", err) != nil {
+	} else if err := cfg.Validate(); err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
-	jc.Encode(period)
+
+	jc.Check("failed to update contracts config", b.store.UpdateContractsConfig(jc.Request.Context(), cfg))
+}
+
+func (b *Bus) autopilotConfigHostsHandlerPUT(jc jape.Context) {
+	var cfg api.HostsConfig
+	if jc.Decode(&cfg) != nil {
+		return
+	} else if err := cfg.Validate(); err != nil {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update hosts config", b.store.UpdateHostsConfig(jc.Request.Context(), cfg))
+}
+
+func (b *Bus) autopilotEnableHandlerPUT(jc jape.Context) {
+	var enable bool
+	if jc.Decode(&enable) != nil {
+		return
+	}
+
+	ap, err := b.store.Autopilot(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot", err) != nil {
+		return
+	}
+
+	// no-op if the autopilot is already in the desired state
+	if (ap.Enabled && enable) || (!ap.Enabled && !enable) {
+		jc.EmptyResonse()
+		return
+	}
+
+	// disable autopilot
+	if ap.Enabled && !enable {
+		jc.Check("failed to disable the autopilot", b.store.EnableAutopilot(jc.Request.Context(), false))
+		return
+	}
+
+	// validate the autopilot config before enabling
+	if err := ap.Contracts.Validate(); err != nil {
+		jc.Error(fmt.Errorf("failed to enable autopilot, contracts config is invalid: %w", err), http.StatusConflict)
+		return
+	} else if err := ap.Hosts.Validate(); err != nil {
+		jc.Error(fmt.Errorf("failed to enable autopilot, hosts config is invalid: %w", err), http.StatusConflict)
+		return
+	}
+
+	// enable autopilot
+	jc.Check("failed to enable the autopilot", b.store.EnableAutopilot(jc.Request.Context(), true))
 }
 
 func (b *Bus) autopilotPeriodHandlerPUT(jc jape.Context) {
@@ -1790,7 +1825,7 @@ func (b *Bus) autopilotPeriodHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to update autopilot period", b.store.UpdateAutopilotPeriod(jc.Request.Context(), period))
+	jc.Check("failed to update autopilot period", b.store.UpdateCurrentPeriod(jc.Request.Context(), period))
 }
 
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
