@@ -59,7 +59,7 @@ type (
 )
 
 type (
-	uploader struct {
+	Uploader struct {
 		cs     ContractStore
 		cl     locking.ContractLocker
 		hm     host.HostManager
@@ -86,25 +86,54 @@ type (
 	}
 )
 
-func (u *uploader) ContractID() types.FileContractID {
+func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, c api.ContractMetadata, l *zap.SugaredLogger) *Uploader {
+	return &Uploader{
+		cl:     cl,
+		cs:     cs,
+		hm:     hm,
+		logger: l,
+
+		// static
+		hk:              c.HostKey,
+		siamuxAddr:      c.SiamuxAddr,
+		shutdownCtx:     ctx,
+		signalNewUpload: make(chan struct{}, 1),
+
+		// stats
+		statsSectorUploadEstimateInMS:    utils.NewDataPoints(10 * time.Minute),
+		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
+
+		// covered by mutex
+		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
+		fcid:      c.ID,
+		endHeight: c.WindowEnd,
+		queue:     make([]*sectorUploadReq, 0),
+	}
+}
+
+func (u *Uploader) ContractID() types.FileContractID {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.fcid
 }
 
-func (u *uploader) Expired(bh uint64) bool {
+func (u *Uploader) Expired(bh uint64) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return bh >= u.endHeight
 }
 
-func (u *uploader) Healthy() bool {
+func (u *Uploader) Healthy() bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.consecutiveFailures == 0
 }
 
-func (u *uploader) Refresh(c api.ContractMetadata) {
+func (u *Uploader) PublicKey() types.PublicKey {
+	return u.hk
+}
+
+func (u *Uploader) Refresh(c api.ContractMetadata) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -114,7 +143,7 @@ func (u *uploader) Refresh(c api.ContractMetadata) {
 	u.endHeight = c.WindowEnd
 }
 
-func (u *uploader) Start() {
+func (u *Uploader) Start() {
 outer:
 	for {
 		// wait for work
@@ -149,7 +178,7 @@ outer:
 			elapsed := time.Since(start)
 			if errors.Is(err, rhp3.ErrMaxRevisionReached) {
 				if u.tryRefresh(req.ctx) {
-					u.enqueue(req)
+					u.Enqueue(req)
 					continue outer
 				}
 			}
@@ -221,7 +250,7 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	return false, true, float64(time.Hour.Milliseconds()), 0
 }
 
-func (u *uploader) Stop(err error) {
+func (u *Uploader) Stop(err error) {
 	u.mu.Lock()
 	u.stopped = true
 	u.mu.Unlock()
@@ -237,7 +266,7 @@ func (u *uploader) Stop(err error) {
 	}
 }
 
-func (u *uploader) enqueue(req *SectorUploadReq) {
+func (u *Uploader) Enqueue(req *SectorUploadReq) {
 	u.mu.Lock()
 	// check for stopped
 	if u.stopped {
@@ -254,7 +283,7 @@ func (u *uploader) enqueue(req *SectorUploadReq) {
 	u.signalWork()
 }
 
-func (u *uploader) estimate() float64 {
+func (u *Uploader) Estimate() float64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -271,7 +300,7 @@ func (u *uploader) estimate() float64 {
 
 // execute executes the sector upload request, if the upload was successful it
 // returns the time it took to upload the sector to the host
-func (u *uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
+func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 	// grab fields
 	u.mu.Lock()
 	host := u.host
@@ -322,7 +351,7 @@ func (u *uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 	return time.Since(start), nil
 }
 
-func (u *uploader) pop() *SectorUploadReq {
+func (u *Uploader) pop() *SectorUploadReq {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -335,14 +364,14 @@ func (u *uploader) pop() *SectorUploadReq {
 	return nil
 }
 
-func (u *uploader) signalWork() {
+func (u *Uploader) signalWork() {
 	select {
 	case u.signalNewUpload <- struct{}{}:
 	default:
 	}
 }
 
-func (u *uploader) trackConsecutiveFailures(success, failure bool) {
+func (u *Uploader) trackConsecutiveFailures(success, failure bool) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -353,7 +382,7 @@ func (u *uploader) trackConsecutiveFailures(success, failure bool) {
 	}
 }
 
-func (u *uploader) trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS float64) {
+func (u *Uploader) trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerMS float64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -365,7 +394,7 @@ func (u *uploader) trackSectorUploadStats(uploadEstimateMS, uploadSpeedBytesPerM
 	}
 }
 
-func (u *uploader) tryRecomputeStats() {
+func (u *Uploader) TryRecomputeStats() {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if time.Since(u.lastRecompute) < statsRecomputeMinInterval {
@@ -377,7 +406,7 @@ func (u *uploader) tryRecomputeStats() {
 	u.statsSectorUploadSpeedBytesPerMS.Recompute()
 }
 
-func (u *uploader) tryRefresh(ctx context.Context) bool {
+func (u *Uploader) tryRefresh(ctx context.Context) bool {
 	// fetch the renewed contract
 	renewed, err := u.cs.RenewedContract(ctx, u.ContractID())
 	if utils.IsErr(err, api.ErrContractNotFound) || utils.IsErr(err, context.Canceled) {
