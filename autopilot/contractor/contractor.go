@@ -881,7 +881,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// get check
-		if host.Checks == nil {
+		if host.Checks == (api.HostChecks{}) {
 			logger.Warn("missing host check")
 			churnReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
 			continue
@@ -1041,7 +1041,7 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 	var candidates scoredHosts
 	for _, host := range allHosts {
 		logger := logger.With("hostKey", host.PublicKey)
-		if host.Checks == nil {
+		if host.Checks == (api.HostChecks{}) {
 			logger.Warnf("missing host check %v", host.PublicKey)
 			continue
 		}

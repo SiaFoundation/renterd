@@ -517,15 +517,6 @@ your node's consensus state using the following endpoint:
 
 - `GET /api/bus/consensus/state`
 
-### Config
-
-The configuration can be updated through the UI or by using the following
-endpoint:
-
-- `PUT /api/bus/config/autopilot`
-
-The autopilot will not perform any tasks until it is configured.
-
 ### Blocklist
 
 Unfortunately the Sia blockchain is subject to hosts that announced themselves

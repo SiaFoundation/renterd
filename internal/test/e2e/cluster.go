@@ -454,7 +454,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		tt.OKAll(
 			busClient.UpdateContractsConfig(ctx, apConfig.Contracts),
 			busClient.UpdateHostsConfig(ctx, apConfig.Hosts),
-			busClient.EnableAutopilot(ctx, true),
+			busClient.EnableAutopilot(ctx),
 		)
 	}
 

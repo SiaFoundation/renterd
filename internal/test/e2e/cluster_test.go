@@ -277,7 +277,7 @@ func TestNewTestCluster(t *testing.T) {
 		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		} else if hi.Checks == nil {
+		} else if hi.Checks == (api.HostChecks{}) {
 			t.Fatal("host check not found")
 		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
@@ -300,7 +300,7 @@ func TestNewTestCluster(t *testing.T) {
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if hi.Checks == nil {
+		if hi.Checks == (api.HostChecks{}) {
 			t.Fatal("host check not found")
 		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
 			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
@@ -2256,7 +2256,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	tt.OKAll(
 		b.UpdateContractsConfig(context.Background(), test.AutopilotConfig.Contracts),
 		b.UpdateHostsConfig(context.Background(), test.AutopilotConfig.Hosts),
-		b.EnableAutopilot(context.Background(), true),
+		b.EnableAutopilot(context.Background()),
 	)
 
 	// wait for a contract to form

@@ -612,11 +612,6 @@ func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 	return nil
 }
 
-func EnableAutopilot(ctx context.Context, tx sql.Tx, enable bool) error {
-	_, err := tx.Exec(ctx, "UPDATE autopilot SET enabled = ? WHERE id = ?", enable, sql.AutopilotID)
-	return err
-}
-
 func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (map[types.FileContractID]UsedContract, error) {
 	if len(fcids) == 0 {
 		return make(map[types.FileContractID]UsedContract), nil
@@ -895,7 +890,7 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 
 	var hosts []api.Host
 	for rows.Next() {
-		h := api.Host{Checks: &api.HostChecks{}}
+		var h api.Host
 		var pte dsql.NullTime
 		var resolvedAddresses string
 		err := rows.Scan(&h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
@@ -2183,57 +2178,38 @@ WHERE fcid = ?`,
 	return nil
 }
 
-func UpdateContractsConfig(ctx context.Context, tx sql.Tx, cfg api.ContractsConfig) error {
-	// sanity check config is valid
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-
+func UpdateAutopilot(ctx context.Context, tx sql.Tx, ap api.Autopilot) error {
 	_, err := tx.Exec(ctx, `
 UPDATE autopilot
-SET contracts_set = ?,
+SET enabled = ?,
+	current_period = ?,
+	contracts_set = ?,
 	contracts_amount = ?,
 	contracts_period = ?,
 	contracts_renew_window = ?,
 	contracts_download = ?,
 	contracts_upload = ?,
 	contracts_storage = ?,
-	contracts_prune = ?
-WHERE id = ?`,
-		cfg.Set,
-		cfg.Amount,
-		cfg.Period,
-		cfg.RenewWindow,
-		cfg.Download,
-		cfg.Upload,
-		cfg.Storage,
-		cfg.Prune,
-		sql.AutopilotID)
-	return err
-}
-
-func UpdateCurrentPeriod(ctx context.Context, tx sql.Tx, period uint64) error {
-	_, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ? WHERE id = ?`, period, sql.AutopilotID)
-	return err
-}
-
-func UpdateHostsConfig(ctx context.Context, tx sql.Tx, cfg api.HostsConfig) error {
-	// sanity check config is valid
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-
-	_, err := tx.Exec(ctx, `
-UPDATE autopilot
-SET hosts_allow_redundant_ips = ?,
+	contracts_prune = ?,
+	hosts_allow_redundant_ips = ?,
 	hosts_max_downtime_hours = ?,
 	hosts_min_protocol_version = ?,
 	hosts_max_consecutive_scan_failures = ?
 WHERE id = ?`,
-		cfg.AllowRedundantIPs,
-		cfg.MaxDowntimeHours,
-		cfg.MinProtocolVersion,
-		cfg.MaxConsecutiveScanFailures,
+		ap.Enabled,
+		ap.CurrentPeriod,
+		ap.Contracts.Set,
+		ap.Contracts.Amount,
+		ap.Contracts.Period,
+		ap.Contracts.RenewWindow,
+		ap.Contracts.Download,
+		ap.Contracts.Upload,
+		ap.Contracts.Storage,
+		ap.Contracts.Prune,
+		ap.Hosts.AllowRedundantIPs,
+		ap.Hosts.MaxDowntimeHours,
+		ap.Hosts.MinProtocolVersion,
+		ap.Hosts.MaxConsecutiveScanFailures,
 		sql.AutopilotID)
 	return err
 }
@@ -2413,7 +2389,7 @@ EXISTS (
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id
 	WHERE %s
-	GROUP by h.id`, strings.Join(whereExprs, "AND")))
+	GROUP by h.id`, strings.Join(whereExprs, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}

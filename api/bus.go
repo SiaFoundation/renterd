@@ -97,4 +97,12 @@ type (
 		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 	}
+
+	// UpdateAutopilotRequest is the request type for the /autopilot endpoint.
+	UpdateAutopilotRequest struct {
+		Enabled       *bool            `json:"enabled"`
+		Contracts     *ContractsConfig `json:"contracts"`
+		CurrentPeriod *uint64          `json:"currentPeriod"`
+		Hosts         *HostsConfig     `json:"hosts"`
+	}
 )

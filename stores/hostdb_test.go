@@ -315,9 +315,9 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert h1 and h2 have the expected checks
-	if *his[0].Checks != h1c {
+	if his[0].Checks != h1c {
 		t.Fatal("unexpected", his[0].Checks)
-	} else if *his[1].Checks != h2c {
+	} else if his[1].Checks != h2c {
 		t.Fatal("unexpected", his[1].Checks)
 	}
 

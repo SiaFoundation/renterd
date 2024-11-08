@@ -187,10 +187,7 @@ type (
 	AutopilotStore interface {
 		Autopilot(ctx context.Context) (api.Autopilot, error)
 		InitAutopilot(ctx context.Context) error
-		EnableAutopilot(ctx context.Context, enabled bool) error
-		UpdateContractsConfig(ctx context.Context, cfg api.ContractsConfig) error
-		UpdateHostsConfig(ctx context.Context, cfg api.HostsConfig) error
-		UpdateCurrentPeriod(ctx context.Context, period uint64) error
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
 	// BackupStore is the interface of a store that can be backed up.
@@ -407,11 +404,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /autopilot":                  b.autopilotHandlerGET,
-		"PUT    /autopilot/config/contracts": b.autopilotConfigContractsHandlerPUT,
-		"PUT    /autopilot/config/hosts":     b.autopilotConfigHostsHandlerPUT,
-		"PUT    /autopilot/enable":           b.autopilotEnableHandlerPUT,
-		"PUT    /autopilot/period":           b.autopilotPeriodHandlerPUT,
+		"GET    /autopilot": b.autopilotHandlerGET,
+		"PUT    /autopilot": b.autopilotHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,

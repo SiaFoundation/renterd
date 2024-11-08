@@ -57,9 +57,9 @@ func TestFormContract(t *testing.T) {
 	// update autopilot config to allow for 1 contract, this won't form a
 	// contract but will ensure we don't skip contract maintenance, which should
 	// renew the contract we formed
-	cfg := ap.Contracts
-	cfg.Amount = 1
-	tt.OK(b.UpdateContractsConfig(context.Background(), cfg))
+	contracts := ap.Contracts
+	contracts.Amount = 1
+	tt.OK(b.UpdateContractsConfig(context.Background(), contracts))
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID

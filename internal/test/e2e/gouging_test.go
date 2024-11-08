@@ -151,9 +151,9 @@ func TestHostMinVersion(t *testing.T) {
 	tt := cluster.tt
 
 	// set min version to a high value
-	cfg := test.AutopilotConfig.Hosts
-	cfg.MinProtocolVersion = "99.99.99"
-	tt.OK(cluster.Bus.UpdateHostsConfig(context.Background(), cfg))
+	hosts := test.AutopilotConfig.Hosts
+	hosts.MinProtocolVersion = "99.99.99"
+	tt.OK(cluster.Bus.UpdateHostsConfig(context.Background(), hosts))
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {

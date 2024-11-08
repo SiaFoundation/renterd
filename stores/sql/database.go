@@ -156,9 +156,6 @@ type (
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
-		// EnableAutopilot enables or disables the autopilot.
-		EnableAutopilot(ctx context.Context, enabled bool) error
-
 		// Hosts returns a list of hosts that match the provided filters
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 
@@ -333,6 +330,9 @@ type (
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
 
+		// UpdateAutopilot updates the autopilot in the database.
+		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
 		// one, fully overwriting the existing policy.
 		UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error
@@ -345,12 +345,6 @@ type (
 		// it doesn't exist already.
 		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
-		// UpdateContractsConfig updates the autopilot's contracts configuration.
-		UpdateContractsConfig(ctx context.Context, cfg api.ContractsConfig) error
-
-		// UpdateCurrentPeriod updates the current period in the database.
-		UpdateCurrentPeriod(ctx context.Context, period uint64) error
-
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 
@@ -359,9 +353,6 @@ type (
 
 		// UpdateHostCheck updates the host check for the given host.
 		UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) error
-
-		// UpdateHostsConfig updates the autopilot's hosts configuration.
-		UpdateHostsConfig(ctx context.Context, cfg api.HostsConfig) error
 
 		// UpdatePeerInfo updates the metadata for the specified peer.
 		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error

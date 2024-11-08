@@ -59,19 +59,23 @@ type (
 )
 
 var (
-	DefaultContractsConfig = ContractsConfig{
-		Amount:      50,
-		Period:      144 * 7 * 6,
-		RenewWindow: 144 * 7 * 2,
-		Download:    1e12, // 1 TB
-		Upload:      1e12, // 1 TB
-		Storage:     4e12, // 4 TB
-	}
-
-	DefaultHostsConfig = HostsConfig{
-		MaxConsecutiveScanFailures: 10,
-		MaxDowntimeHours:           24 * 7 * 2,
-		MinProtocolVersion:         "1.6.0",
+	DefaultAutopilotConfig = AutopilotConfig{
+		Enabled: false,
+		Contracts: ContractsConfig{
+			Amount:      50,
+			Period:      144 * 7 * 6,
+			RenewWindow: 144 * 7 * 2,
+			Download:    1e12, // 1 TB
+			Upload:      1e12, // 1 TB
+			Storage:     4e12, // 4 TB
+			Prune:       false,
+		},
+		Hosts: HostsConfig{
+			AllowRedundantIPs:          false,
+			MaxConsecutiveScanFailures: 10,
+			MaxDowntimeHours:           24 * 7 * 2,
+			MinProtocolVersion:         "1.6.0",
+		},
 	}
 )
 

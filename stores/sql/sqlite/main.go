@@ -389,10 +389,6 @@ func (tx *MainDatabaseTx) DeleteObjects(ctx context.Context, bucket string, key 
 	}
 }
 
-func (tx *MainDatabaseTx) EnableAutopilot(ctx context.Context, enable bool) error {
-	return ssql.EnableAutopilot(ctx, tx, enable)
-}
-
 func (tx *MainDatabaseTx) HostAllowlist(ctx context.Context) ([]types.PublicKey, error) {
 	return ssql.HostAllowlist(ctx, tx)
 }
@@ -406,14 +402,38 @@ func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]ap
 }
 
 func (tx *MainDatabaseTx) InitAutopilot(ctx context.Context) error {
-	if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO autopilot (id, created_at, current_period) VALUES (?, ?, 0);`, sql.AutopilotID, time.Now()); err != nil {
-		return err
-	} else if err := tx.UpdateContractsConfig(ctx, api.DefaultContractsConfig); err != nil {
-		return err
-	} else if err := tx.UpdateHostsConfig(ctx, api.DefaultHostsConfig); err != nil {
-		return err
-	}
-	return nil
+	_, err := tx.Exec(ctx, `
+INSERT OR IGNORE INTO autopilot (
+		id,
+	created_at,
+	current_period,
+	contracts_amount,
+	contracts_period,
+	contracts_renew_window,
+	contracts_download,
+	contracts_upload,
+	contracts_storage,
+	contracts_prune,
+	hosts_allow_redundant_ips,
+	hosts_max_consecutive_scan_failures,
+	hosts_max_downtime_hours,
+	hosts_min_protocol_version
+) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		sql.AutopilotID,
+		time.Now(),
+		api.DefaultAutopilotConfig.Contracts.Amount,
+		api.DefaultAutopilotConfig.Contracts.Period,
+		api.DefaultAutopilotConfig.Contracts.RenewWindow,
+		api.DefaultAutopilotConfig.Contracts.Download,
+		api.DefaultAutopilotConfig.Contracts.Upload,
+		api.DefaultAutopilotConfig.Contracts.Storage,
+		api.DefaultAutopilotConfig.Contracts.Prune,
+		api.DefaultAutopilotConfig.Hosts.AllowRedundantIPs,
+		api.DefaultAutopilotConfig.Hosts.MaxConsecutiveScanFailures,
+		api.DefaultAutopilotConfig.Hosts.MaxDowntimeHours,
+		api.DefaultAutopilotConfig.Hosts.MinProtocolVersion,
+	)
+	return err
 }
 
 func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
@@ -1043,16 +1063,8 @@ func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements 
 	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
 
-func (tx *MainDatabaseTx) UpdateContractsConfig(ctx context.Context, cfg api.ContractsConfig) error {
-	return ssql.UpdateContractsConfig(ctx, tx, cfg)
-}
-
-func (tx *MainDatabaseTx) UpdateHostsConfig(ctx context.Context, cfg api.HostsConfig) error {
-	return ssql.UpdateHostsConfig(ctx, tx, cfg)
-}
-
-func (tx *MainDatabaseTx) UpdateCurrentPeriod(ctx context.Context, period uint64) error {
-	return ssql.UpdateCurrentPeriod(ctx, tx, period)
+func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
+	return ssql.UpdateAutopilot(ctx, tx, ap)
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
