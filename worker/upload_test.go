@@ -155,7 +155,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	}
 
 	// assert our object store contains a partial slab
-	if len(os.partials) != 1 {
+	if os.NumPartials() != 1 {
 		t.Fatal("expected 1 partial slab")
 	}
 
@@ -191,7 +191,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	}
 
 	// assert our object store contains zero partial slabs
-	if len(os.partials) != 0 {
+	if os.NumPartials() != 0 {
 		t.Fatal("expected no partial slabs")
 	}
 
@@ -213,9 +213,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	// define a helper that counts packed slabs
 	packedSlabsCount := func() int {
 		t.Helper()
-		os.mu.Lock()
-		cnt := len(os.partials)
-		os.mu.Unlock()
+		cnt := os.NumPartials()
 		return cnt
 	}
 
@@ -235,7 +233,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	w.BlockAsyncPackedSlabUploads(params)
 
 	// configure max buffer size
-	os.setSlabBufferMaxSizeSoft(128)
+	os.SetSlabBufferMaxSizeSoft(128)
 
 	// upload 2x64 bytes using the worker and assert we still have two packed
 	// slabs (buffer limit not reached)
@@ -547,7 +545,7 @@ func TestRefreshUploaders(t *testing.T) {
 	// remove the host from the second contract
 	c2 := contracts[1]
 	delete(hm.hosts, c2.HostKey)
-	delete(cs.contracts, c2.ID)
+	cs.DeleteContracdt(c2.ID)
 
 	// add a new host/contract
 	hNew := w.AddHost()
@@ -560,9 +558,9 @@ func TestRefreshUploaders(t *testing.T) {
 	var added, renewed int
 	for _, ul := range ul.uploaders {
 		switch ul.ContractID() {
-		case hNew.metadata.ID:
+		case hNew.ID():
 			added++
-		case c1Renewed.metadata.ID:
+		case c1Renewed.ID():
 			renewed++
 		default:
 		}
@@ -581,7 +579,7 @@ func TestRefreshUploaders(t *testing.T) {
 	// manually add a request to the queue of one of the uploaders we're about to expire
 	responseChan := make(chan sectorUploadResp, 1)
 	for _, ul := range ul.uploaders {
-		if ul.fcid == hNew.metadata.ID {
+		if ul.fcid == hNew.ID() {
 			ul.mu.Lock()
 			ul.queue = append(ul.queue, &sectorUploadReq{responseChan: responseChan, sector: &sectorUpload{ctx: context.Background()}})
 			ul.mu.Unlock()
