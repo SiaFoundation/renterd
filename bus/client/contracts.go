@@ -56,12 +56,9 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 
 // ContractRoots returns the sector roots, as well as the ones that are still
 // uploading, for the contract with given id.
-func (c *Client) ContractRoots(ctx context.Context, contractID types.FileContractID) (roots, uploading []types.Hash256, err error) {
-	var resp api.ContractRootsResponse
-	if err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", contractID), &resp); err != nil {
-		return
-	}
-	return resp.Roots, resp.Uploading, nil
+func (c *Client) ContractRoots(ctx context.Context, contractID types.FileContractID) (roots []types.Hash256, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", contractID), &roots)
+	return
 }
 
 // ContractSets returns the contract sets of the bus.

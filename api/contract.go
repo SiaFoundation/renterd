@@ -168,13 +168,6 @@ type (
 		RenterFunds        types.Currency `json:"renterFunds"`
 	}
 
-	// ContractRootsResponse is the response type for the /contract/:id/roots
-	// endpoint.
-	ContractRootsResponse struct {
-		Roots     []types.Hash256 `json:"roots"`
-		Uploading []types.Hash256 `json:"uploading"`
-	}
-
 	// ContractsArchiveRequest is the request type for the /contracts/archive endpoint.
 	ContractsArchiveRequest = map[types.FileContractID]string
 
