@@ -1167,9 +1167,7 @@ func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
 
 	roots, err := b.store.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
-		jc.Encode(api.ContractRootsResponse{
-			Roots: roots,
-		})
+		jc.Encode(roots)
 	}
 }
 
@@ -2053,11 +2051,11 @@ func (b *Bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var req api.UploadSectorRequest
-	if jc.Decode(&req) != nil {
+	var roots []types.Hash256
+	if jc.Decode(&roots) != nil {
 		return
 	}
-	jc.Check("failed to add sectors", b.sectors.AddSectors(id, req.Roots...))
+	jc.Check("failed to add sectors", b.sectors.AddSectors(id, roots...))
 }
 
 func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {

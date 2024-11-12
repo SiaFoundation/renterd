@@ -10,9 +10,7 @@ import (
 
 // AddUploadingSectors adds the given sectors to the upload with given id.
 func (c *Client) AddUploadingSectors(ctx context.Context, uID api.UploadID, roots []types.Hash256) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/upload/%s/sector", uID), api.UploadSectorRequest{
-		Roots: roots,
-	}, nil)
+	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/upload/%s/sector", uID), &roots, nil)
 	return
 }
 

@@ -62,11 +62,6 @@ type (
 		Slabs []UploadedPackedSlab `json:"slabs"`
 	}
 
-	// UploadSectorRequest is the request type for the /upload/:id/sectors endpoint.
-	UploadSectorRequest struct {
-		Roots []types.Hash256 `json:"roots"`
-	}
-
 	UnhealthySlabsResponse struct {
 		Slabs []UnhealthySlab `json:"slabs"`
 	}
