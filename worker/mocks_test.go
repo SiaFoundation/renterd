@@ -191,8 +191,8 @@ func (*contractStoreMock) ContractSize(context.Context, types.FileContractID) (a
 	return api.ContractSize{}, nil
 }
 
-func (*contractStoreMock) ContractRoots(context.Context, types.FileContractID) ([]types.Hash256, []types.Hash256, error) {
-	return nil, nil, nil
+func (*contractStoreMock) ContractRoots(context.Context, types.FileContractID) ([]types.Hash256, error) {
+	return nil, nil
 }
 
 func (cs *contractStoreMock) Contracts(context.Context, api.ContractsOpts) (metadatas []api.ContractMetadata, _ error) {
@@ -363,7 +363,7 @@ func (os *objectStoreMock) AddMultipartPart(ctx context.Context, bucket, path, c
 	return nil
 }
 
-func (os *objectStoreMock) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error {
+func (os *objectStoreMock) AddUploadingSectors(ctx context.Context, uID api.UploadID, root []types.Hash256) error {
 	return nil
 }
 

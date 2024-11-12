@@ -72,6 +72,7 @@ type (
 	upload struct {
 		id          api.UploadID
 		allowed     map[types.PublicKey]struct{}
+		os          ObjectStore
 		shutdownCtx context.Context
 	}
 
@@ -329,9 +330,8 @@ func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm HostMa
 	}
 }
 
-func (mgr *uploadManager) newUploader(os ObjectStore, cl ContractLocker, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
+func (mgr *uploadManager) newUploader(cl ContractLocker, cs ContractStore, hm HostManager, c api.ContractMetadata) *uploader {
 	return &uploader{
-		os:     os,
 		cl:     cl,
 		cs:     cs,
 		hm:     hm,
@@ -705,6 +705,7 @@ func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMet
 	return &upload{
 		id:          api.NewUploadID(),
 		allowed:     allowed,
+		os:          mgr.os,
 		shutdownCtx: mgr.shutdownCtx,
 	}, nil
 }
@@ -744,7 +745,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists && bh < c.WindowEnd {
-			uploader := mgr.newUploader(mgr.os, mgr.cl, mgr.cs, mgr.hm, c)
+			uploader := mgr.newUploader(mgr.cl, mgr.cs, mgr.hm, c)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}
@@ -854,6 +855,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 
 	// prepare requests
 	requests := make([]*sectorUploadReq, len(shards))
+	roots := make([]types.Hash256, len(shards))
 	for sI := range shards {
 		requests[sI] = &sectorUploadReq{
 			uploadID:     slab.uploadID,
@@ -861,6 +863,12 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 			overdrive:    false,
 			responseChan: respChan,
 		}
+		roots[sI] = slab.sectors[sI].root
+	}
+
+	// notify bus about roots
+	if err := u.os.AddUploadingSectors(ctx, u.id, roots); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to add sector to uploading sectors: %w", err)
 	}
 
 	// launch all requests
