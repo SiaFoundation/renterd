@@ -29,7 +29,6 @@ var (
 
 type (
 	uploader struct {
-		os     ObjectStore
 		cs     ContractStore
 		cl     ContractLocker
 		hm     HostManager
@@ -283,11 +282,6 @@ func (u *uploader) execute(req *sectorUploadReq) (_ time.Duration, err error) {
 		return 0, fmt.Errorf("%w; %w", errFetchRevisionFailed, err)
 	} else if rev.RevisionNumber == math.MaxUint64 {
 		return 0, rhp3.ErrMaxRevisionReached
-	}
-
-	// update the bus
-	if err := u.os.AddUploadingSector(ctx, req.uploadID, fcid, req.sector.root); err != nil {
-		return 0, fmt.Errorf("failed to add uploading sector to contract %v; %w", fcid, err)
 	}
 
 	// upload the sector

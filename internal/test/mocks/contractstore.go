@@ -43,8 +43,8 @@ func (*ContractStore) ContractSize(context.Context, types.FileContractID) (api.C
 	return api.ContractSize{}, nil
 }
 
-func (*ContractStore) ContractRoots(context.Context, types.FileContractID) ([]types.Hash256, []types.Hash256, error) {
-	return nil, nil, nil
+func (*ContractStore) ContractRoots(context.Context, types.FileContractID) ([]types.Hash256, error) {
+	return nil, nil
 }
 
 func (cs *ContractStore) Contracts(context.Context, api.ContractsOpts) (metadatas []api.ContractMetadata, _ error) {

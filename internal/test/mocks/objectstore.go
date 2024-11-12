@@ -50,7 +50,7 @@ func (os *ObjectStore) AddMultipartPart(ctx context.Context, bucket, path, contr
 	return nil
 }
 
-func (os *ObjectStore) AddUploadingSector(ctx context.Context, uID api.UploadID, id types.FileContractID, root types.Hash256) error {
+func (os *ObjectStore) AddUploadingSectors(ctx context.Context, uID api.UploadID, root []types.Hash256) error {
 	return nil
 }
 
