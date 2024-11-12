@@ -220,14 +220,6 @@ func (cm ContractMetadata) InSet(set string) bool {
 	return false
 }
 
-func (cm ContractMetadata) HostInfo() HostInfo {
-	return HostInfo{
-		ContractID: cm.ID,
-		PublicKey:  cm.HostKey,
-		SiamuxAddr: cm.SiamuxAddr,
-	}
-}
-
 type (
 	Revision struct {
 		ContractID types.FileContractID `json:"contractID"`

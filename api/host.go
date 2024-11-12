@@ -117,9 +117,8 @@ type (
 	}
 
 	HostInfo struct {
-		ContractID types.FileContractID `json:"contractID"`
-		PublicKey  types.PublicKey      `json:"publicKey"`
-		SiamuxAddr string               `json:"siamuxAddr"`
+		PublicKey  types.PublicKey `json:"publicKey"`
+		SiamuxAddr string          `json:"siamuxAddr"`
 	}
 
 	HostInteractions struct {

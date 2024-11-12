@@ -30,10 +30,10 @@ func (b *mockAccountMgrBackend) RegisterAlert(context.Context, alerts.Alert) err
 	return nil
 }
 
-func (b *mockAccountMgrBackend) FundAccount(ctx context.Context, hi api.HostInfo, balance types.Currency) error {
+func (b *mockAccountMgrBackend) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, balance types.Currency) error {
 	return nil
 }
-func (b *mockAccountMgrBackend) SyncAccount(ctx context.Context, hi api.HostInfo) error {
+func (b *mockAccountMgrBackend) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
 	return nil
 }
 func (b *mockAccountMgrBackend) Accounts(context.Context, string) ([]api.Account, error) {
@@ -45,10 +45,7 @@ func (b *mockAccountMgrBackend) UpdateAccounts(context.Context, []api.Account) e
 func (b *mockAccountMgrBackend) ConsensusState(ctx context.Context) (api.ConsensusState, error) {
 	return api.ConsensusState{}, nil
 }
-func (b *mockAccountMgrBackend) DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error) {
-	return nil, nil
-}
-func (b *mockAccountMgrBackend) UsableHosts(ctx context.Context) ([]api.HostInfo, error) {
+func (b *mockAccountMgrBackend) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return nil, nil
 }
 

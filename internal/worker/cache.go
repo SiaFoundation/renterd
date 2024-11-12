@@ -135,7 +135,6 @@ func (c *cache) UsableHosts(ctx context.Context) (hosts []api.HostInfo, err erro
 		}
 		return
 	}
-
 	return value.([]api.HostInfo), nil
 }
 
@@ -178,7 +177,6 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventConsensusUpdate:
 		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
 		c.handleConsensusUpdate(e)
-		c.cache.Invalidate(cacheKeyUsableHosts)
 	case api.EventSettingUpdate:
 		log = log.With("gouging", e.GougingSettings != nil, "pinned", e.PinnedSettings != nil, "upload", e.UploadSettings != nil, "ts", e.Timestamp)
 		c.handleSettingUpdate(e)
@@ -228,9 +226,6 @@ func (c *cache) isReady() bool {
 }
 
 func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
-	// invalidate usable hosts cache
-	c.cache.Invalidate(cacheKeyUsableHosts)
-
 	// return early if the doesn't have gouging params to update
 	value, found, _ := c.cache.Get(cacheKeyGougingParams)
 	if !found {

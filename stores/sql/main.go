@@ -2319,12 +2319,9 @@ func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.Si
 	return
 }
 
-func UsableHosts(ctx context.Context, tx sql.Tx, minWindowStart uint64) ([]HostInfo, error) {
-	// only include contracts with a window start greater than the given value
-	var whereExprs []string
-	whereExprs = append(whereExprs, "c.window_start > ?")
-
+func UsableHosts(ctx context.Context, tx sql.Tx) ([]HostInfo, error) {
 	// only include allowed hosts
+	var whereExprs []string
 	var hasAllowlist bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM host_allowlist_entries)").Scan(&hasAllowlist); err != nil {
 		return nil, fmt.Errorf("failed to check for allowlist: %w", err)
@@ -2370,13 +2367,12 @@ EXISTS (
 	COALESCE(h.net_address, ""),
 	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
 	h.price_table,
-	h.settings,
-	MAX(c.fcid)
+	h.settings
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
 	WHERE %s
-	GROUP by h.id`, strings.Join(whereExprs, " AND ")), autopilotID, minWindowStart, autopilotID)
+	GROUP by h.id`, strings.Join(whereExprs, " AND ")), autopilotID, autopilotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -2388,8 +2384,7 @@ EXISTS (
 		var addr, port string
 		var pt PriceTable
 		var hs HostSettings
-		var fcid FileContractID
-		err := rows.Scan(&hk, &addr, &port, &pt, &hs, &fcid)
+		err := rows.Scan(&hk, &addr, &port, &pt, &hs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -2402,7 +2397,6 @@ EXISTS (
 
 		hosts = append(hosts, HostInfo{
 			api.HostInfo{
-				ContractID: types.FileContractID(fcid),
 				PublicKey:  types.PublicKey(hk),
 				SiamuxAddr: net.JoinHostPort(host, port),
 			},

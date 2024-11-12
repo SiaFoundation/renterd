@@ -75,13 +75,19 @@ func TestUpload(t *testing.T) {
 	for _, md := range w.Contracts() {
 		// add unused contracts
 		if _, used := used[md.HostKey]; !used {
-			filtered = append(filtered, md.HostInfo())
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  md.HostKey,
+				SiamuxAddr: md.SiamuxAddr,
+			})
 			continue
 		}
 
 		// add min shards used contracts
 		if n < int(params.rs.MinShards) {
-			filtered = append(filtered, md.HostInfo())
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  md.HostKey,
+				SiamuxAddr: md.SiamuxAddr,
+			})
 			n++
 		}
 	}
@@ -504,7 +510,10 @@ func TestUploadShards(t *testing.T) {
 	var hosts []api.HostInfo
 	for _, c := range w.Contracts() {
 		if _, bad := badHosts[c.HostKey]; !bad {
-			hosts = append(hosts, c.HostInfo())
+			hosts = append(hosts, api.HostInfo{
+				PublicKey:  c.HostKey,
+				SiamuxAddr: c.SiamuxAddr,
+			})
 		}
 	}
 

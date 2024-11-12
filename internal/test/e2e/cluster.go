@@ -616,7 +616,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
 	// create bus
-	b, err := bus.New(ctx, cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", cfg.RevisionSubmissionBuffer, logger)
+	b, err := bus.New(ctx, cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -715,9 +715,6 @@ func (c *TestCluster) sync() {
 
 func (c *TestCluster) WaitForAccounts() []api.Account {
 	c.tt.Helper()
-
-	// mine a block (ensures worker cache gets invalidated)
-	c.MineBlocks(1)
 
 	// build hosts map
 	hostsMap := make(map[types.PublicKey]struct{})

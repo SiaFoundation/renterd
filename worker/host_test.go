@@ -48,14 +48,14 @@ func (hm *testHostManager) Downloader(hk types.PublicKey, siamuxAddr string) Sec
 	return hm.hosts[hk]
 }
 
-func (hm *testHostManager) Host(hi api.HostInfo) Host {
+func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
-	if _, ok := hm.hosts[hi.PublicKey]; !ok {
+	if _, ok := hm.hosts[hk]; !ok {
 		hm.tt.Fatal("host not found")
 	}
-	return hm.hosts[hi.PublicKey]
+	return hm.hosts[hk]
 }
 
 func (hm *testHostManager) addHost(h *testHost) {

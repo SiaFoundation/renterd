@@ -26,7 +26,10 @@ func (m *mockBus) GougingParams(ctx context.Context) (api.GougingParams, error) 
 
 func (m *mockBus) UsableHosts(ctx context.Context) (hosts []api.HostInfo, _ error) {
 	for _, c := range m.contracts {
-		hosts = append(hosts, c.HostInfo())
+		hosts = append(hosts, api.HostInfo{
+			PublicKey:  c.HostKey,
+			SiamuxAddr: c.SiamuxAddr,
+		})
 	}
 	return
 }

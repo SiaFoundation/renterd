@@ -36,7 +36,7 @@ type (
 
 	HostManager interface {
 		Downloader(hk types.PublicKey, siamuxAddr string) SectorDownloader
-		Host(hi api.HostInfo) Host
+		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
 	}
 )
 
@@ -80,16 +80,16 @@ func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) SectorDownloa
 	}
 }
 
-func (w *Worker) Host(hi api.HostInfo) Host {
+func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host {
 	return &host{
 		client:                   w.rhp3Client,
-		hk:                       hi.PublicKey,
-		acc:                      w.accounts.ForHost(hi.PublicKey),
+		hk:                       hk,
+		acc:                      w.accounts.ForHost(hk),
 		contractSpendingRecorder: w.contractSpendingRecorder,
-		logger:                   w.logger.Named(hi.PublicKey.String()[:4]),
-		fcid:                     hi.ContractID,
-		siamuxAddr:               hi.SiamuxAddr,
-		renterKey:                w.deriveRenterKey(hi.PublicKey),
+		logger:                   w.logger.Named(hk.String()[:4]),
+		fcid:                     fcid,
+		siamuxAddr:               siamuxAddr,
+		renterKey:                w.deriveRenterKey(hk),
 		priceTables:              w.priceTables,
 	}
 }

@@ -136,7 +136,10 @@ func (w *testWorker) UsableHosts() (hosts []api.HostInfo) {
 		w.tt.Fatal(err)
 	}
 	for _, md := range metadatas {
-		hosts = append(hosts, md.HostInfo())
+		hosts = append(hosts, api.HostInfo{
+			PublicKey:  md.HostKey,
+			SiamuxAddr: md.SiamuxAddr,
+		})
 	}
 	return
 }

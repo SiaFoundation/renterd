@@ -89,9 +89,8 @@ func defaultConfig() config.Config {
 			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 			Bootstrap:                     true,
 			GatewayAddr:                   ":9981",
-			RevisionSubmissionBuffer:      150, // 144 + 6 blocks leeway
-			SlabBufferCompletionThreshold: 1 << 12,
 			UsedUTXOExpiry:                24 * time.Hour,
+			SlabBufferCompletionThreshold: 1 << 12,
 		},
 		Worker: config.Worker{
 			Enabled: true,

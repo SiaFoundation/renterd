@@ -170,7 +170,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	}
 
 	// otherwise fetch it
-	h := p.hm.Host(api.HostInfo{PublicKey: p.hk, SiamuxAddr: host.Settings.SiamuxAddr()})
+	h := p.hm.Host(p.hk, types.FileContractID{}, host.Settings.SiamuxAddr())
 	hpt, cost, err = h.PriceTable(ctx, rev)
 
 	// handle error after recording

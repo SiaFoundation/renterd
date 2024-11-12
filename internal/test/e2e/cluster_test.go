@@ -2658,6 +2658,9 @@ func TestDownloadAllHosts(t *testing.T) {
 		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
 	}
 
+	// add a host
+	cluster.AddHosts(1)
+
 	// grab random used host
 	var randomHost string
 	for _, host := range cluster.hosts {
@@ -2669,10 +2672,6 @@ func TestDownloadAllHosts(t *testing.T) {
 
 	// add it to the blocklist
 	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
-
-	// add a host
-	cluster.AddHostsBlocking(1)
-	cluster.WaitForAccounts()
 
 	// wait until we migrated away from that host
 	var newHost types.PublicKey

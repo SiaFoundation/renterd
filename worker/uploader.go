@@ -78,7 +78,7 @@ func (u *uploader) Refresh(c api.ContractMetadata) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	u.host = u.hm.Host(c.HostInfo())
+	u.host = u.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 	u.fcid = c.ID
 	u.siamuxAddr = c.SiamuxAddr
 	u.endHeight = c.WindowEnd

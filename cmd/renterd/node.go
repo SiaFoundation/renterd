@@ -385,7 +385,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 
 	// create bus
-	b, err := bus.New(ctx, cfg.Bus, masterKey, alertsMgr, wh, cm, s, w, sqlStore, explorerURL, cfg.Bus.RevisionSubmissionBuffer, logger)
+	b, err := bus.New(ctx, cfg.Bus, masterKey, alertsMgr, wh, cm, s, w, sqlStore, explorerURL, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}

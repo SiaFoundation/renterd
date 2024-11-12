@@ -511,7 +511,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// assert h1 is usable
-	hosts, err := ss.UsableHosts(ctx, 0)
+	hosts, err := ss.UsableHosts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -521,21 +521,6 @@ func TestUsableHosts(t *testing.T) {
 	} else if hosts[0].SiamuxAddr != "foo.com:9983" {
 		t.Fatal("unexpected", hosts)
 	}
-	h1 := hosts[0]
-
-	// assert minWindowStart is taken into account
-	hosts, err = ss.UsableHosts(ctx, 9)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts))
-	}
-	hosts, err = ss.UsableHosts(ctx, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hosts) != 0 {
-		t.Fatal("unexpected", len(hosts))
-	}
 
 	// create gouging checker
 	gs := test.GougingSettings
@@ -543,6 +528,7 @@ func TestUsableHosts(t *testing.T) {
 	gc := gouging.NewChecker(gs, cs, nil, nil)
 
 	// assert h1 is not gouging
+	h1 := hosts[0]
 	if gc.Check(&h1.HS, &h1.PT).Gouging() {
 		t.Fatal("unexpected")
 	}
@@ -557,7 +543,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// fetch it again
-	hosts, err = ss.UsableHosts(ctx, 0)
+	hosts, err = ss.UsableHosts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -573,7 +559,7 @@ func TestUsableHosts(t *testing.T) {
 	// create helper to assert number of usable hosts
 	assertNumUsableHosts := func(n int) {
 		t.Helper()
-		hosts, err = ss.UsableHosts(ctx, 0)
+		hosts, err = ss.UsableHosts(ctx)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(hosts) != n {

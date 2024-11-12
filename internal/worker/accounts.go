@@ -33,11 +33,11 @@ var (
 
 type (
 	AccountFunder interface {
-		FundAccount(ctx context.Context, hi api.HostInfo, desired types.Currency) error
+		FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error
 	}
 
 	AccountSyncer interface {
-		SyncAccount(ctx context.Context, hi api.HostInfo) error
+		SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error
 	}
 
 	AccountStore interface {
@@ -45,30 +45,31 @@ type (
 		UpdateAccounts(context.Context, []api.Account) error
 	}
 
-	ConsensusState interface {
+	ConsensusStateStore interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
 
-	HostStore interface {
-		UsableHosts(ctx context.Context) ([]api.HostInfo, error)
+	ContractStore interface {
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 	}
 )
 
 type (
 	AccountMgr struct {
-		alerts         alerts.Alerter
-		funder         AccountFunder
-		syncer         AccountSyncer
-		cs             ConsensusState
-		s              AccountStore
-		hs             HostStore
-		key            utils.AccountsKey
-		logger         *zap.SugaredLogger
-		owner          string
-		refillInterval time.Duration
-		shutdownCtx    context.Context
-		shutdownCancel context.CancelFunc
-		wg             sync.WaitGroup
+		alerts                   alerts.Alerter
+		funder                   AccountFunder
+		syncer                   AccountSyncer
+		cs                       ContractStore
+		css                      ConsensusStateStore
+		s                        AccountStore
+		key                      utils.AccountsKey
+		logger                   *zap.SugaredLogger
+		owner                    string
+		refillInterval           time.Duration
+		revisionSubmissionBuffer uint64
+		shutdownCtx              context.Context
+		shutdownCancel           context.CancelFunc
+		wg                       sync.WaitGroup
 
 		mu                  sync.Mutex
 		byID                map[rhpv3.Account]*Account
@@ -91,7 +92,7 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, hs HostStore, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, css ConsensusStateStore, cs ContractStore, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -100,7 +101,7 @@ func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alert
 		funder: funder,
 		syncer: syncer,
 		cs:     cs,
-		hs:     hs,
+		css:    css,
 		s:      s,
 		key:    key,
 		logger: logger,
@@ -308,31 +309,40 @@ func (a *AccountMgr) markRefillDone(hk types.PublicKey) {
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
 func (a *AccountMgr) refillAccounts() {
-	// fetch all usable hosts
-	hosts, err := a.hs.UsableHosts(a.shutdownCtx)
+	// fetch config
+	cs, err := a.css.ConsensusState(a.shutdownCtx)
 	if err != nil {
-		a.logger.Errorw(fmt.Sprintf("failed to fetch usable hosts: %v", err))
+		a.logger.Errorw(fmt.Sprintf("failed to fetch consensus state for refill: %v", err))
+		return
+	}
+
+	// fetch all contracts
+	contracts, err := a.cs.Contracts(a.shutdownCtx, api.ContractsOpts{})
+	if err != nil {
+		a.logger.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
+		return
+	} else if len(contracts) == 0 {
 		return
 	}
 
 	// refill accounts in separate goroutines
-	for _, hi := range hosts {
+	for _, c := range contracts {
 		// launch refill if not already in progress
-		if a.markRefillInProgress(hi.PublicKey) {
-			go func() {
-				defer a.markRefillDone(hi.PublicKey)
+		if a.markRefillInProgress(c.HostKey) {
+			go func(contract api.ContractMetadata) {
+				defer a.markRefillDone(contract.HostKey)
 
 				rCtx, cancel := context.WithTimeout(a.shutdownCtx, 5*time.Minute)
 				defer cancel()
 
 				// refill
-				refilled, err := a.refillAccount(rCtx, hi)
+				refilled, err := a.refillAccount(rCtx, c, cs.BlockHeight, a.revisionSubmissionBuffer)
 
 				// determine whether to log something
 				shouldLog := true
 				a.mu.Lock()
-				if t, exists := a.lastLoggedRefillErr[hi.PublicKey]; !exists || err == nil {
-					a.lastLoggedRefillErr[hi.PublicKey] = time.Now()
+				if t, exists := a.lastLoggedRefillErr[contract.HostKey]; !exists || err == nil {
+					a.lastLoggedRefillErr[contract.HostKey] = time.Now()
 				} else if time.Since(t) < time.Hour {
 					// only log error once per hour per account
 					shouldLog = false
@@ -340,27 +350,34 @@ func (a *AccountMgr) refillAccounts() {
 				a.mu.Unlock()
 
 				if err != nil && shouldLog {
-					a.logger.Error("failed to refill account for host", zap.Stringer("hostKey", hi.PublicKey), zap.Error(err))
+					a.logger.Error("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				} else if refilled {
-					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", hi.PublicKey), zap.Error(err))
+					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				}
-			}()
+			}(c)
 		}
 	}
 }
 
-func (a *AccountMgr) refillAccount(ctx context.Context, hi api.HostInfo) (bool, error) {
+func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMetadata, bh, revisionSubmissionBuffer uint64) (bool, error) {
 	// fetch the account
-	account := a.Account(hi.PublicKey)
+	account := a.Account(contract.HostKey)
+
+	// check if the contract is too close to the proof window to be revised,
+	// trying to refill the account would result in the host not returning the
+	// revision and returning an obfuscated error
+	if (bh + revisionSubmissionBuffer) > contract.WindowStart {
+		return false, fmt.Errorf("contract %v is too close to the proof window to be revised", contract.ID)
+	}
 
 	// check if a host is potentially cheating before refilling.
 	// We only check against the max drift if the account's drift is
 	// negative because we don't care if we have more money than
 	// expected.
 	if account.Drift.Cmp(maxNegDrift) < 0 {
-		alert := newAccountRefillAlert(account.ID, hi.PublicKey, hi.ContractID, errMaxDriftExceeded,
+		alert := newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
 			"accountID", account.ID.String(),
-			"hostKey", hi.PublicKey.String(),
+			"hostKey", contract.HostKey.String(),
 			"balance", account.Balance.String(),
 			"drift", account.Drift.String(),
 		)
@@ -373,13 +390,13 @@ func (a *AccountMgr) refillAccount(ctx context.Context, hi api.HostInfo) (bool, 
 	// check if a resync is needed
 	if account.RequiresSync {
 		// sync the account
-		err := a.syncer.SyncAccount(ctx, hi)
+		err := a.syncer.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
 		if err != nil {
 			return false, fmt.Errorf("failed to sync account's balance: %w", err)
 		}
 
 		// refetch the account after syncing
-		account = a.Account(hi.PublicKey)
+		account = a.Account(contract.HostKey)
 	}
 
 	// check if refill is needed
@@ -388,7 +405,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, hi api.HostInfo) (bool, 
 	}
 
 	// fund the account
-	err := a.funder.FundAccount(ctx, hi, maxBalance)
+	err := a.funder.FundAccount(ctx, contract.ID, contract.HostKey, maxBalance)
 	if err != nil {
 		return false, fmt.Errorf("failed to fund account: %w", err)
 	}
@@ -576,12 +593,12 @@ func (a *Account) setBalance(balance *big.Int) {
 		zap.Stringer("drift", drift))
 }
 
-func newAccountRefillAlert(id rhpv3.Account, hk types.PublicKey, fcid types.FileContractID, err error, keysAndValues ...string) alerts.Alert {
+func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {
 	data := map[string]interface{}{
 		"error":      err.Error(),
 		"accountID":  id.String(),
-		"contractID": fcid.String(),
-		"hostKey":    hk.String(),
+		"contractID": contract.ID.String(),
+		"hostKey":    contract.HostKey.String(),
 	}
 	for i := 0; i < len(keysAndValues); i += 2 {
 		data[keysAndValues[i]] = keysAndValues[i+1]

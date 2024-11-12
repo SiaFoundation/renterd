@@ -199,9 +199,9 @@ func (w *Worker) isStopped() bool {
 	return false
 }
 
-func (w *Worker) withRevision(ctx context.Context, hi api.HostInfo, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
-	return w.withContractLock(ctx, hi.ContractID, lockPriority, func() error {
-		rev, err := w.Host(hi).FetchRevision(ctx, fetchTimeout)
+func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
+	return w.withContractLock(ctx, fcid, lockPriority, func() error {
+		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fetchTimeout)
 		if err != nil {
 			return err
 		}
@@ -263,7 +263,7 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// fetch hosts
-	dlHosts, err := w.bus.UsableHosts(ctx)
+	dlHosts, err := w.cache.UsableHosts(ctx)
 	if jc.Check("couldn't fetch hosts from bus", err) != nil {
 		return
 	}
@@ -869,9 +869,9 @@ func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadat
 	}, res, nil
 }
 
-func (w *Worker) FundAccount(ctx context.Context, hi api.HostInfo, desired types.Currency) error {
+func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
 	// calculate the deposit amount
-	acc := w.accounts.ForHost(hi.PublicKey)
+	acc := w.accounts.ForHost(hk)
 	return acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
 		// return early if we have the desired balance
 		if balance.Cmp(desired) >= 0 {
@@ -881,7 +881,7 @@ func (w *Worker) FundAccount(ctx context.Context, hi api.HostInfo, desired types
 
 		// fund the account
 		var err error
-		deposit, err = w.bus.FundAccount(ctx, acc.ID(), hi.ContractID, desired.Sub(balance))
+		deposit, err = w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
 		if err != nil {
 			if rhp3.IsBalanceMaxExceeded(err) {
 				acc.ScheduleSync()
@@ -968,7 +968,7 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	return res, err
 }
 
-func (w *Worker) SyncAccount(ctx context.Context, hi api.HostInfo) error {
+func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
 	// attach gouging checker
 	gp, err := w.cache.GougingParams(ctx)
 	if err != nil {
@@ -977,8 +977,9 @@ func (w *Worker) SyncAccount(ctx context.Context, hi api.HostInfo) error {
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// sync the account
-	err = w.withRevision(ctx, hi, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
-		return w.Host(hi).SyncAccount(ctx, &rev)
+	h := w.Host(hk, fcid, siamuxAddr)
+	err = w.withRevision(ctx, fcid, hk, siamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+		return h.SyncAccount(ctx, &rev)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to sync account; %w", err)
@@ -1081,7 +1082,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

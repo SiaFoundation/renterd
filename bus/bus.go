@@ -214,7 +214,7 @@ type (
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
-		UsableHosts(ctx context.Context, minWindowStart uint64) ([]sql.HostInfo, error)
+		UsableHosts(ctx context.Context) ([]sql.HostInfo, error)
 	}
 
 	// A MetadataStore stores information about contracts and objects.
@@ -316,10 +316,9 @@ type (
 )
 
 type Bus struct {
-	allowPrivateIPs          bool
-	startTime                time.Time
-	masterKey                utils.MasterKey
-	revisionSubmissionBuffer uint64
+	allowPrivateIPs bool
+	startTime       time.Time
+	masterKey       utils.MasterKey
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -344,15 +343,14 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, revisionSubmissionBuffer uint64, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
 	b := &Bus{
-		allowPrivateIPs:          cfg.AllowPrivateIPs,
-		revisionSubmissionBuffer: revisionSubmissionBuffer,
-		startTime:                time.Now(),
-		masterKey:                masterKey,
+		allowPrivateIPs: cfg.AllowPrivateIPs,
+		startTime:       time.Now(),
+		masterKey:       masterKey,
 
 		s:        s,
 		cm:       cm,
