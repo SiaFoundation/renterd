@@ -78,7 +78,7 @@ func newTestHostPriceTable() api.HostPriceTable {
 }
 
 func (h *testHost) PublicKey() types.PublicKey {
-	return h.PublicKey()
+	return h.Host.PublicKey()
 }
 
 func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
