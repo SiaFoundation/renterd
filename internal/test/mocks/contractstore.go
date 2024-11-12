@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -97,4 +98,56 @@ func (cs *ContractStore) RenewContract(hk types.PublicKey) (*Contract, error) {
 func (cs *ContractStore) newFileContractID() types.FileContractID {
 	cs.fcidCntr++
 	return types.FileContractID{byte(cs.fcidCntr)}
+}
+
+type Contract struct {
+	rev      types.FileContractRevision
+	metadata api.ContractMetadata
+
+	mu      sync.Mutex
+	sectors map[types.Hash256]*[rhpv2.SectorSize]byte
+}
+
+func NewContract(hk types.PublicKey, fcid types.FileContractID) *Contract {
+	return &Contract{
+		metadata: api.ContractMetadata{
+			ID:          fcid,
+			HostKey:     hk,
+			WindowStart: 0,
+			WindowEnd:   10,
+		},
+		rev:     types.FileContractRevision{ParentID: fcid},
+		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
+	}
+}
+
+func (c *Contract) AddSector(root types.Hash256, sector *[rhpv2.SectorSize]byte) {
+	c.mu.Lock()
+	c.sectors[root] = sector
+	c.mu.Unlock()
+}
+
+func (c *Contract) ID() types.FileContractID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.metadata.ID
+}
+
+func (c *Contract) Metadata() api.ContractMetadata {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.metadata
+}
+
+func (c *Contract) Revision() types.FileContractRevision {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rev
+}
+
+func (c *Contract) Sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
+	c.mu.Lock()
+	sector, found = c.sectors[root]
+	c.mu.Unlock()
+	return
 }
