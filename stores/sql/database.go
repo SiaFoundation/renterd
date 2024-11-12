@@ -379,6 +379,11 @@ type (
 		// present in the database.
 		UpsertContractSectors(ctx context.Context, contractSectors []ContractSector) error
 
+		// UsableHosts returns a list of hosts that are ready to be used. That
+		// means they are deemed usable by the autopilot, they are not gouging,
+		// not blocked, not offline, etc.
+		UsableHosts(ctx context.Context) ([]HostInfo, error)
+
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
 
