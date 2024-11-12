@@ -100,7 +100,7 @@ INSERT INTO contracts_temp (
     c.size,
     c.start_height,
     c.state,
-    CASE WHEN archival_reason IS NULL THEN 1 ELSE 2 END,
+    CASE WHEN archival_reason IS NULL THEN 2 ELSE 1 END,
     c.window_start,
     c.window_end,
     c.contract_price,
