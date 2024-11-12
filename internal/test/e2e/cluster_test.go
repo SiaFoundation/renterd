@@ -1474,7 +1474,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 		HostKey:            c.HostKey,
 		StartHeight:        cs.BlockHeight,
 		State:              api.ContractStatePending,
-		Usability:          api.ContractUsabilityGoodForRenew,
+		Usability:          api.ContractUsabilityGood,
 		WindowStart:        math.MaxUint32,
 		WindowEnd:          math.MaxUint32 + 10,
 		ContractPrice:      types.NewCurrency64(1),

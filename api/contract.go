@@ -17,8 +17,8 @@ const (
 )
 
 const (
-	ContractUsabilityBad          = "bad"
-	ContractUsabilityGoodForRenew = "goodforrenew"
+	ContractUsabilityBad  = "bad"
+	ContractUsabilityGood = "good"
 )
 
 const (

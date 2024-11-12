@@ -78,15 +78,15 @@ type ContractUsability uint8
 const (
 	contractUsabilityInvalid ContractUsability = iota
 	contractUsabilityBad
-	contractUsabilityGoodForRenew
+	contractUsabilityGood
 )
 
 func (s *ContractUsability) LoadString(usability string) error {
 	switch strings.ToLower(usability) {
 	case api.ContractUsabilityBad:
 		*s = contractUsabilityBad
-	case api.ContractUsabilityGoodForRenew:
-		*s = contractUsabilityGoodForRenew
+	case api.ContractUsabilityGood:
+		*s = contractUsabilityGood
 	default:
 		*s = contractUsabilityInvalid
 		return ErrInvalidContractState
@@ -98,8 +98,8 @@ func (s ContractUsability) String() string {
 	switch s {
 	case contractUsabilityBad:
 		return api.ContractUsabilityBad
-	case contractUsabilityGoodForRenew:
-		return api.ContractUsabilityGoodForRenew
+	case contractUsabilityGood:
+		return api.ContractUsabilityGood
 	default:
 		return "invalid"
 	}
