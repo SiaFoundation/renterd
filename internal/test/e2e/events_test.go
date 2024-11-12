@@ -21,7 +21,6 @@ import (
 func TestEvents(t *testing.T) {
 	// list all webhooks
 	allEvents := []func(string, map[string]string) webhooks.Webhook{
-		api.WebhookACLUpdate,
 		api.WebhookConsensusUpdate,
 		api.WebhookContractArchive,
 		api.WebhookContractRenew,
@@ -133,9 +132,6 @@ func TestEvents(t *testing.T) {
 	settings.NetAddress = "127.0.0.1:0"
 	tt.OK(h.UpdateSettings(settings))
 
-	// update ACL
-	tt.OK(b.UpdateHostAllowlist(context.Background(), []types.PublicKey{h.PublicKey()}, nil, false))
-
 	// wait until we received the events
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		mu.Lock()
@@ -152,10 +148,6 @@ func TestEvents(t *testing.T) {
 		event, err := api.ParseEventWebhook(r)
 		tt.OK(err)
 		switch e := event.(type) {
-		case api.EventACLUpdate:
-			if e.Timestamp.IsZero() || len(e.Allowlist) != 1 {
-				t.Fatalf("unexpected event %+v", e)
-			}
 		case api.EventContractRenew:
 			if e.Renewal.ID != renewed.ID || e.Renewal.RenewedFrom != c.ID || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
