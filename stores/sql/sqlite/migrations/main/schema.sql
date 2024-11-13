@@ -89,8 +89,16 @@ CREATE INDEX `idx_slices_db_object_id` ON `slices`(`db_object_id`);
 CREATE INDEX `idx_slices_db_slab_id` ON `slices`(`db_slab_id`);
 CREATE INDEX `idx_slices_db_multipart_part_id` ON `slices`(`db_multipart_part_id`);
 
--- dbHostAnnouncement
-CREATE TABLE `host_announcements` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`host_key` blob NOT NULL,`block_height` integer,`block_id` text,`net_address` text);
+-- host_addresses contains addresses that the host announced itself with
+CREATE TABLE `host_addresses` (
+    `id` integer PRIMARY KEY AUTOINCREMENT,
+    `created_at` datetime NOT NULL,
+    `db_host_id` integer NOT NULL,
+    `net_address` text NOT NULL,
+    `protocol` text NOT NULL,
+    CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts`(`id`) ON DELETE CASCADE
+);
+CREATE INDEX `idx_host_addresses_db_host_id` ON `host_addresses`(`db_host_id`);
 
 -- dbConsensusInfo
 CREATE TABLE `consensus_infos` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`height` integer,`block_id` blob);
