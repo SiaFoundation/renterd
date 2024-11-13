@@ -12,7 +12,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/test"
@@ -1417,9 +1416,7 @@ func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
 	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-			return tx.UpdateHost(hk, chain.HostAnnouncement{
-				NetAddress: na,
-			}, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))
+			return tx.UpdateHost(hk, na, nil, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))
 		})
 	})
 }

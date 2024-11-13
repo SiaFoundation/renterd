@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/stores/sql"
@@ -151,7 +150,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	// assert update host is successful
 	ts := time.Now().Truncate(time.Second).Add(-time.Minute).UTC()
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "foo"}, 1, types.BlockID{}, ts)
+		return tx.UpdateHost(hks[0], "foo", nil, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
@@ -179,7 +178,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	// reannounce the host and make sure the uptime is the same
 	ts = ts.Add(time.Minute)
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		return tx.UpdateHost(hks[0], chain.HostAnnouncement{NetAddress: "fooNew"}, 1, types.BlockID{}, ts)
+		return tx.UpdateHost(hks[0], "fooNew", nil, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
