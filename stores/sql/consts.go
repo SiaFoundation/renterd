@@ -89,7 +89,7 @@ func (s *ContractUsability) LoadString(usability string) error {
 		*s = contractUsabilityGood
 	default:
 		*s = contractUsabilityInvalid
-		return ErrInvalidContractState
+		return ErrInvalidContractUsability
 	}
 	return nil
 }
