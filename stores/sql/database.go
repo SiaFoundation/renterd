@@ -28,7 +28,7 @@ type (
 		UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
 		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
 		UpdateFailedContracts(blockHeight uint64) error
-		UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
+		UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
 
 		wallet.UpdateTx
 	}

@@ -16,6 +16,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
@@ -48,6 +50,7 @@ type (
 	DurationMS      time.Duration
 	Unsigned64      uint64
 	V2Contract      types.V2FileContract
+	ChainProtocol   chain.Protocol
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
@@ -83,6 +86,7 @@ var (
 	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
 	_ scannerValuer = (*V2Contract)(nil)
+	_ scannerValuer = (*ChainProtocol)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
@@ -537,4 +541,38 @@ func (c V2Contract) Value() (driver.Value, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+const (
+	chainProtocolInvalid = iota
+	chainProtocolTCPSiaMux
+)
+
+// Scan scan value into Unsigned64, implements sql.Scanner interface.
+func (p *ChainProtocol) Scan(value interface{}) error {
+	var protocol uint8
+	switch value := value.(type) {
+	case uint8:
+		protocol = value
+	default:
+		return fmt.Errorf("failed to unmarshal ChainProtocol value: %v %T", value, value)
+	}
+
+	switch protocol {
+	case chainProtocolTCPSiaMux:
+		*p = ChainProtocol(rhp4.ProtocolTCPSiaMux)
+	default:
+		return fmt.Errorf("invalid protocol: %d", protocol)
+	}
+	return nil
+}
+
+// Value returns an Unsigned64 value, implements driver.Valuer interface.
+func (p ChainProtocol) Value() (driver.Value, error) {
+	switch chain.Protocol(p) {
+	case rhp4.ProtocolTCPSiaMux:
+		return uint8(chainProtocolTCPSiaMux), nil
+	default:
+		return nil, fmt.Errorf("invalid ChainProtocol value: %v", p)
+	}
 }

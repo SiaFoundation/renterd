@@ -95,7 +95,7 @@ CREATE TABLE `host_addresses` (
     `created_at` datetime NOT NULL,
     `db_host_id` integer NOT NULL,
     `net_address` text NOT NULL,
-    `protocol` text NOT NULL,
+    `protocol` integer NOT NULL,
     CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts`(`id`) ON DELETE CASCADE
 );
 CREATE INDEX `idx_host_addresses_db_host_id` ON `host_addresses`(`db_host_id`);
