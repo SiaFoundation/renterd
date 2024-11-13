@@ -223,8 +223,8 @@ func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return ssql.UpdateFailedContracts(c.ctx, c.tx, blockHeight, c.l)
 }
 
-func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
-	c.l.Debugw("update host", "hk", hk, "netaddress", ha.NetAddress)
+func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
+	c.l.Debugw("update host", "hk", hk, "netaddress", v1Addr)
 
 	// create the host
 	var hostID int64
@@ -252,13 +252,13 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		0,
 		0,
 		ts.UTC(),
-		ha.NetAddress,
+		v1Addr,
 	).Scan(&hostID); err != nil {
 		if errors.Is(err, dsql.ErrNoRows) {
 			err = c.tx.QueryRow(c.ctx,
 				"UPDATE hosts SET last_announcement = ?, net_address = ? WHERE public_key = ? RETURNING id",
 				ts.UTC(),
-				ha.NetAddress,
+				v1Addr,
 				ssql.PublicKey(hk),
 			).Scan(&hostID)
 			if err != nil {
@@ -275,14 +275,17 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	}
 
 	// insert new addresses
-	if _, err := c.tx.Exec(c.ctx,
-		"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
-		time.Now().UTC(),
-		hostID,
-		ha.NetAddress,
-		"placeholder", // TODO: change
-	); err != nil {
-		return fmt.Errorf("failed to insert host announcement: %w", err)
+	// TODO: limit the number of addresses
+	for _, ha := range v2Ha {
+		if _, err := c.tx.Exec(c.ctx,
+			"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
+			time.Now().UTC(),
+			hostID,
+			ha.Address,
+			ssql.ChainProtocol(ha.Protocol), // TODO: change
+		); err != nil {
+			return fmt.Errorf("failed to insert host announcement: %w", err)
+		}
 	}
 
 	// update allow list
@@ -315,10 +318,17 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	}
 
 	// update blocklist
-	values := []string{ha.NetAddress}
-	host, _, err := net.SplitHostPort(ha.NetAddress)
-	if err == nil {
-		values = append(values, host)
+	var values []string
+	addAddr := func(addr string) {
+		values = append(values, addr)
+		host, _, err := net.SplitHostPort(addr)
+		if err == nil {
+			values = append(values, host)
+		}
+	}
+	addAddr(v1Addr)
+	for _, ha := range v2Ha {
+		addAddr(ha.Address)
 	}
 
 	rows, err = c.tx.Query(c.ctx, "SELECT id, entry FROM host_blocklist_entries")

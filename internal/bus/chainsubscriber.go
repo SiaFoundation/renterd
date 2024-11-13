@@ -159,25 +159,37 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	// apply host updates
 	b := cau.Block
 	if time.Since(b.Timestamp) <= s.announcementMaxAge {
-		hus := make(map[types.PublicKey]chain.HostAnnouncement)
+		v1Hus := make(map[types.PublicKey]string)
 		chain.ForEachHostAnnouncement(b, func(ha chain.HostAnnouncement) {
 			if ha.NetAddress != "" {
-				hus[ha.PublicKey] = ha
+				v1Hus[ha.PublicKey] = ha.NetAddress
 			}
 		})
+		v2Hus := make(map[types.PublicKey]chain.V2HostAnnouncement)
 		chain.ForEachV2HostAnnouncement(b, func(hk types.PublicKey, addrs []chain.NetAddress) {
+			var filtered []chain.NetAddress
 			for _, addr := range addrs {
+				if addr.Address == "" {
+					continue
+				}
 				switch addr.Protocol {
 				case rhp4.ProtocolTCPSiaMux:
-					// TODO: implement
+					filtered = append(filtered, addr)
 				default:
 					// any other protocol is not supported
 				}
 			}
+			v2Hus[hk] = filtered
 		})
 		// v1 announcements
-		for hk, ha := range hus {
-			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
+		for hk, addr := range v1Hus {
+			if err := tx.UpdateHost(hk, addr, nil, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
+				return fmt.Errorf("failed to update host: %w", err)
+			}
+		}
+		// v2 announcements
+		for hk, ha := range v2Hus {
+			if err := tx.UpdateHost(hk, "", ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
 			}
 		}

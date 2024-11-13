@@ -243,6 +243,7 @@ CREATE TABLE `host_addresses` (
   `created_at` datetime(3) DEFAULT NULL,
   `db_host_id` bigint unsigned NOT NULL,
   `net_address` longtext NOT NULL,
+  `protocol` tinyint unsigned NOT NULL,
   PRIMARY KEY (`id`),
   KEY `ìdx_host_addresses_db_host_id` (`db_host_id`),
   CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
