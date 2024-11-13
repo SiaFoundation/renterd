@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
@@ -164,6 +165,17 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 				hus[ha.PublicKey] = ha
 			}
 		})
+		chain.ForEachV2HostAnnouncement(b, func(hk types.PublicKey, addrs []chain.NetAddress) {
+			for _, addr := range addrs {
+				switch addr.Protocol {
+				case rhp4.ProtocolTCPSiaMux:
+					// TODO: implement
+				default:
+					// any other protocol is not supported
+				}
+			}
+		})
+		// v1 announcements
 		for hk, ha := range hus {
 			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
