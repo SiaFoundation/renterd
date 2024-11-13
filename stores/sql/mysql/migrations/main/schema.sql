@@ -224,15 +224,15 @@ CREATE TABLE `host_allowlist_entry_hosts` (
   CONSTRAINT `fk_host_allowlist_entry_hosts_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbHostAnnouncement
-CREATE TABLE `host_announcements` (
+-- host_addresses contains addresses that the host announced itself with
+CREATE TABLE `host_addresses` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `host_key` longblob NOT NULL,
-  `block_height` bigint unsigned DEFAULT NULL,
-  `block_id` longtext,
-  `net_address` longtext,
-  PRIMARY KEY (`id`)
+  `db_host_id` bigint unsigned NOT NULL,
+  `net_address` longtext NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ìdx_host_addresses_db_host_id` (`db_host_id`),
+  CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbBlocklistEntry
