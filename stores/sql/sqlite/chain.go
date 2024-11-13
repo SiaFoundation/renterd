@@ -276,7 +276,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 
 	// insert new addresses
 	if _, err := c.tx.Exec(c.ctx,
-		"INSERT OR IGNORE INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
+		"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
 		time.Now().UTC(),
 		hostID,
 		ha.NetAddress,

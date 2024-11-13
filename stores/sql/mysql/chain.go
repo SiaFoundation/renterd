@@ -223,18 +223,6 @@ func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
 	c.l.Debugw("update host", "hk", hk, "netaddress", ha.NetAddress)
 
-	// create the announcement
-	if _, err := c.tx.Exec(c.ctx,
-		"INSERT IGNORE INTO host_announcements (created_at, host_key, block_height, block_id, net_address) VALUES (?, ?, ?, ?, ?)",
-		time.Now().UTC(),
-		ssql.PublicKey(hk),
-		bh,
-		blockID.String(),
-		ha.NetAddress,
-	); err != nil {
-		return fmt.Errorf("failed to insert host announcement: %w", err)
-	}
-
 	// create the host
 	var hostID int64
 	if res, err := c.tx.Exec(c.ctx, `
@@ -267,6 +255,22 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		return fmt.Errorf("failed to insert host: %w", err)
 	} else if hostID, err = res.LastInsertId(); err != nil {
 		return fmt.Errorf("failed to fetch host id: %w", err)
+	}
+
+	// delete previous addresses
+	if _, err := c.tx.Exec(c.ctx, "DELETE FROM host_addresses WHERE db_host_id = ?", hostID); err != nil {
+		return fmt.Errorf("failed to remove previous announcments: %w", err)
+	}
+
+	// insert new addresses
+	if _, err := c.tx.Exec(c.ctx,
+		"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
+		time.Now().UTC(),
+		hostID,
+		ha.NetAddress,
+		"placeholder", // TODO: change
+	); err != nil {
+		return fmt.Errorf("failed to insert host announcement: %w", err)
 	}
 
 	// update allow list
