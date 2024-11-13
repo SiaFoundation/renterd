@@ -75,23 +75,21 @@ func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 }
 
 func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
-
 	return errors.New("implement when needed")
-
 }
+
 func (h *Host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	return h.HostPriceTable(), types.NewCurrency64(1), nil
 }
+
 func (h *Host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
-
 	return types.FileContractRevision{}, errors.New("implement when needed")
-
 }
+
 func (h *Host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	return errors.New("implement when needed")
-
 }
+
 func (h *Host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	return errors.New("implement when needed")
-
 }
