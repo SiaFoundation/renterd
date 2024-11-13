@@ -127,9 +127,6 @@ CREATE TABLE `ephemeral_accounts` (`id` integer PRIMARY KEY AUTOINCREMENT,`creat
 CREATE INDEX `idx_ephemeral_accounts_requires_sync` ON `ephemeral_accounts`(`requires_sync`);
 CREATE INDEX `idx_ephemeral_accounts_owner` ON `ephemeral_accounts`(`owner`);
 
--- dbAutopilot
-CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`identifier` text NOT NULL UNIQUE,`config` text,`current_period` integer DEFAULT 0);
-
 -- dbWebhook
 CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL,`headers` text DEFAULT ('{}'));
 CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`);
@@ -139,8 +136,8 @@ CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`cre
 CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db_object_id`,`db_multipart_upload_id`,`key`);
 
 -- dbHostCheck
-CREATE TABLE `host_checks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `created_at` datetime, `db_autopilot_id` INTEGER NOT NULL, `db_host_id` INTEGER NOT NULL, `usability_blocked` INTEGER NOT NULL DEFAULT 0, `usability_offline` INTEGER NOT NULL DEFAULT 0, `usability_low_score` INTEGER NOT NULL DEFAULT 0, `usability_redundant_ip` INTEGER NOT NULL DEFAULT 0, `usability_gouging` INTEGER NOT NULL DEFAULT 0, `usability_not_accepting_contracts` INTEGER NOT NULL DEFAULT 0, `usability_not_announced` INTEGER NOT NULL DEFAULT 0, `usability_not_completing_scan` INTEGER NOT NULL DEFAULT 0, `score_age` REAL NOT NULL, `score_collateral` REAL NOT NULL, `score_interactions` REAL NOT NULL, `score_storage_remaining` REAL NOT NULL, `score_uptime` REAL NOT NULL, `score_version` REAL NOT NULL, `score_prices` REAL NOT NULL, `gouging_contract_err` TEXT, `gouging_download_err` TEXT, `gouging_gouging_err` TEXT, `gouging_prune_err` TEXT, `gouging_upload_err` TEXT, FOREIGN KEY (`db_autopilot_id`) REFERENCES `autopilots` (`id`) ON DELETE CASCADE, FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE);
-CREATE UNIQUE INDEX `idx_host_checks_id` ON `host_checks` (`db_autopilot_id`, `db_host_id`);
+CREATE TABLE `host_checks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `created_at` datetime, `db_host_id` INTEGER NOT NULL, `usability_blocked` INTEGER NOT NULL DEFAULT 0, `usability_offline` INTEGER NOT NULL DEFAULT 0, `usability_low_score` INTEGER NOT NULL DEFAULT 0, `usability_redundant_ip` INTEGER NOT NULL DEFAULT 0, `usability_gouging` INTEGER NOT NULL DEFAULT 0, `usability_not_accepting_contracts` INTEGER NOT NULL DEFAULT 0, `usability_not_announced` INTEGER NOT NULL DEFAULT 0, `usability_not_completing_scan` INTEGER NOT NULL DEFAULT 0, `score_age` REAL NOT NULL, `score_collateral` REAL NOT NULL, `score_interactions` REAL NOT NULL, `score_storage_remaining` REAL NOT NULL, `score_uptime` REAL NOT NULL, `score_version` REAL NOT NULL, `score_prices` REAL NOT NULL, `gouging_contract_err` TEXT, `gouging_download_err` TEXT, `gouging_gouging_err` TEXT, `gouging_prune_err` TEXT, `gouging_upload_err` TEXT, FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE);
+CREATE UNIQUE INDEX `idx_host_checks_id` ON `host_checks` (`db_host_id`);
 CREATE INDEX `idx_host_checks_usability_blocked` ON `host_checks` (`usability_blocked`);
 CREATE INDEX `idx_host_checks_usability_offline` ON `host_checks` (`usability_offline`);
 CREATE INDEX `idx_host_checks_usability_low_score` ON `host_checks` (`usability_low_score`);
@@ -178,3 +175,6 @@ CREATE INDEX `idx_wallet_events_block_id_height` ON `wallet_events`(`block_id`,`
 CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`output_id` blob NOT NULL,`leaf_index` integer,`merkle_proof` longblob NOT NULL,`value` text,`address` blob,`maturity_height` integer);
 CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
+
+-- dbAutopilot
+CREATE TABLE autopilot (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, enabled integer NOT NULL DEFAULT 0, contracts_set text, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);

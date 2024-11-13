@@ -221,7 +221,7 @@ func isUpForRenewal(cfg api.AutopilotConfig, r api.Revision, blockHeight uint64)
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostCheck {
+func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostChecks {
 	h := sh.host
 
 	// prepare host breakdown fields
@@ -258,7 +258,7 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostChe
 		}
 	}
 
-	return &api.HostCheck{
+	return &api.HostChecks{
 		UsabilityBreakdown: ub,
 		GougingBreakdown:   gb,
 		ScoreBreakdown:     sh.sb,

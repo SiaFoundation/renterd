@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	testAutopilotID    = "default"
 	testUpdateInterval = 100 * time.Millisecond
 )
 
@@ -106,28 +105,16 @@ func (e *mockExplorer) setUnreachable(unreachable bool) {
 }
 
 type mockPinStore struct {
-	mu         sync.Mutex
-	gs         api.GougingSettings
-	ps         api.PinnedSettings
-	autopilots map[string]api.Autopilot
+	mu sync.Mutex
+	gs api.GougingSettings
+	ps api.PinnedSettings
 }
 
 func newTestStore() *mockPinStore {
-	s := &mockPinStore{
-		autopilots: make(map[string]api.Autopilot),
-		gs:         api.DefaultGougingSettings,
-		ps:         api.DefaultPinnedSettings,
+	return &mockPinStore{
+		gs: api.DefaultGougingSettings,
+		ps: api.DefaultPinnedSettings,
 	}
-
-	// add default autopilot
-	s.autopilots[testAutopilotID] = api.Autopilot{
-		ID: testAutopilotID,
-		Config: api.AutopilotConfig{
-			Contracts: api.ContractsConfig{},
-		},
-	}
-
-	return s
 }
 
 func (ms *mockPinStore) GougingSettings(ctx context.Context) (api.GougingSettings, error) {
@@ -162,19 +149,6 @@ func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedS
 		return err
 	}
 	ms.ps = cloned
-	return nil
-}
-
-func (ms *mockPinStore) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	return ms.autopilots[id], nil
-}
-
-func (ms *mockPinStore) UpdateAutopilot(ctx context.Context, autopilot api.Autopilot) error {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-	ms.autopilots[autopilot.ID] = autopilot
 	return nil
 }
 

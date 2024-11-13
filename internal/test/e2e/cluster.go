@@ -76,7 +76,6 @@ type TestCluster struct {
 	genesisBlock types.Block
 	bs           bus.Store
 	cm           *chain.Manager
-	apID         string
 	dbName       string
 	dir          string
 	logger       *zap.Logger
@@ -181,23 +180,6 @@ func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 	return newCluster
 }
 
-// AutopilotConfig returns the autopilot's config and current period.
-func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, uint64) {
-	c.tt.Helper()
-	ap, err := c.Bus.Autopilot(ctx, c.apID)
-	c.tt.OK(err)
-	return ap.Config, ap.CurrentPeriod
-}
-
-// UpdateAutopilotConfig updates the cluster's autopilot with given config.
-func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) {
-	c.tt.Helper()
-	c.tt.OK(c.Bus.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     c.apID,
-		Config: cfg,
-	}))
-}
-
 type testClusterOptions struct {
 	dbName               string
 	dir                  string
@@ -209,11 +191,11 @@ type testClusterOptions struct {
 	skipRunningAutopilot bool
 	walletKey            *types.PrivateKey
 
-	autopilotCfg      *config.Autopilot
-	autopilotSettings *api.AutopilotConfig
-	cm                *chain.Manager
-	busCfg            *config.Bus
-	workerCfg         *config.Worker
+	autopilotCfg    *config.Autopilot
+	autopilotConfig *api.AutopilotConfig
+	cm              *chain.Manager
+	busCfg          *config.Bus
+	workerCfg       *config.Worker
 }
 
 // newTestLogger creates a console logger used for testing.
@@ -236,6 +218,8 @@ func newTestLogger(enable bool) *zap.Logger {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
+	t.Helper()
+
 	// Skip any test that requires a cluster when running short tests.
 	tt := test.NewTT(t)
 
@@ -279,9 +263,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.uploadPacking {
 		enableUploadPacking = opts.uploadPacking
 	}
-	apSettings := test.AutopilotConfig
-	if opts.autopilotSettings != nil {
-		apSettings = *opts.autopilotSettings
+	apConfig := test.AutopilotConfig
+	if opts.autopilotConfig != nil {
+		apConfig = *opts.autopilotConfig
 	}
 	if opts.dbName != "" {
 		dbCfg.Database.MySQL.Database = opts.dbName
@@ -406,7 +390,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
 	cluster := &TestCluster{
-		apID:         apCfg.ID,
 		dir:          dir,
 		dbName:       dbCfg.Database.MySQL.Database,
 		logger:       logger,
@@ -468,10 +451,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
-		tt.OK(busClient.UpdateAutopilot(ctx, api.Autopilot{
-			ID:     apCfg.ID,
-			Config: apSettings,
-		}))
+		tt.OKAll(
+			busClient.UpdateContractsConfig(ctx, apConfig.Contracts),
+			busClient.UpdateHostsConfig(ctx, apConfig.Hosts),
+			busClient.EnableAutopilot(ctx),
+		)
 	}
 
 	// Build upload settings.
@@ -671,12 +655,12 @@ func (c *TestCluster) MineToRenewWindow() {
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
+	ap, err := c.Bus.Autopilot(context.Background())
 	c.tt.OK(err)
 
-	renewWindowStart := ap.CurrentPeriod + ap.Config.Contracts.Period
+	renewWindowStart := ap.CurrentPeriod + ap.Contracts.Period
 	if cs.BlockHeight >= renewWindowStart {
-		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
+		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Contracts.Period, renewWindowStart)
 	}
 	c.MineBlocks(renewWindowStart - cs.BlockHeight)
 }
@@ -1076,7 +1060,6 @@ func testWorkerCfg() config.Worker {
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
 		Heartbeat:                      time.Second,
-		ID:                             api.DefaultAutopilotID,
 		MigrationHealthCutoff:          0.99,
 		MigratorParallelSlabsPerWorker: 1,
 		RevisionSubmissionBuffer:       0,

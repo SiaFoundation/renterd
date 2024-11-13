@@ -71,12 +71,8 @@ type (
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
 
-		// Autopilot returns the autopilot with the given ID. Returns
-		// api.ErrAutopilotNotFound if the autopilot doesn't exist.
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-
-		// Autopilots returns all autopilots.
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+		// Autopilot returns the autopilot.
+		Autopilot(ctx context.Context) (api.Autopilot, error)
 
 		// BanPeer temporarily bans one or more IPs. The addr should either be a
 		// single IP with port (e.g. 1.2.3.4:5678) or a CIDR subnet (e.g.
@@ -169,6 +165,9 @@ type (
 
 		// HostBlocklist returns the list of host addresses on the blocklist.
 		HostBlocklist(ctx context.Context) ([]string, error)
+
+		// InitAutopilot initializes the autopilot state in the database.
+		InitAutopilot(ctx context.Context) error
 
 		// InsertBufferedSlab inserts a buffered slab into the database. This
 		// includes the creation of a buffered slab as well as the corresponding
@@ -331,8 +330,7 @@ type (
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
 
-		// UpdateAutopilot updates the autopilot with the provided one or
-		// creates a new one if it doesn't exist yet.
+		// UpdateAutopilot updates the autopilot in the database.
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 
 		// UpdateBucketPolicy updates the policy of the bucket with the provided
@@ -354,7 +352,7 @@ type (
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
 
 		// UpdateHostCheck updates the host check for the given host.
-		UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) error
 
 		// UpdatePeerInfo updates the metadata for the specified peer.
 		UpdatePeerInfo(ctx context.Context, addr string, fn func(*syncer.PeerInfo)) error

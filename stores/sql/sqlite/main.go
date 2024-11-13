@@ -192,12 +192,8 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
-func (tx *MainDatabaseTx) Autopilot(ctx context.Context, id string) (api.Autopilot, error) {
-	return ssql.Autopilot(ctx, tx, id)
-}
-
-func (tx *MainDatabaseTx) Autopilots(ctx context.Context) ([]api.Autopilot, error) {
-	return ssql.Autopilots(ctx, tx)
+func (tx *MainDatabaseTx) Autopilot(ctx context.Context) (api.Autopilot, error) {
+	return ssql.Autopilot(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
@@ -403,6 +399,41 @@ func (tx *MainDatabaseTx) HostBlocklist(ctx context.Context) ([]string, error) {
 
 func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	return ssql.Hosts(ctx, tx, opts)
+}
+
+func (tx *MainDatabaseTx) InitAutopilot(ctx context.Context) error {
+	_, err := tx.Exec(ctx, `
+INSERT OR IGNORE INTO autopilot (
+		id,
+	created_at,
+	current_period,
+	contracts_amount,
+	contracts_period,
+	contracts_renew_window,
+	contracts_download,
+	contracts_upload,
+	contracts_storage,
+	contracts_prune,
+	hosts_allow_redundant_ips,
+	hosts_max_consecutive_scan_failures,
+	hosts_max_downtime_hours,
+	hosts_min_protocol_version
+) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+		sql.AutopilotID,
+		time.Now(),
+		api.DefaultAutopilotConfig.Contracts.Amount,
+		api.DefaultAutopilotConfig.Contracts.Period,
+		api.DefaultAutopilotConfig.Contracts.RenewWindow,
+		api.DefaultAutopilotConfig.Contracts.Download,
+		api.DefaultAutopilotConfig.Contracts.Upload,
+		api.DefaultAutopilotConfig.Contracts.Storage,
+		api.DefaultAutopilotConfig.Contracts.Prune,
+		api.DefaultAutopilotConfig.Hosts.AllowRedundantIPs,
+		api.DefaultAutopilotConfig.Hosts.MaxConsecutiveScanFailures,
+		api.DefaultAutopilotConfig.Hosts.MaxDowntimeHours,
+		api.DefaultAutopilotConfig.Hosts.MinProtocolVersion,
+	)
+	return err
 }
 
 func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
@@ -1038,14 +1069,7 @@ func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements 
 }
 
 func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO autopilots (created_at, identifier, config, current_period)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(identifier) DO UPDATE SET
-		config = EXCLUDED.config,
-		current_period = EXCLUDED.current_period
-	`, time.Now(), ap.ID, (*ssql.AutopilotConfig)(&ap.Config), ap.CurrentPeriod)
-	return err
+	return ssql.UpdateAutopilot(ctx, tx, ap)
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {
@@ -1162,18 +1186,17 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {
+func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) error {
 	_, err := tx.Exec(ctx, `
-	    INSERT INTO host_checks (created_at, db_autopilot_id, db_host_id, usability_blocked, usability_offline, usability_low_score,
+	    INSERT INTO host_checks (created_at, db_host_id, usability_blocked, usability_offline, usability_low_score,
 	        usability_redundant_ip, usability_gouging, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
 	        score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
 	        gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
 	    VALUES (?,
-			(SELECT id FROM autopilots WHERE identifier = ?),
 			(SELECT id FROM hosts WHERE public_key = ?),
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	    ON CONFLICT (db_autopilot_id, db_host_id) DO UPDATE SET
-	        created_at = EXCLUDED.created_at, db_autopilot_id = EXCLUDED.db_autopilot_id, db_host_id = EXCLUDED.db_host_id,
+	    ON CONFLICT (db_host_id) DO UPDATE SET
+	        created_at = EXCLUDED.created_at, db_host_id = EXCLUDED.db_host_id,
 	        usability_blocked = EXCLUDED.usability_blocked, usability_offline = EXCLUDED.usability_offline, usability_low_score = EXCLUDED.usability_low_score,
 	        usability_redundant_ip = EXCLUDED.usability_redundant_ip, usability_gouging = EXCLUDED.usability_gouging, usability_not_accepting_contracts = EXCLUDED.usability_not_accepting_contracts,
 	        usability_not_announced = EXCLUDED.usability_not_announced, usability_not_completing_scan = EXCLUDED.usability_not_completing_scan,
@@ -1181,7 +1204,7 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	        score_storage_remaining = EXCLUDED.score_storage_remaining, score_uptime = EXCLUDED.score_uptime, score_version = EXCLUDED.score_version,
 	        score_prices = EXCLUDED.score_prices, gouging_contract_err = EXCLUDED.gouging_contract_err, gouging_download_err = EXCLUDED.gouging_download_err,
 	        gouging_gouging_err = EXCLUDED.gouging_gouging_err, gouging_prune_err = EXCLUDED.gouging_prune_err, gouging_upload_err = EXCLUDED.gouging_upload_err
-	    `, time.Now(), autopilot, ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
+	    `, time.Now(), ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
 		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
 		hc.ScoreBreakdown.Age, hc.ScoreBreakdown.Collateral, hc.ScoreBreakdown.Interactions, hc.ScoreBreakdown.StorageRemaining, hc.ScoreBreakdown.Uptime, hc.ScoreBreakdown.Version, hc.ScoreBreakdown.Prices,
 		hc.GougingBreakdown.ContractErr, hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,

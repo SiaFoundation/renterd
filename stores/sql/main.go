@@ -30,9 +30,8 @@ import (
 )
 
 var (
-	ErrNegativeOffset     = errors.New("offset can not be negative")
-	ErrMissingAutopilotID = errors.New("missing autopilot id")
-	ErrSettingNotFound    = errors.New("setting not found")
+	ErrNegativeOffset  = errors.New("offset can not be negative")
+	ErrSettingNotFound = errors.New("setting not found")
 )
 
 // helper types
@@ -194,33 +193,46 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
-func Autopilot(ctx context.Context, tx sql.Tx, id string) (api.Autopilot, error) {
-	row := tx.QueryRow(ctx, "SELECT identifier, config, current_period FROM autopilots WHERE identifier = ?", id)
-	ap, err := scanAutopilot(row)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.Autopilot{}, api.ErrAutopilotNotFound
-	} else if err != nil {
-		return api.Autopilot{}, fmt.Errorf("failed to fetch autopilot: %w", err)
-	}
-	return ap, nil
+func Autopilot(ctx context.Context, tx sql.Tx) (ap api.Autopilot, err error) {
+	err = tx.QueryRow(ctx, `
+SELECT
+	enabled,
+	current_period,
+	contracts_set,
+	contracts_amount,
+	contracts_period,
+	contracts_renew_window,
+	contracts_download,
+	contracts_upload,
+	contracts_storage,
+	contracts_prune,
+	hosts_allow_redundant_ips,
+	hosts_max_downtime_hours,
+	hosts_min_protocol_version,
+	hosts_max_consecutive_scan_failures
+FROM autopilot
+WHERE id = ?`, sql.AutopilotID).Scan(
+		&ap.Enabled,
+		&ap.CurrentPeriod,
+		&ap.Contracts.Set,
+		&ap.Contracts.Amount,
+		&ap.Contracts.Period,
+		&ap.Contracts.RenewWindow,
+		&ap.Contracts.Download,
+		&ap.Contracts.Upload,
+		&ap.Contracts.Storage,
+		&ap.Contracts.Prune,
+		&ap.Hosts.AllowRedundantIPs,
+		&ap.Hosts.MaxDowntimeHours,
+		&ap.Hosts.MinProtocolVersion,
+		&ap.Hosts.MaxConsecutiveScanFailures,
+	)
+	return
 }
 
-func Autopilots(ctx context.Context, tx sql.Tx) ([]api.Autopilot, error) {
-	rows, err := tx.Query(ctx, "SELECT identifier, config, current_period FROM autopilots")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch autopilots: %w", err)
-	}
-	defer rows.Close()
-
-	var autopilots []api.Autopilot
-	for rows.Next() {
-		ap, err := scanAutopilot(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan autopilot: %w", err)
-		}
-		autopilots = append(autopilots, ap)
-	}
-	return autopilots, nil
+func AutopilotPeriod(ctx context.Context, tx sql.Tx) (period uint64, err error) {
+	err = tx.QueryRow(ctx, `SELECT current_period FROM autopilot WHERE id = ?`, sql.AutopilotID).Scan(&period)
+	return
 }
 
 func Bucket(ctx context.Context, tx sql.Tx, bucket string) (api.Bucket, error) {
@@ -698,8 +710,6 @@ func HostBlocklist(ctx context.Context, tx sql.Tx) ([]string, error) {
 func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, error) {
 	if opts.Offset < 0 {
 		return nil, ErrNegativeOffset
-	} else if opts.AutopilotID == "" && opts.UsabilityMode != "" && opts.UsabilityMode != api.UsabilityFilterModeAll {
-		return nil, fmt.Errorf("%w: have to specify autopilot id when filter mode isn't 'all'", ErrMissingAutopilotID)
 	}
 
 	var hasAllowlist, hasBlocklist bool
@@ -720,17 +730,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 
 	var whereExprs []string
 	var args []any
-
-	// fetch autopilot id
-	var autopilotID int64
-	if opts.AutopilotID != "" {
-		if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", opts.AutopilotID).
-			Scan(&autopilotID); errors.Is(err, dsql.ErrNoRows) {
-			return nil, api.ErrAutopilotNotFound
-		} else if err != nil {
-			return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
-		}
-	}
 
 	// filter allowlist/blocklist
 	switch opts.FilterMode {
@@ -773,17 +772,12 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	}
 
 	// filter usability
-	whereApExpr := ""
-	if opts.AutopilotID != "" {
-		whereApExpr = "AND hc.db_autopilot_id = ?"
-
+	if opts.UsabilityMode != api.UsabilityFilterModeAll {
 		switch opts.UsabilityMode {
 		case api.UsabilityFilterModeUsable:
-			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0) %s)", whereApExpr))
-			args = append(args, autopilotID)
+			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 0 AND hc.usability_offline = 0 AND hc.usability_low_score = 0 AND hc.usability_redundant_ip = 0 AND hc.usability_gouging = 0 AND hc.usability_not_accepting_contracts = 0 AND hc.usability_not_announced = 0 AND hc.usability_not_completing_scan = 0))")
 		case api.UsabilityFilterModeUnusable:
-			whereExprs = append(whereExprs, fmt.Sprintf("EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1) %s)", whereApExpr))
-			args = append(args, autopilotID)
+			whereExprs = append(whereExprs, "EXISTS (SELECT 1 FROM hosts h2 INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id WHERE (hc.usability_blocked = 1 OR hc.usability_offline = 1 OR hc.usability_low_score = 1 OR hc.usability_redundant_ip = 1 OR hc.usability_gouging = 1 OR hc.usability_not_accepting_contracts = 1 OR hc.usability_not_announced = 1 OR hc.usability_not_completing_scan = 1))")
 		}
 	}
 
@@ -838,15 +832,57 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	}
 
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
-		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
-			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
-			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
-			h.scanned, h.resolved_addresses, %s
-		FROM hosts h
-		%s
-		%s
-		%s
-	`, blockedExpr, whereExpr, orderByExpr, offsetLimitStr), args...)
+SELECT
+	h.created_at,
+	h.last_announcement,
+	h.public_key,
+	h.net_address,
+
+	h.price_table,
+	h.price_table_expiry,
+	h.settings,
+
+	h.total_scans,
+	h.last_scan,
+	h.last_scan_success,
+	h.second_to_last_scan_success,
+	h.uptime,
+	h.downtime,
+	h.successful_interactions,
+	h.failed_interactions,
+	COALESCE(h.lost_sectors, 0),
+	h.scanned,
+	h.resolved_addresses,
+
+	%s,
+
+	COALESCE(hc.usability_blocked, 0),
+	COALESCE(hc.usability_offline, 0),
+	COALESCE(hc.usability_low_score, 0),
+	COALESCE(hc.usability_redundant_ip, 0),
+	COALESCE(hc.usability_gouging, 0),
+	COALESCE(hc.usability_not_accepting_contracts, 0),
+	COALESCE(hc.usability_not_announced, 0),
+	COALESCE(hc.usability_not_completing_scan, 0),
+
+	COALESCE(hc.score_age,0),
+	COALESCE(hc.score_collateral,0),
+	COALESCE(hc.score_interactions,0),
+	COALESCE(hc.score_storage_remaining,0),
+	COALESCE(hc.score_uptime,0),
+	COALESCE(hc.score_version,0),
+	COALESCE(hc.score_prices,0),
+
+	COALESCE(hc.gouging_contract_err, ""),
+	COALESCE(hc.gouging_download_err, ""),
+	COALESCE(hc.gouging_gouging_err, ""),
+	COALESCE(hc.gouging_prune_err, ""),
+	COALESCE(hc.gouging_upload_err, "")
+FROM hosts h
+LEFT JOIN host_checks hc ON hc.db_host_id = h.id
+%s
+%s
+%s`, blockedExpr, whereExpr, orderByExpr, offsetLimitStr), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -855,16 +891,18 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	var hosts []api.Host
 	for rows.Next() {
 		var h api.Host
-		var hostID int64
 		var pte dsql.NullTime
 		var resolvedAddresses string
-		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
+		err := rows.Scan(&h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &resolvedAddresses, &h.Blocked,
-		)
+			&h.Scanned, &resolvedAddresses, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
+			&h.Checks.UsabilityBreakdown.Gouging, &h.Checks.UsabilityBreakdown.NotAcceptingContracts, &h.Checks.UsabilityBreakdown.NotAnnounced, &h.Checks.UsabilityBreakdown.NotCompletingScan,
+			&h.Checks.ScoreBreakdown.Age, &h.Checks.ScoreBreakdown.Collateral, &h.Checks.ScoreBreakdown.Interactions, &h.Checks.ScoreBreakdown.StorageRemaining, &h.Checks.ScoreBreakdown.Uptime,
+			&h.Checks.ScoreBreakdown.Version, &h.Checks.ScoreBreakdown.Prices, &h.Checks.GougingBreakdown.ContractErr, &h.Checks.GougingBreakdown.DownloadErr, &h.Checks.GougingBreakdown.GougingErr,
+			&h.Checks.GougingBreakdown.PruneErr, &h.Checks.GougingBreakdown.UploadErr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -879,57 +917,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[h.PublicKey]
 		hosts = append(hosts, h)
-	}
-
-	// query host checks
-	var apExpr string
-	if opts.AutopilotID != "" {
-		apExpr = "WHERE ap.identifier = ?"
-		args = append(args, opts.AutopilotID)
-	}
-	rows, err = tx.Query(ctx, fmt.Sprintf(`
-		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
-			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
-			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
-			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
-			hc.gouging_prune_err, hc.gouging_upload_err
-		FROM (
-			SELECT h.id, h.public_key
-			FROM hosts h
-			%s
-			%s
-		) AS h
-		INNER JOIN host_checks hc ON hc.db_host_id = h.id
-		INNER JOIN autopilots ap ON hc.db_autopilot_id = ap.id
-		%s
-	`, whereExpr, offsetLimitStr, apExpr), args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch host checks: %w", err)
-	}
-	defer rows.Close()
-
-	hostChecks := make(map[types.PublicKey]map[string]api.HostCheck)
-	for rows.Next() {
-		var ap string
-		var pk PublicKey
-		var hc api.HostCheck
-		err := rows.Scan(&pk, &ap, &hc.UsabilityBreakdown.Blocked, &hc.UsabilityBreakdown.Offline, &hc.UsabilityBreakdown.LowScore, &hc.UsabilityBreakdown.RedundantIP,
-			&hc.UsabilityBreakdown.Gouging, &hc.UsabilityBreakdown.NotAcceptingContracts, &hc.UsabilityBreakdown.NotAnnounced, &hc.UsabilityBreakdown.NotCompletingScan,
-			&hc.ScoreBreakdown.Age, &hc.ScoreBreakdown.Collateral, &hc.ScoreBreakdown.Interactions, &hc.ScoreBreakdown.StorageRemaining, &hc.ScoreBreakdown.Uptime,
-			&hc.ScoreBreakdown.Version, &hc.ScoreBreakdown.Prices, &hc.GougingBreakdown.ContractErr, &hc.GougingBreakdown.DownloadErr, &hc.GougingBreakdown.GougingErr,
-			&hc.GougingBreakdown.PruneErr, &hc.GougingBreakdown.UploadErr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan host: %w", err)
-		}
-		if _, ok := hostChecks[types.PublicKey(pk)]; !ok {
-			hostChecks[types.PublicKey(pk)] = make(map[string]api.HostCheck)
-		}
-		hostChecks[types.PublicKey(pk)][ap] = hc
-	}
-
-	// fill in hosts
-	for i := range hosts {
-		hosts[i].Checks = hostChecks[hosts[i].PublicKey]
 	}
 	return hosts, nil
 }
@@ -2196,6 +2183,42 @@ WHERE fcid = ?`,
 	return nil
 }
 
+func UpdateAutopilot(ctx context.Context, tx sql.Tx, ap api.Autopilot) error {
+	_, err := tx.Exec(ctx, `
+UPDATE autopilot
+SET enabled = ?,
+	current_period = ?,
+	contracts_set = ?,
+	contracts_amount = ?,
+	contracts_period = ?,
+	contracts_renew_window = ?,
+	contracts_download = ?,
+	contracts_upload = ?,
+	contracts_storage = ?,
+	contracts_prune = ?,
+	hosts_allow_redundant_ips = ?,
+	hosts_max_downtime_hours = ?,
+	hosts_min_protocol_version = ?,
+	hosts_max_consecutive_scan_failures = ?
+WHERE id = ?`,
+		ap.Enabled,
+		ap.CurrentPeriod,
+		ap.Contracts.Set,
+		ap.Contracts.Amount,
+		ap.Contracts.Period,
+		ap.Contracts.RenewWindow,
+		ap.Contracts.Download,
+		ap.Contracts.Upload,
+		ap.Contracts.Storage,
+		ap.Contracts.Prune,
+		ap.Hosts.AllowRedundantIPs,
+		ap.Hosts.MaxDowntimeHours,
+		ap.Hosts.MinProtocolVersion,
+		ap.Hosts.MaxConsecutiveScanFailures,
+		sql.AutopilotID)
+	return err
+}
+
 func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer.PeerInfo)) error {
 	info, err := PeerInfo(ctx, tx, addr)
 	if err != nil {
@@ -2342,18 +2365,12 @@ func UsableHosts(ctx context.Context, tx sql.Tx) ([]HostInfo, error) {
 		whereExprs = append(whereExprs, "NOT EXISTS (SELECT 1 FROM host_blocklist_entry_hosts hbeh WHERE hbeh.db_host_id = h.id)")
 	}
 
-	// fetch autopilot
-	var autopilotID int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM autopilots WHERE identifier = ?", api.DefaultAutopilotID).Scan(&autopilotID); err != nil {
-		return nil, fmt.Errorf("failed to fetch autopilot id: %w", err)
-	}
-
 	// only include usable hosts
 	whereExprs = append(whereExprs, `
 EXISTS (
 	SELECT 1
 	FROM hosts h2
-	INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND hc.db_autopilot_id = ? AND h2.id = h.id
+	INNER JOIN host_checks hc ON hc.db_host_id = h2.id AND h2.id = h.id
 	WHERE
 		hc.usability_blocked = 0 AND
 		hc.usability_offline = 0 AND
@@ -2375,9 +2392,9 @@ EXISTS (
 	h.settings
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
-	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
+	INNER JOIN host_checks hc on hc.db_host_id = h.id
 	WHERE %s
-	GROUP by h.id`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID)
+	GROUP by h.id`, strings.Join(whereExprs, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -2440,14 +2457,6 @@ func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) 
 		return 0, fmt.Errorf("failed to count wallet events: %w", err)
 	}
 	return uint64(n), nil
-}
-
-func scanAutopilot(s Scanner) (api.Autopilot, error) {
-	var a api.Autopilot
-	if err := s.Scan(&a.ID, (*AutopilotConfig)(&a.Config), &a.CurrentPeriod); err != nil {
-		return api.Autopilot{}, err
-	}
-	return a, nil
 }
 
 func scanBucket(s Scanner) (api.Bucket, error) {

@@ -24,8 +24,8 @@ func TestMetrics(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:             test.RedundancySettings.TotalShards,
-		autopilotSettings: &apCfg,
+		hosts:           test.RedundancySettings.TotalShards,
+		autopilotConfig: &apCfg,
 	})
 	defer cluster.Shutdown()
 

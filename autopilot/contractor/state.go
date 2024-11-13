@@ -37,12 +37,8 @@ func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
 	}
 }
 
-func (ctx *mCtx) ApID() string {
-	return ctx.state.AP.ID
-}
-
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
-	return ctx.state.AP.Config
+	return ctx.state.AP.AutopilotConfig
 }
 
 func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
@@ -50,7 +46,7 @@ func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
 }
 
 func (ctx *mCtx) ContractSet() string {
-	return ctx.state.AP.Config.Contracts.Set
+	return ctx.state.ContractsConfig().Set
 }
 
 func (ctx *mCtx) Deadline() (deadline time.Time, ok bool) {
@@ -62,7 +58,7 @@ func (ctx *mCtx) Done() <-chan struct{} {
 }
 
 func (ctx *mCtx) EndHeight() uint64 {
-	return ctx.state.AP.EndHeight()
+	return ctx.state.AP.CurrentPeriod + ctx.state.AP.Contracts.Period + ctx.state.AP.Contracts.RenewWindow
 }
 
 func (ctx *mCtx) Err() error {
@@ -81,19 +77,19 @@ func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
 			err = errors.New("panic while scoring host")
 		}
 	}()
-	return hostScore(ctx.state.AP.Config, ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
+	return hostScore(ctx.AutopilotConfig(), ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
 }
 
 func (ctx *mCtx) Period() uint64 {
-	return ctx.state.Period()
+	return ctx.state.AP.Contracts.Period
 }
 
 func (ctx *mCtx) RenewWindow() uint64 {
-	return ctx.state.AP.Config.Contracts.RenewWindow
+	return ctx.state.AP.Contracts.RenewWindow
 }
 
 func (ctx *mCtx) ShouldFilterRedundantIPs() bool {
-	return !ctx.state.AP.Config.Hosts.AllowRedundantIPs
+	return !ctx.state.AP.Hosts.AllowRedundantIPs
 }
 
 func (ctx *mCtx) Value(key interface{}) interface{} {
@@ -101,11 +97,7 @@ func (ctx *mCtx) Value(key interface{}) interface{} {
 }
 
 func (ctx *mCtx) WantedContracts() uint64 {
-	return ctx.state.AP.Config.Contracts.Amount
-}
-
-func (ctx *mCtx) Set() string {
-	return ctx.state.ContractsConfig().Set
+	return ctx.state.AP.Contracts.Amount
 }
 
 func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
@@ -113,9 +105,5 @@ func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
-	return state.AP.Config.Contracts
-}
-
-func (state *MaintenanceState) Period() uint64 {
-	return state.AP.Config.Contracts.Period
+	return state.AP.Contracts
 }

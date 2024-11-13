@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	dsql "database/sql"
+
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -354,6 +359,52 @@ var (
 				ID: "00027_contract_usability",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_contract_usability", log)
+				},
+			},
+			{
+				ID: "00028_autopilot",
+				Migrate: func(tx Tx) error {
+					// remove all references to the autopilots table, without dropping the table
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_autopilot_1", log); err != nil {
+						return fmt.Errorf("failed to migrate: %v", err)
+					}
+
+					// fetch existing autopilot and override the blank config
+					var cfgraw []byte
+					var period uint64
+					var cfg api.AutopilotConfig
+					err := tx.QueryRow(ctx, `SELECT config, current_period FROM autopilots WHERE identifier = "autopilot"`).Scan(&cfgraw, &period)
+					if errors.Is(dsql.ErrNoRows, err) {
+						log.Warn("existing autopilot not found, the autopilot will be recreated with default values and the period will be reset")
+					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
+						log.Warnf("existing autopilot config not valid JSON, err %v", err)
+					} else {
+						res, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+							period,
+							cfg.Contracts.Set,
+							cfg.Contracts.Amount,
+							cfg.Contracts.Period,
+							cfg.Contracts.RenewWindow,
+							cfg.Contracts.Download,
+							cfg.Contracts.Upload,
+							cfg.Contracts.Storage,
+							cfg.Contracts.Prune,
+							cfg.Hosts.AllowRedundantIPs,
+							cfg.Hosts.MaxDowntimeHours,
+							cfg.Hosts.MinProtocolVersion,
+							cfg.Hosts.MaxConsecutiveScanFailures,
+							AutopilotID)
+						if err != nil {
+							return fmt.Errorf("failed to update autopilot config: %w", err)
+						} else if n, err := res.RowsAffected(); err != nil {
+							return fmt.Errorf("failed to fetch rows affected: %w", err)
+						} else if n == 0 {
+							return fmt.Errorf("failed to override blank autopilot config not found")
+						}
+					}
+
+					// drop autopilots table
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_autopilot_2", log)
 				},
 			},
 		}

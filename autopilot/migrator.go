@@ -179,12 +179,12 @@ func (m *migrator) performMigrations(p *workerPool) {
 	}
 
 	// fetch currently configured set
-	autopilot, err := m.ap.Config(m.ap.shutdownCtx)
+	ap, err := m.ap.bus.Autopilot(m.ap.shutdownCtx)
 	if err != nil {
-		m.logger.Errorf("failed to fetch autopilot config: %w", err)
+		m.logger.Errorf("failed to fetch autopilot: %w", err)
 		return
 	}
-	set := autopilot.Config.Contracts.Set
+	set := ap.Contracts.Set
 	if set == "" {
 		m.logger.Error("could not perform migrations, no contract set configured")
 		return

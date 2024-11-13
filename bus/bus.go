@@ -181,10 +181,10 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 	}
 
-	// An AutopilotStore stores autopilots.
+	// A AutopilotStore stores autopilot state.
 	AutopilotStore interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
+		Autopilot(ctx context.Context) (api.Autopilot, error)
+		InitAutopilot(ctx context.Context) error
 		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
 	}
 
@@ -211,7 +211,7 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
-		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, check api.HostChecks) error
 		UsableHosts(ctx context.Context) ([]sql.HostInfo, error)
 	}
 
@@ -366,6 +366,12 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 		rhp4Client: rhp4.New(dialer),
 	}
 
+	// ensure autopilot state
+	err = store.InitAutopilot(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
@@ -396,11 +402,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /autopilots":    b.autopilotsListHandlerGET,
-		"GET    /autopilot/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
-
-		"PUT    /autopilot/:id/host/:hostkey/check": b.autopilotHostCheckHandlerPUT,
+		"GET    /autopilot": b.autopilotHandlerGET,
+		"PUT    /autopilot": b.autopilotHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -445,6 +448,7 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"PUT    /host/:hostkey/check":            b.hostsCheckHandlerPUT,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
 		"POST   /host/:hostkey/scan":             b.hostsScanHandlerPOST,
 

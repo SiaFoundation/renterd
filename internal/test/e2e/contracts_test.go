@@ -14,18 +14,17 @@ import (
 
 func TestFormContract(t *testing.T) {
 	// configure the autopilot not to form any contracts
-	apSettings := test.AutopilotConfig
-	apSettings.Contracts.Amount = 0
+	apCfg := test.AutopilotConfig
+	apCfg.Contracts.Amount = 0
 
 	// create cluster
 	opts := clusterOptsDefault
-	opts.autopilotSettings = &apSettings
+	opts.autopilotConfig = &apCfg
 	cluster := newTestCluster(t, opts)
 	defer cluster.Shutdown()
 
 	// convenience variables
 	b := cluster.Bus
-	a := cluster.Autopilot
 	tt := cluster.tt
 
 	// add a host
@@ -35,7 +34,7 @@ func TestFormContract(t *testing.T) {
 
 	// form a contract using the bus
 	wallet, _ := b.Wallet(context.Background())
-	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
+	ap, err := b.Autopilot(context.Background())
 	tt.OK(err)
 	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
 	tt.OK(err)
@@ -44,16 +43,12 @@ func TestFormContract(t *testing.T) {
 	_, err = b.Contract(context.Background(), contract.ID)
 	tt.OK(err)
 
-	// fetch autopilot config
-	old, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
-	tt.OK(err)
-
 	// mine to the renew window
 	cluster.MineToRenewWindow()
 
 	// wait until autopilot updated the current period
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		if curr, _ := b.Autopilot(context.Background(), api.DefaultAutopilotID); curr.CurrentPeriod == old.CurrentPeriod {
+		if curr, _ := b.Autopilot(context.Background()); curr.CurrentPeriod == ap.CurrentPeriod {
 			return errors.New("autopilot didn't update the current period")
 		}
 		return nil
@@ -62,8 +57,9 @@ func TestFormContract(t *testing.T) {
 	// update autopilot config to allow for 1 contract, this won't form a
 	// contract but will ensure we don't skip contract maintenance, which should
 	// renew the contract we formed
-	apSettings.Contracts.Amount = 1
-	tt.OK(a.UpdateConfig(apSettings))
+	contracts := ap.Contracts
+	contracts.Amount = 1
+	tt.OK(b.UpdateContractsConfig(context.Background(), contracts))
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID

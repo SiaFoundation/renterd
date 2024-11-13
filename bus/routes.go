@@ -523,11 +523,6 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	if req.AutopilotID == "" && req.UsabilityMode != api.UsabilityFilterModeAll {
-		jc.Error(errors.New("need to specify autopilot id when usability mode isn't 'all'"), http.StatusBadRequest)
-		return
-	}
-
 	// validate the filter mode
 	switch req.FilterMode {
 	case api.HostFilterModeAllowed:
@@ -553,7 +548,6 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 	}
 
 	hosts, err := b.store.Hosts(jc.Request.Context(), api.HostOptions{
-		AutopilotID:     req.AutopilotID,
 		FilterMode:      req.FilterMode,
 		UsabilityMode:   req.UsabilityMode,
 		AddressContains: req.AddressContains,
@@ -1754,6 +1748,61 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	})
 }
 
+func (b *Bus) autopilotHandlerGET(jc jape.Context) {
+	ap, err := b.store.Autopilot(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot", err) != nil {
+		return
+	}
+	jc.Encode(ap)
+}
+
+func (b *Bus) autopilotHandlerPUT(jc jape.Context) {
+	// decode request
+	var req api.UpdateAutopilotRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req == (api.UpdateAutopilotRequest{}) {
+		jc.Error(errors.New("request body is empty"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch the autopilot
+	ap, err := b.store.Autopilot(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot", err) != nil {
+		return
+	}
+
+	// update the contracts config
+	if req.Contracts != nil {
+		if err := req.Contracts.Validate(); err != nil {
+			jc.Error(fmt.Errorf("failed to update autopilot, contracts config is invalid: %w", err), http.StatusBadRequest)
+			return
+		}
+		ap.Contracts = *req.Contracts
+	}
+
+	// update the hosts config
+	if req.Hosts != nil {
+		if err := req.Hosts.Validate(); err != nil {
+			jc.Error(fmt.Errorf("failed to update autopilot, hosts config is invalid: %w", err), http.StatusBadRequest)
+			return
+		}
+		ap.Hosts = *req.Hosts
+	}
+
+	// enable/disable the autopilot
+	if req.Enabled != nil {
+		ap.Enabled = *req.Enabled
+	}
+
+	// update the current period
+	if req.CurrentPeriod != nil {
+		ap.CurrentPeriod = *req.CurrentPeriod
+	}
+
+	jc.Check("failed to update autopilot", b.store.UpdateAutopilot(jc.Request.Context(), ap))
+}
+
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 	var fcid types.FileContractID
 	if jc.DecodeParam("id", &fcid) != nil {
@@ -1936,69 +1985,18 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *Bus) autopilotsListHandlerGET(jc jape.Context) {
-	if autopilots, err := b.store.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
-		jc.Encode(autopilots)
-	}
-}
-
-func (b *Bus) autopilotsHandlerGET(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	ap, err := b.store.Autopilot(jc.Request.Context(), id)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("couldn't load object", err) != nil {
-		return
-	}
-
-	jc.Encode(ap)
-}
-
-func (b *Bus) autopilotsHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	var ap api.Autopilot
-	if jc.Decode(&ap) != nil {
-		return
-	}
-
-	if ap.ID != id {
-		jc.Error(errors.New("id in path and body don't match"), http.StatusBadRequest)
-		return
-	}
-
-	if jc.Check("failed to update autopilot", b.store.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
-		b.pinMgr.TriggerUpdate()
-	}
-}
-
-func (b *Bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
+func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
 	var hk types.PublicKey
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	var hc api.HostCheck
+	var hc api.HostChecks
 	if jc.Check("failed to decode host check", jc.Decode(&hc)) != nil {
 		return
 	}
 
-	err := b.store.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to update host", err) != nil {
+	err := b.store.UpdateHostCheck(jc.Request.Context(), hk, hc)
+	if jc.Check("failed to update host check", err) != nil {
 		return
 	}
 }
