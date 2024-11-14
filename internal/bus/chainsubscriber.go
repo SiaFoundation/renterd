@@ -19,6 +19,10 @@ import (
 )
 
 const (
+	// maxAddrsPerProtocol is the maximum number of announced addresses we will
+	// track per host, per protocol for a V2 announcement
+	maxAddrsPerProtocol = 5
+
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
 	updatesBatchSize = 100
@@ -167,19 +171,17 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 		})
 		v2Hus := make(map[types.PublicKey]chain.V2HostAnnouncement)
 		chain.ForEachV2HostAnnouncement(b, func(hk types.PublicKey, addrs []chain.NetAddress) {
-			var filtered []chain.NetAddress
+			filtered := make(map[chain.Protocol][]chain.NetAddress)
 			for _, addr := range addrs {
-				if addr.Address == "" {
+				if addr.Address == "" || addr.Protocol != rhp4.ProtocolTCPSiaMux {
 					continue
-				}
-				switch addr.Protocol {
-				case rhp4.ProtocolTCPSiaMux:
-					filtered = append(filtered, addr)
-				default:
-					// any other protocol is not supported
+				} else if len(filtered[addr.Protocol]) < maxAddrsPerProtocol {
+					filtered[addr.Protocol] = append(filtered[addr.Protocol], addr)
 				}
 			}
-			v2Hus[hk] = filtered
+			for _, addrs := range filtered {
+				v2Hus[hk] = append(v2Hus[hk], addrs...)
+			}
 		})
 		// v1 announcements
 		for hk, addr := range v1Hus {
