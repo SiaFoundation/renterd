@@ -40,7 +40,6 @@ func NewHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSet
 		Settings:          settings,
 		Scanned:           true,
 		ResolvedAddresses: []string{"38.135.51.1"},
-		Subnets:           []string{"38.135.51.0/24"},
 	}
 }
 
