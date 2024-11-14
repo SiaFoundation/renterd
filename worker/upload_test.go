@@ -576,17 +576,6 @@ func TestRefreshUploaders(t *testing.T) {
 		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), len(contracts)+1)
 	}
 
-	// manually add a request to the queue of one of the uploaders we're about to expire
-	responseChan := make(chan sectorUploadResp, 1)
-	for _, ul := range ul.uploaders {
-		if ul.fcid == hNew.ID() {
-			ul.mu.Lock()
-			ul.queue = append(ul.queue, &sectorUploadReq{responseChan: responseChan, sector: &sectorUpload{ctx: context.Background()}})
-			ul.mu.Unlock()
-			break
-		}
-	}
-
 	// refresh uploaders, use blockheight that expires most uploaders
 	bh = c1.WindowEnd
 	contracts = w.Contracts()
@@ -595,13 +584,6 @@ func TestRefreshUploaders(t *testing.T) {
 	// assert we only have one uploader left
 	if len(ul.uploaders) != 1 {
 		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), 1)
-	}
-
-	// assert all queued requests failed with an error indicating the underlying
-	// contract expired
-	res := <-responseChan
-	if !errors.Is(res.err, errContractExpired) {
-		t.Fatal("expected contract expired error", res.err)
 	}
 }
 

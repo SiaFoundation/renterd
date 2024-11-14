@@ -24,8 +24,15 @@ func NewContractStore() *ContractStore {
 	}
 }
 
-func (cs *ContractStore) RenewedContract(ctx context.Context, fcid types.FileContractID) (api.ContractMetadata, error) {
-	return cs.Contract(ctx, fcid)
+func (cs *ContractStore) RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	for _, c := range cs.contracts {
+		if c.metadata.RenewedFrom == renewedFrom {
+			return c.metadata, nil
+		}
+	}
+	return api.ContractMetadata{}, api.ErrContractNotFound
 }
 
 func (cs *ContractStore) Contract(_ context.Context, fcid types.FileContractID) (api.ContractMetadata, error) {

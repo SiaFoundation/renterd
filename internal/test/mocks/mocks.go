@@ -56,7 +56,7 @@ type busMock struct {
 	*alerterMock
 	*accountsMock
 	*Chain
-	*contractLockerMock
+	*ContractLocker
 	*ContractStore
 	*HostStore
 	*ObjectStore
@@ -72,7 +72,7 @@ func NewBus(cs *ContractStore, hs *HostStore, os *ObjectStore) *busMock {
 		alerterMock:            &alerterMock{},
 		accountsMock:           &accountsMock{},
 		Chain:                  &Chain{},
-		contractLockerMock:     newContractLockerMock(),
+		ContractLocker:         NewContractLocker(),
 		ContractStore:          cs,
 		HostStore:              hs,
 		ObjectStore:            os,
@@ -107,7 +107,7 @@ func (h *Host) UpdatePriceTable(pt api.HostPriceTable) {
 	h.hi.PriceTable = pt
 }
 
-func (h *Host) PriceTable() api.HostPriceTable {
+func (h *Host) HostPriceTable() api.HostPriceTable {
 	return h.hi.PriceTable
 }
 

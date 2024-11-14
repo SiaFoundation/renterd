@@ -41,8 +41,6 @@ const (
 
 	lockingPrioritySyncing                = 30
 	lockingPriorityActiveContractRevision = 100
-
-	lockingPriorityUpload = 10
 )
 
 var (

@@ -89,13 +89,13 @@ func TestPriceTables(t *testing.T) {
 	update, _, err = pts.fetch(gCtx, h.PublicKey(), nil)
 	if err != nil {
 		t.Fatal(err)
-	} else if update.UID != h.PriceTable().UID {
+	} else if update.UID != h.HostPriceTable().UID {
 		t.Fatal("price table mismatch")
 	}
 
 	// refresh the price table on the host and make sure fetching doesn't update
 	// the price table since it's not expired
-	validPT = h.PriceTable()
+	validPT = h.HostPriceTable()
 	h.UpdatePriceTable(newTestHostPriceTable())
 	update, _, err = pts.fetch(gCtx, h.PublicKey(), nil)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestPriceTables(t *testing.T) {
 	update, _, err = pts.fetch(gCtx, h.PublicKey(), nil)
 	if err != nil {
 		t.Fatal(err)
-	} else if update.UID != h.PriceTable().UID {
+	} else if update.UID != h.HostPriceTable().UID {
 		t.Fatal("price table mismatch")
 	}
 }

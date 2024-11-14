@@ -1,4 +1,4 @@
-package worker
+package uploader
 
 import (
 	"context"
@@ -8,28 +8,31 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	"go.sia.tech/core/types"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/test/mocks"
+	"go.uber.org/zap"
 )
 
 func TestUploaderStopped(t *testing.T) {
-	w := newTestWorker(t)
-	w.AddHosts(1)
+	cs := mocks.NewContractStore()
+	hm := mocks.NewHostManager()
+	c := mocks.NewContract(types.PublicKey{1}, types.FileContractID{1})
+	cl := mocks.NewContractLocker()
 
-	um := w.uploadManager
-	um.refreshUploaders(w.Contracts(), 1)
-
-	ul := um.uploaders[0]
+	ul := New(context.Background(), cl, cs, hm, c.Metadata(), zap.NewNop().Sugar())
 	ul.Stop(errors.New("test"))
 
-	req := sectorUploadReq{
-		responseChan: make(chan sectorUploadResp),
-		sector:       &sectorUpload{ctx: context.Background()},
+	req := SectorUploadReq{
+		Ctx:          context.Background(),
+		ResponseChan: make(chan SectorUploadResp),
 	}
-	ul.enqueue(&req)
+
+	ul.Enqueue(&req)
 
 	select {
-	case res := <-req.responseChan:
-		if !errors.Is(res.err, errUploaderStopped) {
+	case res := <-req.ResponseChan:
+		if !errors.Is(res.Err, ErrStopped) {
 			t.Fatal("expected error response")
 		}
 	case <-time.After(10 * time.Second):
@@ -44,7 +47,7 @@ func TestHandleSectorUpload(t *testing.T) {
 	regular := false
 
 	errHostError := errors.New("some host error")
-	errSectorUploadFinishedAndDial := fmt.Errorf("%w;%w", rhp3.ErrDialTransport, errSectorUploadFinished)
+	errSectorUploadFinishedAndDial := fmt.Errorf("%w;%w", rhp3.ErrDialTransport, ErrSectorUploadFinished)
 
 	cases := []struct {
 		// input
@@ -72,8 +75,8 @@ func TestHandleSectorUpload(t *testing.T) {
 		{context.Canceled, 0, ms, overdrive, false, false, 0, 0},
 
 		// sector already uploaded case
-		{errSectorUploadFinished, ms, ms, regular, false, false, 10, 0},
-		{errSectorUploadFinished, ms, ms, overdrive, false, false, 0, 0},
+		{ErrSectorUploadFinished, ms, ms, regular, false, false, 10, 0},
+		{ErrSectorUploadFinished, ms, ms, overdrive, false, false, 0, 0},
 		{errSectorUploadFinishedAndDial, ms, ms, overdrive, false, false, 0, 0},
 		{errSectorUploadFinishedAndDial, ms, 1001 * ms, overdrive, false, true, 10010, 0},
 
@@ -97,5 +100,32 @@ func TestHandleSectorUpload(t *testing.T) {
 		} else if uploadSpeedBytesPerMS != c.uploadSpeedBytesPerMS {
 			t.Fatalf("case %d failed: expected uploadSpeedBytesPerMS %v, got %v", i+1, c.uploadSpeedBytesPerMS, uploadSpeedBytesPerMS)
 		}
+	}
+}
+
+func TestRefreshUploader(t *testing.T) {
+	cs := mocks.NewContractStore()
+	hm := mocks.NewHostManager()
+	cl := mocks.NewContractLocker()
+
+	// create uploader
+	hk := types.PublicKey{1}
+	c1 := cs.AddContract(hk)
+	ul := New(context.Background(), cl, cs, hm, c1.Metadata(), zap.NewNop().Sugar())
+
+	// renew the first contract
+	fmt.Println(c1.ID())
+	c1Renewed, err := cs.RenewContract(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// refresh uploader to cause it to expire
+	if !ul.tryRefresh(context.Background()) {
+		t.Fatal("uploader wasn't refreshed")
+	}
+
+	if ul.fcid != c1Renewed.ID() {
+		t.Fatalf("expected uploader to be using renewed contract, got %v", ul.fcid)
 	}
 }
