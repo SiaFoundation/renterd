@@ -41,8 +41,11 @@ func (hs *hostSet) resolveHostIP(host api.Host) []string {
 	// 1. not the host's faul, so we give it the benefit of the doubt
 	// 2. the host is unreachable of incorrectly announced, in which case the scans will fail
 	//
-	// TODO: resolve v2 addresses
 	resolvedAddresses, _, _ = utils.ResolveHostIP(context.Background(), host.NetAddress)
+	for _, addr := range host.V2SiamuxAddresses {
+		v2Addr, _, _ := utils.ResolveHostIP(context.Background(), addr)
+		resolvedAddresses = append(resolvedAddresses, v2Addr...)
+	}
 
 	// update cache
 	hs.resolvedAddresses[host.PublicKey] = resolvedAddresses
