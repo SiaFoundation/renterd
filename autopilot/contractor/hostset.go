@@ -23,6 +23,14 @@ type (
 	}
 )
 
+func newHostSet(l *zap.SugaredLogger) *hostSet {
+	return &hostSet{
+		resolvedAddresses: make(map[types.PublicKey][]string),
+		subnetToHostKey:   make(map[string]string),
+		logger:            l,
+	}
+}
+
 func (hs *hostSet) resolveHostIP(host api.Host) []string {
 	resolvedAddresses := hs.resolvedAddresses[host.PublicKey]
 	if len(resolvedAddresses) > 0 {
