@@ -78,7 +78,7 @@ func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
 
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.InsertDirectories(ctx, bucket, path)
+	return mtx.InsertDirectoriesDeprecated(ctx, bucket, path)
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
@@ -236,14 +236,8 @@ func (tx *MainDatabaseTx) CompleteMultipartUpload(ctx context.Context, bucket, k
 		return "", fmt.Errorf("failed to fetch multipart upload: %w", err)
 	}
 
-	// create the directory.
-	dirID, err := tx.InsertDirectories(ctx, bucket, key)
-	if err != nil {
-		return "", fmt.Errorf("failed to create directory for key %s: %w", key, err)
-	}
-
 	// create the object
-	objID, err := ssql.InsertObject(ctx, tx, key, dirID, mpu.BucketID, size, mpu.EC, mpu.MimeType, eTag)
+	objID, err := ssql.InsertObject(ctx, tx, key, mpu.BucketID, size, mpu.EC, mpu.MimeType, eTag)
 	if err != nil {
 		return "", fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -322,11 +316,7 @@ func (tx *MainDatabaseTx) ContractSizes(ctx context.Context) (map[types.FileCont
 }
 
 func (tx *MainDatabaseTx) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
-	dstDirID, err := tx.InsertDirectories(ctx, dstBucket, dstKey)
-	if err != nil {
-		return api.ObjectMetadata{}, err
-	}
-	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata, dstDirID)
+	return ssql.CopyObject(ctx, tx, srcBucket, dstBucket, srcKey, dstKey, mimeType, metadata)
 }
 
 func (tx *MainDatabaseTx) CreateBucket(ctx context.Context, bucket string, bp api.BucketPolicy) error {
@@ -457,7 +447,70 @@ func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName strin
 	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
 }
 
-func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
+func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
+	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
+}
+
+func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
+	// get bucket id
+	var bucketID int64
+	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrBucketNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to fetch bucket id: %w", err)
+	}
+
+	// insert object
+	objID, err := ssql.InsertObject(ctx, tx, key, bucketID, o.TotalSize(), o.Key, mimeType, eTag)
+	if err != nil {
+		return fmt.Errorf("failed to insert object: %w", err)
+	}
+
+	// insert slabs
+	if err := tx.insertSlabs(ctx, &objID, nil, contractSet, o.Slabs); err != nil {
+		return fmt.Errorf("failed to insert slabs: %w", err)
+	}
+
+	// insert metadata
+	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
+		return fmt.Errorf("failed to insert object metadata: %w", err)
+	}
+	return nil
+}
+
+func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error) {
+	if len(fcids) == 0 {
+		return 0, nil
+	}
+	// prepare args
+	var args []any
+	for _, fcid := range fcids {
+		args = append(args, ssql.FileContractID(fcid))
+	}
+	args = append(args, time.Now().Unix())
+	args = append(args, limit)
+	res, err := tx.Exec(ctx, fmt.Sprintf(`
+		UPDATE slabs SET health_valid_until = 0 WHERE id in (
+			SELECT *
+			FROM (
+				SELECT slabs.id
+				FROM slabs
+				INNER JOIN sectors se ON se.db_slab_id = slabs.id
+				INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
+				INNER JOIN contracts c ON c.id = cs.db_contract_id
+				WHERE c.fcid IN (%s) AND slabs.health_valid_until >= ?
+				LIMIT ?
+			) slab_ids
+		)
+	`, strings.Repeat("?, ", len(fcids)-1)+"?"), args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) InsertDirectoriesDeprecated(ctx context.Context, bucket, path string) (int64, error) {
 	// sanity check input
 	if !strings.HasPrefix(path, "/") {
 		return 0, errors.New("path has to have a leading slash")
@@ -511,69 +564,6 @@ func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path st
 		dirID = &insertedID
 	}
 	return *dirID, nil
-}
-
-func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error) {
-	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
-}
-
-func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
-	// get bucket id
-	var bucketID int64
-	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ErrBucketNotFound
-	} else if err != nil {
-		return fmt.Errorf("failed to fetch bucket id: %w", err)
-	}
-
-	// insert object
-	objID, err := ssql.InsertObject(ctx, tx, key, dirID, bucketID, o.TotalSize(), o.Key, mimeType, eTag)
-	if err != nil {
-		return fmt.Errorf("failed to insert object: %w", err)
-	}
-
-	// insert slabs
-	if err := tx.insertSlabs(ctx, &objID, nil, contractSet, o.Slabs); err != nil {
-		return fmt.Errorf("failed to insert slabs: %w", err)
-	}
-
-	// insert metadata
-	if err := ssql.InsertMetadata(ctx, tx, &objID, nil, md); err != nil {
-		return fmt.Errorf("failed to insert object metadata: %w", err)
-	}
-	return nil
-}
-
-func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error) {
-	if len(fcids) == 0 {
-		return 0, nil
-	}
-	// prepare args
-	var args []any
-	for _, fcid := range fcids {
-		args = append(args, ssql.FileContractID(fcid))
-	}
-	args = append(args, time.Now().Unix())
-	args = append(args, limit)
-	res, err := tx.Exec(ctx, fmt.Sprintf(`
-		UPDATE slabs SET health_valid_until = 0 WHERE id in (
-			SELECT *
-			FROM (
-				SELECT slabs.id
-				FROM slabs
-				INNER JOIN sectors se ON se.db_slab_id = slabs.id
-				INNER JOIN contract_sectors cs ON cs.db_sector_id = se.id
-				INNER JOIN contracts c ON c.id = cs.db_contract_id
-				WHERE c.fcid IN (%s) AND slabs.health_valid_until >= ?
-				LIMIT ?
-			) slab_ids
-		)
-	`, strings.Repeat("?, ", len(fcids)-1)+"?"), args...)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {
@@ -720,30 +710,6 @@ CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable))
 	return
 }
 
-func (tx *MainDatabaseTx) PruneEmptydirs(ctx context.Context) error {
-	stmt, err := tx.Prepare(ctx, `
-	DELETE
-	FROM directories
-	WHERE directories.id != 1
-	AND NOT EXISTS (SELECT 1 FROM objects WHERE objects.db_directory_id = directories.id)
-	AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM directories AS d WHERE d.db_parent_id = directories.id) i)
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-	for {
-		res, err := stmt.Exec(ctx)
-		if err != nil {
-			return err
-		} else if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n == 0 {
-			return nil
-		}
-	}
-}
-
 func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, error) {
 	res, err := tx.Exec(ctx, `
 	DELETE FROM slabs
@@ -827,11 +793,7 @@ func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailu
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
 
-func (tx *MainDatabaseTx) RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error) {
-	return ssql.RenameDirectories(ctx, tx, bucket, prefixOld, prefixNew)
-}
-
-func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error {
+func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
 	if force {
 		// delete potentially existing object at destination
 		if _, err := tx.DeleteObject(ctx, bucket, keyNew); err != nil {
@@ -845,7 +807,7 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 			return api.ErrObjectExists
 		}
 	}
-	resp, err := tx.Exec(ctx, `UPDATE objects SET object_id = ?, db_directory_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, dirID, keyOld, bucket)
+	resp, err := tx.Exec(ctx, `UPDATE objects SET object_id = ? WHERE object_id = ? AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`, keyNew, keyOld, bucket)
 	if err != nil {
 		return err
 	} else if n, err := resp.RowsAffected(); err != nil {
@@ -856,33 +818,27 @@ func (tx *MainDatabaseTx) RenameObject(ctx context.Context, bucket, keyOld, keyN
 	return nil
 }
 
-func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error {
+func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
 	if force {
-		// delete where bucket matches, where object_id is prefixed by the old
-		// prefix (case sensitive) and directories that exactly match the new
-		// prefix, otherwise the update conflicts
+		// to avoid a conflict on update, we delete objects that would conflict
+		// with objects being renamed, within the scope of the bucket of course
 		query := `
 		DELETE
 		FROM objects
 		WHERE
 			db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) AND
-			(
-				object_id IN (
-					SELECT *
-					FROM (
-						SELECT CONCAT(?, SUBSTR(object_id, ?))
-						FROM objects
-						WHERE object_id LIKE ?
-						AND SUBSTR(object_id, 1, ?) = ?
-					) as i
-				) OR (object_id = ? AND size = 0)
+			object_id IN (
+				SELECT *
+				FROM (
+					SELECT CONCAT(?, SUBSTR(object_id, ?))
+					FROM objects
+					WHERE object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ?
+				) as i
 			)`
 		args := []any{
 			bucket,
 			prefixNew, utf8.RuneCountInString(prefixOld) + 1,
-			prefixOld + "%",
-			utf8.RuneCountInString(prefixOld), prefixOld,
-			prefixOld,
+			prefixOld + "%", utf8.RuneCountInString(prefixOld), prefixOld,
 		}
 		_, err := tx.Exec(ctx, query, args...)
 		if err != nil {
@@ -896,20 +852,15 @@ func (tx *MainDatabaseTx) RenameObjects(ctx context.Context, bucket, prefixOld, 
 	// only when the object is an immediate child (no slash in suffix)
 	query := `
 		UPDATE objects
-		SET object_id = CONCAT(?, SUBSTR(object_id, ?)),
-		db_directory_id = CASE INSTR(SUBSTR(object_id, ?), "/") WHEN 0 THEN ? ELSE db_directory_id END
-		WHERE object_id LIKE ?
-		AND SUBSTR(object_id, 1, ?) = ?
-		AND object_id != ?
-		AND db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?)`
+		SET object_id = CONCAT(?, SUBSTR(object_id, ?))
+		WHERE
+			db_bucket_id = (SELECT id FROM buckets WHERE buckets.name = ?) AND
+			object_id LIKE ? AND SUBSTR(object_id, 1, ?) = ?`
 
 	args := []any{
 		prefixNew, utf8.RuneCountInString(prefixOld) + 1,
-		utf8.RuneCountInString(prefixOld) + 1, dirID,
-		prefixOld + "%",
-		utf8.RuneCountInString(prefixOld), prefixOld,
-		prefixNew,
 		bucket,
+		prefixOld + "%", utf8.RuneCountInString(prefixOld), prefixOld,
 	}
 	resp, err := tx.Exec(ctx, query, args...)
 	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {

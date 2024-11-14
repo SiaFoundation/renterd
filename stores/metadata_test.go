@@ -1252,7 +1252,7 @@ func TestObjectsExplicitDir(t *testing.T) {
 	}{
 		{"/dir/", 0},     // empty dir - created first
 		{"/dir/file", 1}, // file uploaded to dir
-		{"/dir2/", 2},    // empty dir - remains empty
+		{"/dir2/", 0},    // empty dir - remains empty
 	}
 
 	ctx := context.Background()
@@ -1285,7 +1285,7 @@ func TestObjectsExplicitDir(t *testing.T) {
 	}{
 		{"/", "", "", "", []api.ObjectMetadata{
 			{Key: "/dir/", Size: 1, Health: 0.5},
-			{ETag: "d34db33f", Key: "/dir2/", Size: 2, Health: 1, MimeType: testMimeType}, // has MimeType and ETag since it's a file
+			{Key: "/dir2/", Size: 0, Health: 1},
 		}},
 		{"/dir/", "", "", "", []api.ObjectMetadata{{ETag: "d34db33f", Key: "/dir/file", Size: 1, Health: 0.5, MimeType: testMimeType}}},
 	}
@@ -2263,64 +2263,6 @@ func TestRenameObjects(t *testing.T) {
 			t.Fatal("unexpected path", obj.Key)
 		}
 	}
-
-	// Assert directories are correct
-	expectedDirs := []struct {
-		id       int64
-		parentID int64
-		name     string
-	}{
-		{
-			id:       1,
-			parentID: 0,
-			name:     "/",
-		},
-		{
-			id:       2,
-			parentID: 1,
-			name:     "/fileś/",
-		},
-		{
-			id:       5,
-			parentID: 2,
-			name:     "/fileś/foo/",
-		},
-	}
-
-	var n int64
-	if err := ss.DB().QueryRow(ctx, "SELECT COUNT(*) FROM directories").Scan(&n); err != nil {
-		t.Fatal(err)
-	} else if n != int64(len(expectedDirs)) {
-		t.Fatalf("unexpected number of directories, %v != %v", n, len(expectedDirs))
-	}
-
-	type row struct {
-		ID       int64
-		ParentID int64
-		Name     string
-	}
-	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var i int
-	for rows.Next() {
-		var dir row
-		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
-			t.Fatal(err)
-		} else if dir.ID != expectedDirs[i].id {
-			t.Fatalf("unexpected directory id, %v != %v", dir.ID, expectedDirs[i].id)
-		} else if dir.ParentID != expectedDirs[i].parentID {
-			t.Fatalf("unexpected directory parent id, %v != %v", dir.ParentID, expectedDirs[i].parentID)
-		} else if dir.Name != expectedDirs[i].name {
-			t.Fatalf("unexpected directory name, %v != %v", dir.Name, expectedDirs[i].name)
-		}
-		i++
-	}
-	if len(expectedDirs) != i {
-		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), i)
-	}
 }
 
 func TestRenameObjectsRegression(t *testing.T) {
@@ -2404,6 +2346,25 @@ func TestRenameObjectsRegression(t *testing.T) {
 
 	assertNumObjects("/video/", 2)
 	assertNumObjects("/video/thriller/", 2)
+	assertNumObjects("/", 4)
+
+	// assert we can move a folder up
+	if err := ss.RenameObjects(ctx, testBucket, "/video/thriller/", "/thriller/", false); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumObjects("/video/", 1)
+	assertNumObjects("/thriller/", 2)
+	assertNumObjects("/", 5)
+
+	// assert we can move a folder down
+	if err := ss.RenameObjects(ctx, testBucket, "/thriller/", "/audio/thriller/", false); err != nil {
+		t.Fatal(err)
+	}
+
+	assertNumObjects("/video/", 1)
+	assertNumObjects("/audio/thriller/", 2)
+	assertNumObjects("/audio/", 2)
 	assertNumObjects("/", 4)
 }
 
@@ -4133,18 +4094,8 @@ func TestSlabCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var dirID int64
-	err = ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-		var err error
-		dirID, err = tx.InsertDirectories(context.Background(), testBucket, "/")
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// create objects
-	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (db_directory_id, object_id, db_bucket_id, health, `key`) VALUES (?, ?, ?, ?, ?);")
+	insertObjStmt, err := ss.DB().Prepare(context.Background(), "INSERT INTO objects (object_id, db_bucket_id, health, `key`) VALUES (?, ?, ?, ?);")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4156,11 +4107,11 @@ func TestSlabCleanup(t *testing.T) {
 
 	var obj1ID, obj2ID int64
 	obj1Key, obj2Key := randomKey(), randomKey()
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "/1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
+	if res, err := insertObjStmt.Exec(context.Background(), "/1", ss.DefaultBucketID(), 1, obj1Key); err != nil {
 		t.Fatal(err)
 	} else if obj1ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
-	} else if res, err := insertObjStmt.Exec(context.Background(), dirID, "/2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
+	} else if res, err := insertObjStmt.Exec(context.Background(), "/2", ss.DefaultBucketID(), 1, obj2Key); err != nil {
 		t.Fatal(err)
 	} else if obj2ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4217,7 +4168,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	var obj3ID int64
 	obj3Key := randomKey()
-	if res, err := insertObjStmt.Exec(context.Background(), dirID, "3", ss.DefaultBucketID(), 1, obj3Key); err != nil {
+	if res, err := insertObjStmt.Exec(context.Background(), "3", ss.DefaultBucketID(), 1, obj3Key); err != nil {
 		t.Fatal(err)
 	} else if obj3ID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4663,104 +4614,6 @@ func TestUpdateObjectParallel(t *testing.T) {
 
 	close(c)
 	wg.Wait()
-}
-
-func TestDirectories(t *testing.T) {
-	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
-	defer ss.Close()
-
-	paths := []string{
-		"/foo",
-		"/bar/baz",
-		"///somefile",
-		"/dir/fakedir/",
-		"/",
-		"/bar/fileinsamedirasbefore",
-	}
-
-	for _, p := range paths {
-		var dirID int64
-		err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-			var err error
-			dirID, err = tx.InsertDirectories(context.Background(), testBucket, p)
-			return err
-		})
-		if err != nil {
-			t.Fatal(err)
-		} else if dirID == 0 {
-			t.Fatalf("unexpected dir id %v", dirID)
-		}
-	}
-
-	expectedDirs := []struct {
-		name     string
-		id       int64
-		parentID int64
-	}{
-		{
-			name:     "/",
-			id:       1,
-			parentID: 0,
-		},
-		{
-			name:     "/bar/",
-			id:       2,
-			parentID: 1,
-		},
-		{
-			name:     "//",
-			id:       3,
-			parentID: 1,
-		},
-		{
-			name:     "///",
-			id:       4,
-			parentID: 3,
-		},
-		{
-			name:     "/dir/",
-			id:       5,
-			parentID: 1,
-		},
-	}
-
-	type row struct {
-		ID       int64
-		ParentID int64
-		Name     string
-	}
-	rows, err := ss.DB().Query(context.Background(), "SELECT id, COALESCE(db_parent_id, 0), name FROM directories ORDER BY id ASC")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var nDirs int
-	for i := 0; rows.Next(); i++ {
-		var dir row
-		if err := rows.Scan(&dir.ID, &dir.ParentID, &dir.Name); err != nil {
-			t.Fatal(err)
-		} else if dir.ID != expectedDirs[i].id {
-			t.Fatalf("unexpected id %v", dir.ID)
-		} else if dir.ParentID != expectedDirs[i].parentID {
-			t.Fatalf("unexpected parent id %v", dir.ParentID)
-		} else if dir.Name != expectedDirs[i].name {
-			t.Fatalf("unexpected name '%v' != '%v'", dir.Name, expectedDirs[i].name)
-		}
-		nDirs++
-	}
-	if len(expectedDirs) != nDirs {
-		t.Fatalf("expected %v dirs, got %v", len(expectedDirs), nDirs)
-	}
-
-	now := time.Now()
-	ss.Retry(100, 100*time.Millisecond, func() error {
-		ss.triggerSlabPruning()
-		return ss.waitForPruneLoop(now)
-	})
-
-	if n := ss.Count("directories"); n != 1 {
-		t.Fatal("expected 1 dir, got", n)
-	}
 }
 
 func TestPutContract(t *testing.T) {
