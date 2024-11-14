@@ -786,9 +786,8 @@ func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types
 	}
 
 	// resolve host ip, don't scan if the host is on a private network or if it
-	// resolves to more than two addresses of the same type, if it fails for
-	// another reason the host scan won't have subnets
-	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
+	// resolves to more than two addresses of the same type
+	_, private, err := utils.ResolveHostIP(ctx, hostIP)
 	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !b.allowPrivateIPs {
@@ -830,9 +829,8 @@ func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types
 	// Otherwise scans that time out won't be recorded.
 	scanErr := b.store.RecordHostScans(ctx, []api.HostScan{
 		{
-			HostKey:           hostKey,
-			PriceTable:        pt,
-			ResolvedAddresses: resolvedAddresses,
+			HostKey:    hostKey,
+			PriceTable: pt,
 
 			// NOTE: A scan is considered successful if both fetching the price
 			// table and the settings succeeded. Right now scanning can't fail
