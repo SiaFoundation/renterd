@@ -350,6 +350,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_key_prefix", log)
 				},
 			},
+			{
+				ID: "00027_remove_directories",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_remove_directories", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
