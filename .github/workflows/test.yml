@@ -108,7 +108,7 @@ jobs:
           go-test-args: "-race;-timeout=20m;-tags=netgo,v2"
 
   success: # Use in branch rulesets to ensure all matrix jobs completed successfully
-    needs: [test-sqlite, test-mysql]
+    needs: [test-sqlite, test-mysql, test-sqlite-v2, test-mysql-v2]
     runs-on: ubuntu-latest
     steps:
       - run: echo "Success!"
