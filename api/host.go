@@ -101,17 +101,18 @@ type (
 
 type (
 	Host struct {
-		KnownSince       time.Time            `json:"knownSince"`
-		LastAnnouncement time.Time            `json:"lastAnnouncement"`
-		PublicKey        types.PublicKey      `json:"publicKey"`
-		NetAddress       string               `json:"netAddress"`
-		PriceTable       HostPriceTable       `json:"priceTable"`
-		Settings         rhpv2.HostSettings   `json:"settings"`
-		Interactions     HostInteractions     `json:"interactions"`
-		Scanned          bool                 `json:"scanned"`
-		Blocked          bool                 `json:"blocked"`
-		Checks           map[string]HostCheck `json:"checks"`
-		StoredData       uint64               `json:"storedData"`
+		KnownSince        time.Time            `json:"knownSince"`
+		LastAnnouncement  time.Time            `json:"lastAnnouncement"`
+		PublicKey         types.PublicKey      `json:"publicKey"`
+		NetAddress        string               `json:"netAddress"`
+		PriceTable        HostPriceTable       `json:"priceTable"`
+		Settings          rhpv2.HostSettings   `json:"settings"`
+		Interactions      HostInteractions     `json:"interactions"`
+		Scanned           bool                 `json:"scanned"`
+		Blocked           bool                 `json:"blocked"`
+		Checks            map[string]HostCheck `json:"checks"`
+		StoredData        uint64               `json:"storedData"`
+		V2SiamuxAddresses []string             `json:"v2SiamuxAddresses"`
 	}
 
 	HostInfo struct {
