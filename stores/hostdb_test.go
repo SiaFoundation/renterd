@@ -621,11 +621,6 @@ func TestRecordScan(t *testing.T) {
 		t.Fatal("mismatch")
 	}
 
-	// The host shouldn't have any addresses.
-	if len(host.ResolvedAddresses) != 0 {
-		t.Fatal("unexpected", host.ResolvedAddresses, len(host.ResolvedAddresses))
-	}
-
 	// Fetch the host directly to get the creation time.
 	h, err := ss.Host(ctx, hk)
 	if err != nil {
@@ -658,11 +653,6 @@ func TestRecordScan(t *testing.T) {
 	_, err = ss.DB().Exec(ctx, "UPDATE hosts SET price_table_expiry = ? WHERE public_key = ?", time.Now().Add(time.Hour), sql.PublicKey(hk))
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// The host should have the addresses.
-	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
-		t.Fatal("resolved addresses mismatch")
 	}
 
 	// We expect no uptime or downtime from only a single scan.
@@ -718,11 +708,6 @@ func TestRecordScan(t *testing.T) {
 		FailedInteractions:      0,
 	}) {
 		t.Fatal("mismatch")
-	}
-
-	// The host should still have the subnets.
-	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
-		t.Fatal("resolved addresses mismatch")
 	}
 
 	// Record another scan 2 hours after the second one. This time it fails.

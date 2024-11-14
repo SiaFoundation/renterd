@@ -859,7 +859,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
 			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
 			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
-			h.scanned, h.resolved_addresses, %s
+			h.scanned, %s
 		FROM hosts h
 		%s
 		%s
@@ -887,9 +887,6 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		if resolvedAddresses != "" {
-			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
-		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[h.PublicKey]
 		hosts = append(hosts, h)
@@ -1683,7 +1680,6 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
-		resolved_addresses = CASE WHEN ? THEN ? ELSE resolved_addresses END
 		WHERE public_key = ?
 	`)
 	if err != nil {

@@ -89,22 +89,5 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 		// Delete the cache if the cached IP doesn't work
 		d.cache.Delete(host)
 	}
-
-	// Attempt to resolve using the bus
-	logger.Debug("Cache not available or cached IP stale, retrieving host resolved addresses from bus")
-	hostInfo, err := d.bus.Host(ctx, hk)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, addr := range hostInfo.ResolvedAddresses {
-		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(addr, port))
-		if err == nil {
-			// Update cache on successful dial
-			d.cache.Set(host, addr)
-			return conn, nil
-		}
-	}
-
 	return nil, fmt.Errorf("failed to dial %s with all methods", address)
 }

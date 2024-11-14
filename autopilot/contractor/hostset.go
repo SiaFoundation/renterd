@@ -3,8 +3,8 @@ package contractor
 import (
 	"context"
 	"errors"
-	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
@@ -16,22 +16,35 @@ var (
 
 type (
 	hostSet struct {
-		subnetToHostKey map[string]string
+		resolvedAddresses map[types.PublicKey][]string
+		subnetToHostKey   map[string]string
 
 		logger *zap.SugaredLogger
 	}
 )
 
-func (hs *hostSet) HasRedundantIP(host api.Host) bool {
-	// compat code for hosts that have been scanned before ResolvedAddresses
-	// were introduced
-	if len(host.ResolvedAddresses) == 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		host.ResolvedAddresses, _, _ = utils.ResolveHostIP(ctx, host.NetAddress)
+func (hs *hostSet) resolveHostIP(host api.Host) []string {
+	resolvedAddresses := hs.resolvedAddresses[host.PublicKey]
+	if len(resolvedAddresses) > 0 {
+		return resolvedAddresses
 	}
+	// resolve host IP
+	// NOTE: we ignore errors here since failing to resolve an address is either
+	// 1. not the host's faul, so we give it the benefit of the doubt
+	// 2. the host is unreachable of incorrectly announced, in which case the scans will fail
+	//
+	// TODO: resolve v2 addresses
+	resolvedAddresses, _, _ = utils.ResolveHostIP(context.Background(), host.NetAddress)
 
-	subnets, err := utils.AddressesToSubnets(host.ResolvedAddresses)
+	// update cache
+	hs.resolvedAddresses[host.PublicKey] = resolvedAddresses
+	return resolvedAddresses
+}
+
+func (hs *hostSet) HasRedundantIP(host api.Host) bool {
+	resolvedAddresses := hs.resolveHostIP(host)
+
+	subnets, err := utils.AddressesToSubnets(resolvedAddresses)
 	if err != nil {
 		hs.logger.Errorf("failed to parse host %v subnets: %v", host.PublicKey, err)
 		return true
@@ -61,7 +74,7 @@ func (hs *hostSet) HasRedundantIP(host api.Host) bool {
 }
 
 func (hs *hostSet) Add(host api.Host) {
-	subnets, err := utils.AddressesToSubnets(host.ResolvedAddresses)
+	subnets, err := utils.AddressesToSubnets(hs.resolveHostIP(host))
 	if err != nil {
 		hs.logger.Errorf("failed to parse host %v subnets: %v", host.PublicKey, err)
 		return
