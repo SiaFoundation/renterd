@@ -91,6 +91,7 @@ type Bus interface {
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
+	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
 	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
 }
 
@@ -1283,6 +1284,16 @@ func updateContractSet(ctx *mCtx, bus Bus, oldSet, newSet []api.ContractMetadata
 	}
 	if err := bus.UpdateContractSet(ctx, ctx.ContractSet(), newSetIDs, toRemove); err != nil {
 		return fmt.Errorf("failed to update contract set: %w", err)
+	}
+	for _, id := range toRemove {
+		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityBad); err != nil {
+			return fmt.Errorf("failed to record contract set change: %w", err)
+		}
+	}
+	for _, id := range toAdd {
+		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityGood); err != nil {
+			return fmt.Errorf("failed to record contract set change: %w", err)
+		}
 	}
 	return nil
 }

@@ -365,6 +365,28 @@ func TestNewTestCluster(t *testing.T) {
 	} else if _, err := cluster.Bus.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
 		t.Fatal("unexpected error", err)
 	}
+
+	// Assert contract set contracts are marked good
+	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
+	tt.OK(err)
+
+	seen := make(map[types.FileContractID]struct{})
+	for _, c := range contracts {
+		if c.Usability != api.ContractUsabilityGood {
+			t.Fatal("contract should be good")
+		}
+		seen[c.ID] = struct{}{}
+	}
+	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+	tt.OK(err)
+	for _, c := range contracts {
+		if _, ok := seen[c.ID]; ok {
+			continue
+		}
+		if c.Usability != api.ContractUsabilityBad {
+			t.Fatal("contract should be bad")
+		}
+	}
 }
 
 // TestObjectsBucket is a test that verifies whether we properly escape bucket

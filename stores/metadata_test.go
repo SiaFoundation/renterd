@@ -677,7 +677,7 @@ func TestArchiveContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(active) != 1 || active[0].ID != fcids[0] {
+	if len(active) != 1 || active[0].ID != fcids[0] || active[0].Usability != api.ContractUsabilityGood {
 		t.Fatal("wrong contracts", active)
 	}
 
@@ -685,7 +685,7 @@ func TestArchiveContracts(t *testing.T) {
 	ffcids := make([]sql.FileContractID, 2)
 	ffcids[0] = sql.FileContractID(fcids[1])
 	ffcids[1] = sql.FileContractID(fcids[2])
-	rows, err := ss.DB().Query(context.Background(), "SELECT archival_reason FROM contracts WHERE fcid IN (?, ?)",
+	rows, err := ss.DB().Query(context.Background(), "SELECT archival_reason, usability FROM contracts WHERE fcid IN (?, ?)",
 		sql.FileContractID(ffcids[0]), sql.FileContractID(ffcids[1]))
 	if err != nil {
 		t.Fatal(err)
@@ -695,12 +695,15 @@ func TestArchiveContracts(t *testing.T) {
 	var cnt int
 	for rows.Next() {
 		var reason string
-		if err := rows.Scan(&reason); err != nil {
+		var usability uint8
+		if err := rows.Scan(&reason, &usability); err != nil {
 			t.Fatal(err)
 		} else if cnt == 0 && reason != "foo" {
 			t.Fatal("unexpected reason", reason)
 		} else if cnt == 1 && reason != "bar" {
 			t.Fatal("unexpected reason", reason)
+		} else if usability != 1 { // marked as bad
+			t.Fatal("unexpected usability", usability)
 		}
 		cnt++
 	}

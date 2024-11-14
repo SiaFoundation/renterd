@@ -51,6 +51,7 @@ type Bus interface {
 	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
+	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 
