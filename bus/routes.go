@@ -624,7 +624,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 
 	// scan host
 	var errStr string
-	settings, priceTable, elapsed, err := b.scanHost(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
+	settings, priceTable, elapsed, err := b.scanHost(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress, h.V2SiamuxAddresses)
 	if err != nil {
 		errStr = err.Error()
 	}
