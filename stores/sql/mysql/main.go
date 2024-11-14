@@ -71,6 +71,11 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
+func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
+	mtx := b.wrapTxn(tx)
+	return mtx.InitAutopilot(ctx)
+}
+
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
 	return mtx.InsertDirectories(ctx, bucket, path)
@@ -414,10 +419,11 @@ func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]ap
 
 func (tx *MainDatabaseTx) InitAutopilot(ctx context.Context) error {
 	_, err := tx.Exec(ctx, `
-INSERT IGNORE INTO autopilot (
+INSERT IGNORE INTO autopilot_config (
 	id,
 	created_at,
 	current_period,
+	contracts_set,
 	contracts_amount,
 	contracts_period,
 	contracts_renew_window,
@@ -429,7 +435,7 @@ INSERT IGNORE INTO autopilot (
 	hosts_max_consecutive_scan_failures,
 	hosts_max_downtime_hours,
 	hosts_min_protocol_version
-) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+) VALUES (?, ?, 0, "autopilot", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		sql.AutopilotID,
 		time.Now(),
 		api.DefaultAutopilotConfig.Contracts.Amount,

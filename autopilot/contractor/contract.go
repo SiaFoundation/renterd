@@ -37,14 +37,13 @@ func (c contract) RemainingCollateral() types.Currency {
 	return c.Revision.MissedHostValue.Sub(c.ContractPrice)
 }
 
-func sortContractsForMaintenance(_ api.ContractsConfig, contracts []contract) {
+func sortContractsForMaintenance(cfg api.ContractsConfig, contracts []contract) {
 	sort.SliceStable(contracts, func(i, j int) bool {
-		// TODO: contract_sets will be removed
-		// iInSet := contracts[i].InSet(cfg.Set)
-		// jInSet := contracts[j].InSet(cfg.Set)
-		// if iInSet != jInSet {
-		// 	return iInSet
-		// }
+		iInSet := contracts[i].InSet(cfg.Set)
+		jInSet := contracts[j].InSet(cfg.Set)
+		if iInSet != jInSet {
+			return iInSet
+		}
 		return contracts[i].FileSize() > contracts[j].FileSize()
 	})
 }

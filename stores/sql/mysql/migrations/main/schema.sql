@@ -1,14 +1,3 @@
--- dbAutopilot
-CREATE TABLE `autopilots` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `identifier` varchar(191) NOT NULL,
-  `config` longtext,
-  `current_period` bigint unsigned DEFAULT '0',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `identifier` (`identifier`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbBucket
 CREATE TABLE `buckets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -496,8 +485,7 @@ CREATE TABLE `wallet_outputs` (
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbAutopilot
-CREATE TABLE `autopilot` (
+CREATE TABLE `autopilot_config` (
   `id` bigint unsigned NOT NULL DEFAULT 1,
   `created_at` datetime(3) DEFAULT NULL,
   `current_period` bigint unsigned DEFAULT 0,

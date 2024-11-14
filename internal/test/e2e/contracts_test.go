@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/internal/test"
 )
 
@@ -59,7 +60,7 @@ func TestFormContract(t *testing.T) {
 	// renew the contract we formed
 	contracts := ap.Contracts
 	contracts.Amount = 1
-	tt.OK(b.UpdateContractsConfig(context.Background(), contracts))
+	tt.OK(b.UpdateAutopilot(context.Background(), client.WithContractsConfig(contracts)))
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID

@@ -62,6 +62,7 @@ var (
 	DefaultAutopilotConfig = AutopilotConfig{
 		Enabled: false,
 		Contracts: ContractsConfig{
+			Set:         "autopilot",
 			Amount:      50,
 			Period:      144 * 7 * 6,
 			RenewWindow: 144 * 7 * 2,
