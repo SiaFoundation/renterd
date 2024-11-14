@@ -859,13 +859,12 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		var h api.Host
 		var hostID int64
 		var pte dsql.NullTime
-		var resolvedAddresses string
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
 			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &resolvedAddresses, &h.Blocked,
+			&h.Scanned, &h.Blocked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
@@ -878,7 +877,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	}
 
 	// fill in v2 addresses
-	netAddrsStmt, err := tx.Prepare(ctx, "SELECT address, protocol FROM host_addresses ha INNER JOIN hosts h ON ha.db_host_id = h.id WHERE h.id = ?")
+	netAddrsStmt, err := tx.Prepare(ctx, "SELECT ha.net_address, ha.protocol FROM host_addresses ha INNER JOIN hosts h ON ha.db_host_id = h.id WHERE h.id = ?")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare stmt for fetching host addresses: %w", err)
 	}
