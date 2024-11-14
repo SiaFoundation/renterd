@@ -494,8 +494,7 @@ CREATE TABLE `wallet_outputs` (
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbAutopilot
-CREATE TABLE `autopilot` (
+CREATE TABLE `autopilot_config` (
   `id` bigint unsigned NOT NULL DEFAULT 1,
   `created_at` datetime(3) DEFAULT NULL,
   `current_period` bigint unsigned DEFAULT 0,

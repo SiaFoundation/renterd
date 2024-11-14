@@ -210,7 +210,7 @@ SELECT
 	hosts_max_downtime_hours,
 	hosts_min_protocol_version,
 	hosts_max_consecutive_scan_failures
-FROM autopilot
+FROM autopilot_config
 WHERE id = ?`, sql.AutopilotID).Scan(
 		&ap.Enabled,
 		&ap.CurrentPeriod,
@@ -231,7 +231,7 @@ WHERE id = ?`, sql.AutopilotID).Scan(
 }
 
 func AutopilotPeriod(ctx context.Context, tx sql.Tx) (period uint64, err error) {
-	err = tx.QueryRow(ctx, `SELECT current_period FROM autopilot WHERE id = ?`, sql.AutopilotID).Scan(&period)
+	err = tx.QueryRow(ctx, `SELECT current_period FROM autopilot_config WHERE id = ?`, sql.AutopilotID).Scan(&period)
 	return
 }
 

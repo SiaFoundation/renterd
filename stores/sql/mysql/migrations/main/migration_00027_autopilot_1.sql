@@ -5,7 +5,7 @@ ALTER TABLE host_checks DROP INDEX idx_host_checks_id;
 ALTER TABLE host_checks ADD UNIQUE INDEX idx_host_checks_id (db_host_id);
 
 -- create autopilot table & insert blank state object
-CREATE TABLE `autopilot` (
+CREATE TABLE `autopilot_config` (
   `id` bigint unsigned NOT NULL DEFAULT 1,
   `created_at` datetime(3) DEFAULT NULL,
   `current_period` bigint unsigned DEFAULT 0,
