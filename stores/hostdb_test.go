@@ -1323,13 +1323,11 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 // newTestScan returns a host interaction with given parameters.
 func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, resolvedAddresses, subnets []string) api.HostScan {
 	return api.HostScan{
-		HostKey:           hk,
-		PriceTable:        pt,
-		Settings:          settings,
-		ResolvedAddresses: resolvedAddresses,
-		Subnets:           subnets,
-		Success:           success,
-		Timestamp:         scanTime,
+		HostKey:    hk,
+		PriceTable: pt,
+		Settings:   settings,
+		Success:    success,
+		Timestamp:  scanTime,
 	}
 }
 

@@ -1716,7 +1716,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
-		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
 		WHERE public_key = ?
 	`)
 	if err != nil {
@@ -1740,7 +1740,6 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
-			len(scan.ResolvedAddresses) > 0, strings.Join(scan.ResolvedAddresses, ","),
 			PublicKey(scan.HostKey),
 		)
 		if err != nil {
