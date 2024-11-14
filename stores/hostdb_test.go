@@ -478,7 +478,7 @@ func TestUsableHosts(t *testing.T) {
 		// add host scan
 		hs := test.NewHostSettings()
 		pt := test.NewHostPriceTable()
-		s1 := newTestScan(hk, time.Now(), hs, pt, true, nil, nil)
+		s1 := newTestScan(hk, time.Now(), hs, pt, true)
 		if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 			t.Fatal(err)
 		}
@@ -536,7 +536,7 @@ func TestUsableHosts(t *testing.T) {
 	hs := test.NewHostSettings()
 	pt := test.NewHostPriceTable()
 	pt.UploadBandwidthCost = gs.MaxUploadPrice
-	s1 := newTestScan(h1.PublicKey, time.Now(), hs, pt, true, nil, nil)
+	s1 := newTestScan(h1.PublicKey, time.Now(), hs, pt, true)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 		t.Fatal(err)
 	}
@@ -631,13 +631,11 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
-	resolvedAddresses := []string{"212.1.96.0", "38.135.51.0"}
-	subnets := []string{"212.1.96.0/24", "38.135.51.0/24"}
 	settings := rhpv2.HostSettings{NetAddress: "host.com"}
 	pt := rhpv3.HostPriceTable{
 		HostBlockHeight: 123,
 	}
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true, resolvedAddresses, subnets)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -682,7 +680,7 @@ func TestRecordScan(t *testing.T) {
 	// subnets this time.
 	secondScanTime := firstScanTime.Add(time.Hour)
 	pt.HostBlockHeight = 456
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true, nil, nil)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -712,7 +710,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false, nil, nil)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -770,8 +768,8 @@ func TestRemoveHosts(t *testing.T) {
 	pt := rhpv3.HostPriceTable{}
 	t1 := now.Add(-time.Minute * 120) // 2 hours ago
 	t2 := now.Add(-time.Minute * 90)  // 1.5 hours ago (30min downtime)
-	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil, nil)
-	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil, nil)
+	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
+	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
 
 	// record interactions
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
@@ -801,7 +799,7 @@ func TestRemoveHosts(t *testing.T) {
 
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
-	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false, nil, nil)
+	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
@@ -1321,7 +1319,7 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool, resolvedAddresses, subnets []string) api.HostScan {
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool) api.HostScan {
 	return api.HostScan{
 		HostKey:    hk,
 		PriceTable: pt,
