@@ -624,8 +624,6 @@ func TestRecordScan(t *testing.T) {
 	// The host shouldn't have any addresses.
 	if len(host.ResolvedAddresses) != 0 {
 		t.Fatal("unexpected", host.ResolvedAddresses, len(host.ResolvedAddresses))
-	} else if len(host.Subnets) != 0 {
-		t.Fatal("unexpected", host.Subnets, len(host.Subnets))
 	}
 
 	// Fetch the host directly to get the creation time.
@@ -665,8 +663,6 @@ func TestRecordScan(t *testing.T) {
 	// The host should have the addresses.
 	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
 		t.Fatal("resolved addresses mismatch")
-	} else if !reflect.DeepEqual(host.Subnets, subnets) {
-		t.Fatal("subnets mismatch")
 	}
 
 	// We expect no uptime or downtime from only a single scan.
@@ -727,8 +723,6 @@ func TestRecordScan(t *testing.T) {
 	// The host should still have the subnets.
 	if !reflect.DeepEqual(host.ResolvedAddresses, resolvedAddresses) {
 		t.Fatal("resolved addresses mismatch")
-	} else if !reflect.DeepEqual(host.Subnets, subnets) {
-		t.Fatal("subnets mismatch")
 	}
 
 	// Record another scan 2 hours after the second one. This time it fails.

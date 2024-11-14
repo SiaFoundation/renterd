@@ -113,7 +113,6 @@ type (
 		Checks            map[string]HostCheck `json:"checks"`
 		StoredData        uint64               `json:"storedData"`
 		ResolvedAddresses []string             `json:"resolvedAddresses"`
-		Subnets           []string             `json:"subnets"`
 	}
 
 	HostInfo struct {
