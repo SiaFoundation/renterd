@@ -2180,7 +2180,7 @@ WHERE fcid = ?`,
 
 func UpdateAutopilot(ctx context.Context, tx sql.Tx, ap api.Autopilot) error {
 	_, err := tx.Exec(ctx, `
-UPDATE autopilot
+UPDATE autopilot_config
 SET enabled = ?,
 	current_period = ?,
 	contracts_set = ?,

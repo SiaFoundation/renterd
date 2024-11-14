@@ -34,6 +34,7 @@ type (
 
 	MainMigrator interface {
 		Migrator
+		InitAutopilot(ctx context.Context, tx Tx) error
 		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
 		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
@@ -363,6 +364,11 @@ var (
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
+					// make sure the autopilot config is initialized
+					if err := m.InitAutopilot(ctx, tx); err != nil {
+						return fmt.Errorf("failed to initialize autopilot: %w", err)
+					}
+
 					// fetch existing autopilot and override the blank config
 					var cfgraw []byte
 					var period uint64
@@ -373,7 +379,16 @@ var (
 					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
 						log.Warnf("existing autopilot config not valid JSON, err %v", err)
 					} else {
-						res, err := tx.Exec(ctx, `UPDATE autopilot SET current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						var enabled bool
+						if err := cfg.Contracts.Validate(); err != nil {
+							log.Warnf("existing contracts config is invalid, autopilot will be disabled, err: %v", err)
+						} else if err := cfg.Hosts.Validate(); err != nil {
+							log.Warnf("existing hosts config is invalid, autopilot will be disabled, err: %v", err)
+						} else {
+							enabled = true
+						}
+						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+							enabled,
 							period,
 							cfg.Contracts.Set,
 							cfg.Contracts.Amount,

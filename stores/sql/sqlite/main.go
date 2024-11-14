@@ -70,6 +70,11 @@ func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBu
 	return ssql.LoadSlabBuffers(ctx, b.db)
 }
 
+func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
+	mtx := b.wrapTxn(tx)
+	return mtx.InitAutopilot(ctx)
+}
+
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
 	return mtx.InsertDirectories(ctx, bucket, path)
