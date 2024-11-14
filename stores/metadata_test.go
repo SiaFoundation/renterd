@@ -530,6 +530,60 @@ func TestContractRoots(t *testing.T) {
 	}
 }
 
+func TestContractUsability(t *testing.T) {
+	// create a SQL store
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add two contracts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert both contracts are usable
+	contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 2 {
+		t.Fatal("wrong number of contracts", len(contracts))
+	}
+
+	// archive a contract
+	err = ss.ArchiveContract(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert only one contract is usbale now
+	contracts, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("wrong number of contracts", len(contracts))
+	} else if contracts[0].HostKey != hks[1] {
+		t.Fatal("wrong contract", contracts[0])
+	}
+
+	// update the usability of the remaining contract
+	err = ss.UpdateContractUsability(context.Background(), fcids[1], api.ContractUsabilityBad)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert no contracts are usable
+	contracts, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("wrong number of contracts", len(contracts))
+	}
+}
+
 // TestAncestorsContracts verifies that AncestorContracts returns the right
 // ancestors in the correct order.
 func TestAncestorsContracts(t *testing.T) {

@@ -230,6 +230,7 @@ type (
 		PutContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
+		UpdateContractUsability(ctx context.Context, id types.FileContractID, usability string) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
@@ -439,6 +440,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
+		"PUT    /contract/:id/usability": b.contractUsabilityHandlerPUT,
 
 		"GET    /hosts":                          b.hostsHandlerGET,
 		"POST   /hosts":                          b.hostsHandlerPOST,

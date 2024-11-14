@@ -345,6 +345,9 @@ type (
 		// it doesn't exist already.
 		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
+		// UpdateContractUsability updates the usability of the given contract.
+		UpdateContractUsability(ctx context.Context, fcid types.FileContractID, usability string) error
+
 		// UpdateHostAllowlistEntries updates the allowlist in the database
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 

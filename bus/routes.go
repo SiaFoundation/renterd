@@ -709,6 +709,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	case api.ContractFilterModeAll:
 	case api.ContractFilterModeActive:
 	case api.ContractFilterModeArchived:
+	case api.ContractFilterModeGood:
 	default:
 		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
 		return
@@ -1031,6 +1032,29 @@ func (b *Bus) contractSizeHandlerGET(jc jape.Context) {
 		return
 	}
 	jc.Encode(size)
+}
+
+func (b *Bus) contractUsabilityHandlerPUT(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	var usability string
+	if jc.DecodeForm("usability", &usability) != nil {
+		return
+	}
+
+	err := b.store.UpdateContractUsability(jc.Request.Context(), id, usability)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, errors.New("TODO")) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update contract usability", err)
 }
 
 func (b *Bus) contractReleaseHandlerPOST(jc jape.Context) {

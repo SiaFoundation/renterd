@@ -16,6 +16,7 @@ const (
 	ContractFilterModeAll      = "all"
 	ContractFilterModeActive   = "active"
 	ContractFilterModeArchived = "archived"
+	ContractFilterModeGood     = "good"
 
 	HostFilterModeAll     = "all"
 	HostFilterModeAllowed = "allowed"

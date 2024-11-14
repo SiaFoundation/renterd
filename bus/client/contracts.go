@@ -199,3 +199,9 @@ func (c *Client) UpdateContractSet(ctx context.Context, set string, toAdd, toRem
 	}, nil)
 	return
 }
+
+// UpdateContractUsability updates the usability of the given contract.
+func (c *Client) UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contract/%s/usability", contractID), usability)
+	return
+}

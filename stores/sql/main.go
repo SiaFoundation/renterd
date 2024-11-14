@@ -180,7 +180,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	}
 
 	// archive contract
-	_, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
+	_, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ?, usability = ? WHERE fcid = ?", reason, contractUsabilityBad, FileContractID(fcid))
 	if err != nil {
 		return fmt.Errorf("failed to archive contract: %w", err)
 	}
@@ -316,6 +316,9 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 			whereExprs = append(whereExprs, "c.archival_reason IS NULL")
 		case api.ContractFilterModeArchived:
 			whereExprs = append(whereExprs, "c.archival_reason IS NOT NULL")
+		case api.ContractFilterModeGood:
+			whereExprs = append(whereExprs, "c.archival_reason IS NULL AND c.usability = ?")
+			whereArgs = append(whereArgs, contractUsabilityGood)
 		case api.ContractFilterModeAll:
 		default:
 			return nil, fmt.Errorf("invalid filter mode: %v", opts.FilterMode)
@@ -2181,6 +2184,19 @@ WHERE fcid = ?`,
 		return fmt.Errorf("failed to update contract: %w", err)
 	}
 	return nil
+}
+
+func UpdateContractUsability(ctx context.Context, tx sql.Tx, fcid types.FileContractID, usability string) error {
+	var u ContractUsability
+	if err := u.LoadString(usability); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(ctx, `UPDATE contracts SET usability = ? WHERE fcid = ?`, u, FileContractID(fcid))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrContractNotFound
+	}
+	return err
 }
 
 func UpdateAutopilot(ctx context.Context, tx sql.Tx, ap api.Autopilot) error {

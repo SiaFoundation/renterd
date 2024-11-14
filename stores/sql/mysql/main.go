@@ -1071,6 +1071,10 @@ func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, to
 	return nil
 }
 
+func (tx *MainDatabaseTx) UpdateContractUsability(ctx context.Context, fcid types.FileContractID, usability string) error {
+	return ssql.UpdateContractUsability(ctx, tx, fcid, usability)
+}
+
 func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {
 	if clear {
 		if _, err := tx.Exec(ctx, "DELETE FROM host_allowlist_entries"); err != nil {

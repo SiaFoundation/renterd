@@ -728,9 +728,7 @@ func (c *TestCluster) WaitForContracts() []api.ContractMetadata {
 	c.waitForHostContracts(hostsMap)
 
 	// fetch all contracts
-	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{
-		FilterMode: api.ContractFilterModeActive,
-	})
+	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	c.tt.OK(err)
 	return resp
 }

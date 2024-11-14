@@ -299,6 +299,12 @@ func (s *SQLStore) UpdateContractSet(ctx context.Context, name string, toAdd, to
 	return nil
 }
 
+func (s *SQLStore) UpdateContractUsability(ctx context.Context, fcid types.FileContractID, usability string) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateContractUsability(ctx, fcid, usability)
+	})
+}
+
 func (s *SQLStore) RemoveContractSet(ctx context.Context, name string) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 		return tx.RemoveContractSet(ctx, name)
