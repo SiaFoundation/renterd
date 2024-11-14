@@ -63,19 +63,29 @@ func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
 	return subnets, nil
 }
 
-func ResolveHostIP(ctx context.Context, hostIP string) (ips []string, private bool, _ error) {
-	// resolve host address
-	host, _, err := net.SplitHostPort(hostIP)
-	if err != nil {
-		return nil, false, err
+func ResolveHostIPs(ctx context.Context, hostIPs []string) (ips []string, private bool, _ error) {
+	// resolve host addresses and deduplicate IPs
+	addrMap := make(map[string]net.IPAddr)
+	for _, hostIP := range hostIPs {
+		host, _, err := net.SplitHostPort(hostIP)
+		if err != nil {
+			return nil, false, err
+		}
+		ips, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, ip := range ips {
+			addrMap[ip.String()] = ip
+		}
 	}
-	addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, false, err
+	var addrs []net.IPAddr
+	for _, addr := range addrMap {
+		addrs = append(addrs, addr)
 	}
 
 	// filter out hosts associated with more than two addresses or two of the same type
-	if len(addrs) > 2 || (len(addrs) == 2) && (len(addrs[0].IP) == len(addrs[1].IP)) {
+	if len(addrs) > 2 || (len(addrs) == 2) && (len(addrs[0].IP.String()) == len(addrs[1].IP.String())) {
 		return nil, false, fmt.Errorf("%w: %+v", ErrHostTooManyAddresses, addrs)
 	}
 
