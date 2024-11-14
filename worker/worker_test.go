@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/test/mocks"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -20,12 +21,12 @@ type (
 		tt test.TT
 		*Worker
 
-		cs *contractStoreMock
-		os *objectStoreMock
-		hs *hostStoreMock
+		cs *mocks.ContractStore
+		os *mocks.ObjectStore
+		hs *mocks.HostStore
 
-		dlmm *memoryManagerMock
-		ulmm *memoryManagerMock
+		dlmm *mocks.MemoryManager
+		ulmm *mocks.MemoryManager
 
 		hm *testHostManager
 	}
@@ -33,14 +34,14 @@ type (
 
 func newTestWorker(t test.TestingCommon) *testWorker {
 	// create bus dependencies
-	cs := newContractStoreMock()
-	os := newObjectStoreMock(testBucket, cs)
-	hs := newHostStoreMock()
+	cs := mocks.NewContractStore()
+	os := mocks.NewObjectStore(testBucket, cs)
+	hs := mocks.NewHostStore()
 
 	// create worker dependencies
-	b := newBusMock(cs, hs, os)
-	dlmm := newMemoryManagerMock()
-	ulmm := newMemoryManagerMock()
+	b := mocks.NewBus(cs, hs, os)
+	dlmm := mocks.NewMemoryManager()
+	ulmm := mocks.NewMemoryManager()
 
 	// create worker
 	w, err := New(newTestWorkerCfg(), blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
@@ -76,23 +77,15 @@ func (w *testWorker) AddHosts(n int) (added []*testHost) {
 }
 
 func (w *testWorker) AddHost() *testHost {
-	h := w.hs.addHost()
-	c := w.cs.addContract(h.hk)
+	h := w.hs.AddHost()
+	c := w.cs.AddContract(h.PublicKey())
 	host := newTestHost(h, c)
 	w.hm.addHost(host)
 	return host
 }
 
 func (w *testWorker) BlockUploads() func() {
-	select {
-	case <-w.ulmm.memBlockChan:
-	case <-time.After(time.Second):
-		w.tt.Fatal("already blocking")
-	}
-
-	blockChan := make(chan struct{})
-	w.ulmm.memBlockChan = blockChan
-	return func() { close(blockChan) }
+	return w.ulmm.Block()
 }
 
 func (w *testWorker) BlockAsyncPackedSlabUploads(up uploadParameters) {
@@ -117,13 +110,13 @@ func (w *testWorker) Contracts() []api.ContractMetadata {
 	return metadatas
 }
 
-func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
+func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
 	h := w.hm.hosts[hk]
 	if h == nil {
 		w.tt.Fatal("host not found")
 	}
 
-	renewal, err := w.cs.renewContract(hk)
+	renewal, err := w.cs.RenewContract(hk)
 	if err != nil {
 		w.tt.Fatal(err)
 	}

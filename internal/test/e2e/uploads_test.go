@@ -79,19 +79,17 @@ func TestUploadingSectorsCache(t *testing.T) {
 	tt.OK(err)
 
 	// fetch pending roots for all contracts
-	pending := make(map[types.FileContractID][]types.Hash256)
 	tt.Retry(10, time.Second, func() error {
 		var n int
 		for _, c := range contracts {
-			_, uploading, err := b.ContractRoots(context.Background(), c.ID)
+			roots, err := b.ContractRoots(context.Background(), c.ID)
 			tt.OK(err)
-			pending[c.ID] = uploading
-			n += len(uploading)
+			n += len(roots)
 		}
 
 		// expect all sectors to be uploading at one point
-		if n != rs.TotalShards {
-			return fmt.Errorf("expected %v uploading sectors, got %v", rs.TotalShards, n)
+		if n != 0 {
+			return fmt.Errorf("expected 0 roots, got %v", n)
 		}
 		return nil
 	})
@@ -104,7 +102,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	tt.Retry(10, time.Second, func() error {
 		var n int
 		for _, c := range contracts {
-			roots, _, err := b.ContractRoots(context.Background(), c.ID)
+			roots, err := b.ContractRoots(context.Background(), c.ID)
 			tt.OK(err)
 			uploaded[c.ID] = make(map[types.Hash256]struct{})
 			for _, root := range roots {
@@ -120,10 +118,21 @@ func TestUploadingSectorsCache(t *testing.T) {
 		return nil
 	})
 
-	if len(pending) != len(uploaded) {
-		t.Fatal("unexpected number of contracts")
+	// fetch the object and compare its roots against the uploaded ones
+	obj, err := b.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
+	tt.OK(err)
+	objRoots := make(map[types.FileContractID][]types.Hash256)
+	for _, slab := range obj.Slabs {
+		for _, shard := range slab.Shards {
+			for _, fcids := range shard.Contracts {
+				for _, fcid := range fcids {
+					objRoots[fcid] = append(objRoots[fcid], shard.Root)
+				}
+			}
+		}
 	}
-	for id, roots := range pending {
+
+	for id, roots := range objRoots {
 		for _, root := range roots {
 			_, found := uploaded[id][root]
 			if !found {
