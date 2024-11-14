@@ -116,8 +116,9 @@ type (
 	}
 
 	HostInfo struct {
-		PublicKey  types.PublicKey `json:"publicKey"`
-		SiamuxAddr string          `json:"siamuxAddr"`
+		PublicKey         types.PublicKey `json:"publicKey"`
+		SiamuxAddr        string          `json:"siamuxAddr"`
+		V2SiamuxAddresses []string        `json:"v2SiamuxAddresses"`
 	}
 
 	HostInteractions struct {
