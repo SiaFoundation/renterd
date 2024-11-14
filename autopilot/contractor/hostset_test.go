@@ -17,8 +17,8 @@ func TestHostSet(t *testing.T) {
 		NetAddress:        "",
 		V2SiamuxAddresses: []string{},
 	}
-	if !hs.HasRedundantIP(host1) {
-		t.Fatalf("Expected host with no subnets to be considered redundant")
+	if hs.HasRedundantIP(host1) {
+		t.Fatalf("Expected host with no subnets to not be redundant")
 	}
 
 	// Host with more than 2 subnets
@@ -61,7 +61,7 @@ func TestHostSet(t *testing.T) {
 	host5 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
 		NetAddress:        "",
-		V2SiamuxAddresses: []string{"5.5.5.5:5555", "6.6.6.6:6666"},
+		V2SiamuxAddresses: []string{"5.5.5.5:5555", "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:5555"},
 	}
 	if hs.HasRedundantIP(host5) {
 		t.Fatal("Expected host with two valid subnets to not be considered redundant")

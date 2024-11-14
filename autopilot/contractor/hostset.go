@@ -10,10 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	errHostTooManySubnets = errors.New("host has more than two subnets")
-)
-
 type (
 	hostSet struct {
 		resolvedAddresses map[types.PublicKey][]string
@@ -31,42 +27,55 @@ func newHostSet(l *zap.SugaredLogger) *hostSet {
 	}
 }
 
-func (hs *hostSet) resolveHostIP(host api.Host) []string {
+func (hs *hostSet) resolveHostIP(host api.Host) ([]string, error) {
 	resolvedAddresses := hs.resolvedAddresses[host.PublicKey]
 	if len(resolvedAddresses) > 0 {
-		return resolvedAddresses
+		return resolvedAddresses, nil
 	}
 	// resolve host IP
 	// NOTE: we ignore errors here since failing to resolve an address is either
 	// 1. not the host's faul, so we give it the benefit of the doubt
 	// 2. the host is unreachable of incorrectly announced, in which case the scans will fail
 	//
-	resolvedAddresses, _, _ = utils.ResolveHostIP(context.Background(), host.NetAddress)
-	for _, addr := range host.V2SiamuxAddresses {
-		v2Addr, _, _ := utils.ResolveHostIP(context.Background(), addr)
-		resolvedAddresses = append(resolvedAddresses, v2Addr...)
+	var hostAddrs []string
+	if host.NetAddress != "" {
+		hostAddrs = append(hostAddrs, host.NetAddress)
+	}
+	hostAddrs = append(hostAddrs, host.V2SiamuxAddresses...)
+	resolvedAddresses, _, err := utils.ResolveHostIPs(context.Background(), hostAddrs)
+	if err != nil {
+		return nil, err
 	}
 
 	// update cache
 	hs.resolvedAddresses[host.PublicKey] = resolvedAddresses
-	return resolvedAddresses
+	return resolvedAddresses, nil
 }
 
 func (hs *hostSet) HasRedundantIP(host api.Host) bool {
-	resolvedAddresses := hs.resolveHostIP(host)
+	logger := hs.logger.Named("hasRedundantIP").
+		With("hostKey", host.PublicKey).
+		With("netAddress", host.NetAddress).
+		With("v2SiamuxAddresses", host.V2SiamuxAddresses)
+
+	resolvedAddresses, err := hs.resolveHostIP(host)
+	if errors.Is(err, utils.ErrHostTooManyAddresses) {
+		logger.Errorf("host has more than 2 subnets, treating its IP %v as redundant", host.PublicKey, utils.ErrHostTooManyAddresses)
+		return true
+	} else if err != nil {
+		logger.With(zap.Error(err)).Error("failed to resolve host ip - treating it as redundant")
+		return true
+	}
 
 	subnets, err := utils.AddressesToSubnets(resolvedAddresses)
 	if err != nil {
-		hs.logger.Errorf("failed to parse host %v subnets: %v", host.PublicKey, err)
+		logger.With(zap.Error(err)).Errorf("failed to parse host subnets")
 		return true
 	}
 	// validate host subnets
 	if len(subnets) == 0 {
-		hs.logger.Errorf("host %v has no subnet, treating its IP %v as redundant", host.PublicKey, host.NetAddress)
-		return true
-	} else if len(subnets) > 2 {
-		hs.logger.Errorf("host %v has more than 2 subnets, treating its IP %v as redundant", host.PublicKey, errHostTooManySubnets)
-		return true
+		logger.Warnf("host has no subnets")
+		return false
 	}
 
 	// check if we know about this subnet
@@ -85,7 +94,12 @@ func (hs *hostSet) HasRedundantIP(host api.Host) bool {
 }
 
 func (hs *hostSet) Add(host api.Host) {
-	subnets, err := utils.AddressesToSubnets(hs.resolveHostIP(host))
+	addresses, err := hs.resolveHostIP(host)
+	if err != nil {
+		hs.logger.Errorf("failed to resolve host %v addresses: %v", host.PublicKey, err)
+		return
+	}
+	subnets, err := utils.AddressesToSubnets(addresses)
 	if err != nil {
 		hs.logger.Errorf("failed to parse host %v subnets: %v", host.PublicKey, err)
 		return
