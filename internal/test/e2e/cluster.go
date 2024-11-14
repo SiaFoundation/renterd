@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -452,9 +453,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
 		tt.OKAll(
-			busClient.UpdateContractsConfig(ctx, apConfig.Contracts),
-			busClient.UpdateHostsConfig(ctx, apConfig.Hosts),
-			busClient.EnableAutopilot(ctx),
+			busClient.UpdateAutopilot(ctx,
+				client.WithContractsConfig(apConfig.Contracts),
+				client.WithHostsConfig(apConfig.Hosts),
+				client.WithAutopilotEnabled(true),
+			),
 		)
 	}
 

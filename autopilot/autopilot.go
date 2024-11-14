@@ -380,7 +380,7 @@ func (ap *Autopilot) blockUntilEnabled(interrupt <-chan time.Time) (enabled, int
 
 	for {
 		autopilot, err := ap.bus.Autopilot(ap.shutdownCtx)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			ap.logger.Errorf("unable to fetch autopilot from the bus, err: %v", err)
 		}
 

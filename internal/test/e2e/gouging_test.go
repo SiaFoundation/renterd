@@ -11,6 +11,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
@@ -153,7 +154,7 @@ func TestHostMinVersion(t *testing.T) {
 	// set min version to a high value
 	hosts := test.AutopilotConfig.Hosts
 	hosts.MinProtocolVersion = "99.99.99"
-	tt.OK(cluster.Bus.UpdateHostsConfig(context.Background(), hosts))
+	tt.OK(cluster.Bus.UpdateAutopilot(context.Background(), client.WithHostsConfig(hosts)))
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {

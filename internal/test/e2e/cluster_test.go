@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -2253,10 +2254,13 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// enable the autopilot by configuring it
-	tt.OKAll(
-		b.UpdateContractsConfig(context.Background(), test.AutopilotConfig.Contracts),
-		b.UpdateHostsConfig(context.Background(), test.AutopilotConfig.Hosts),
-		b.EnableAutopilot(context.Background()),
+	tt.OK(
+		b.UpdateAutopilot(
+			context.Background(),
+			client.WithContractsConfig(test.AutopilotConfig.Contracts),
+			client.WithHostsConfig(test.AutopilotConfig.Hosts),
+			client.WithAutopilotEnabled(true),
+		),
 	)
 
 	// wait for a contract to form
