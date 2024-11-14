@@ -19,6 +19,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
@@ -853,6 +855,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	defer rows.Close()
 
 	var hosts []api.Host
+	var hostIDs []int64
 	for rows.Next() {
 		var h api.Host
 		var hostID int64
@@ -872,6 +875,43 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[h.PublicKey]
 		hosts = append(hosts, h)
+		hostIDs = append(hostIDs, hostID)
+	}
+
+	// fill in v2 addresses
+	netAddrsStmt, err := tx.Prepare(ctx, "SELECT address, protocol FROM host_addresses ha INNER JOIN hosts h ON ha.db_host_id = h.id WHERE h.id = ?")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare stmt for fetching host addresses: %w", err)
+	}
+	defer netAddrsStmt.Close()
+
+	fetchAddrs := func(hostID int64) ([]chain.NetAddress, error) {
+		rows, err := netAddrsStmt.Query(ctx, hostID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var addrs []chain.NetAddress
+		for rows.Next() {
+			var addr chain.NetAddress
+			if err := rows.Scan(&addr.Address, (*ChainProtocol)(&addr.Protocol)); err != nil {
+				return nil, err
+			}
+			addrs = append(addrs, addr)
+		}
+		return addrs, nil
+	}
+
+	for i := range hosts {
+		netAddrs, err := fetchAddrs(hostIDs[i])
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch net addresses for host %d: %w", hostIDs[i], err)
+		}
+		for _, na := range netAddrs {
+			if na.Protocol == rhp4.ProtocolTCPSiaMux {
+				hosts[i].V2SiamuxAddresses = append(hosts[i].V2SiamuxAddresses, na.Address)
+			}
+		}
 	}
 
 	// query host checks
