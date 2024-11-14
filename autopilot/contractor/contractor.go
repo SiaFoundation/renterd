@@ -863,8 +863,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// extend logger
-		logger = logger.With("addresses", host.ResolvedAddresses).
-			With("blocked", host.Blocked)
+		logger = logger.With("blocked", host.Blocked)
 
 		// check if host is blocked
 		if host.Blocked {
@@ -1082,8 +1081,7 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 		}
 
 		// prepare a logger
-		logger := logger.With("hostKey", candidate.host.PublicKey).
-			With("addresses", candidate.host.ResolvedAddresses)
+		logger := logger.With("hostKey", candidate.host.PublicKey)
 
 		// check if we already have a contract with a host on that address
 		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
