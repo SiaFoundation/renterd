@@ -893,7 +893,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	return newRevision, contractPrice, fundAmount, nil
 }
 
-func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
+func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string, v3Addrs []string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
 	logger := b.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
 
 	// prepare a helper to create a context for scanning
@@ -927,7 +927,12 @@ func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types
 
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type
-	_, private, err := utils.ResolveHostIP(ctx, hostIP)
+	var hostIPs []string
+	if hostIP != "" {
+		hostIPs = append(hostIPs, hostIP)
+	}
+	hostIPs = append(hostIPs, v3Addrs...)
+	_, private, err := utils.ResolveHostIPs(ctx, hostIPs)
 	if errors.Is(err, utils.ErrHostTooManyAddresses) {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
 	} else if private && !b.allowPrivateIPs {
