@@ -519,9 +519,9 @@ const (
 
 // Scan scan value into Unsigned64, implements sql.Scanner interface.
 func (p *ChainProtocol) Scan(value interface{}) error {
-	var protocol uint8
+	var protocol int64
 	switch value := value.(type) {
-	case uint8:
+	case int64:
 		protocol = value
 	default:
 		return fmt.Errorf("failed to unmarshal ChainProtocol value: %v %T", value, value)
@@ -540,7 +540,7 @@ func (p *ChainProtocol) Scan(value interface{}) error {
 func (p ChainProtocol) Value() (driver.Value, error) {
 	switch chain.Protocol(p) {
 	case rhp4.ProtocolTCPSiaMux:
-		return uint8(chainProtocolTCPSiaMux), nil
+		return int64(chainProtocolTCPSiaMux), nil
 	default:
 		return nil, fmt.Errorf("invalid ChainProtocol value: %v", p)
 	}
