@@ -275,14 +275,13 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.
 	}
 
 	// insert new addresses
-	// TODO: limit the number of addresses
 	for _, ha := range v2Ha {
 		if _, err := c.tx.Exec(c.ctx,
 			"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
 			time.Now().UTC(),
 			hostID,
 			ha.Address,
-			ssql.ChainProtocol(ha.Protocol), // TODO: change
+			ssql.ChainProtocol(ha.Protocol),
 		); err != nil {
 			return fmt.Errorf("failed to insert host announcement: %w", err)
 		}
