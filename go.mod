@@ -17,7 +17,7 @@ require (
 	go.sia.tech/core v0.6.1
 	go.sia.tech/coreutils v0.6.0
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/hostd v1.1.3-0.20241112083857-0b367aeb947e
+	go.sia.tech/hostd v1.1.3-0.20241101225313-7757ddcfc23f
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.3.0
 	go.sia.tech/web/renterd v0.66.0
