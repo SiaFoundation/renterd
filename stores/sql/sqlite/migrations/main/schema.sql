@@ -4,7 +4,7 @@ CREATE TABLE `hosts` (
 `created_at` datetime,
 `public_key` blob NOT NULL UNIQUE,
 `settings` text,
-`v2_settings` text NOT NULL DEFAULT '{}',
+`v2_settings` text,
 `price_table` text,
 `price_table_expiry` datetime,
 `total_scans` integer,
