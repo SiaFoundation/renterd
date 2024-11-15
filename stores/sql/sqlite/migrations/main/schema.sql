@@ -193,6 +193,7 @@ CREATE INDEX `idx_host_checks_usability_offline` ON `host_checks` (`usability_of
 CREATE INDEX `idx_host_checks_usability_low_score` ON `host_checks` (`usability_low_score`);
 CREATE INDEX `idx_host_checks_usability_redundant_ip` ON `host_checks` (`usability_redundant_ip`);
 CREATE INDEX `idx_host_checks_usability_gouging` ON `host_checks` (`usability_gouging`);
+CREATE INDEX `idx_host_checks_usability_low_max_duration` ON `host_checks` (`usability_low_max_duration`);
 CREATE INDEX `idx_host_checks_usability_not_accepting_contracts` ON `host_checks` (`usability_not_accepting_contracts`);
 CREATE INDEX `idx_host_checks_usability_not_announced` ON `host_checks` (`usability_not_announced`);
 CREATE INDEX `idx_host_checks_usability_not_completing_scan` ON `host_checks` (`usability_not_completing_scan`);
