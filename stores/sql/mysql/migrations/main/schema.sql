@@ -43,6 +43,7 @@ CREATE TABLE `hosts` (
   `created_at` datetime(3) DEFAULT NULL,
   `public_key` varbinary(32) NOT NULL,
   `settings` JSON,
+  `v2_settings` JSON NOT NULL DEFAULT '{}',
   `price_table` longtext,
   `price_table_expiry` datetime(3) DEFAULT NULL,
   `total_scans` bigint unsigned DEFAULT NULL,
