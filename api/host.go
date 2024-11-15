@@ -227,7 +227,10 @@ func (h Host) IsV2() bool {
 }
 
 func (h Host) V2SiamuxAddr() string {
-	// NOTE: eventually this can be smarter about picking an address
+	// NOTE: eventually we can improve this by implementing a dialer wrapper that
+	// can be created from a slice of addresses and tries them in order. It
+	// should also be aware of whether we support v4 or v6 and pick addresses
+	// accordingly.
 	if len(h.V2SiamuxAddresses) > 0 {
 		return h.V2SiamuxAddresses[0]
 	}
