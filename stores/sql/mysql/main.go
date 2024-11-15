@@ -1108,7 +1108,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string, hk types.PublicKey, hc api.HostCheck) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO host_checks (created_at, db_autopilot_id, db_host_id, usability_blocked, usability_offline, usability_low_score,
-			usability_redundant_ip, usability_gouging, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
+			usability_redundant_ip, usability_gouging, usability_low_max_duration, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
 			score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
 			gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
 	    VALUES (?,
@@ -1118,16 +1118,16 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 		ON DUPLICATE KEY UPDATE
 			created_at = VALUES(created_at), db_autopilot_id = VALUES(db_autopilot_id), db_host_id = VALUES(db_host_id),
 			usability_blocked = VALUES(usability_blocked), usability_offline = VALUES(usability_offline), usability_low_score = VALUES(usability_low_score),
-			usability_redundant_ip = VALUES(usability_redundant_ip), usability_gouging = VALUES(usability_gouging), usability_not_accepting_contracts = VALUES(usability_not_accepting_contracts),
+			usability_redundant_ip = VALUES(usability_redundant_ip), usability_gouging = VALUES(usability_gouging), usability_low_max_duration = VALUES(usability_low_max_duration), usability_not_accepting_contracts = VALUES(usability_not_accepting_contracts),
 			usability_not_announced = VALUES(usability_not_announced), usability_not_completing_scan = VALUES(usability_not_completing_scan),
 			score_age = VALUES(score_age), score_collateral = VALUES(score_collateral), score_interactions = VALUES(score_interactions),
 			score_storage_remaining = VALUES(score_storage_remaining), score_uptime = VALUES(score_uptime), score_version = VALUES(score_version),
 			score_prices = VALUES(score_prices), gouging_contract_err = VALUES(gouging_contract_err), gouging_download_err = VALUES(gouging_download_err),
 			gouging_gouging_err = VALUES(gouging_gouging_err), gouging_prune_err = VALUES(gouging_prune_err), gouging_upload_err = VALUES(gouging_upload_err)
 	`, time.Now(), autopilot, ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
-		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
+		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.LowMaxDuration, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
 		hc.ScoreBreakdown.Age, hc.ScoreBreakdown.Collateral, hc.ScoreBreakdown.Interactions, hc.ScoreBreakdown.StorageRemaining, hc.ScoreBreakdown.Uptime, hc.ScoreBreakdown.Version, hc.ScoreBreakdown.Prices,
-		hc.GougingBreakdown.ContractErr, hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
+		hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)

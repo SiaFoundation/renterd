@@ -915,7 +915,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 	}
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
-			hc.usability_gouging, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
+			hc.usability_gouging, hc.usability_low_max_duration, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
 			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
 			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
 			hc.gouging_prune_err, hc.gouging_upload_err
@@ -940,9 +940,9 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		var pk PublicKey
 		var hc api.HostCheck
 		err := rows.Scan(&pk, &ap, &hc.UsabilityBreakdown.Blocked, &hc.UsabilityBreakdown.Offline, &hc.UsabilityBreakdown.LowScore, &hc.UsabilityBreakdown.RedundantIP,
-			&hc.UsabilityBreakdown.Gouging, &hc.UsabilityBreakdown.NotAcceptingContracts, &hc.UsabilityBreakdown.NotAnnounced, &hc.UsabilityBreakdown.NotCompletingScan,
+			&hc.UsabilityBreakdown.Gouging, &hc.UsabilityBreakdown.LowMaxDuration, &hc.UsabilityBreakdown.NotAcceptingContracts, &hc.UsabilityBreakdown.NotAnnounced, &hc.UsabilityBreakdown.NotCompletingScan,
 			&hc.ScoreBreakdown.Age, &hc.ScoreBreakdown.Collateral, &hc.ScoreBreakdown.Interactions, &hc.ScoreBreakdown.StorageRemaining, &hc.ScoreBreakdown.Uptime,
-			&hc.ScoreBreakdown.Version, &hc.ScoreBreakdown.Prices, &hc.GougingBreakdown.ContractErr, &hc.GougingBreakdown.DownloadErr, &hc.GougingBreakdown.GougingErr,
+			&hc.ScoreBreakdown.Version, &hc.ScoreBreakdown.Prices, &hc.GougingBreakdown.DownloadErr, &hc.GougingBreakdown.GougingErr,
 			&hc.GougingBreakdown.PruneErr, &hc.GougingBreakdown.UploadErr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
