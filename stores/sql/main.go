@@ -919,7 +919,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		SELECT h.public_key, ap.identifier, hc.usability_blocked, hc.usability_offline, hc.usability_low_score, hc.usability_redundant_ip,
 			hc.usability_gouging, hc.usability_low_max_duration, usability_not_accepting_contracts, hc.usability_not_announced, hc.usability_not_completing_scan,
 			hc.score_age, hc.score_collateral, hc.score_interactions, hc.score_storage_remaining, hc.score_uptime,
-			hc.score_version, hc.score_prices, hc.gouging_contract_err, hc.gouging_download_err, hc.gouging_gouging_err,
+			hc.score_version, hc.score_prices, hc.gouging_download_err, hc.gouging_gouging_err,
 			hc.gouging_prune_err, hc.gouging_upload_err
 		FROM (
 			SELECT h.id, h.public_key
