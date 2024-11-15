@@ -841,7 +841,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 		SELECT h.id, h.created_at, h.last_announcement, h.public_key, h.net_address, h.price_table, h.price_table_expiry,
-			h.settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
+			h.settings, h.v2_settings, h.total_scans, h.last_scan, h.last_scan_success, h.second_to_last_scan_success,
 			h.uptime, h.downtime, h.successful_interactions, h.failed_interactions, COALESCE(h.lost_sectors, 0),
 			h.scanned, %s
 		FROM hosts h
@@ -862,10 +862,13 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
-			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
-			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &h.Blocked,
+			(*HostSettings)(&h.Settings), (*V2HostSettings)(&h.V2Settings),
+			&h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan),
+			&h.Interactions.LastScanSuccess, &h.Interactions.SecondToLastScanSuccess,
+			(*DurationMS)(&h.Interactions.Uptime),
+			(*DurationMS)(&h.Interactions.Downtime),
+			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions,
+			&h.Interactions.LostSectors, &h.Scanned, &h.Blocked,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
@@ -1670,6 +1673,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
+		v2_settings = CASE WHEN ? THEN ? ELSE settings END,
 		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
@@ -1693,6 +1697,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, scanTime, scanTime, // uptime
 			scanTime,                                  // last_scan
 			scan.Success, HostSettings(scan.Settings), // settings
+			scan.Success, V2HostSettings(scan.V2Settings), // settings
 			scan.Success, now, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, now, // price_table_expiry
 			scan.Success,  // successful_interactions
