@@ -122,7 +122,6 @@ type Host struct {
 
 	rhpv2        *rhpv2.SessionHandler
 	rhpv3        *rhpv3.SessionHandler
-	rhpv4        *rhp4.Server
 	rhp4Listener net.Listener
 }
 
@@ -279,7 +278,10 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, storage, settings.WithValidateNetAddress(false))
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, storage,
+		settings.WithValidateNetAddress(false),
+		settings.WithRHP4AnnounceAddresses([]chain.NetAddress{{Protocol: rhp4.ProtocolTCPSiaMux, Address: rhp4Listener.Addr().String()}}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
@@ -325,7 +327,6 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 		rhpv2: rhpv2,
 		rhpv3: rhpv3,
-		rhpv4: rhpv4,
 
 		rhp4Listener: rhp4Listener,
 	}, nil
