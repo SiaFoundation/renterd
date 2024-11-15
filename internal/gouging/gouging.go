@@ -106,13 +106,56 @@ func (gc checker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.Ho
 }
 
 // TODO: write tests
-func (gc checker) CheckV2(hs rhpv4.HostSettings) api.HostGougingBreakdown {
-	return api.HostGougingBreakdown{
-		DownloadErr: "",
-		GougingErr:  "",
-		PruneErr:    "",
-		UploadErr:   "",
+func (gc checker) CheckV2(hs rhpv4.HostSettings) (gb api.HostGougingBreakdown) {
+	prices := hs.Prices
+	gs := gc.settings
+
+	// upload gouging
+	var uploadErrs []error
+	if prices.StoragePrice.Cmp(gs.MaxStoragePrice) > 0 {
+		uploadErrs = append(uploadErrs, fmt.Errorf("%v: storage price exceeds max storage price: %v > %v", ErrPriceTableGouging, prices.StoragePrice, gs.MaxStoragePrice))
 	}
+	if prices.IngressPrice.Cmp(gs.MaxUploadPrice) > 0 {
+		uploadErrs = append(uploadErrs, fmt.Errorf("%v: ingress price exceeds max upload price: %v > %v", ErrPriceTableGouging, prices.IngressPrice, gs.MaxUploadPrice))
+	}
+	gb.UploadErr = errsToStr(uploadErrs...)
+	if gougingErr := errsToStr(uploadErrs...); gougingErr != "" {
+		gb.UploadErr = fmt.Sprintf("%v: %s", ErrPriceTableGouging, gougingErr)
+	}
+
+	// download gouging
+	if prices.EgressPrice.Cmp(gs.MaxDownloadPrice) > 0 {
+		gb.DownloadErr = fmt.Sprintf("%v: egress price exceeds max download price: %v > %v", ErrPriceTableGouging, prices.EgressPrice, gs.MaxDownloadPrice)
+	}
+
+	// prune gouging
+	maxFreeSectorCost := types.Siacoins(1).Div64((1 << 40) / rhpv4.SectorSize) // 1 SC / TiB
+	if prices.FreeSectorPrice.Cmp(maxFreeSectorCost) > 0 {
+		gb.PruneErr = fmt.Sprintf("%v: cost to free a sector exceeds max free sector cost: %v  > %v", ErrPriceTableGouging, prices.FreeSectorPrice, maxFreeSectorCost)
+	}
+
+	// general gouging
+	const sectorDuration = 144 * 3
+	const sectorBatchSize = 25600
+
+	var errs []error
+	if prices.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
+		errs = append(errs, fmt.Errorf("contract price exceeds max contract price: %v > %v", prices.ContractPrice, gs.MaxContractPrice))
+	}
+	if hs.MaxCollateral.IsZero() {
+		errs = append(errs, errors.New("max collateral is zero"))
+	}
+	if hs.MaxSectorDuration < sectorDuration {
+		errs = append(errs, fmt.Errorf("max sector duration is less than %v: %v", sectorDuration, hs.MaxSectorDuration))
+	}
+	if hs.MaxSectorBatchSize < sectorBatchSize {
+		errs = append(errs, fmt.Errorf("max sector batch size is less than %v: %v", sectorBatchSize, hs.MaxSectorBatchSize))
+	}
+	if gougingErr := errsToStr(errs...); gougingErr != "" {
+		gb.GougingErr = fmt.Sprintf("%v: %s", ErrPriceTableGouging, gougingErr)
+	}
+	gb.GougingErr = errsToStr(errs...)
+	return
 }
 
 func (gc checker) CheckSettings(hs rhpv2.HostSettings) api.HostGougingBreakdown {
