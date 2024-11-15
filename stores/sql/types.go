@@ -15,6 +15,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
@@ -51,6 +52,7 @@ type (
 	Unsigned64      uint64
 	V2Contract      types.V2FileContract
 	ChainProtocol   chain.Protocol
+	V2HostSettings  rhpv4.HostSettings
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
@@ -87,6 +89,7 @@ var (
 	_ scannerValuer = (*Unsigned64)(nil)
 	_ scannerValuer = (*V2Contract)(nil)
 	_ scannerValuer = (*ChainProtocol)(nil)
+	_ scannerValuer = (*V2HostSettings)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
@@ -575,4 +578,26 @@ func (p ChainProtocol) Value() (driver.Value, error) {
 	default:
 		return nil, fmt.Errorf("invalid ChainProtocol value: %v", p)
 	}
+}
+
+// Scan scan value into V2HostSettings, implements sql.Scanner interface.
+func (hs *V2HostSettings) Scan(value interface{}) error {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
+		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
+	}
+	return json.Unmarshal(bytes, hs)
+}
+
+// Value returns a V2HostSettings value, implements driver.Valuer interface.
+func (hs V2HostSettings) Value() (driver.Value, error) {
+	if hs == (V2HostSettings{}) {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(hs)
 }

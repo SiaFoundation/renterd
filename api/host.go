@@ -107,7 +107,8 @@ type (
 		PublicKey         types.PublicKey      `json:"publicKey"`
 		NetAddress        string               `json:"netAddress"`
 		PriceTable        HostPriceTable       `json:"priceTable"`
-		Settings          rhpv2.HostSettings   `json:"settings"`
+		Settings          rhpv2.HostSettings   `json:"settings,omitempty"`
+		V2Settings        rhpv4.HostSettings   `json:"v2Settings,omitempty"`
 		Interactions      HostInteractions     `json:"interactions"`
 		Scanned           bool                 `json:"scanned"`
 		Blocked           bool                 `json:"blocked"`
