@@ -497,7 +497,8 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 
 	var infos []api.HostInfo
 	for _, h := range hosts {
-		if !gc.Check(&h.HS, &h.PT).Gouging() {
+		if (len(h.V2SiamuxAddresses) > 0 && !gc.CheckV2(h.V2HS).Gouging()) ||
+			(len(h.V2SiamuxAddresses) == 0 && !gc.CheckV1(&h.HS, &h.PT).Gouging()) {
 			infos = append(infos, h.HostInfo)
 		}
 	}

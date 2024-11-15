@@ -368,7 +368,7 @@ func rpcRenew(ctx context.Context, t *transportV3, gc gouging.Checker, rev types
 	}
 
 	// Perform gouging checks.
-	if breakdown := gc.Check(nil, &pt); breakdown.Gouging() {
+	if breakdown := gc.CheckV1(nil, &pt); breakdown.Gouging() {
 		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("host gouging during renew: %v", breakdown)
 	}
 
