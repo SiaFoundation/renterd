@@ -203,7 +203,6 @@ type (
 		HostBlocklist(ctx context.Context) ([]string, error)
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error

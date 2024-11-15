@@ -257,10 +257,6 @@ type (
 		// therefore only useful for gouging checks.
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
 
-		// RecordPriceTables records price tables for hosts in the database
-		// increasing the successful/failed interactions accordingly.
-		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
-
 		// RemoveContractSet removes the contract set with the given name from
 		// the database.
 		RemoveContractSet(ctx context.Context, contractSet string) error
