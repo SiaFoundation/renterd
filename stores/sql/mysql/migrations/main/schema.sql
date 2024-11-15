@@ -380,6 +380,7 @@ CREATE TABLE `host_checks` (
   `usability_low_score` boolean NOT NULL DEFAULT false,
   `usability_redundant_ip` boolean NOT NULL DEFAULT false,
   `usability_gouging` boolean NOT NULL DEFAULT false,
+  `usability_low_max_duration` boolean NOT NULL DEFAULT false,
   `usability_not_accepting_contracts` boolean NOT NULL DEFAULT false,
   `usability_not_announced` boolean NOT NULL DEFAULT false,
   `usability_not_completing_scan` boolean NOT NULL DEFAULT false,
@@ -392,7 +393,6 @@ CREATE TABLE `host_checks` (
   `score_version` double NOT NULL,
   `score_prices` double NOT NULL,
 
-  `gouging_contract_err` text,
   `gouging_download_err` text,
   `gouging_gouging_err` text,
   `gouging_prune_err` text,

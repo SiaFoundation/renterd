@@ -1125,16 +1125,16 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 	    ON CONFLICT (db_autopilot_id, db_host_id) DO UPDATE SET
 	        created_at = EXCLUDED.created_at, db_autopilot_id = EXCLUDED.db_autopilot_id, db_host_id = EXCLUDED.db_host_id,
 	        usability_blocked = EXCLUDED.usability_blocked, usability_offline = EXCLUDED.usability_offline, usability_low_score = EXCLUDED.usability_low_score,
-	        usability_redundant_ip = EXCLUDED.usability_redundant_ip, usability_gouging = EXCLUDED.usability_gouging, usability_not_accepting_contracts = EXCLUDED.usability_not_accepting_contracts,
+	        usability_redundant_ip = EXCLUDED.usability_redundant_ip, usability_gouging = EXCLUDED.usability_gouging, usability_low_max_duration = EXCLUDED.usability_low_max_duration, usability_not_accepting_contracts = EXCLUDED.usability_not_accepting_contracts,
 	        usability_not_announced = EXCLUDED.usability_not_announced, usability_not_completing_scan = EXCLUDED.usability_not_completing_scan,
 	        score_age = EXCLUDED.score_age, score_collateral = EXCLUDED.score_collateral, score_interactions = EXCLUDED.score_interactions,
 	        score_storage_remaining = EXCLUDED.score_storage_remaining, score_uptime = EXCLUDED.score_uptime, score_version = EXCLUDED.score_version,
-	        score_prices = EXCLUDED.score_prices, gouging_contract_err = EXCLUDED.gouging_contract_err, gouging_download_err = EXCLUDED.gouging_download_err,
+	        score_prices = EXCLUDED.score_prices, gouging_download_err = EXCLUDED.gouging_download_err,
 	        gouging_gouging_err = EXCLUDED.gouging_gouging_err, gouging_prune_err = EXCLUDED.gouging_prune_err, gouging_upload_err = EXCLUDED.gouging_upload_err
 	    `, time.Now(), autopilot, ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
-		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
+		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.LowMaxDuration, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
 		hc.ScoreBreakdown.Age, hc.ScoreBreakdown.Collateral, hc.ScoreBreakdown.Interactions, hc.ScoreBreakdown.StorageRemaining, hc.ScoreBreakdown.Uptime, hc.ScoreBreakdown.Version, hc.ScoreBreakdown.Prices,
-		hc.GougingBreakdown.ContractErr, hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
+		hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)
