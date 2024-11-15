@@ -47,5 +47,4 @@ require (
 	golang.org/x/text v0.20.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	golang.org/x/tools v0.23.0 // indirect
-	nhooyr.io/websocket v1.8.17 // indirect
 )
