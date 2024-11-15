@@ -18,6 +18,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
@@ -40,8 +41,9 @@ var (
 type (
 	HostInfo struct {
 		api.HostInfo
-		HS rhpv2.HostSettings
-		PT rhpv3.HostPriceTable
+		HS   rhpv2.HostSettings
+		PT   rhpv3.HostPriceTable
+		V2HS rhpv4.HostSettings
 	}
 
 	multipartUpload struct {
@@ -2208,6 +2210,7 @@ EXISTS (
 		hc.usability_low_score = 0 AND
 		hc.usability_redundant_ip = 0 AND
 		hc.usability_gouging = 0 AND
+		hc.usability_low_max_duration = 0 AND
 		hc.usability_not_accepting_contracts = 0 AND
 		hc.usability_not_announced = 0 AND
 		hc.usability_not_completing_scan = 0
@@ -2221,7 +2224,8 @@ EXISTS (
 	COALESCE(h.net_address, ""),
 	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
 	h.price_table,
-	h.settings
+	h.settings,
+	h.v2_settings
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
@@ -2240,7 +2244,8 @@ EXISTS (
 		var addr, port string
 		var pt PriceTable
 		var hs HostSettings
-		err := rows.Scan(&hostID, &hk, &addr, &port, &pt, &hs)
+		var v2Hs V2HostSettings
+		err := rows.Scan(&hostID, &hk, &addr, &port, &pt, &hs, &v2Hs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
@@ -2258,6 +2263,7 @@ EXISTS (
 			},
 			rhpv2.HostSettings(hs),
 			rhpv3.HostPriceTable(pt),
+			rhpv4.HostSettings(v2Hs),
 		})
 		hostIDs = append(hostIDs, hostID)
 	}

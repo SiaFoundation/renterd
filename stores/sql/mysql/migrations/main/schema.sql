@@ -405,6 +405,7 @@ CREATE TABLE `host_checks` (
   INDEX `idx_host_checks_usability_low_score` (`usability_low_score`),
   INDEX `idx_host_checks_usability_redundant_ip` (`usability_redundant_ip`),
   INDEX `idx_host_checks_usability_gouging` (`usability_gouging`),
+  INDEX `idx_host_checks_usability_low_max_duration` (`usability_low_max_duration`),
   INDEX `idx_host_checks_usability_not_accepting_contracts` (`usability_not_accepting_contracts`),
   INDEX `idx_host_checks_usability_not_announced` (`usability_not_announced`),
   INDEX `idx_host_checks_usability_not_completing_scan` (`usability_not_completing_scan`),

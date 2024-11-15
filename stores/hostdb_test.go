@@ -528,7 +528,7 @@ func TestUsableHosts(t *testing.T) {
 
 	// assert h1 is not gouging
 	h1 := hosts[0]
-	if gc.Check(&h1.HS, &h1.PT).Gouging() {
+	if gc.CheckV1(&h1.HS, &h1.PT).Gouging() {
 		t.Fatal("unexpected")
 	}
 
@@ -551,7 +551,7 @@ func TestUsableHosts(t *testing.T) {
 
 	// assert h1 is now gouging
 	h1 = hosts[0]
-	if !gc.Check(&h1.HS, &h1.PT).Gouging() {
+	if !gc.CheckV1(&h1.HS, &h1.PT).Gouging() {
 		t.Fatal("unexpected")
 	}
 
