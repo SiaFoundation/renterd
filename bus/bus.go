@@ -34,6 +34,7 @@ import (
 	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -879,6 +880,84 @@ func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types
 	}
 	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
 	return settings, pt, duration, err
+}
+
+func (b *Bus) updateSetting(ctx context.Context, key string, value any) error {
+	var payload interface{}
+	var updatePinMgr bool
+
+	switch key {
+	case stores.SettingGouging:
+		_, ok := value.(api.GougingSettings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		gs := value.(api.GougingSettings)
+		if err := b.store.UpdateGougingSettings(ctx, gs); err != nil {
+			return fmt.Errorf("failed to update gouging settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			GougingSettings: &gs,
+			Timestamp:       time.Now().UTC(),
+		}
+		updatePinMgr = true
+	case stores.SettingPinned:
+		_, ok := value.(api.PinnedSettings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		ps := value.(api.PinnedSettings)
+		if err := b.store.UpdatePinnedSettings(ctx, ps); err != nil {
+			return fmt.Errorf("failed to update pinned settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			PinnedSettings: &ps,
+			Timestamp:      time.Now().UTC(),
+		}
+		updatePinMgr = true
+	case stores.SettingUpload:
+		_, ok := value.(api.UploadSettings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		us := value.(api.UploadSettings)
+		if err := b.store.UpdateUploadSettings(ctx, us); err != nil {
+			return fmt.Errorf("failed to update upload settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			UploadSettings: &us,
+			Timestamp:      time.Now().UTC(),
+		}
+	case stores.SettingS3:
+		_, ok := value.(api.S3Settings)
+		if !ok {
+			panic("invalid type") // developer error
+		}
+		s3s := value.(api.S3Settings)
+		if err := b.store.UpdateS3Settings(ctx, s3s); err != nil {
+			return fmt.Errorf("failed to update S3 settings: %w", err)
+		}
+		payload = api.EventSettingUpdate{
+			S3Settings: &s3s,
+			Timestamp:  time.Now().UTC(),
+		}
+	default:
+		panic("unknown setting") // developer error
+	}
+
+	// broadcast update
+	b.broadcastAction(webhooks.Event{
+		Module:  api.ModuleSetting,
+		Event:   api.EventUpdate,
+		Payload: payload,
+	})
+
+	// update pin manager if necessary
+	if updatePinMgr {
+		b.pinMgr.TriggerUpdate()
+	}
+
+	return nil
 }
 
 func isErrHostUnreachable(err error) bool {

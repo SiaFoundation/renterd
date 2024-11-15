@@ -14,6 +14,8 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 
 	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -622,18 +624,27 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// scan host
+	// scan host, prefer v2
+	var pt rhpv3.HostPriceTable
+	var settings rhpv2.HostSettings
+	var ping time.Duration
+	var v2Settings rhpv4.HostSettings
+	if h.V2SiamuxAddr() != "" {
+		v2Settings, ping, err = b.scanHostV2(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.V2SiamuxAddr())
+	} else {
+		settings, pt, ping, err = b.scanHostV1(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
+	}
 	var errStr string
-	settings, priceTable, elapsed, err := b.scanHost(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress, h.V2SiamuxAddresses)
 	if err != nil {
 		errStr = err.Error()
 	}
 
 	jc.Encode(api.HostScanResponse{
-		Ping:       api.DurationMS(elapsed),
-		PriceTable: priceTable,
+		Ping:       api.DurationMS(ping),
+		PriceTable: pt,
 		ScanError:  errStr,
 		Settings:   settings,
+		V2Settings: v2Settings,
 	})
 }
 

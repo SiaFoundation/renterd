@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 )
 
@@ -136,8 +138,9 @@ type (
 
 	HostScan struct {
 		HostKey    types.PublicKey      `json:"hostKey"`
-		PriceTable rhpv3.HostPriceTable `json:"priceTable"`
-		Settings   rhpv2.HostSettings   `json:"settings"`
+		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
+		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+		V2Settings rhpv4.HostSettings   `json:"v2Settings,omitempty"`
 		Success    bool                 `json:"success"`
 		Timestamp  time.Time            `json:"timestamp"`
 	}
@@ -216,6 +219,18 @@ func (h Host) IsOnline() bool {
 		return h.Interactions.LastScanSuccess
 	}
 	return h.Interactions.LastScanSuccess || h.Interactions.SecondToLastScanSuccess
+}
+
+func (h Host) V2SiamuxAddr() string {
+	// NOTE: eventually this can be smarter about picking an address but right now
+	// we just prioritize IPv4 over IPv6
+	sort.Slice(h.V2SiamuxAddresses, func(i, j int) bool {
+		return len(h.V2SiamuxAddresses[i]) < len(h.V2SiamuxAddresses[j])
+	})
+	if len(h.V2SiamuxAddresses) > 0 {
+		return h.V2SiamuxAddresses[0]
+	}
+	return ""
 }
 
 func (sb HostScoreBreakdown) String() string {
