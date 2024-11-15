@@ -1122,7 +1122,7 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 			usability_not_announced = VALUES(usability_not_announced), usability_not_completing_scan = VALUES(usability_not_completing_scan),
 			score_age = VALUES(score_age), score_collateral = VALUES(score_collateral), score_interactions = VALUES(score_interactions),
 			score_storage_remaining = VALUES(score_storage_remaining), score_uptime = VALUES(score_uptime), score_version = VALUES(score_version),
-			score_prices = VALUES(score_prices), gouging_contract_err = VALUES(gouging_contract_err), gouging_download_err = VALUES(gouging_download_err),
+			score_prices = VALUES(score_prices), gouging_download_err = VALUES(gouging_download_err),
 			gouging_gouging_err = VALUES(gouging_gouging_err), gouging_prune_err = VALUES(gouging_prune_err), gouging_upload_err = VALUES(gouging_upload_err)
 	`, time.Now(), autopilot, ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
 		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.LowMaxDuration, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
