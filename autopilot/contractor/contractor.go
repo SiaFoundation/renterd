@@ -1137,7 +1137,7 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 	}
 	for _, h := range scoredHosts {
 		h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
-		hc := checkHost(ctx.GougingChecker(cs), h, minScore)
+		hc := checkHost(ctx.GougingChecker(cs), h, minScore, ctx.Period())
 		if err := bus.UpdateHostCheck(ctx, ctx.ApID(), h.host.PublicKey, *hc); err != nil {
 			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)
 		}
