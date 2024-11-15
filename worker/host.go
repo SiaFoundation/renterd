@@ -71,6 +71,33 @@ func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) host.Download
 	}
 }
 
+func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
+	var amount types.Currency
+	return h.acc.WithWithdrawal(func() (types.Currency, error) {
+		pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+		hpt := pt.HostPriceTable
+		amount = uptc
+
+		// check for download gouging specifically
+		gc, err := GougingCheckerFromContext(ctx, overpay)
+		if err != nil {
+			return amount, err
+		}
+		if breakdown := gc.CheckV1(nil, &hpt); breakdown.DownloadErr != "" {
+			return amount, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
+		}
+
+		cost, err := h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.ID(), h.acc.Key(), hpt)
+		if err != nil {
+			return amount, err
+		}
+		return amount.Add(cost), nil
+	})
+}
+
 func (h *hostClient) PublicKey() types.PublicKey { return h.hk }
 
 func (h *hostClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
@@ -208,7 +235,7 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 	if err != nil {
 		return rhpv3.HostPriceTable{}, cost, err
 	}
-	if breakdown := gc.Check(nil, &pt.HostPriceTable); breakdown.Gouging() {
+	if breakdown := gc.CheckV1(nil, &pt.HostPriceTable); breakdown.Gouging() {
 		return rhpv3.HostPriceTable{}, cost, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
 	}
 	return pt.HostPriceTable, cost, nil

@@ -41,7 +41,7 @@ type (
 	}
 
 	Checker interface {
-		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		CheckV1(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
 		CheckV2(rhpv4.HostSettings) api.HostGougingBreakdown
 		CheckSettings(rhpv2.HostSettings) api.HostGougingBreakdown
 		CheckUnusedDefaults(rhpv3.HostPriceTable) error
@@ -89,7 +89,7 @@ func (gc checker) BlocksUntilBlockHeightGouging(hostHeight uint64) int64 {
 	return int64(hostHeight) - int64(minHeight)
 }
 
-func (gc checker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.HostGougingBreakdown {
+func (gc checker) CheckV1(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.HostGougingBreakdown {
 	if hs == nil && pt == nil {
 		panic("gouging checker needs to be provided with at least host settings or a price table") // developer error
 	}
@@ -159,7 +159,7 @@ func (gc checker) CheckV2(hs rhpv4.HostSettings) (gb api.HostGougingBreakdown) {
 }
 
 func (gc checker) CheckSettings(hs rhpv2.HostSettings) api.HostGougingBreakdown {
-	return gc.Check(&hs, nil)
+	return gc.CheckV1(&hs, nil)
 }
 
 func (gc checker) CheckUnusedDefaults(pt rhpv3.HostPriceTable) error {
