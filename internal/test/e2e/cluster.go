@@ -645,10 +645,15 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 
 // announceHosts configures hosts with default settings and announces them to
 // the group
-func announceHosts(hosts []*Host) error {
+func announceHosts(hosts []*Host, network *consensus.Network) error {
 	for _, host := range hosts {
+		tip := host.index.Tip()
 		settings := defaultHostSettings
-		settings.NetAddress = host.RHPv2Addr()
+		if tip.Height < network.HardforkV2.AllowHeight {
+			settings.NetAddress = host.RHPv2Addr()
+		} else {
+			settings.NetAddress = host.rhp4Listener.Addr().String()
+		}
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
@@ -853,7 +858,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
-	c.tt.OK(announceHosts([]*Host{h}))
+	c.tt.OK(announceHosts([]*Host{h}, c.network))
 
 	// Mine a block and wait until the host shows up.
 	c.MineBlocks(1)
