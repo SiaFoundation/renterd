@@ -221,7 +221,7 @@ func isUpForRenewal(cfg api.AutopilotConfig, r api.Revision, blockHeight uint64)
 }
 
 // checkHost performs a series of checks on the host.
-func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostCheck {
+func checkHost(gc gouging.Checker, sh scoredHost, minScore float64, period uint64) *api.HostCheck {
 	h := sh.host
 
 	// prepare host breakdown fields
@@ -255,6 +255,19 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64) *api.HostChe
 			ub.Gouging = true
 		} else if minScore > 0 && !(sh.score > minScore) {
 			ub.LowScore = true
+		}
+
+		// check contract gouging separately
+		checkContractGouging := func(maxDuration uint64) {
+			if period > maxDuration {
+				ub.LowMaxDuration = true
+			}
+		}
+		if h.IsV2() {
+			checkContractGouging(h.V2Settings.MaxContractDuration)
+		} else {
+			checkContractGouging(h.Settings.MaxDuration)
+			checkContractGouging(h.PriceTable.MaxDuration)
 		}
 	}
 

@@ -1332,7 +1332,6 @@ func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSett
 func newTestHostCheck() api.HostCheck {
 	return api.HostCheck{
 		GougingBreakdown: api.HostGougingBreakdown{
-			ContractErr: "foo",
 			DownloadErr: "bar",
 			GougingErr:  "baz",
 			PruneErr:    "qux",
@@ -1350,6 +1349,7 @@ func newTestHostCheck() api.HostCheck {
 		UsabilityBreakdown: api.HostUsabilityBreakdown{
 			Blocked:               false,
 			Offline:               false,
+			LowMaxDuration:        false,
 			LowScore:              false,
 			RedundantIP:           false,
 			Gouging:               false,

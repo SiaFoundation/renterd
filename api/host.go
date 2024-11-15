@@ -164,7 +164,6 @@ type (
 	}
 
 	HostGougingBreakdown struct {
-		ContractErr string `json:"contractErr"`
 		DownloadErr string `json:"downloadErr"`
 		GougingErr  string `json:"gougingErr"`
 		PruneErr    string `json:"pruneErr"`
@@ -184,6 +183,7 @@ type (
 	HostUsabilityBreakdown struct {
 		Blocked               bool `json:"blocked"`
 		Offline               bool `json:"offline"`
+		LowMaxDuration        bool `json:"lowMaxDuration"`
 		LowScore              bool `json:"lowScore"`
 		RedundantIP           bool `json:"redundantIP"`
 		Gouging               bool `json:"gouging"`
@@ -221,6 +221,11 @@ func (h Host) IsOnline() bool {
 	return h.Interactions.LastScanSuccess || h.Interactions.SecondToLastScanSuccess
 }
 
+func (h Host) IsV2() bool {
+	// consider a host to be v2 if it has announced a v2 address
+	return len(h.V2SiamuxAddresses) > 0
+}
+
 func (h Host) V2SiamuxAddr() string {
 	// NOTE: eventually this can be smarter about picking an address
 	if len(h.V2SiamuxAddresses) > 0 {
@@ -235,7 +240,6 @@ func (sb HostScoreBreakdown) String() string {
 
 func (hgb HostGougingBreakdown) Gouging() bool {
 	for _, err := range []string{
-		hgb.ContractErr,
 		hgb.DownloadErr,
 		hgb.GougingErr,
 		hgb.PruneErr,
@@ -251,7 +255,6 @@ func (hgb HostGougingBreakdown) Gouging() bool {
 func (hgb HostGougingBreakdown) String() string {
 	var reasons []string
 	for _, errStr := range []string{
-		hgb.ContractErr,
 		hgb.DownloadErr,
 		hgb.GougingErr,
 		hgb.PruneErr,

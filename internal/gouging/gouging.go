@@ -8,6 +8,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -40,7 +41,8 @@ type (
 	}
 
 	Checker interface {
-		Check(_ *rhpv2.HostSettings, _ *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		Check(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
+		CheckV2(rhpv4.HostSettings) api.HostGougingBreakdown
 		CheckSettings(rhpv2.HostSettings) api.HostGougingBreakdown
 		CheckUnusedDefaults(rhpv3.HostPriceTable) error
 		BlocksUntilBlockHeightGouging(hostHeight uint64) int64
@@ -49,9 +51,6 @@ type (
 	checker struct {
 		consensusState api.ConsensusState
 		settings       api.GougingSettings
-
-		period      *uint64
-		renewWindow *uint64
 	}
 )
 
@@ -61,9 +60,6 @@ func NewChecker(gs api.GougingSettings, cs api.ConsensusState, period, renewWind
 	return checker{
 		consensusState: cs,
 		settings:       gs,
-
-		period:      period,
-		renewWindow: renewWindow,
 	}
 }
 
@@ -99,10 +95,6 @@ func (gc checker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.Ho
 	}
 
 	return api.HostGougingBreakdown{
-		ContractErr: errsToStr(
-			checkContractGougingRHPv2(gc.period, gc.renewWindow, hs),
-			checkContractGougingRHPv3(gc.period, gc.renewWindow, pt),
-		),
 		DownloadErr: errsToStr(checkDownloadGougingRHPv3(gc.settings, pt)),
 		GougingErr: errsToStr(
 			checkPriceGougingPT(gc.settings, gc.consensusState, pt),
@@ -110,6 +102,16 @@ func (gc checker) Check(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.Ho
 		),
 		PruneErr:  errsToStr(checkPruneGougingRHPv2(gc.settings, hs)),
 		UploadErr: errsToStr(checkUploadGougingRHPv3(gc.settings, pt)),
+	}
+}
+
+// TODO: write tests
+func (gc checker) CheckV2(hs rhpv4.HostSettings) api.HostGougingBreakdown {
+	return api.HostGougingBreakdown{
+		DownloadErr: "",
+		GougingErr:  "",
+		PruneErr:    "",
+		UploadErr:   "",
 	}
 }
 
@@ -245,47 +247,6 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv
 	// check Validity
 	if pt.Validity < gs.MinPriceTableValidity {
 		return fmt.Errorf("'Validity' is less than the allowed minimum value, %v < %v", pt.Validity, gs.MinPriceTableValidity)
-	}
-
-	return nil
-}
-
-func checkContractGougingRHPv2(period, renewWindow *uint64, hs *rhpv2.HostSettings) (err error) {
-	// period and renew window might be nil since we don't always have access to
-	// these settings when performing gouging checks
-	if hs == nil || period == nil || renewWindow == nil {
-		return nil
-	}
-
-	err = checkContractGouging(*period, *renewWindow, hs.MaxDuration, hs.WindowSize)
-	if err != nil {
-		err = fmt.Errorf("%w: %v", ErrHostSettingsGouging, err)
-	}
-	return
-}
-
-func checkContractGougingRHPv3(period, renewWindow *uint64, pt *rhpv3.HostPriceTable) (err error) {
-	// period and renew window might be nil since we don't always have access to
-	// these settings when performing gouging checks
-	if pt == nil || period == nil || renewWindow == nil {
-		return nil
-	}
-	err = checkContractGouging(*period, *renewWindow, pt.MaxDuration, pt.WindowSize)
-	if err != nil {
-		err = fmt.Errorf("%w: %v", ErrPriceTableGouging, err)
-	}
-	return
-}
-
-func checkContractGouging(period, renewWindow, maxDuration, windowSize uint64) error {
-	// check MaxDuration
-	if period != 0 && period > maxDuration {
-		return fmt.Errorf("MaxDuration %v is lower than the period %v", maxDuration, period)
-	}
-
-	// check WindowSize
-	if renewWindow != 0 && renewWindow < windowSize {
-		return fmt.Errorf("minimum WindowSize %v is greater than the renew window %v", windowSize, renewWindow)
 	}
 
 	return nil
