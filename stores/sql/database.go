@@ -176,16 +176,12 @@ type (
 		// that was created.
 		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
-		// InsertDirectories inserts the directories for the given path and
-		// returns the ID of the immediate parent directory.
-		InsertDirectories(ctx context.Context, bucket, path string) (int64, error)
-
 		// InsertMultipartUpload creates a new multipart upload and returns a
 		// unique upload ID.
 		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
 
 		// InsertObject inserts a new object into the database.
-		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
+		InsertObject(ctx context.Context, bucket, key, contractSet string, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.
@@ -242,9 +238,6 @@ type (
 		// the contract.
 		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
 
-		// PruneEmptydirs prunes any directories that are empty.
-		PruneEmptydirs(ctx context.Context) error
-
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
@@ -277,17 +270,13 @@ type (
 		// times. The contracts of those hosts are also removed.
 		RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error)
 
-		// RenameDirectories renames all directories in the database with the
-		// given prefix to the new prefix.
-		RenameDirectories(ctx context.Context, bucket, prefixOld, prefixNew string) (int64, error)
-
 		// RenameObject renames an object in the database from keyOld to keyNew
 		// and the new directory dirID. returns api.ErrObjectExists if the an
 		// object already exists at the target location or api.ErrObjectNotFound
 		// if the object at keyOld doesn't exist. If force is true, the instead
 		// of returning api.ErrObjectExists, the existing object will be
 		// deleted.
-		RenameObject(ctx context.Context, bucket, keyOld, keyNew string, dirID int64, force bool) error
+		RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error
 
 		// RenameObjects renames all objects in the database with the given
 		// prefix to the new prefix. If 'force' is true, it will overwrite any
@@ -295,7 +284,7 @@ type (
 		// `api.ErrOBjectNotFound` is returned. If 'force' is false and an
 		// object already exists with the new prefix, `api.ErrObjectExists` is
 		// returned.
-		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, dirID int64, force bool) error
+		RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error
 
 		// RenewedContract returns the metadata of the contract that was renewed
 		// from the specified contract or ErrContractNotFound otherwise.
