@@ -37,7 +37,7 @@ func TestFormContract(t *testing.T) {
 	wallet, _ := b.Wallet(context.Background())
 	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
 	tt.OK(err)
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, types.Siacoins(1), ap.EndHeight())
 	tt.OK(err)
 
 	// assert the contract was added to the bus
