@@ -217,8 +217,8 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 
 	// figure out how much collateral we want the host to pu into the contract
 	hostCollateral := collateral.Mul64(expectedStorage).Mul64(ctx.Period())
-	if collateral.Cmp(maxCollateral) > 0 {
-		collateral = maxCollateral
+	if hostCollateral.Cmp(maxCollateral) > 0 {
+		hostCollateral = maxCollateral
 	}
 
 	// form contract
