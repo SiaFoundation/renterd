@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
@@ -211,11 +212,16 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
 	renterFunds := initialContractFunding(contractPrice, txnFee, minInitialContractFunds)
 
-	// calculate the host collateral
+	// calculate the expected storage
 	endHeight := ctx.EndHeight()
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
+	var expectedStorage uint64
+	if host.IsV2() {
+		expectedStorage = renterFundsToExpectedStorageV2(renterFunds, endHeight-cs.BlockHeight, scan.V2Settings.Prices)
+	} else {
+		expectedStorage = renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
+	}
 
-	// figure out how much collateral we want the host to pu into the contract
+	// calculate the host collateral
 	hostCollateral := collateral.Mul64(expectedStorage).Mul64(ctx.Period())
 	if hostCollateral.Cmp(maxCollateral) > 0 {
 		hostCollateral = maxCollateral
@@ -760,6 +766,19 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 		expectedStorage = types.NewCurrency64(math.MaxUint64)
 	}
 	return expectedStorage.Big().Uint64()
+}
+
+// renterFundsToExpectedStorageV2 returns how much storage a renter is expected to
+// be able to afford given the provided 'renterFunds'.
+func renterFundsToExpectedStorageV2(renterFunds types.Currency, duration uint64, hp rhpv4.HostPrices) uint64 {
+	sectorUploadCost := hp.RPCWriteSectorCost(rhpv4.SectorSize, 144*3).RenterCost()
+	sectorStorageCost := hp.RPCAppendSectorsCost(1, duration).RenterCost()
+	costPerByte := sectorUploadCost.Add(sectorStorageCost).Div64(rhpv4.SectorSize)
+	expectedStorage := renterFunds.Div(costPerByte).Big()
+	if !expectedStorage.IsUint64() {
+		return math.MaxUint64
+	}
+	return expectedStorage.Uint64()
 }
 
 // performContractChecks performs maintenance on existing contracts,
