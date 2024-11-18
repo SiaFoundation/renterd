@@ -2306,14 +2306,14 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	if b.isPassedV2AllowHeight() {
 		// fetch host settings
 		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
+		if jc.Check("couldn't fetch host settings", err) != nil {
+			return
+		}
 
 		// check gouging
 		breakdown := gc.CheckV2(settings)
 		if breakdown.Gouging() {
 			jc.Error(fmt.Errorf("failed to form v2 contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
-			return
-		}
-		if jc.Check("couldn't fetch host settings", err) != nil {
 			return
 		}
 		contract, err = b.formContractV2(
