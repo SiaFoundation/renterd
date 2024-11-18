@@ -18,13 +18,13 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -43,7 +43,7 @@ type (
 		api.HostInfo
 		HS   rhpv2.HostSettings
 		PT   rhpv3.HostPriceTable
-		V2HS rhpv4.HostSettings
+		V2HS rhp.HostSettings
 	}
 
 	multipartUpload struct {
@@ -2284,7 +2284,7 @@ EXISTS (
 			},
 			rhpv2.HostSettings(hs),
 			rhpv3.HostPriceTable(pt),
-			rhpv4.HostSettings(v2Hs),
+			rhp.HostSettings(v2Hs),
 		})
 		hostIDs = append(hostIDs, hostID)
 	}
