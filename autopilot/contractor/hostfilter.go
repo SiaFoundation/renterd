@@ -268,42 +268,11 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64, period uint6
 			gb = gc.CheckV1(&h.Settings, &h.PriceTable.HostPriceTable)
 		}
 
-		// max duration check
-		checkContractGouging := func(maxDuration uint64) {
-			if period > maxDuration {
-				ub.LowMaxDuration = true
-			}
-		}
-		if h.IsV2() {
-			checkContractGouging(h.V2Settings.MaxContractDuration)
-		} else {
-			checkContractGouging(h.Settings.MaxDuration)
-			checkContractGouging(h.PriceTable.MaxDuration)
-		}
-
 		// perform gouging and score checks
-		if h.IsV2() {
-			gb = gc.CheckV2(h.V2Settings)
-		} else {
-			gb = gc.CheckV1(&h.Settings, &h.PriceTable.HostPriceTable)
-		}
 		if gb.Gouging() {
 			ub.Gouging = true
 		} else if minScore > 0 && !(sh.score > minScore) {
 			ub.LowScore = true
-		}
-
-		// check contract gouging separately
-		checkContractGouging := func(maxDuration uint64) {
-			if period > maxDuration {
-				ub.LowMaxDuration = true
-			}
-		}
-		if h.IsV2() {
-			checkContractGouging(h.V2Settings.MaxContractDuration)
-		} else {
-			checkContractGouging(h.Settings.MaxDuration)
-			checkContractGouging(h.PriceTable.MaxDuration)
 		}
 	}
 
