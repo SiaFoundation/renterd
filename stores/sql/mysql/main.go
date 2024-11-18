@@ -1110,7 +1110,7 @@ func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, autopilot string,
 		INSERT INTO host_checks (created_at, db_autopilot_id, db_host_id, usability_blocked, usability_offline, usability_low_score,
 			usability_redundant_ip, usability_gouging, usability_low_max_duration, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
 			score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
-			gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
+			gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
 	    VALUES (?,
 			(SELECT id FROM autopilots WHERE identifier = ?),
 			(SELECT id FROM hosts WHERE public_key = ?),
