@@ -15,10 +15,10 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 
 	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/gouging"
@@ -629,7 +629,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	var pt rhpv3.HostPriceTable
 	var settings rhpv2.HostSettings
 	var ping time.Duration
-	var v2Settings rhpv4.HostSettings
+	var v2Settings rhp4.HostSettings
 	if h.V2SiamuxAddr() != "" {
 		v2Settings, ping, err = b.scanHostV2(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.V2SiamuxAddr())
 	} else {

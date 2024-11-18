@@ -15,12 +15,12 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/object"
 )
 
@@ -52,7 +52,7 @@ type (
 	Unsigned64      uint64
 	V2Contract      types.V2FileContract
 	ChainProtocol   chain.Protocol
-	V2HostSettings  rhpv4.HostSettings
+	V2HostSettings  rhp.HostSettings
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
