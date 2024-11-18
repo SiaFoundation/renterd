@@ -14,12 +14,12 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/object"
 )
 
@@ -50,7 +50,7 @@ type (
 	DurationMS      time.Duration
 	Unsigned64      uint64
 	ChainProtocol   chain.Protocol
-	V2HostSettings  rhpv4.HostSettings
+	V2HostSettings  rhp.HostSettings
 
 	StateElement struct {
 		ID          Hash256

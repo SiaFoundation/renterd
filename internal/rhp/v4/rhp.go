@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	rhp4 "go.sia.tech/core/rhp/v4"
@@ -21,6 +22,11 @@ type (
 	Dialer interface {
 		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
 	}
+
+	HostSettings struct {
+		rhp4.HostSettings
+		Validity time.Duration `json:"validity"`
+	}
 )
 
 type Client struct {
@@ -33,9 +39,17 @@ func New(dialer Dialer) *Client {
 	}
 }
 
-func (c *Client) Settings(ctx context.Context, hk types.PublicKey, addr string) (hs rhp4.HostSettings, _ error) {
-	err := c.tpool.withTransport(ctx, hk, addr, func(c rhp.TransportClient) (err error) {
-		hs, err = rhp.RPCSettings(ctx, c)
+func (c *Client) Settings(ctx context.Context, hk types.PublicKey, addr string) (hs HostSettings, _ error) {
+	err := c.tpool.withTransport(ctx, hk, addr, func(c rhp.TransportClient) error {
+		var settings rhp4.HostSettings
+		settings, err := rhp.RPCSettings(ctx, c)
+		if err != nil {
+			return err
+		}
+		hs = HostSettings{
+			HostSettings: settings,
+			Validity:     time.Until(settings.Prices.ValidUntil),
+		}
 		return err
 	})
 	return hs, err
