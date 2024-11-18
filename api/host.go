@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -222,11 +221,7 @@ func (h Host) IsOnline() bool {
 }
 
 func (h Host) V2SiamuxAddr() string {
-	// NOTE: eventually this can be smarter about picking an address but right now
-	// we just prioritize IPv4 over IPv6
-	sort.Slice(h.V2SiamuxAddresses, func(i, j int) bool {
-		return len(h.V2SiamuxAddresses[i]) < len(h.V2SiamuxAddresses[j])
-	})
+	// NOTE: eventually this can be smarter about picking an address
 	if len(h.V2SiamuxAddresses) > 0 {
 		return h.V2SiamuxAddresses[0]
 	}
