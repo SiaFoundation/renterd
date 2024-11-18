@@ -478,7 +478,6 @@ func sectorUploadCostRHPv3(pt rhpv3.HostPriceTable) (types.Currency, bool) {
 	if overflow {
 		return types.ZeroCurrency, true
 	}
-	writeCost, overflow = writeCost.AddWithOverflow(pt.InitBaseCost)
 	if overflow {
 		return types.ZeroCurrency, true
 	}
