@@ -11,6 +11,7 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/rhp/v4"
 )
 
 const (
@@ -42,7 +43,7 @@ type (
 
 	Checker interface {
 		CheckV1(*rhpv2.HostSettings, *rhpv3.HostPriceTable) api.HostGougingBreakdown
-		CheckV2(rhpv4.HostSettings) api.HostGougingBreakdown
+		CheckV2(rhp.HostSettings) api.HostGougingBreakdown
 		CheckSettings(rhpv2.HostSettings) api.HostGougingBreakdown
 		CheckUnusedDefaults(rhpv3.HostPriceTable) error
 		BlocksUntilBlockHeightGouging(hostHeight uint64) int64
@@ -106,7 +107,7 @@ func (gc checker) CheckV1(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.
 }
 
 // TODO: write tests
-func (gc checker) CheckV2(hs rhpv4.HostSettings) (gb api.HostGougingBreakdown) {
+func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	prices := hs.Prices
 	gs := gc.settings
 
@@ -150,6 +151,9 @@ func (gc checker) CheckV2(hs rhpv4.HostSettings) (gb api.HostGougingBreakdown) {
 	}
 	if hs.MaxSectorBatchSize < sectorBatchSize {
 		errs = append(errs, fmt.Errorf("max sector batch size is less than %v: %v", sectorBatchSize, hs.MaxSectorBatchSize))
+	}
+	if hs.Validity < gs.MinPriceTableValidity {
+		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
 	}
 	if gougingErr := errsToStr(errs...); gougingErr != "" {
 		gb.GougingErr = fmt.Sprintf("%v: %s", ErrPriceTableGouging, gougingErr)

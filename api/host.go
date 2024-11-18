@@ -9,8 +9,8 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 )
 
 const (
@@ -108,7 +108,7 @@ type (
 		NetAddress        string               `json:"netAddress"`
 		PriceTable        HostPriceTable       `json:"priceTable"`
 		Settings          rhpv2.HostSettings   `json:"settings,omitempty"`
-		V2Settings        rhpv4.HostSettings   `json:"v2Settings,omitempty"`
+		V2Settings        rhp4.HostSettings    `json:"v2Settings,omitempty"`
 		Interactions      HostInteractions     `json:"interactions"`
 		Scanned           bool                 `json:"scanned"`
 		Blocked           bool                 `json:"blocked"`
@@ -140,7 +140,7 @@ type (
 		HostKey    types.PublicKey      `json:"hostKey"`
 		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
-		V2Settings rhpv4.HostSettings   `json:"v2Settings,omitempty"`
+		V2Settings rhp4.HostSettings    `json:"v2Settings,omitempty"`
 		Success    bool                 `json:"success"`
 		Timestamp  time.Time            `json:"timestamp"`
 	}

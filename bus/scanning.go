@@ -6,9 +6,9 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -109,7 +109,7 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 	return settings, pt, duration, err
 }
 
-func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv4.HostSettings, time.Duration, error) {
+func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhp4.HostSettings, time.Duration, error) {
 	logger := b.logger.
 		With("host", hostKey).
 		With("hostIP", hostIP).
@@ -117,7 +117,7 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 		With("version", "v2")
 
 	// prepare a helper for scanning
-	scan := func() (rhpv4.HostSettings, time.Duration, error) {
+	scan := func() (rhp4.HostSettings, time.Duration, error) {
 		// apply the timeout
 		scanCtx := ctx
 		if timeout > 0 {
@@ -137,7 +137,7 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type
 	if err := b.shouldScanAddr(hostIP); err != nil {
-		return rhpv4.HostSettings{}, 0, err
+		return rhp4.HostSettings{}, 0, err
 	}
 
 	// scan: first try
@@ -148,7 +148,7 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 		// scan: second try
 		select {
 		case <-ctx.Done():
-			return rhpv4.HostSettings{}, 0, context.Cause(ctx)
+			return rhp4.HostSettings{}, 0, context.Cause(ctx)
 		case <-time.After(time.Second):
 		}
 		settings, duration, err = scan()
@@ -166,7 +166,7 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 	// repercussions
 	select {
 	case <-ctx.Done():
-		return rhpv4.HostSettings{}, 0, context.Cause(ctx)
+		return rhp4.HostSettings{}, 0, context.Cause(ctx)
 	default:
 	}
 
