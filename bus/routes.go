@@ -2361,25 +2361,44 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
-	// fetch host settings
-	settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
-	if jc.Check("couldn't fetch host settings", err) != nil {
-		return
-	}
-
-	// check gouging
-	breakdown := gc.CheckSettings(settings)
-	if breakdown.Gouging() {
-		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
-		return
-	}
-
 	// send V2 transaction if we're passed the V2 hardfork allow height
-	var rev rhpv2.ContractRevision
+	var contract api.ContractMetadata
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		// fetch host settings
+		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
+		if jc.Check("couldn't fetch host settings", err) != nil {
+			return
+		}
+		contract, err = b.formContractV2(
+			ctx,
+			rfr.HostKey,
+			rfr.HostIP,
+			settings.WalletAddress,
+			rfr.RenterAddress,
+			settings.Prices,
+			rfr.RenterFunds,
+			rfr.HostCollateral,
+			rfr.EndHeight,
+		)
+		if jc.Check("couldn't form v2 contract", err) != nil {
+			return
+		}
 	} else {
-		rev, err = b.formContract(
+		// fetch host settings
+		settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
+		if jc.Check("couldn't fetch host settings", err) != nil {
+			return
+		}
+
+		// check gouging
+		breakdown := gc.CheckSettings(settings)
+		if breakdown.Gouging() {
+			jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+			return
+		}
+
+		// form contract
+		contract, err = b.formContract(
 			ctx,
 			settings,
 			rfr.RenterAddress,
@@ -2395,14 +2414,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 
 	// add the contract
-	metadata, err := b.addContract(
-		ctx,
-		rev,
-		rev.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
-		rfr.RenterFunds,
-		b.cm.Tip().Height,
-		api.ContractStatePending,
-	)
+	metadata, err := b.addContract(ctx, contract)
 	if jc.Check("couldn't add contract", err) != nil {
 		return
 	}

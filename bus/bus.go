@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
@@ -529,22 +530,12 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 	)
 }
 
-func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.store.PutContract(ctx, api.ContractMetadata{
-		ID:                 rev.ID(),
-		HostKey:            rev.HostKey(),
-		StartHeight:        startHeight,
-		State:              state,
-		Usability:          api.ContractUsabilityGood,
-		WindowStart:        rev.Revision.WindowStart,
-		WindowEnd:          rev.Revision.WindowEnd,
-		ContractPrice:      contractPrice,
-		InitialRenterFunds: initialRenterFunds,
-	}); err != nil {
+func (b *Bus) addContract(ctx context.Context, contract api.ContractMetadata) (api.ContractMetadata, error) {
+	if err := b.store.PutContract(ctx, contract); err != nil {
 		return api.ContractMetadata{}, err
 	}
 
-	added, err := b.store.Contract(ctx, rev.ID())
+	added, err := b.store.Contract(ctx, contract.ID)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -655,7 +646,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	return
 }
 
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
@@ -672,7 +663,7 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
 	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if err != nil {
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("couldn't fund transaction: %w", err)
 	}
 
 	// sign the transaction
@@ -682,20 +673,72 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	contract, txnSet, err := b.rhp2Client.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, err
+		return api.ContractMetadata{}, err
 	}
 
 	// add transaction set to the pool
 	_, err = b.cm.AddPoolTransactions(txnSet)
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
 	}
 
 	// broadcast the transaction set
 	go b.s.BroadcastTransactionSet(txnSet)
 
-	return contract, nil
+	return api.ContractMetadata{
+		ID:                 contract.ID(),
+		HostKey:            contract.HostKey(),
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.WindowStart,
+		WindowEnd:          contract.Revision.WindowEnd,
+		ContractPrice:      contract.Revision.MissedHostPayout().Sub(hostCollateral),
+		InitialRenterFunds: renterFunds,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 false,
+	}, nil
+}
+
+func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+	cs := b.cm.TipState()
+	key := b.masterKey.DeriveContractKey(hk)
+	signer := ibus.NewFormContractSigner(b.w, key)
+
+	// form the contract
+	res, err := b.rhp4Client.FormContract(ctx, hk, hostIP, b.cm, signer, cs, prices, hostAddr, rhpv4.RPCFormContractParams{
+		RenterPublicKey: key.PublicKey(),
+		RenterAddress:   renterAddr,
+		Allowance:       renterFunds,
+		Collateral:      collateral,
+		ProofHeight:     endHeight,
+	})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to form v2 contract: %w", err)
+	}
+
+	// add transaction set to the pool
+	_, err = b.cm.AddV2PoolTransactions(res.FormationSet.Basis, res.FormationSet.Transactions)
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to add v2 transaction set to the pool: %w", err)
+	}
+
+	// broadcast the transaction set
+	go b.s.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions)
+
+	contract := res.Contract
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            contract.Revision.HostPublicKey,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ProofHeight + rhpv4.ProofWindow,
+		ContractPrice:      res.Usage.RenterCost(),
+		InitialRenterFunds: renterFunds,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
 }
 
 func (b *Bus) isPassedV2AllowHeight() bool {
