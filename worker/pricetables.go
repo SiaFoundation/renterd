@@ -11,6 +11,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/host"
 	"lukechampine.com/frand"
 )
 
@@ -34,7 +35,7 @@ var (
 
 type (
 	priceTables struct {
-		hm HostManager
+		hm host.HostManager
 		hs HostStore
 
 		mu          sync.Mutex
@@ -42,7 +43,7 @@ type (
 	}
 
 	priceTable struct {
-		hm HostManager
+		hm host.HostManager
 		hs HostStore
 		hk types.PublicKey
 
@@ -65,7 +66,7 @@ func (w *Worker) initPriceTables() {
 	w.priceTables = newPriceTables(w, w.bus)
 }
 
-func newPriceTables(hm HostManager, hs HostStore) *priceTables {
+func newPriceTables(hm host.HostManager, hs HostStore) *priceTables {
 	return &priceTables{
 		hm: hm,
 		hs: hs,

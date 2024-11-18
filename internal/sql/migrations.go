@@ -351,9 +351,15 @@ var (
 				},
 			},
 			{
-				ID: "00027_contract_usability",
+				ID: "00027_remove_directories",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_contract_usability", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_remove_directories", log)
+				},
+			},
+			{
+				ID: "00028_contract_usability",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_contract_usability", log)
 				},
 			},
 		}
