@@ -490,7 +490,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(network.HardforkFoundation.Height + network.MaturityDelay) // mine until the first block reward matures
+		cluster.MineBlocks(network.HardforkFoundation.Height + network.MaturityDelay + 10) // mine until the first block reward matures plus a few more mature
 		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
