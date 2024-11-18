@@ -1,6 +1,7 @@
 package contractor
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"time"
@@ -46,10 +47,12 @@ func clampScore(score float64) float64 {
 
 func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expectedRedundancy float64) (sb api.HostScoreBreakdown) {
 	cCfg := cfg.Contracts
+
 	// idealDataPerHost is the amount of data that we would have to put on each
 	// host assuming that our storage requirements were spread evenly across
 	// every single host.
 	idealDataPerHost := float64(cCfg.Storage) * expectedRedundancy / float64(cCfg.Amount)
+
 	// allocationPerHost is the amount of data that we would like to be able to
 	// put on each host, because data is not always spread evenly across the
 	// hosts during upload. Slower hosts may get very little data, more
@@ -59,14 +62,48 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	// NOTE: assume that data is not spread evenly and the host with the most
 	// data will store twice the expectation
 	allocationPerHost := idealDataPerHost * 2
+
+	// extract inputs from the host depending on whether the host supports v1 or v2
+	var appendSectorCost types.Currency
+	var collateral, maxCollateral types.Currency
+	var dppb, uppb, sppb types.Currency
+	var remainingStorage uint64
+	var version string
+	if h.IsV2() {
+		appendSectorCost = h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).Storage
+		maxCollateral = h.V2Settings.MaxCollateral
+		collateral = h.V2Settings.Prices.Collateral
+		dppb = h.V2Settings.Prices.EgressPrice
+		uppb = h.V2Settings.Prices.IngressPrice
+		sppb = h.V2Settings.Prices.StoragePrice
+		remainingStorage = h.V2Settings.RemainingStorage
+		version = fmt.Sprintf("%d.%d.%d", h.V2Settings.ProtocolVersion[0], h.V2Settings.ProtocolVersion[1], h.V2Settings.ProtocolVersion[2])
+	} else {
+		var overflow bool
+		appendSectorCost = h.PriceTable.AppendSectorCost(cfg.Contracts.Period).Storage
+		maxCollateral = h.PriceTable.MaxCollateral
+		collateral = h.PriceTable.CollateralCost
+		dppb, overflow = gouging.DownloadPricePerByte(h.PriceTable.HostPriceTable)
+		if overflow {
+			dppb = types.MaxCurrency
+		}
+		uppb, overflow = gouging.UploadPricePerByte(h.PriceTable.HostPriceTable)
+		if overflow {
+			uppb = types.MaxCurrency
+		}
+		sppb = h.PriceTable.WriteStoreCost
+		remainingStorage = h.Settings.RemainingStorage
+		version = h.Settings.Version
+	}
+
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h), // not clamped since values are hardcoded
-		Collateral:       clampScore(collateralScore(cCfg, h.PriceTable.HostPriceTable, uint64(allocationPerHost))),
+		Collateral:       clampScore(collateralScore(cCfg, appendSectorCost, maxCollateral, collateral, uint64(allocationPerHost))),
 		Interactions:     clampScore(interactionScore(h)),
-		Prices:           clampScore(priceAdjustmentScore(h.PriceTable.HostPriceTable, gs)),
-		StorageRemaining: clampScore(storageRemainingScore(h.Settings, h.StoredData, allocationPerHost)),
+		Prices:           clampScore(priceAdjustmentScore(dppb, uppb, sppb, gs)),
+		StorageRemaining: clampScore(storageRemainingScore(remainingStorage, h.StoredData, allocationPerHost)),
 		Uptime:           clampScore(uptimeScore(h)),
-		Version:          clampScore(versionScore(h.Settings, cfg.Hosts.MinProtocolVersion)),
+		Version:          clampScore(versionScore(version, cfg.Hosts.MinProtocolVersion)),
 	}
 }
 
@@ -81,18 +118,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 //   - If the host is more expensive than expected, an exponential malus is applied.
 //     A 2x ratio will already cause the score to drop to 0.16 and a 3x ratio causes
 //     it to drop to 0.05.
-func priceAdjustmentScore(pt rhpv3.HostPriceTable, gs api.GougingSettings) float64 {
-	// combine the upload and download prices to get a threshold
-	dppb, overflow := gouging.DownloadPricePerByte(pt)
-	if overflow {
-		return math.SmallestNonzeroFloat64
-	}
-	uppb, overflow := gouging.UploadPricePerByte(pt)
-	if overflow {
-		return math.SmallestNonzeroFloat64
-	}
-	sppb := pt.WriteStoreCost
-
+func priceAdjustmentScore(dppb, uppb, sppb types.Currency, gs api.GougingSettings) float64 {
 	priceScore := func(actual, max types.Currency) float64 {
 		threshold := max.Div64(2)
 		if threshold.IsZero() {
@@ -126,11 +152,11 @@ func priceAdjustmentScore(pt rhpv3.HostPriceTable, gs api.GougingSettings) float
 	return (downloadScore + uploadScore + storageScore) / 3.0
 }
 
-func storageRemainingScore(h rhpv2.HostSettings, storedData uint64, allocationPerHost float64) float64 {
+func storageRemainingScore(remainingStorage, storedData uint64, allocationPerHost float64) float64 {
 	// hostExpectedStorage is the amount of storage that we expect to be able to
 	// store on this host overall, which should include the stored data that is
 	// already on the host.
-	hostExpectedStorage := (float64(h.RemainingStorage) * 0.25) + float64(storedData)
+	hostExpectedStorage := (float64(remainingStorage) * 0.25) + float64(storedData)
 	// The score for the host is the square of the amount of storage we
 	// expected divided by the amount of storage we want. If we expect to be
 	// able to store more data on the host than we need to allocate, the host
@@ -177,9 +203,9 @@ func ageScore(h api.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.ContractsConfig, pt rhpv3.HostPriceTable, allocationPerHost uint64) float64 {
+func collateralScore(cfg api.ContractsConfig, appendSectorCost, maxCollateral, collateralCost types.Currency, allocationPerHost uint64) float64 {
 	// Ignore hosts which have set their max collateral to 0.
-	if pt.MaxCollateral.IsZero() || pt.CollateralCost.IsZero() {
+	if maxCollateral.IsZero() || collateralCost.IsZero() {
 		return 0
 	}
 
@@ -189,12 +215,12 @@ func collateralScore(cfg api.ContractsConfig, pt rhpv3.HostPriceTable, allocatio
 
 	// compute the cost of storing
 	numSectors := bytesToSectors(allocationPerHost)
-	storageCost := pt.AppendSectorCost(cfg.Period).Storage.Mul64(numSectors)
+	storageCost := appendSectorCost.Mul64(numSectors)
 
 	// calculate the expected collateral for the host allocation.
-	expectedCollateral := pt.CollateralCost.Mul64(allocationPerHost).Mul64(cfg.Period)
-	if expectedCollateral.Cmp(pt.MaxCollateral) > 0 {
-		expectedCollateral = pt.MaxCollateral
+	expectedCollateral := collateralCost.Mul64(allocationPerHost).Mul64(cfg.Period)
+	if expectedCollateral.Cmp(maxCollateral) > 0 {
+		expectedCollateral = maxCollateral
 	}
 
 	// avoid division by zero
@@ -290,7 +316,7 @@ func uptimeScore(h api.Host) float64 {
 	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
 }
 
-func versionScore(settings rhpv2.HostSettings, minVersion string) float64 {
+func versionScore(version, minVersion string) float64 {
 	if minVersion == "" {
 		minVersion = minProtocolVersion
 	}
@@ -309,7 +335,7 @@ func versionScore(settings rhpv2.HostSettings, minVersion string) float64 {
 	}
 	weight := 1.0
 	for _, v := range versions {
-		if utils.VersionCmp(settings.Version, v.version) < 0 {
+		if utils.VersionCmp(version, v.version) < 0 {
 			weight *= v.penalty
 		}
 	}
