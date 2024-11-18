@@ -2276,14 +2276,20 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	} else if rfr.HostCollateral.IsZero() {
 		http.Error(jc.ResponseWriter, "HostCollateral can not be zero", http.StatusBadRequest)
 		return
-	} else if rfr.HostIP == "" {
-		http.Error(jc.ResponseWriter, "HostIP must be provided", http.StatusBadRequest)
-		return
 	} else if rfr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
 	} else if rfr.RenterAddress == (types.Address{}) {
 		http.Error(jc.ResponseWriter, "RenterAddress must be provided", http.StatusBadRequest)
+		return
+	}
+
+	// fetch host to form a contract with to get its netaddress
+	h, err := b.store.Host(jc.Request.Context(), rfr.HostKey)
+	if errors.Is(err, api.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch host for contract formation", err) != nil {
 		return
 	}
 
@@ -2296,16 +2302,23 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	var contract api.ContractMetadata
-	if b.isPassedV2AllowHeight() {
+	if h.IsV2() {
 		// fetch host settings
-		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
+		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
+
+		// check gouging
+		breakdown := gc.CheckV2(settings)
+		if breakdown.Gouging() {
+			jc.Error(fmt.Errorf("failed to form v2 contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+			return
+		}
 		if jc.Check("couldn't fetch host settings", err) != nil {
 			return
 		}
 		contract, err = b.formContractV2(
 			ctx,
 			rfr.HostKey,
-			rfr.HostIP,
+			h.V2SiamuxAddr(),
 			settings.WalletAddress,
 			rfr.RenterAddress,
 			settings.Prices,
@@ -2318,7 +2331,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 		}
 	} else {
 		// fetch host settings
-		settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, rfr.HostIP)
+		settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, h.NetAddress)
 		if jc.Check("couldn't fetch host settings", err) != nil {
 			return
 		}
@@ -2338,7 +2351,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 			rfr.RenterFunds,
 			rfr.HostCollateral,
 			rfr.HostKey,
-			rfr.HostIP,
+			h.NetAddress,
 			rfr.EndHeight,
 		)
 		if jc.Check("couldn't form contract", err) != nil {

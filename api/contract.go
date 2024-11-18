@@ -132,7 +132,6 @@ type (
 		EndHeight      uint64          `json:"endHeight"`
 		HostCollateral types.Currency  `json:"hostCollateral"`
 		HostKey        types.PublicKey `json:"hostKey"`
-		HostIP         string          `json:"hostIP"`
 		RenterFunds    types.Currency  `json:"renterFunds"`
 		RenterAddress  types.Address   `json:"renterAddress"`
 	}

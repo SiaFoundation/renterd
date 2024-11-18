@@ -84,7 +84,7 @@ type Bus interface {
 	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
 	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
-	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
+	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
@@ -195,17 +195,34 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		return api.ContractMetadata{}, false, err
 	}
 
+	// version specific costs
+	var contractPrice, collateral, maxCollateral types.Currency
+	if host.IsV2() {
+		contractPrice = scan.V2Settings.Prices.ContractPrice
+		collateral = scan.V2Settings.Prices.Collateral
+		maxCollateral = scan.V2Settings.MaxCollateral
+	} else {
+		contractPrice = scan.Settings.ContractPrice
+		collateral = scan.Settings.Collateral
+		maxCollateral = scan.Settings.MaxCollateral
+	}
+
 	// check our budget
 	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
-	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds)
+	renterFunds := initialContractFunding(contractPrice, txnFee, minInitialContractFunds)
 
 	// calculate the host collateral
 	endHeight := ctx.EndHeight()
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
-	hostCollateral := rhpv2.ContractFormationCollateral(ctx.Period(), expectedStorage, scan.Settings)
+
+	// figure out how much collateral we want the host to pu into the contract
+	hostCollateral := collateral.Mul64(expectedStorage).Mul64(ctx.Period())
+	if collateral.Cmp(maxCollateral) > 0 {
+		collateral = maxCollateral
+	}
 
 	// form contract
-	contract, err := c.bus.FormContract(ctx, ctx.state.Address, renterFunds, hk, host.NetAddress, hostCollateral, endHeight)
+	contract, err := c.bus.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
 	if err != nil {
 		// TODO: keep track of consecutive failures and break at some point
 		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
@@ -687,8 +704,8 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	return hasChanged, nil
 }
 
-func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding types.Currency) types.Currency {
-	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
+func initialContractFunding(contractPrice, txnFee, minFunding types.Currency) types.Currency {
+	funding := contractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
 	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
 		return minFunding
 	}
