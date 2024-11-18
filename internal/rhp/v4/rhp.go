@@ -105,8 +105,15 @@ func (c *Client) AccountBalance(ctx context.Context, account rhp4.Account) (type
 }
 
 // FormContract forms a contract with a host
-func (c *Client) FormContract(ctx context.Context, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, hostKey types.PublicKey, hostAddress types.Address, params rhp4.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
-	panic("not implemented")
+func (c *Client) FormContract(ctx context.Context, hk types.PublicKey, hostIP string, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, hostAddress types.Address, params rhp4.RPCFormContractParams) (res rhp.RPCFormContractResult, _ error) {
+	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
+		res, err = rhp.RPCFormContract(ctx, c, tp, signer, cs, p, hk, hostAddress, params)
+		if err != nil {
+			return err
+		}
+		return err
+	})
+	return res, err
 }
 
 // RenewContract renews a contract with a host.
