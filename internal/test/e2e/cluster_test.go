@@ -1070,7 +1070,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
 	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, types.Siacoins(1), endHeight)
 	tt.OK(err)
 
 	// assert revision height is 0
