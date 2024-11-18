@@ -117,12 +117,11 @@ func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) 
 }
 
 // FormContract forms a contract with a host and adds it to the bus.
-func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
+func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
 	err = c.c.WithContext(ctx).POST("/contracts/form", api.ContractFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
 		HostKey:        hostKey,
-		HostIP:         hostIP,
 		RenterFunds:    renterFunds,
 		RenterAddress:  renterAddress,
 	}, &contract)
