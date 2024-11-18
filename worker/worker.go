@@ -277,7 +277,7 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
 		var objects []api.ObjectMetadata
 		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
-			w.logger.Error("failed to list objects for slab key; %v", err)
+			w.logger.Errorf("failed to list objects for slab key; %v", err)
 		} else {
 			objects = res.Objects
 		}
