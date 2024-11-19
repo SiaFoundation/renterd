@@ -14,7 +14,7 @@ func TestDownloaderStopped(t *testing.T) {
 	dm := w.downloadManager
 	h := hosts[0]
 
-	dm.refreshDownloaders(w.Contracts())
+	dm.refreshDownloaders(w.UsableHosts())
 	dl := w.downloadManager.downloaders[h.PublicKey()]
 	dl.Stop()
 

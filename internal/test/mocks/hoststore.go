@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -46,6 +47,25 @@ func (hs *HostStore) RecordContractSpending(ctx context.Context, records []api.C
 	return nil
 }
 
+func (hs *HostStore) UsableHosts(ctx context.Context) (hosts []api.HostInfo, _ error) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+
+	for _, h := range hs.hosts {
+		host, _, err := net.SplitHostPort(h.hi.NetAddress)
+		if err != nil || host == "" {
+			continue
+		}
+
+		hosts = append(hosts, api.HostInfo{
+			PublicKey:  h.hk,
+			SiamuxAddr: net.JoinHostPort(host, h.hi.Settings.SiaMuxPort),
+		})
+	}
+
+	return
+}
+
 func (hs *HostStore) AddHost() *Host {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
@@ -64,6 +84,10 @@ func NewHostManager() *HostManager {
 	return &HostManager{
 		HostStore: *NewHostStore(),
 	}
+}
+
+func (hm *HostManager) Downloader(hk types.PublicKey, siamuxAddr string) host.Downloader {
+	return NewHost(hk)
 }
 
 func (hm *HostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {

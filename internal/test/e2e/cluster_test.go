@@ -2631,13 +2631,9 @@ func TestDownloadAllHosts(t *testing.T) {
 		t.SkipNow()
 	}
 
-	// get rid of redundancy
-	rs := test.RedundancySettings
-	rs.MinShards = rs.TotalShards
-
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         rs.TotalShards,
+		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: false, // make sure data is uploaded
 	})
 	defer cluster.Shutdown()
@@ -2645,12 +2641,6 @@ func TestDownloadAllHosts(t *testing.T) {
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
-
-	// update redundancy settings
-	us, err := b.UploadSettings(context.Background())
-	tt.OK(err)
-	us.Redundancy = rs
-	tt.OK(b.UpdateUploadSettings(context.Background(), us))
 
 	// prepare a file
 	data := make([]byte, 128)
@@ -2673,7 +2663,7 @@ func TestDownloadAllHosts(t *testing.T) {
 			}
 		}
 	}
-	if len(usedHosts) != rs.TotalShards {
+	if len(usedHosts) != test.RedundancySettings.TotalShards {
 		t.Fatalf("unexpected number of used hosts %d", len(usedHosts))
 	}
 

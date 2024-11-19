@@ -62,7 +62,7 @@ func TestUpload(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -71,17 +71,23 @@ func TestUpload(t *testing.T) {
 
 	// filter contracts to have (at most) min shards used contracts
 	var n int
-	var filtered []api.ContractMetadata
+	var filtered []api.HostInfo
 	for _, md := range w.Contracts() {
 		// add unused contracts
 		if _, used := used[md.HostKey]; !used {
-			filtered = append(filtered, md)
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  md.HostKey,
+				SiamuxAddr: md.SiamuxAddr,
+			})
 			continue
 		}
 
 		// add min shards used contracts
 		if n < int(params.rs.MinShards) {
-			filtered = append(filtered, md)
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  md.HostKey,
+				SiamuxAddr: md.SiamuxAddr,
+			})
 			n++
 		}
 	}
@@ -96,8 +102,8 @@ func TestUpload(t *testing.T) {
 	}
 
 	// filter out one contract - expect download to fail
-	for i, md := range filtered {
-		if _, used := used[md.HostKey]; used {
+	for i, h := range filtered {
+		if _, used := used[h.PublicKey]; used {
 			filtered = append(filtered[:i], filtered[i+1:]...)
 			break
 		}
@@ -167,7 +173,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -203,7 +209,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -320,7 +326,7 @@ func TestMigrateLostSector(t *testing.T) {
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +442,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,16 +505,19 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// create download contracts
-	contracts = contracts[:0]
+	var hosts []api.HostInfo
 	for _, c := range w.Contracts() {
 		if _, bad := badHosts[c.HostKey]; !bad {
-			contracts = append(contracts, c)
+			hosts = append(hosts, api.HostInfo{
+				PublicKey:  c.HostKey,
+				SiamuxAddr: c.SiamuxAddr,
+			})
 		}
 	}
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), contracts)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), hosts)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -632,7 +641,7 @@ func TestUploadRegression(t *testing.T) {
 
 	// download data for good measure
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {

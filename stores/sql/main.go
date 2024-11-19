@@ -2250,7 +2250,7 @@ EXISTS (
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id and hc.db_autopilot_id = ?
 	WHERE %s
-	GROUP by h.id`, strings.Join(whereExprs, "AND")), autopilotID, autopilotID)
+	GROUP by h.id`, strings.Join(whereExprs, " AND ")), autopilotID, autopilotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
