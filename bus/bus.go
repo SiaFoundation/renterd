@@ -275,20 +275,16 @@ type (
 
 	// A MetricsStore stores metrics.
 	MetricsStore interface {
-		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
-
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
 		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
-		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
-		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
-		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
+
+		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
 	}
 
 	// A SettingStore stores settings.

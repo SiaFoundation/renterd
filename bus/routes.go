@@ -2104,29 +2104,19 @@ func (b *Bus) metricsHandlerPUT(jc jape.Context) {
 	jc.Custom((*interface{})(nil), nil)
 
 	key := jc.PathParam("key")
-	switch key {
-	case api.MetricContractPrune:
-		// TODO: jape hack - remove once jape can handle decoding multiple different request types
-		var req api.ContractPruneMetricRequestPUT
-		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
-			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
-			return
-		} else if jc.Check("failed to record contract prune metric", b.store.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
-	case api.MetricContractSetChurn:
-		// TODO: jape hack - remove once jape can handle decoding multiple different request types
-		var req api.ContractSetChurnMetricRequestPUT
-		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
-			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
-			return
-		} else if jc.Check("failed to record contract churn metric", b.store.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
-	default:
+	if key != api.MetricContractPrune {
 		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
 		return
 	}
+
+	// TODO: jape hack - remove once jape can handle decoding multiple different request types
+	var req api.ContractPruneMetricRequestPUT
+	if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to record contract prune metric", b.store.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...))
 }
 
 func (b *Bus) metricsHandlerGET(jc jape.Context) {
@@ -2182,22 +2172,6 @@ func (b *Bus) metricsHandlerGET(jc jape.Context) {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
-	case api.MetricContractSet:
-		var opts api.ContractSetMetricsQueryOpts
-		if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		}
-		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
-	case api.MetricContractSetChurn:
-		var opts api.ContractSetChurnMetricsQueryOpts
-		if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		} else if jc.DecodeForm("direction", &opts.Direction) != nil {
-			return
-		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
-			return
-		}
-		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricWallet:
 		var opts api.WalletMetricsQueryOpts
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
@@ -2220,10 +2194,6 @@ func (b *Bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 		return b.store.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
 	case api.MetricContractPrune:
 		return b.store.ContractPruneMetrics(ctx, start, n, interval, opts.(api.ContractPruneMetricsQueryOpts))
-	case api.MetricContractSet:
-		return b.store.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
-	case api.MetricContractSetChurn:
-		return b.store.ContractSetChurnMetrics(ctx, start, n, interval, opts.(api.ContractSetChurnMetricsQueryOpts))
 	case api.MetricWallet:
 		return b.store.WalletMetrics(ctx, start, n, interval, opts.(api.WalletMetricsQueryOpts))
 	}

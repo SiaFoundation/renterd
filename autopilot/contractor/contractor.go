@@ -89,7 +89,6 @@ type Bus interface {
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
-	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
 	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
 }
@@ -544,7 +543,7 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	return "", false
 }
 
-func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, logger *zap.SugaredLogger, oldSet, newSet []api.ContractMetadata, toStopUsing map[types.FileContractID]string) (bool, error) {
+func computeChangeSet(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, logger *zap.SugaredLogger, oldSet, newSet []api.ContractMetadata, toStopUsing map[types.FileContractID]string) (bool, error) {
 	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch all contracts: %w", err)
@@ -625,29 +624,6 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	logFn := logger.Infow
 	if len(newSet) < int(ctx.state.RS.TotalShards) {
 		logFn = logger.Warnw
-	}
-
-	// record churn metrics
-	var metrics []api.ContractSetChurnMetric
-	for fcid := range setAdditions {
-		metrics = append(metrics, api.ContractSetChurnMetric{
-			ContractID: fcid,
-			Direction:  api.ChurnDirAdded,
-			Timestamp:  now,
-		})
-	}
-	for fcid, removal := range setRemovals {
-		metrics = append(metrics, api.ContractSetChurnMetric{
-			ContractID: fcid,
-			Direction:  api.ChurnDirRemoved,
-			Reason:     removal.Removals[0].Reason,
-			Timestamp:  now,
-		})
-	}
-	if len(metrics) > 0 {
-		if err := bus.RecordContractSetChurnMetric(ctx, metrics...); err != nil {
-			logger.Error("failed to record contract set churn metric:", err)
-		}
 	}
 
 	// log the contract set after maintenance
@@ -1249,7 +1225,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	}
 
 	// STEP 6: log changes and register alerts
-	return computeContractSetChanged(ctx, alerter, bus, churn, logger, oldSet, newSet, churnReasons)
+	return computeChangeSet(ctx, alerter, bus, churn, logger, oldSet, newSet, churnReasons)
 }
 
 func updateContractSet(ctx *mCtx, bus Bus, oldSet, newSet []api.ContractMetadata) error {

@@ -384,14 +384,6 @@ type (
 		// time range and options.
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
 
-		// ContractSetChurnMetrics returns the contract set churn metrics for
-		// the given time range and options.
-		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
-
-		// ContractSetMetrics returns the contract set metrics for the given
-		// time range and options.
-		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
-
 		// PruneMetrics deletes metrics of a certain type older than the given
 		// cutoff time.
 		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
@@ -401,12 +393,6 @@ type (
 
 		// RecordContractPruneMetric records contract prune metrics.
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
-
-		// RecordContractSetChurnMetric records contract set churn metrics.
-		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-
-		// RecordContractSetMetric records contract set metrics.
-		RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error
 
 		// RecordWalletMetric records wallet metrics.
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error

@@ -534,6 +534,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_contract_spending", log)
 				},
 			},
+			{
+				ID: "00005_remove_contract_sets",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00005_remove_contract_sets", log)
+				},
+			},
 		}
 	}
 )

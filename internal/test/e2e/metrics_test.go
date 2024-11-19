@@ -15,8 +15,6 @@ import (
 )
 
 func TestMetrics(t *testing.T) {
-	t.Skip("re-enable when metrics concerning contractsets are refactored")
-
 	// register start time
 	start := time.Now()
 
@@ -61,20 +59,6 @@ func TestMetrics(t *testing.T) {
 		tt.OK(err)
 		if len(cpm) == 0 {
 			return errors.New("no contract prune metrics")
-		}
-
-		// check contract set metrics
-		csm, err := b.ContractSetMetrics(context.Background(), start, 10, time.Minute, api.ContractSetMetricsQueryOpts{})
-		tt.OK(err)
-		if len(csm) == 0 {
-			return errors.New("no contract set metrics")
-		}
-
-		// check contract set metrics
-		cscm, err := b.ContractSetChurnMetrics(context.Background(), start, 10, time.Minute, api.ContractSetChurnMetricsQueryOpts{})
-		tt.OK(err)
-		if len(cscm) == 0 {
-			return errors.New("no contract set churn metrics")
 		}
 
 		// check wallet metrics

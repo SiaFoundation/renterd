@@ -2263,45 +2263,14 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 }
 
 func TestBusRecordedMetrics(t *testing.T) {
-	t.Skip("re-enable when metrics concerning contractsets are refactored")
-
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
 
 	startTime := time.Now().UTC().Round(time.Second)
 
-	// fetch contract set metrics
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
-		csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-		cluster.tt.OK(err)
-
-		// expect at least 1 metric with contracts
-		if len(csMetrics) < 1 {
-			return fmt.Errorf("expected at least 1 metric, got %v", len(csMetrics))
-		} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
-			return fmt.Errorf("expected 1 contract, got %v", m.Contracts)
-		} else if m.Timestamp.Std().Before(startTime) {
-			return fmt.Errorf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-		}
-		return nil
-	})
-
-	// get churn metrics, should have 1 for the new contract
-	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetChurnMetricsQueryOpts{})
-	cluster.tt.OK(err)
-	if len(cscMetrics) != 1 {
-		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
-	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
-		t.Fatalf("expected added churn, got %v", m.Direction)
-	} else if m.ContractID == (types.FileContractID{}) {
-		t.Fatal("expected non-zero FCID")
-	} else if m.Timestamp.Std().Before(startTime) {
-		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-	}
-
 	// get contract metrics
 	var cMetrics []api.ContractMetric
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+	cluster.tt.Retry(100, 100*time.Millisecond, func() (err error) {
 		// Retry fetching metrics since they are buffered.
 		cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{})
 		cluster.tt.OK(err)
@@ -2341,7 +2310,7 @@ func TestBusRecordedMetrics(t *testing.T) {
 	} else if cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
 		t.Fatal(err)
 	} else if len(cMetrics) > 0 {
-		t.Fatalf("expected 0 metrics, got %v", len(cscMetrics))
+		t.Fatalf("expected 0 metrics, got %v", len(cMetrics))
 	}
 }
 
