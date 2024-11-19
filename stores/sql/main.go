@@ -148,7 +148,7 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 		)
 		SELECT
 			c.fcid, c.host_id, c.host_key, c.v2,
-			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
+			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 			c.contract_price, c.initial_renter_funds,
 			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
 			"", COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
@@ -1776,7 +1776,7 @@ func QueryContracts(ctx context.Context, tx sql.Tx, whereExprs []string, whereAr
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 SELECT
 	c.fcid, c.host_id, c.host_key, c.v2,
-	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.window_start, c.window_end,
+	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
 	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
 	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
@@ -2025,7 +2025,12 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, c
 	var state ContractState
 	if err := state.LoadString(c.State); err != nil {
 		return err
-	} else if c.ID == (types.FileContractID{}) {
+	}
+	var usability ContractUsability
+	if err := usability.LoadString(c.Usability); err != nil {
+		return err
+	}
+	if c.ID == (types.FileContractID{}) {
 		return errors.New("contract id is required")
 	} else if c.HostKey == (types.PublicKey{}) {
 		return errors.New("host key is required")
@@ -2035,12 +2040,12 @@ func UpdateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, c
 	_, err := tx.Exec(ctx, `
 UPDATE contracts SET
 	created_at = ?, fcid = ?,
-	proof_height = ?, renewed_from = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, window_start = ?, window_end = ?,
+	proof_height = ?, renewed_from = ?, revision_height = ?, revision_number = ?, size = ?, start_height = ?, state = ?, usability = ?, window_start = ?, window_end = ?,
 	contract_price = ?, initial_renter_funds = ?,
 	delete_spending = ?, fund_account_spending = ?, sector_roots_spending = ?, upload_spending = ?
 WHERE fcid = ?`,
 		time.Now(), FileContractID(c.ID),
-		0, FileContractID(c.RenewedFrom), 0, fmt.Sprint(c.RevisionNumber), c.Size, c.StartHeight, state, c.WindowStart, c.WindowEnd,
+		0, FileContractID(c.RenewedFrom), 0, fmt.Sprint(c.RevisionNumber), c.Size, c.StartHeight, state, usability, c.WindowStart, c.WindowEnd,
 		Currency(c.ContractPrice), Currency(c.InitialRenterFunds),
 		ZeroCurrency, ZeroCurrency, ZeroCurrency, ZeroCurrency,
 		FileContractID(c.RenewedFrom),

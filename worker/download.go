@@ -170,7 +170,7 @@ func newDownloadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host
 	}
 }
 
-func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, contracts []api.ContractMetadata) (err error) {
+func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, hosts []api.HostInfo) (err error) {
 	// calculate what slabs we need
 	var ss []slabSlice
 	for _, s := range o.Slabs {
@@ -202,12 +202,12 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 	}
 
 	// refresh the downloaders
-	mgr.refreshDownloaders(contracts)
+	mgr.refreshDownloaders(hosts)
 
-	// build a map to count available shards later
-	hosts := make(map[types.PublicKey]struct{})
-	for _, c := range contracts {
-		hosts[c.HostKey] = struct{}{}
+	// map available hosts
+	available := make(map[types.PublicKey]struct{})
+	for _, h := range hosts {
+		available[h.PublicKey] = struct{}{}
 	}
 
 	// create the cipher writer
@@ -265,14 +265,14 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 			}
 
 			// check if we have enough downloaders
-			var available uint8
+			var numAvailable uint8
 			for _, s := range next.Shards {
-				if isSectorAvailable(s, hosts) {
-					available++
+				if isSectorAvailable(s, available) {
+					numAvailable++
 				}
 			}
-			if available < next.MinShards {
-				responseChan <- &slabDownloadResponse{err: fmt.Errorf("%w: %v/%v", errDownloadNotEnoughHosts, available, next.MinShards)}
+			if numAvailable < next.MinShards {
+				responseChan <- &slabDownloadResponse{err: fmt.Errorf("%w: %v/%v", errDownloadNotEnoughHosts, numAvailable, next.MinShards)}
 				return
 			}
 
@@ -376,14 +376,14 @@ outer:
 	return nil
 }
 
-func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, contracts []api.ContractMetadata) ([][]byte, bool, error) {
+func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, hosts []api.HostInfo) ([][]byte, bool, error) {
 	// refresh the downloaders
-	mgr.refreshDownloaders(contracts)
+	mgr.refreshDownloaders(hosts)
 
-	// grab available hosts
+	// map available hosts
 	available := make(map[types.PublicKey]struct{})
-	for _, c := range contracts {
-		available[c.HostKey] = struct{}{}
+	for _, h := range hosts {
+		available[h.PublicKey] = struct{}{}
 	}
 
 	// count how many shards we can download (best-case)
@@ -489,14 +489,14 @@ func (mgr *downloadManager) fetchPartialSlab(ctx context.Context, key object.Enc
 	return data, nil, nil
 }
 
-func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata) {
+func (mgr *downloadManager) refreshDownloaders(hosts []api.HostInfo) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	// build map
-	want := make(map[types.PublicKey]api.ContractMetadata)
-	for _, c := range contracts {
-		want[c.HostKey] = c
+	want := make(map[types.PublicKey]string)
+	for _, h := range hosts {
+		want[h.PublicKey] = h.SiamuxAddr
 	}
 
 	// prune downloaders
@@ -512,12 +512,9 @@ func (mgr *downloadManager) refreshDownloaders(contracts []api.ContractMetadata)
 	}
 
 	// update downloaders
-	for _, c := range want {
-		// create a host
-		host := mgr.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
-		downloader := newDownloader(mgr.shutdownCtx, host)
-		mgr.downloaders[c.HostKey] = downloader
-		go downloader.processQueue()
+	for hk, siamuxAddr := range want {
+		mgr.downloaders[hk] = newDownloader(mgr.shutdownCtx, mgr.hm.Downloader(hk, siamuxAddr))
+		go mgr.downloaders[hk].processQueue()
 	}
 }
 

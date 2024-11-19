@@ -45,7 +45,7 @@ func (b *mockAccountMgrBackend) UpdateAccounts(context.Context, []api.Account) e
 func (b *mockAccountMgrBackend) ConsensusState(ctx context.Context) (api.ConsensusState, error) {
 	return api.ConsensusState{}, nil
 }
-func (b *mockAccountMgrBackend) DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error) {
+func (b *mockAccountMgrBackend) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return nil, nil
 }
 

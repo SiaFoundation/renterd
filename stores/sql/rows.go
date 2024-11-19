@@ -26,6 +26,7 @@ type ContractRow struct {
 	Size           uint64
 	StartHeight    uint64
 	State          ContractState
+	Usability      ContractUsability
 	WindowStart    uint64
 	WindowEnd      uint64
 
@@ -48,7 +49,7 @@ type ContractRow struct {
 func (r *ContractRow) Scan(s Scanner) error {
 	return s.Scan(
 		&r.FCID, &r.HostID, &r.HostKey, &r.V2,
-		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.WindowStart, &r.WindowEnd,
+		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.Usability, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
 		&r.ContractSet, &r.NetAddress, &r.SiamuxPort,
@@ -97,6 +98,7 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 		Spending:       spending,
 		StartHeight:    r.StartHeight,
 		State:          r.State.String(),
+		Usability:      r.Usability.String(),
 		WindowStart:    r.WindowStart,
 		WindowEnd:      r.WindowEnd,
 	}

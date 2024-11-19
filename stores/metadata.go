@@ -124,6 +124,7 @@ func (s *SQLStore) AddRenewal(ctx context.Context, c api.ContractMetadata) error
 		// reinsert renewed contract
 		renewed.ArchivalReason = api.ContractArchivalReasonRenewed
 		renewed.RenewedTo = c.ID
+		renewed.Usability = api.ContractUsabilityBad
 		return tx.PutContract(ctx, renewed)
 	})
 }
