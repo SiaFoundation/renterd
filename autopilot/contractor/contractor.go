@@ -72,6 +72,7 @@ const (
 
 var (
 	InitialContractFunding = types.Siacoins(10)
+	MinCollateral          = types.Siacoins(2)
 )
 
 type Bus interface {
@@ -100,7 +101,7 @@ type HostScanner interface {
 }
 
 type contractChecker interface {
-	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string)
+	isUsableContract(cfg api.AutopilotConfig, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string)
 	pruneContractRefreshFailures(contracts []api.ContractMetadata)
 	shouldArchive(c contract, bh uint64, network consensus.Network) error
 }
@@ -265,7 +266,6 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 
 	// convenience variables
-	settings := host.Settings
 	pt := host.PriceTable.HostPriceTable
 	fcid := contract.ID
 	hk := contract.HostKey
@@ -279,7 +279,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 
 	// calculate the renter funds
 	var renterFunds types.Currency
-	if isOutOfFunds(ctx.AutopilotConfig(), pt, contract) {
+	if contract.IsOutOfFunds() {
 		renterFunds = c.refreshFundingEstimate(contract, logger)
 	} else {
 		renterFunds = rev.RenterOutput.Value // don't increase funds
@@ -289,7 +289,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	unallocatedCollateral := contract.RemainingCollateral()
 
 	// a refresh should always result in a contract that has enough collateral
-	minNewCollateral := minRemainingCollateral(ctx.AutopilotConfig(), ctx.state.RS, renterFunds, settings, pt).Mul64(2)
+	minNewCollateral := MinCollateral.Mul64(2)
 
 	// renew the contract
 	renewal, err := c.bus.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral, expectedNewStorage)
@@ -954,7 +954,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// check if contract is usable
-		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, inSet, bh, ipFilter)
+		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), c, inSet, bh, ipFilter)
 
 		// extend logger
 		logger = logger.With("usable", usable).
