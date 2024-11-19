@@ -504,9 +504,9 @@ func (s *SQLStore) RefreshHealth(ctx context.Context) error {
 	}
 }
 
-// UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy
-// in the given contract set. These slabs need to be migrated to good contracts
-// so they are restored to full health.
+// UnhealthySlabs returns up to 'limit' slabs that do not reach full redundancy.
+// These slabs need to be migrated to good contracts so they are restored to
+// full health.
 func (s *SQLStore) UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) (slabs []api.UnhealthySlab, err error) {
 	if limit <= -1 {
 		limit = math.MaxInt

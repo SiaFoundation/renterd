@@ -40,6 +40,7 @@ func TestMetrics(t *testing.T) {
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "foo", api.DownloadObjectOptions{}))
 	tt.OK(w.DeleteObject(context.Background(), testBucket, "foo"))
 
+	// assert we have various  metrics
 	tt.Retry(30, time.Second, func() (err error) {
 		defer func() {
 			if err != nil {
@@ -69,4 +70,13 @@ func TestMetrics(t *testing.T) {
 		}
 		return nil
 	})
+
+	// assert pruning works
+	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
+		t.Fatal(err)
+	} else if cMetrics, err := cluster.Bus.ContractMetrics(context.Background(), start, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(cMetrics) > 0 {
+		t.Fatalf("expected 0 metrics, got %v", len(cMetrics))
+	}
 }

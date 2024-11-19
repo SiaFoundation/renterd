@@ -1075,7 +1075,7 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal("wrong health", entries[0].Health)
 	}
 
-	// update contract set again to make sure the 2nd slab has even worse health
+	// update contract usability again to make sure the 2nd slab has even worse health
 	if err := ss.UpdateContractUsability(context.Background(), fcids[4], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
@@ -3723,7 +3723,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	assertHealthValid(s2, false)
 	refreshHealth(s1, s2) // reset
 
-	// switch out the contract set with two new contracts
+	// switch out the usabe contracts
 	if err := ss.UpdateContractUsability(context.Background(), fcids[0], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	} else if err := ss.UpdateContractUsability(context.Background(), fcids[1], api.ContractUsabilityBad); err != nil {
@@ -3739,7 +3739,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	assertHealthValid(s2, false)
 	refreshHealth(s1, s2) // reset
 
-	// assert there are 2 contracts in the contract set
+	// assert there are 2 good contracts
 	good, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		t.Fatal(err)

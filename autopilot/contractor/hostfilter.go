@@ -99,8 +99,8 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 }
 
 // isUsableContract returns whether the given contract is
-// - usable -> can be used in the contract set
-// - recoverable -> can be usable in the contract set if it is refreshed/renewed
+// - usable -> can be used
+// - recoverable -> can be usable if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
 func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {

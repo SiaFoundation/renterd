@@ -2262,58 +2262,6 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 }
 
-func TestBusRecordedMetrics(t *testing.T) {
-	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
-	defer cluster.Shutdown()
-
-	startTime := time.Now().UTC().Round(time.Second)
-
-	// get contract metrics
-	var cMetrics []api.ContractMetric
-	cluster.tt.Retry(100, 100*time.Millisecond, func() (err error) {
-		// Retry fetching metrics since they are buffered.
-		cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{})
-		cluster.tt.OK(err)
-		if len(cMetrics) != 1 {
-			return fmt.Errorf("expected 1 metric, got %v", len(cMetrics))
-		}
-		return nil
-	})
-
-	if len(cMetrics) != 1 {
-		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
-	} else if m := cMetrics[0]; m.Timestamp.Std().Before(startTime) {
-		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-	} else if m.ContractID != (types.FileContractID{}) {
-		t.Fatal("expected zero FCID")
-	} else if m.HostKey != (types.PublicKey{}) {
-		t.Fatal("expected zero Host")
-	} else if m.RemainingCollateral == (types.Currency{}) {
-		t.Fatal("expected non-zero RemainingCollateral")
-	} else if m.RemainingFunds == (types.Currency{}) {
-		t.Fatal("expected non-zero RemainingFunds")
-	} else if m.RevisionNumber != 0 {
-		t.Fatal("expected zero RevisionNumber")
-	} else if !m.UploadSpending.IsZero() {
-		t.Fatal("expected zero UploadSpending")
-	} else if m.FundAccountSpending == (types.Currency{}) {
-		t.Fatal("expected non-zero FundAccountSpending")
-	} else if !m.DeleteSpending.IsZero() {
-		t.Fatal("expected zero DeleteSpending")
-	} else if !m.SectorRootsSpending.IsZero() {
-		t.Fatal("expected zero SectorRootsSpending")
-	}
-
-	// prune one of the metrics
-	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
-		t.Fatal(err)
-	} else if cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
-		t.Fatal(err)
-	} else if len(cMetrics) > 0 {
-		t.Fatalf("expected 0 metrics, got %v", len(cMetrics))
-	}
-}
-
 func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,

@@ -256,7 +256,7 @@ func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, in
 			(*Unsigned64)(&m.Immature.Lo), (*Unsigned64)(&m.Immature.Hi),
 		)
 		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			err = fmt.Errorf("failed to scan wallet metric: %w", err)
 			return
 		}
 		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))

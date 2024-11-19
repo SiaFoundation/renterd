@@ -55,9 +55,9 @@ func TestGouging(t *testing.T) {
 		hostsMap[h.PublicKey().String()] = h
 	}
 
-	// upload and download some data, asserting we have a working contract set
+	// generate random data
 	data := make([]byte, rhpv2.SectorSize/12)
-	tt.OKAll(frand.Read(data))
+	frand.Read(data)
 
 	// upload the data
 	path := fmt.Sprintf("data_%v", len(data))
