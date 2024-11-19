@@ -88,6 +88,7 @@ CREATE TABLE `contracts` (
   `size` bigint unsigned DEFAULT NULL,
   `start_height` bigint unsigned NOT NULL,
   `state` tinyint unsigned NOT NULL DEFAULT '0',
+  `usability` tinyint unsigned NOT NULL,
   `window_start` bigint unsigned NOT NULL DEFAULT '0',
   `window_end` bigint unsigned NOT NULL DEFAULT '0',
 
@@ -110,6 +111,7 @@ CREATE TABLE `contracts` (
   KEY `idx_contracts_revision_height` (`revision_height`),
   KEY `idx_contracts_start_height` (`start_height`),
   KEY `idx_contracts_state` (`state`),
+  KEY `idx_contracts_usability` (`usability`),
   KEY `idx_contracts_window_start` (`window_start`),
   KEY `idx_contracts_window_end` (`window_end`),
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)

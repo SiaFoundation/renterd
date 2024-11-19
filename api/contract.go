@@ -17,6 +17,11 @@ const (
 )
 
 const (
+	ContractUsabilityBad  = "bad"
+	ContractUsabilityGood = "good"
+)
+
+const (
 	ContractArchivalReasonHostPruned = "hostpruned"
 	ContractArchivalReasonRemoved    = "removed"
 	ContractArchivalReasonRenewed    = "renewed"
@@ -55,6 +60,7 @@ type (
 		Size           uint64               `json:"size"`
 		StartHeight    uint64               `json:"startHeight"`
 		State          string               `json:"state"`
+		Usability      string               `json:"usability"`
 		WindowStart    uint64               `json:"windowStart"`
 		WindowEnd      uint64               `json:"windowEnd"`
 

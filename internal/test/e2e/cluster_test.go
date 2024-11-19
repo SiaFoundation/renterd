@@ -204,6 +204,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
+	} else if contract.Usability != api.ContractUsabilityGood {
+		t.Fatal("contract should be good")
 	}
 
 	// Wait for contract set to form
@@ -233,6 +235,9 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		if contracts[0].State != api.ContractStatePending {
 			return fmt.Errorf("contract should be pending but was %v", contracts[0].State)
+		}
+		if contracts[0].Usability != api.ContractUsabilityGood {
+			return fmt.Errorf("contract should be good but was %v", contracts[0].Usability)
 		}
 		renewalID = contracts[0].ID
 		return nil
@@ -266,6 +271,9 @@ func TestNewTestCluster(t *testing.T) {
 		}
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
+		}
+		if ac.Usability != api.ContractUsabilityBad {
+			return fmt.Errorf("contract should be bad but was %v", ac.Usability)
 		}
 		return nil
 	})
@@ -1474,6 +1482,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 		HostKey:            c.HostKey,
 		StartHeight:        cs.BlockHeight,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityGood,
 		WindowStart:        math.MaxUint32,
 		WindowEnd:          math.MaxUint32 + 10,
 		ContractPrice:      types.NewCurrency64(1),
