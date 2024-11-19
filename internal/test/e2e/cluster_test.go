@@ -1543,7 +1543,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 				WindowStart:    math.MaxUint32,
 				WindowEnd:      math.MaxUint32 + 10,
 				Payout:         types.ZeroCurrency,
-				UnlockHash:     types.Hash256{},
+				UnlockHash:     types.Address{},
 				RevisionNumber: 0,
 			},
 		},

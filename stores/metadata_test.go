@@ -409,7 +409,7 @@ func TestSQLContractStore(t *testing.T) {
 						Address: types.Address{2, 3, 2},
 					},
 				},
-				UnlockHash: types.Hash256{6, 6, 6},
+				UnlockHash: types.Address{6, 6, 6},
 			},
 		},
 		Signatures: [2]types.TransactionSignature{
@@ -1028,7 +1028,7 @@ func testContractRevision(fcid types.FileContractID, hk types.PublicKey) rhpv2.C
 						Address: types.Address{2, 3, 2},
 					},
 				},
-				UnlockHash: types.Hash256{6, 6, 6},
+				UnlockHash: types.Address{6, 6, 6},
 			},
 		},
 		Signatures: [2]types.TransactionSignature{
