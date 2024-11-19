@@ -36,22 +36,17 @@ func init() {
 	}
 }
 
-func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
+func AddressesToSubnets(resolvedAddresses []net.IPAddr) ([]string, error) {
 	var subnets []string
 	for _, addr := range resolvedAddresses {
-		parsed := net.ParseIP(addr)
-		if parsed == nil {
-			return nil, fmt.Errorf("failed to parse address: %s", addr)
-		}
-
 		// figure out the IP range
 		ipRange := ipv6FilterRange
-		if parsed.To4() != nil {
+		if addr.IP.To4() != nil {
 			ipRange = ipv4FilterRange
 		}
 
 		// parse the subnet
-		cidr := fmt.Sprintf("%s/%d", parsed.String(), ipRange)
+		cidr := fmt.Sprintf("%s/%d", addr.IP.String(), ipRange)
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse cidr: %w", err)
@@ -63,17 +58,25 @@ func AddressesToSubnets(resolvedAddresses []string) ([]string, error) {
 	return subnets, nil
 }
 
-func ResolveHostIPs(ctx context.Context, hostIPs []string) (ips []string, private bool, _ error) {
+func PerformHostIPChecks(hostIPs []net.IPAddr) error {
+	// filter out hosts associated with more than two addresses or two of the same type
+	if len(hostIPs) > 2 || (len(hostIPs) == 2) && (len(hostIPs[0].IP.String()) == len(hostIPs[1].IP.String())) {
+		return fmt.Errorf("%w: %+v", ErrHostTooManyAddresses, hostIPs)
+	}
+	return nil
+}
+
+func ResolveHostIPs(ctx context.Context, hostIPs []string) ([]net.IPAddr, error) {
 	// resolve host addresses and deduplicate IPs
 	addrMap := make(map[string]net.IPAddr)
 	for _, hostIP := range hostIPs {
 		host, _, err := net.SplitHostPort(hostIP)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		ips, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		for _, ip := range ips {
 			addrMap[ip.String()] = ip
@@ -83,28 +86,14 @@ func ResolveHostIPs(ctx context.Context, hostIPs []string) (ips []string, privat
 	for _, addr := range addrMap {
 		addrs = append(addrs, addr)
 	}
-
-	// filter out hosts associated with more than two addresses or two of the same type
-	if len(addrs) > 2 || (len(addrs) == 2) && (len(addrs[0].IP.String()) == len(addrs[1].IP.String())) {
-		return nil, false, fmt.Errorf("%w: %+v", ErrHostTooManyAddresses, addrs)
-	}
-
-	// get ips
-	for _, address := range addrs {
-		private = private || isPrivateIP(address.IP)
-
-		// add it
-		ips = append(ips, address.IP.String())
-	}
-
-	// sort the ips
-	sort.Slice(ips, func(i, j int) bool {
-		return ips[i] < ips[j]
+	// sort IPs
+	sort.Slice(addrs, func(i, j int) bool {
+		return addrs[i].IP.String() < addrs[j].IP.String()
 	})
-	return
+	return addrs, nil
 }
 
-func isPrivateIP(addr net.IP) bool {
+func IsPrivateIP(addr net.IP) bool {
 	if addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
 		return true
 	}
