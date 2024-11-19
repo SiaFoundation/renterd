@@ -519,7 +519,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, s object.Slab, contra
 						if _, exists := existingContracts[fcid]; exists {
 							continue
 						}
-						shards[sI].Contracts[hk] = append(shards[sI].Contracts[hk], fcids...)
+						shards[sI].Contracts[hk] = append(shards[sI].Contracts[hk], fcid)
 					}
 				}
 			}
