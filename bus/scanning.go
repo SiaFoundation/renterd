@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -19,7 +18,7 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 		With("host", hostKey).
 		With("hostIP", hostIP).
 		With("timeout", timeout).
-		With("version", "v2")
+		With("version", "v1")
 
 	// prepare a helper to create a context for scanning
 	timeoutCtx := func() (context.Context, context.CancelFunc) {
@@ -52,11 +51,8 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type
-	_, private, err := utils.ResolveHostIPs(ctx, []string{hostIP})
-	if errors.Is(err, utils.ErrHostTooManyAddresses) {
+	if err := b.shouldScanAddr(hostIP); err != nil {
 		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-	} else if private && !b.allowPrivateIPs {
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
 	}
 
 	// scan: first try
@@ -140,11 +136,8 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type
-	_, private, err := utils.ResolveHostIPs(ctx, []string{hostIP})
-	if errors.Is(err, utils.ErrHostTooManyAddresses) {
+	if err := b.shouldScanAddr(hostIP); err != nil {
 		return rhpv4.HostSettings{}, 0, err
-	} else if private && !b.allowPrivateIPs {
-		return rhpv4.HostSettings{}, 0, api.ErrHostOnPrivateNetwork
 	}
 
 	// scan: first try
@@ -198,4 +191,24 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 	}
 	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
 	return settings, duration, err
+}
+
+// shouldScanAddr checks whether the provided addr should be scanned according
+// to the bus's configuration. A scanned address needs to:
+// - be resolvable
+// - pass the IP checks we enforce on hosts
+// - not be a private IP if the bus is configured to disallow private IPs
+func (b *Bus) shouldScanAddr(addr string) error {
+	resolved, err := utils.ResolveHostIPs(context.Background(), []string{addr})
+	if err != nil {
+		return err
+	} else if err := utils.PerformHostIPChecks(resolved); err != nil {
+		return err
+	}
+	for _, ipAddr := range resolved {
+		if utils.IsPrivateIP(ipAddr.IP) && !b.allowPrivateIPs {
+			return api.ErrHostOnPrivateNetwork
+		}
+	}
+	return nil
 }
