@@ -24,8 +24,8 @@ import (
 // database operations.
 //
 // cpu: Apple M1 Max
-// BenchmarkObjects/Objects-10         	    9920	    113301 ns/op	    6758 B/op	      97 allocs/op
-// BenchmarkObjects/RenameObjects-10   	   19507	     62000 ns/op	    3521 B/op	      81 allocs/op
+// BenchmarkObjects/ObjectEntries-10   	   11618	     102732 ns/op	     7074 B/op	     99 allocs/op
+// BenchmarkObjects/RenameObjects-10   	   12705         94236 ns/op         3506 B/op       81 allocs/op
 func BenchmarkObjects(b *testing.B) {
 	db, err := newTestDB(context.Background(), b.TempDir())
 	if err != nil {
