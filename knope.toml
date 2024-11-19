@@ -30,7 +30,7 @@ command = "git push --force --set-upstream origin release"
 
 [[workflows.steps]]
 type = "CreatePullRequest"
-base = "main"
+base = "master"
 
 [workflows.steps.title]
 template = "chore: prepare release $version"
