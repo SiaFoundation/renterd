@@ -362,7 +362,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 	return sizes, nil
 }
 
-func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata, dstDirID int64) (api.ObjectMetadata, error) {
+func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error) {
 	// stmt to fetch bucket id
 	bucketIDStmt, err := tx.Prepare(ctx, "SELECT id FROM buckets WHERE name = ?")
 	if err != nil {
@@ -420,10 +420,10 @@ func CopyObject(ctx context.Context, tx sql.Tx, srcBucket, dstBucket, srcKey, ds
 	}
 
 	// copy object
-	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
-						SELECT ?, ?, ?, ?, `+"`key`"+`, size, ?, etag
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_bucket_id,`+"`key`"+`, size, mime_type, etag)
+						SELECT ?, ?, ?, `+"`key`"+`, size, ?, etag
 						FROM objects
-						WHERE id = ?`, time.Now(), dstKey, dstDirID, dstBID, mimeType, srcObjID)
+						WHERE id = ?`, time.Now(), dstKey, dstBID, mimeType, srcObjID)
 	if err != nil {
 		return api.ObjectMetadata{}, fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -464,10 +464,6 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 		return fmt.Errorf("failed to check if bucket is empty: %w", err)
 	} else if !empty {
 		return api.ErrBucketNotEmpty
-	}
-	_, err = tx.Exec(ctx, "DELETE FROM directories WHERE db_bucket_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("failed to delete bucket: %w", err)
 	}
 	_, err = tx.Exec(ctx, "DELETE FROM buckets WHERE id = ?", id)
 	if err != nil {
@@ -801,12 +797,11 @@ func InsertMultipartUpload(ctx context.Context, tx sql.Tx, bucket, key string, e
 	return uploadID, nil
 }
 
-func InsertObject(ctx context.Context, tx sql.Tx, key string, dirID, bucketID, size int64, ec object.EncryptionKey, mimeType, eTag string) (int64, error) {
-	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_directory_id, db_bucket_id, `+"`key`"+`, size, mime_type, etag)
-						VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+func InsertObject(ctx context.Context, tx sql.Tx, key string, bucketID, size int64, ec object.EncryptionKey, mimeType, eTag string) (int64, error) {
+	res, err := tx.Exec(ctx, `INSERT INTO objects (created_at, object_id, db_bucket_id, `+"`key`"+`, size, mime_type, etag)
+						VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		time.Now(),
 		key,
-		dirID,
 		bucketID,
 		EncryptionKey(ec),
 		size,
@@ -1339,22 +1334,6 @@ func NormalizePeer(peer string) (string, error) {
 	return normalized.String(), nil
 }
 
-func dirID(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
-	if bucket == "" {
-		return 0, fmt.Errorf("bucket must be set")
-	} else if !strings.HasPrefix(path, "/") {
-		return 0, fmt.Errorf("path must start with /")
-	} else if !strings.HasSuffix(path, "/") {
-		return 0, fmt.Errorf("path must end with /")
-	}
-
-	var id int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM directories WHERE db_bucket_id = (SELECT id FROM buckets WHERE name = ?) AND name = ?", bucket, path).Scan(&id); err != nil {
-		return 0, fmt.Errorf("failed to fetch directory: %w", err)
-	}
-	return id, nil
-}
-
 func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error) {
 	// sanity check we are passing a directory
 	if !strings.HasSuffix(path, "/") {
@@ -1383,38 +1362,23 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 		sortDir = api.ObjectSortDirAsc
 	}
 
-	// fetch directory id
-	dirID, err := dirID(ctx, tx, bucket, path)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return []api.ObjectMetadata{}, false, nil
-	} else if err != nil {
-		return nil, false, fmt.Errorf("failed to fetch directory id: %w", err)
-	}
-
+	// add object query args
 	args := []any{
-		path,
-		dirID, bucket,
+		path + "%", utf8.RuneCountInString(path), path, // case-sensitive object_id LIKE
+		path,                             // exclude exact path
+		utf8.RuneCountInString(path) + 1, // exclude dirs
 	}
 
-	// apply prefix
-	var prefixExpr string
-	if prefix != "" {
-		prefixExpr = "AND SUBSTR(o.object_id, 1, ?) = ?"
-		args = append(args,
-			utf8.RuneCountInString(path+prefix), path+prefix,
-			utf8.RuneCountInString(path+prefix), path+prefix,
-		)
-	}
-
+	// add directory query args
 	args = append(args,
-		bucket,
-		path+"%",
-		utf8.RuneCountInString(path), path,
-		dirID,
+		utf8.RuneCountInString(path), utf8.RuneCountInString(path)+1,
+		path+"%", utf8.RuneCountInString(path), path, // case-sensitive object_id LIKE
+		utf8.RuneCountInString(path), utf8.RuneCountInString(path)+1, path,
+		utf8.RuneCountInString(path), utf8.RuneCountInString(path)+1,
 	)
 
 	// apply marker
-	var whereExpr string
+	var whereExprs []string
 	markerExprs, markerArgs, err := whereObjectMarker(marker, sortBy, sortDir, func(dst any, marker, col string) error {
 		var groupFn string
 		switch col {
@@ -1425,19 +1389,33 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 		default:
 			return fmt.Errorf("unknown column: %v", col)
 		}
+
+		markerExprsObj := []string{"o.object_id = ?"}
+		markerArgsObj := []any{marker}
+		if bucket != "" {
+			markerExprsObj = append(markerExprsObj, "b.name = ?")
+			markerArgsObj = append(markerArgsObj, bucket)
+		}
+
+		markerExprsDir := []string{"SUBSTR(o.object_id, 1, ?) = ?"}
+		markerArgsDir := []any{utf8.RuneCountInString(marker), marker}
+		if bucket != "" {
+			markerExprsDir = append(markerExprsDir, "b.name = ?")
+			markerArgsDir = append(markerArgsDir, bucket)
+		}
+
 		err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT o.%s
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			WHERE b.name = ? AND o.object_id = ?
+			WHERE %s
 			UNION ALL
 			SELECT %s(o.%s)
 			FROM objects o
 			INNER JOIN buckets b ON o.db_bucket_id = b.id
-			INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name
-			WHERE b.name = ? AND d.name = ?
-			GROUP BY d.id
-		`, col, groupFn, col, tx.CharLengthExpr()), bucket, marker, bucket, marker).Scan(dst)
+			WHERE %s
+			GROUP BY o.db_bucket_id
+		`, col, strings.Join(markerExprsObj, " AND "), groupFn, col, strings.Join(markerExprsDir, " AND ")), append(markerArgsObj, markerArgsDir...)...).Scan(dst)
 		if errors.Is(err, dsql.ErrNoRows) {
 			return api.ErrMarkerNotFound
 		} else {
@@ -1447,9 +1425,23 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to query marker: %w", err)
 	} else if len(markerExprs) > 0 {
-		whereExpr = "WHERE " + strings.Join(markerExprs, " AND ")
+		whereExprs = append(whereExprs, markerExprs...)
 	}
 	args = append(args, markerArgs...)
+
+	// apply bucket
+	if bucket != "" {
+		whereExprs = append(whereExprs, "b.name = ?")
+		args = append(args, bucket)
+	}
+
+	// apply prefix
+	if prefix != "" {
+		whereExprs = append(whereExprs, "SUBSTR(object_id, 1, ?) = ?")
+		args = append(args,
+			utf8.RuneCountInString(path+prefix), path+prefix,
+		)
+	}
 
 	// apply sorting
 	orderByExprs, err := orderByObject(sortBy, sortDir)
@@ -1460,35 +1452,41 @@ func ObjectEntries(ctx context.Context, tx Tx, bucket, path, prefix, sortBy, sor
 	// apply offset and limit
 	args = append(args, limit, offset)
 
+	// build where expression
+	var whereExpr string
+	if len(whereExprs) > 0 {
+		whereExpr = fmt.Sprintf("WHERE %s", strings.Join(whereExprs, " AND "))
+	}
+
 	// objectsQuery consists of 2 parts
 	// 1. fetch all objects in requested directory
 	// 2. fetch all sub-directories
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 	SELECT %s
 	FROM (
-		SELECT o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
+		SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 		FROM objects o
-		LEFT JOIN directories d ON d.name = o.object_id
-		WHERE o.object_id != ? AND o.db_directory_id = ? AND o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?) %s
-			AND d.id IS NULL
+		WHERE
+			o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND
+			o.object_id != ? AND
+			INSTR(SUBSTR(o.object_id, ?), "/") = 0
+			AND SUBSTR(o.object_id, -1, 1) != "/"
+
 		UNION ALL
-		SELECT d.name as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
+
+		SELECT MIN(o.db_bucket_id), MIN(SUBSTR(o.object_id, 1, ?+INSTR(SUBSTR(o.object_id, ?), "/"))) as object_id, SUM(o.size), MIN(o.health), '' as mime_type, MAX(o.created_at) as created_at, '' as etag
 		FROM objects o
-		INNER JOIN directories d ON SUBSTR(o.object_id, 1, %s(d.name)) = d.name %s
-		WHERE o.db_bucket_id = (SELECT id FROM buckets b WHERE b.name = ?)
-		AND o.object_id LIKE ?
-		AND SUBSTR(o.object_id, 1, ?) = ?
-		AND d.db_parent_id = ?
-		GROUP BY d.id
+		WHERE
+			o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND
+			SUBSTR(o.object_id, 1, ?+INSTR(SUBSTR(o.object_id, ?), "/")) != ?
+		GROUP BY SUBSTR(o.object_id, 1, ?+INSTR(SUBSTR(o.object_id, ?), "/"))
 	) AS o
+	INNER JOIN buckets b ON b.id = o.db_bucket_id
 	%s
 	ORDER BY %s
 	LIMIT ? OFFSET ?
 `,
 		tx.SelectObjectMetadataExpr(),
-		prefixExpr,
-		tx.CharLengthExpr(),
-		prefixExpr,
 		whereExpr,
 		strings.Join(orderByExprs, ", "),
 	), args...)
@@ -1858,112 +1856,6 @@ func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64
 		return 0, fmt.Errorf("failed to delete hosts: %w", err)
 	}
 	return res.RowsAffected()
-}
-
-// RenameDirectories renames all directories in the database with the given
-// prefix to the new prefix.
-func RenameDirectories(ctx context.Context, tx sql.Tx, bucket, prefixOld, prefixNew string) (int64, error) {
-	// sanity check input
-	if !strings.HasPrefix(prefixNew, "/") {
-		return 0, errors.New("paths has to have a leading slash")
-	} else if bucket == "" {
-		return 0, errors.New("bucket cannot be empty")
-	}
-
-	// prepare statements
-	queryDirStmt, err := tx.Prepare(ctx, "SELECT id FROM directories WHERE name = ? AND db_bucket_id = ?")
-	if err != nil {
-		return 0, err
-	}
-	defer queryDirStmt.Close()
-
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO directories (created_at, db_bucket_id, db_parent_id, name) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return 0, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer insertStmt.Close()
-
-	updateNameStmt, err := tx.Prepare(ctx, "UPDATE directories SET name = ? WHERE id = ?")
-	if err != nil {
-		return 0, err
-	}
-	defer updateNameStmt.Close()
-
-	updateParentStmt, err := tx.Prepare(ctx, "UPDATE directories SET db_parent_id = ? WHERE db_parent_id = ?")
-	if err != nil {
-		return 0, err
-	}
-	defer updateParentStmt.Close()
-
-	// fetch bucket id
-	var bucketID int64
-	err = tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return 0, fmt.Errorf("bucket '%v' not found: %w", bucket, api.ErrBucketNotFound)
-	} else if err != nil {
-		return 0, fmt.Errorf("failed to fetch bucket id: %w", err)
-	}
-
-	// fetch destination directories
-	directories := make(map[int64]string)
-	rows, err := tx.Query(ctx, "SELECT id, name FROM directories WHERE name LIKE ? AND db_bucket_id = ? ORDER BY LENGTH(name) - LENGTH(REPLACE(name, '/', '')) ASC", prefixOld+"%", bucketID)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
-			return 0, err
-		}
-		directories[id] = strings.Replace(name, prefixOld, prefixNew, 1)
-	}
-
-	// update existing directories
-	for id, name := range directories {
-		var existingID int64
-		if err := queryDirStmt.QueryRow(ctx, name, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
-			return 0, err
-		} else if existingID > 0 {
-			if _, err := updateParentStmt.Exec(ctx, existingID, id); err != nil {
-				return 0, err
-			}
-		} else {
-			if _, err := updateNameStmt.Exec(ctx, name, id); err != nil {
-				return 0, err
-			}
-		}
-	}
-
-	// insert new directories
-	var dirID *int64
-	dirs := object.Directories(prefixNew)
-	if strings.HasSuffix(prefixNew, "/") {
-		dirs = append(dirs, prefixNew)
-	}
-	for _, dir := range dirs {
-		// check if the directory exists
-		var existingID int64
-		if err := queryDirStmt.QueryRow(ctx, dir, bucketID).Scan(&existingID); err != nil && !errors.Is(err, dsql.ErrNoRows) {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if existingID > 0 {
-			dirID = &existingID
-			continue
-		}
-
-		// insert directory
-		if res, err := insertStmt.Exec(ctx, time.Now(), bucketID, dirID, dir); err != nil {
-			return 0, fmt.Errorf("failed to create directory %v %v: %w", dirID, dir, err)
-		} else if insertedID, err := res.LastInsertId(); err != nil {
-			return 0, fmt.Errorf("failed to fetch directory id %v: %w", dir, err)
-		} else if insertedID == 0 {
-			return 0, fmt.Errorf("dir we just created doesn't exist - shouldn't happen")
-		} else {
-			dirID = &insertedID
-		}
-	}
-	return *dirID, nil
 }
 
 func RenewContract(ctx context.Context, tx sql.Tx, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error) {

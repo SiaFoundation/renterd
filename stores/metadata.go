@@ -40,7 +40,6 @@ const (
 
 var (
 	pruneSlabsAlertID = frand.Entropy256()
-	pruneDirsAlertID  = frand.Entropy256()
 )
 
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
@@ -421,17 +420,9 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 
 func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		// create new dir
-		dirID, err := tx.InsertDirectories(ctx, bucket, keyNew)
-		if err != nil {
+		if err := tx.RenameObject(ctx, bucket, keyOld, keyNew, force); err != nil {
 			return err
 		}
-		// update object
-		err = tx.RenameObject(ctx, bucket, keyOld, keyNew, dirID, force)
-		if err != nil {
-			return err
-		}
-		// delete old dir if empty
 		s.triggerSlabPruning()
 		return nil
 	})
@@ -439,14 +430,9 @@ func (s *SQLStore) RenameObject(ctx context.Context, bucket, keyOld, keyNew stri
 
 func (s *SQLStore) RenameObjects(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		// create new dir
-		dirID, err := tx.RenameDirectories(ctx, bucket, prefixOld, prefixNew)
-		if err != nil {
-			return fmt.Errorf("RenameObjects: failed to create new directory: %w", err)
-		} else if err := tx.RenameObjects(ctx, bucket, prefixOld, prefixNew, dirID, force); err != nil {
+		if err := tx.RenameObjects(ctx, bucket, prefixOld, prefixNew, force); err != nil {
 			return err
 		}
-		// prune old dirs
 		s.triggerSlabPruning()
 		return nil
 	})
@@ -512,14 +498,8 @@ func (s *SQLStore) UpdateObject(ctx context.Context, bucket, path, contractSet, 
 			return fmt.Errorf("UpdateObject: failed to delete object: %w", err)
 		}
 
-		// create the dir
-		dirID, err := tx.InsertDirectories(ctx, bucket, path)
-		if err != nil {
-			return fmt.Errorf("failed to create directories for path '%s': %w", path, err)
-		}
-
 		// Insert a new object.
-		err = tx.InsertObject(ctx, bucket, path, contractSet, dirID, o, mimeType, eTag, metadata)
+		err = tx.InsertObject(ctx, bucket, path, contractSet, o, mimeType, eTag, metadata)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
@@ -751,27 +731,6 @@ func (s *SQLStore) pruneSlabsLoop() {
 			if deleted < slabPruningBatchSize {
 				break // done
 			}
-		}
-
-		// prune dirs
-		err := s.db.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
-			return dt.PruneEmptydirs(s.shutdownCtx)
-		})
-		if err != nil {
-			s.logger.Errorw("dir pruning failed", zap.Error(err))
-			s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
-				ID:        pruneDirsAlertID,
-				Severity:  alerts.SeverityWarning,
-				Message:   "Failed to prune dirs",
-				Timestamp: time.Now(),
-				Data: map[string]interface{}{
-					"error": err.Error(),
-					"hint":  "This might happen when your database is under a lot of load due to deleting objects rapidly. This alert will disappear the next time slabs are pruned successfully.",
-				},
-			})
-			pruneSuccess = false
-		} else {
-			s.alerts.DismissAlerts(s.shutdownCtx, pruneDirsAlertID)
 		}
 
 		// mark the last prune time where both slabs and dirs were pruned
