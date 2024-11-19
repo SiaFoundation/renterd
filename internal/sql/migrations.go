@@ -360,16 +360,22 @@ var (
 				},
 			},
 			{
-				ID: "00027_contract_usability",
+				ID: "00027_remove_directories",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_contract_usability", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_remove_directories", log)
 				},
 			},
 			{
-				ID: "00028_autopilot",
+				ID: "00028_contract_usability",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_contract_usability", log)
+				},
+			},
+			{
+				ID: "00029_autopilot",
 				Migrate: func(tx Tx) error {
 					// remove all references to the autopilots table, without dropping the table
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_autopilot_1", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_autopilot_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
@@ -421,11 +427,11 @@ var (
 					}
 
 					// drop autopilots table
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_autopilot_2", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_autopilot_2", log)
 				},
 			},
 			{
-				ID: "00029_slab_buffers",
+				ID: "00030_remove_contract_sets",
 				Migrate: func(tx Tx) error {
 					// prepare statement to rename the buffer
 					stmt, err := tx.Prepare(ctx, "UPDATE slab_buffers SET filename = ? WHERE filename = ?")
@@ -492,7 +498,7 @@ var (
 					}
 
 					// perform database migration
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_slab_buffers", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_remove_contract_sets", log)
 				},
 			},
 		}

@@ -41,8 +41,6 @@ const (
 
 	lockingPrioritySyncing                = 30
 	lockingPriorityActiveContractRevision = 100
-
-	lockingPriorityUpload = 10
 )
 
 var (
@@ -95,6 +93,7 @@ type (
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
 
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+		UsableHosts(ctx context.Context) ([]api.HostInfo, error)
 	}
 
 	ObjectStore interface {
@@ -198,10 +197,9 @@ func (w *Worker) isStopped() bool {
 	return false
 }
 
-func (w *Worker) withRevision(ctx context.Context, fetchTimeout time.Duration, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, lockPriority int, fn func(rev types.FileContractRevision) error) error {
+func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
-		h := w.Host(hk, fcid, siamuxAddr)
-		rev, err := h.FetchRevision(ctx, fetchTimeout)
+		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fetchTimeout)
 		if err != nil {
 			return err
 		}
@@ -242,24 +240,24 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch download contracts
-	dlContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+	// fetch hosts
+	dlHosts, err := w.cache.UsableHosts(ctx)
+	if jc.Check("couldn't fetch hosts from bus", err) != nil {
 		return
 	}
 
-	// filter upload contracts
+	// fetch contracts
 	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	// migrate the slab and handle alerts
-	err = w.migrate(ctx, slab, dlContracts, ulContracts, up.CurrentHeight)
+	err = w.migrate(ctx, slab, dlHosts, ulContracts, up.CurrentHeight)
 	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
 		var objects []api.ObjectMetadata
 		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
-			w.logger.Errorf("failed to list objects for slab key; %w", err)
+			w.logger.Errorf("failed to list objects for slab key; %v", err)
 		} else {
 			objects = res.Objects
 		}
@@ -881,8 +879,8 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
 	}
 
-	// fetch all contracts
-	contracts, err := w.cache.DownloadContracts(ctx)
+	// fetch usable hosts
+	hosts, err := w.cache.UsableHosts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -897,13 +895,13 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 		// otherwise return a pipe reader
 		downloadFn := func(wr io.Writer, offset, length int64) error {
 			ctx = WithGougingChecker(ctx, w.bus, gp)
-			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), contracts)
+			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), hosts)
 			if err != nil {
 				w.logger.Error(err)
 				if !errors.Is(err, ErrShuttingDown) &&
 					!errors.Is(err, errDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
-					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(contracts)), err))
+					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(hosts)), err))
 				}
 				return fmt.Errorf("failed to download object: %w", err)
 			}
@@ -938,7 +936,7 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 
 	// sync the account
 	h := w.Host(hk, fcid, siamuxAddr)
-	err = w.withRevision(ctx, defaultRevisionFetchTimeout, fcid, hk, siamuxAddr, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+	err = w.withRevision(ctx, fcid, hk, siamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})
 	if err != nil {
@@ -1040,7 +1038,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.cache, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

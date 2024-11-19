@@ -45,12 +45,12 @@ type (
 		UpdateAccounts(context.Context, []api.Account) error
 	}
 
-	ConsensusState interface {
+	ConsensusStateStore interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
 
-	DownloadContracts interface {
-		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
+	ContractStore interface {
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 	}
 )
 
@@ -59,8 +59,8 @@ type (
 		alerts                   alerts.Alerter
 		funder                   AccountFunder
 		syncer                   AccountSyncer
-		dc                       DownloadContracts
-		cs                       ConsensusState
+		cs                       ContractStore
+		css                      ConsensusStateStore
 		s                        AccountStore
 		key                      utils.AccountsKey
 		logger                   *zap.SugaredLogger
@@ -92,7 +92,7 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, css ConsensusStateStore, cs ContractStore, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -101,7 +101,7 @@ func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alert
 		funder: funder,
 		syncer: syncer,
 		cs:     cs,
-		dc:     dc,
+		css:    css,
 		s:      s,
 		key:    key,
 		logger: logger,
@@ -310,14 +310,14 @@ func (a *AccountMgr) markRefillDone(hk types.PublicKey) {
 // until the previously launched goroutine returns.
 func (a *AccountMgr) refillAccounts() {
 	// fetch config
-	cs, err := a.cs.ConsensusState(a.shutdownCtx)
+	cs, err := a.css.ConsensusState(a.shutdownCtx)
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch consensus state for refill: %v", err))
 		return
 	}
 
 	// fetch all contracts
-	contracts, err := a.dc.DownloadContracts(a.shutdownCtx)
+	contracts, err := a.cs.Contracts(a.shutdownCtx, api.ContractsOpts{})
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
 		return

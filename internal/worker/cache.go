@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	cacheKeyDownloadContracts = "downloadcontracts"
-	cacheKeyGougingParams     = "gougingparams"
+	cacheKeyGougingParams = "gougingparams"
+	cacheKeyUsableHosts   = "usablehosts"
 
 	cacheEntryExpiry = 5 * time.Minute
 )
@@ -83,12 +83,12 @@ func (c *memoryCache) Invalidate(key string) {
 
 type (
 	Bus interface {
-		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
+		UsableHosts(ctx context.Context) ([]api.HostInfo, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 	}
 
 	WorkerCache interface {
-		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
+		UsableHosts(ctx context.Context) ([]api.HostInfo, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 		HandleEvent(event webhooks.Event) error
 		Subscribe(e EventSubscriber) error
@@ -115,28 +115,27 @@ func NewCache(b Bus, logger *zap.Logger) WorkerCache {
 	}
 }
 
-func (c *cache) DownloadContracts(ctx context.Context) (contracts []api.ContractMetadata, err error) {
+func (c *cache) UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error) {
 	// fetch directly from bus if the cache is not ready
 	if !c.isReady() {
 		c.logger.Warn(errCacheNotReady)
-		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{})
+		hosts, err = c.b.UsableHosts(ctx)
 		return
 	}
 
 	// fetch from bus if it's not cached or expired
-	value, found, expired := c.cache.Get(cacheKeyDownloadContracts)
+	value, found, expired := c.cache.Get(cacheKeyUsableHosts)
 	if !found || expired {
-		contracts, err = c.b.Contracts(ctx, api.ContractsOpts{})
+		hosts, err = c.b.UsableHosts(ctx)
 		if err == nil {
-			c.cache.Set(cacheKeyDownloadContracts, contracts)
+			c.cache.Set(cacheKeyUsableHosts, hosts)
 		}
-		if expired && !contractsEqual(value.([]api.ContractMetadata), contracts) {
-			c.logger.Warn(fmt.Errorf("%w: key %v", errCacheOutdated, cacheKeyDownloadContracts))
+		if expired && !hostsEqual(value.([]api.HostInfo), hosts) {
+			c.logger.Warn(fmt.Errorf("%w: key %v", errCacheOutdated, cacheKeyUsableHosts))
 		}
 		return
 	}
-
-	return value.([]api.ContractMetadata), nil
+	return value.([]api.HostInfo), nil
 }
 
 func (c *cache) GougingParams(ctx context.Context) (gp api.GougingParams, err error) {
@@ -178,21 +177,14 @@ func (c *cache) HandleEvent(event webhooks.Event) (err error) {
 	case api.EventConsensusUpdate:
 		log = log.With("bh", e.BlockHeight, "ts", e.Timestamp)
 		c.handleConsensusUpdate(e)
-	case api.EventContractAdd:
-		log = log.With("fcid", e.Added.ID, "ts", e.Timestamp)
-		c.handleContractAdd(e)
-	case api.EventContractArchive:
-		log = log.With("fcid", e.ContractID, "ts", e.Timestamp)
-		c.handleContractArchive(e)
-	case api.EventContractRenew:
-		log = log.With("fcid", e.Renewal.ID, "renewedFrom", e.Renewal.RenewedFrom, "ts", e.Timestamp)
-		c.handleContractRenew(e)
-	case api.EventHostUpdate:
-		log = log.With("hk", e.HostKey, "ts", e.Timestamp)
-		c.handleHostUpdate(e)
 	case api.EventSettingUpdate:
 		log = log.With("gouging", e.GougingSettings != nil, "pinned", e.PinnedSettings != nil, "upload", e.UploadSettings != nil, "ts", e.Timestamp)
 		c.handleSettingUpdate(e)
+	case api.EventContractAdd:
+	case api.EventContractArchive:
+	case api.EventContractRenew:
+	case api.EventHostUpdate:
+		c.cache.Invalidate(cacheKeyUsableHosts)
 	default:
 		log.Info("unhandled event", e)
 		return
@@ -246,79 +238,6 @@ func (c *cache) handleConsensusUpdate(event api.EventConsensusUpdate) {
 	c.cache.Set(cacheKeyGougingParams, gp)
 }
 
-func (c *cache) handleContractAdd(event api.EventContractAdd) {
-	// return early if the cache doesn't have contracts
-	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		return
-	}
-	contracts := value.([]api.ContractMetadata)
-
-	// add the contract to the cache
-	for _, contract := range contracts {
-		if contract.ID == event.Added.ID {
-			return
-		}
-	}
-	contracts = append(contracts, event.Added)
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-}
-
-func (c *cache) handleContractArchive(event api.EventContractArchive) {
-	// return early if the cache doesn't have contracts
-	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		return
-	}
-	contracts := value.([]api.ContractMetadata)
-
-	// remove the contract from the cache
-	for i, contract := range contracts {
-		if contract.ID == event.ContractID {
-			contracts = append(contracts[:i], contracts[i+1:]...)
-			break
-		}
-	}
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-}
-
-func (c *cache) handleContractRenew(event api.EventContractRenew) {
-	// return early if the cache doesn't have contracts
-	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		return
-	}
-	contracts := value.([]api.ContractMetadata)
-
-	// update the renewed contract in the cache
-	for i, contract := range contracts {
-		if contract.ID == event.Renewal.RenewedFrom {
-			contracts[i] = event.Renewal
-			break
-		}
-	}
-
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-}
-
-func (c *cache) handleHostUpdate(e api.EventHostUpdate) {
-	// return early if the cache doesn't have contracts
-	value, found, _ := c.cache.Get(cacheKeyDownloadContracts)
-	if !found {
-		return
-	}
-	contracts := value.([]api.ContractMetadata)
-
-	// update the host's IP in the cache
-	for i, contract := range contracts {
-		if contract.HostKey == e.HostKey {
-			contracts[i].HostIP = e.NetAddr
-		}
-	}
-
-	c.cache.Set(cacheKeyDownloadContracts, contracts)
-}
-
 func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) {
 	// return early if the cache doesn't have gouging params to update
 	value, found, _ := c.cache.Get(cacheKeyGougingParams)
@@ -337,14 +256,14 @@ func (c *cache) handleSettingUpdate(e api.EventSettingUpdate) {
 	c.cache.Set(cacheKeyGougingParams, gp)
 }
 
-func contractsEqual(x, y []api.ContractMetadata) bool {
+func hostsEqual(x, y []api.HostInfo) bool {
 	if len(x) != len(y) {
 		return false
 	}
-	sort.Slice(x, func(i, j int) bool { return x[i].ID.String() < x[j].ID.String() })
-	sort.Slice(y, func(i, j int) bool { return y[i].ID.String() < y[j].ID.String() })
+	sort.Slice(x, func(i, j int) bool { return x[i].PublicKey.String() < x[j].PublicKey.String() })
+	sort.Slice(y, func(i, j int) bool { return y[i].PublicKey.String() < y[j].PublicKey.String() })
 	for i, c := range x {
-		if c.ID.String() != y[i].ID.String() {
+		if c.PublicKey.String() != y[i].PublicKey.String() || c.SiamuxAddr != y[i].SiamuxAddr {
 			return false
 		}
 	}

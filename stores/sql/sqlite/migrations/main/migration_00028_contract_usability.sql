@@ -1,5 +1,3 @@
--- create a temporary table that adds the usability column
-DROP TABLE IF EXISTS contracts_temp;
 CREATE TABLE contracts_temp (
     `id` integer PRIMARY KEY AUTOINCREMENT,
     `created_at` datetime,
@@ -31,33 +29,6 @@ CREATE TABLE contracts_temp (
 
     CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts`(`id`)
 );
-
-DROP INDEX IF EXISTS `idx_contracts_archival_reason`;
-DROP INDEX IF EXISTS `idx_contracts_fcid`;
-DROP INDEX IF EXISTS `idx_contracts_host_id`;
-DROP INDEX IF EXISTS `idx_contracts_host_key`;
-DROP INDEX IF EXISTS `idx_contracts_proof_height`;
-DROP INDEX IF EXISTS `idx_contracts_renewed_from`;
-DROP INDEX IF EXISTS `idx_contracts_renewed_to`;
-DROP INDEX IF EXISTS `idx_contracts_revision_height`;
-DROP INDEX IF EXISTS `idx_contracts_start_height`;
-DROP INDEX IF EXISTS `idx_contracts_state`;
-DROP INDEX IF EXISTS `idx_contracts_window_end`;
-DROP INDEX IF EXISTS `idx_contracts_window_start`;
-
-CREATE INDEX `idx_contracts_archival_reason` ON `contracts_temp`(`archival_reason`);
-CREATE INDEX `idx_contracts_fcid` ON `contracts_temp`(`fcid`);
-CREATE INDEX `idx_contracts_host_id` ON `contracts_temp`(`host_id`);
-CREATE INDEX `idx_contracts_host_key` ON `contracts_temp`(`host_key`);
-CREATE INDEX `idx_contracts_proof_height` ON `contracts_temp`(`proof_height`);
-CREATE INDEX `idx_contracts_renewed_from` ON `contracts_temp`(`renewed_from`);
-CREATE INDEX `idx_contracts_renewed_to` ON `contracts_temp`(`renewed_to`);
-CREATE INDEX `idx_contracts_revision_height` ON `contracts_temp`(`revision_height`);
-CREATE INDEX `idx_contracts_start_height` ON `contracts_temp`(`start_height`);
-CREATE INDEX `idx_contracts_state` ON `contracts_temp`(`state`);
-CREATE INDEX `idx_contracts_usability` ON `contracts_temp`(`usability`);
-CREATE INDEX `idx_contracts_window_end` ON `contracts_temp`(`window_end`);
-CREATE INDEX `idx_contracts_window_start` ON `contracts_temp`(`window_start`);
 
 INSERT INTO contracts_temp (
     id,
@@ -113,3 +84,17 @@ FROM contracts c;
 
 DROP TABLE `contracts`;
 ALTER TABLE contracts_temp RENAME TO contracts;
+
+CREATE INDEX `idx_contracts_archival_reason` ON `contracts`(`archival_reason`);
+CREATE INDEX `idx_contracts_fcid` ON `contracts`(`fcid`);
+CREATE INDEX `idx_contracts_host_id` ON `contracts`(`host_id`);
+CREATE INDEX `idx_contracts_host_key` ON `contracts`(`host_key`);
+CREATE INDEX `idx_contracts_proof_height` ON `contracts`(`proof_height`);
+CREATE INDEX `idx_contracts_renewed_from` ON `contracts`(`renewed_from`);
+CREATE INDEX `idx_contracts_renewed_to` ON `contracts`(`renewed_to`);
+CREATE INDEX `idx_contracts_revision_height` ON `contracts`(`revision_height`);
+CREATE INDEX `idx_contracts_start_height` ON `contracts`(`start_height`);
+CREATE INDEX `idx_contracts_state` ON `contracts`(`state`);
+CREATE INDEX `idx_contracts_usability` ON `contracts`(`usability`);
+CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
+CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);

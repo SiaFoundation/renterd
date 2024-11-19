@@ -11,10 +11,14 @@ import (
 )
 
 type (
+	Downloader interface {
+		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
+		PublicKey() types.PublicKey
+	}
+
 	Host interface {
 		PublicKey() types.PublicKey
 
-		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
 		UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error
 
 		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
@@ -25,6 +29,7 @@ type (
 	}
 
 	HostManager interface {
+		Downloader(hk types.PublicKey, siamuxAddr string) Downloader
 		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
 	}
 )

@@ -1,6 +1,3 @@
--- drop contracts_set column
-ALTER TABLE autopilot_config DROP COLUMN contracts_set;
-
 -- drop default contract set from settings
 UPDATE settings SET value=JSON_REMOVE(value, '$.defaultContractSet') WHERE `key`="upload";
 

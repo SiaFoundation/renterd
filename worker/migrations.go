@@ -11,44 +11,39 @@ import (
 	"go.uber.org/zap"
 )
 
-func (w *Worker) migrate(ctx context.Context, s object.Slab, dlContracts, ulContracts []api.ContractMetadata, bh uint64) error {
-	// make a map of good hosts
-	goodHosts := make(map[types.PublicKey]map[types.FileContractID]bool)
-	for _, c := range ulContracts {
-		if goodHosts[c.HostKey] == nil {
-			goodHosts[c.HostKey] = make(map[types.FileContractID]bool)
-		}
-		goodHosts[c.HostKey][c.ID] = false
+func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulContracts []api.ContractMetadata, bh uint64) error {
+	// map usable hosts
+	usableHosts := make(map[types.PublicKey]struct{})
+	for _, h := range dlHosts {
+		usableHosts[h.PublicKey] = struct{}{}
 	}
 
-	// make a map of hosts we can download from
-	h2c := make(map[types.PublicKey]types.FileContractID)
-	for _, c := range append(dlContracts, ulContracts...) {
-		h2c[c.HostKey] = c.ID
+	// map usable contracts
+	usableContracts := make(map[types.FileContractID]struct{})
+	for _, c := range ulContracts {
+		usableContracts[c.ID] = struct{}{}
 	}
 
 	// collect indices of shards that need to be migrated
-	usedMap := make(map[types.PublicKey]struct{})
+	seen := make(map[types.PublicKey]struct{})
 	var shardIndices []int
 SHARDS:
 	for i, shard := range s.Shards {
 		for hk, fcids := range shard.Contracts {
 			for _, fcid := range fcids {
 				// bad host
-				if _, exists := goodHosts[hk]; !exists {
+				if _, ok := usableHosts[hk]; !ok {
 					continue
 				}
 				// bad contract
-				if _, exists := goodHosts[hk][fcid]; !exists {
+				if _, ok := usableContracts[fcid]; !ok {
 					continue
 				}
 				// reused host
-				_, exists := usedMap[hk]
-				if exists {
+				if _, used := seen[hk]; used {
 					continue
 				}
-				goodHosts[hk][fcid] = true
-				usedMap[hk] = struct{}{}
+				seen[hk] = struct{}{}
 				continue SHARDS
 			}
 		}
@@ -66,7 +61,7 @@ SHARDS:
 	missingShards := len(shardIndices)
 	for _, si := range shardIndices {
 		for hk := range s.Shards[si].Contracts {
-			if _, ok := h2c[hk]; ok {
+			if _, ok := usableHosts[hk]; ok {
 				missingShards--
 				break
 			}
@@ -89,7 +84,7 @@ SHARDS:
 	defer mem.Release()
 
 	// download the slab
-	shards, surchargeApplied, err := w.downloadManager.DownloadSlab(ctx, s, dlContracts)
+	shards, surchargeApplied, err := w.downloadManager.DownloadSlab(ctx, s, dlHosts)
 	if err != nil {
 		w.logger.Debugw("slab migration failed",
 			zap.Error(err),
@@ -109,10 +104,10 @@ SHARDS:
 
 	// filter upload contracts to the ones we haven't used yet
 	var allowed []api.ContractMetadata
-	for c := range ulContracts {
-		if _, exists := usedMap[ulContracts[c].HostKey]; !exists {
-			allowed = append(allowed, ulContracts[c])
-			usedMap[ulContracts[c].HostKey] = struct{}{}
+	for _, c := range ulContracts {
+		if _, used := seen[c.HostKey]; !used {
+			allowed = append(allowed, c)
+			seen[c.HostKey] = struct{}{}
 		}
 	}
 

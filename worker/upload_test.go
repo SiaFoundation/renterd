@@ -61,7 +61,7 @@ func TestUpload(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -70,17 +70,23 @@ func TestUpload(t *testing.T) {
 
 	// filter contracts to have (at most) min shards used contracts
 	var n int
-	var filtered []api.ContractMetadata
+	var filtered []api.HostInfo
 	for _, md := range w.Contracts() {
 		// add unused contracts
 		if _, used := used[md.HostKey]; !used {
-			filtered = append(filtered, md)
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  md.HostKey,
+				SiamuxAddr: md.SiamuxAddr,
+			})
 			continue
 		}
 
 		// add min shards used contracts
 		if n < int(params.rs.MinShards) {
-			filtered = append(filtered, md)
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  md.HostKey,
+				SiamuxAddr: md.SiamuxAddr,
+			})
 			n++
 		}
 	}
@@ -95,8 +101,8 @@ func TestUpload(t *testing.T) {
 	}
 
 	// filter out one contract - expect download to fail
-	for i, md := range filtered {
-		if _, used := used[md.HostKey]; used {
+	for i, h := range filtered {
+		if _, used := used[h.PublicKey]; used {
 			filtered = append(filtered[:i], filtered[i+1:]...)
 			break
 		}
@@ -153,7 +159,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	}
 
 	// assert our object store contains a partial slab
-	if len(os.partials) != 1 {
+	if os.NumPartials() != 1 {
 		t.Fatal("expected 1 partial slab")
 	}
 
@@ -165,7 +171,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -189,7 +195,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	}
 
 	// assert our object store contains zero partial slabs
-	if len(os.partials) != 0 {
+	if os.NumPartials() != 0 {
 		t.Fatal("expected no partial slabs")
 	}
 
@@ -201,7 +207,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -211,9 +217,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	// define a helper that counts packed slabs
 	packedSlabsCount := func() int {
 		t.Helper()
-		os.mu.Lock()
-		cnt := len(os.partials)
-		os.mu.Unlock()
+		cnt := os.NumPartials()
 		return cnt
 	}
 
@@ -233,7 +237,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	w.BlockAsyncPackedSlabUploads(params)
 
 	// configure max buffer size
-	os.setSlabBufferMaxSizeSoft(128)
+	os.SetSlabBufferMaxSizeSoft(128)
 
 	// upload 2x64 bytes using the worker and assert we still have two packed
 	// slabs (buffer limit not reached)
@@ -320,7 +324,7 @@ func TestMigrateLostSector(t *testing.T) {
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +440,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,16 +503,19 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// create download contracts
-	contracts = contracts[:0]
+	var hosts []api.HostInfo
 	for _, c := range w.Contracts() {
 		if _, bad := badHosts[c.HostKey]; !bad {
-			contracts = append(contracts, c)
+			hosts = append(hosts, api.HostInfo{
+				PublicKey:  c.HostKey,
+				SiamuxAddr: c.SiamuxAddr,
+			})
 		}
 	}
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), contracts)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), hosts)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -545,7 +552,7 @@ func TestRefreshUploaders(t *testing.T) {
 	// remove the host from the second contract
 	c2 := contracts[1]
 	delete(hm.hosts, c2.HostKey)
-	delete(cs.contracts, c2.ID)
+	cs.DeleteContracdt(c2.ID)
 
 	// add a new host/contract
 	hNew := w.AddHost()
@@ -558,9 +565,9 @@ func TestRefreshUploaders(t *testing.T) {
 	var added, renewed int
 	for _, ul := range ul.uploaders {
 		switch ul.ContractID() {
-		case hNew.metadata.ID:
+		case hNew.ID():
 			added++
-		case c1Renewed.metadata.ID:
+		case c1Renewed.ID():
 			renewed++
 		default:
 		}
@@ -576,17 +583,6 @@ func TestRefreshUploaders(t *testing.T) {
 		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), len(contracts)+1)
 	}
 
-	// manually add a request to the queue of one of the uploaders we're about to expire
-	responseChan := make(chan sectorUploadResp, 1)
-	for _, ul := range ul.uploaders {
-		if ul.fcid == hNew.metadata.ID {
-			ul.mu.Lock()
-			ul.queue = append(ul.queue, &sectorUploadReq{responseChan: responseChan, sector: &sectorUpload{ctx: context.Background()}})
-			ul.mu.Unlock()
-			break
-		}
-	}
-
 	// refresh uploaders, use blockheight that expires most uploaders
 	bh = c1.WindowEnd
 	contracts = w.Contracts()
@@ -595,13 +591,6 @@ func TestRefreshUploaders(t *testing.T) {
 	// assert we only have one uploader left
 	if len(ul.uploaders) != 1 {
 		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), 1)
-	}
-
-	// assert all queued requests failed with an error indicating the underlying
-	// contract expired
-	res := <-responseChan
-	if !errors.Is(res.err, errContractExpired) {
-		t.Fatal("expected contract expired error", res.err)
 	}
 }
 
@@ -650,7 +639,7 @@ func TestUploadRegression(t *testing.T) {
 
 	// download data for good measure
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {

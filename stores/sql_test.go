@@ -42,12 +42,11 @@ type testSQLStore struct {
 }
 
 type testSQLStoreConfig struct {
-	dbName          string
-	dbMetricsName   string
-	dir             string
-	persistent      bool
-	skipMigrate     bool
-	skipContractSet bool
+	dbName        string
+	dbMetricsName string
+	dir           string
+	persistent    bool
+	skipMigrate   bool
 }
 
 var defaultTestSQLStoreConfig = testSQLStoreConfig{}
@@ -260,7 +259,6 @@ func (s *testSQLStore) DefaultBucketID() (id int64) {
 func (s *testSQLStore) Reopen() *testSQLStore {
 	s.t.Helper()
 	cfg := s.cfg
-	cfg.skipContractSet = true
 	cfg.skipMigrate = true
 	return newTestSQLStore(s.t, cfg)
 }

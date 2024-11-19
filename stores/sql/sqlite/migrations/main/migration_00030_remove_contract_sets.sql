@@ -1,9 +1,3 @@
--- drop contracts_set column
-CREATE TABLE autopilot_config_temp (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, enabled integer NOT NULL DEFAULT 0, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);
-INSERT INTO autopilot_config_temp SELECT id, created_at, current_period, enabled, contracts_amount, contracts_period, contracts_renew_window, contracts_download, contracts_upload, contracts_storage, contracts_prune, hosts_allow_redundant_ips, hosts_max_downtime_hours, hosts_min_protocol_version, hosts_max_consecutive_scan_failures FROM autopilot_config;
-DROP TABLE autopilot_config;
-ALTER TABLE autopilot_config_temp RENAME TO autopilot_config;
-
 -- drop default contract set from settings
 UPDATE settings SET value=JSON_REMOVE(value, '$.defaultContractSet') WHERE `key`="upload";
 

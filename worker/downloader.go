@@ -10,6 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/host"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 )
@@ -25,7 +26,7 @@ var (
 
 type (
 	downloader struct {
-		host Host
+		host host.Downloader
 
 		statsDownloadSpeedBytesPerMS    *utils.DataPoints // keep track of this separately for stats (no decay is applied)
 		statsSectorDownloadEstimateInMS *utils.DataPoints
@@ -41,9 +42,9 @@ type (
 	}
 )
 
-func newDownloader(ctx context.Context, host Host) *downloader {
+func newDownloader(ctx context.Context, h host.Downloader) *downloader {
 	return &downloader{
-		host: host,
+		host: h,
 
 		statsSectorDownloadEstimateInMS: utils.NewDataPoints(10 * time.Minute),
 		statsDownloadSpeedBytesPerMS:    utils.NewDataPoints(0),
