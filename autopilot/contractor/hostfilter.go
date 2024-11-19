@@ -4,11 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 )
@@ -17,16 +13,6 @@ const (
 	// ContractConfirmationDeadline is the number of blocks since its start
 	// height we wait for a contract to appear on chain.
 	ContractConfirmationDeadline = 18
-
-	// minContractFundUploadThreshold is the percentage of contract funds
-	// remaining at which the contract gets marked as not good for upload
-	minContractFundUploadThreshold = float64(0.05) // 5%
-
-	// minContractCollateralDenominator is used to define the percentage of
-	// remaining collateral in a contract in relation to its potential
-	// acquirable storage below which the contract is considered to be
-	// out-of-collateral.
-	minContractCollateralDenominator = 20 // 5%
 )
 
 var (
@@ -103,7 +89,7 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - recoverable -> can be usable in the contract set if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
 	usable = true
 	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
@@ -116,13 +102,13 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSetti
 		refresh = false
 		renew = false
 	} else {
-		if isOutOfCollateral(cfg, rs, contract, s, pt) {
+		if contract.IsOutOfCollateral() {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}
-		if isOutOfFunds(cfg, pt, contract) {
+		if contract.IsOutOfFunds() {
 			reasons = append(reasons, errContractOutOfFunds.Error())
 			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
@@ -138,80 +124,26 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSetti
 	return
 }
 
-func isOutOfFunds(cfg api.AutopilotConfig, pt rhpv3.HostPriceTable, c contract) bool {
+func (c contract) IsOutOfFunds() bool {
 	// InitialRenterFunds should never be zero but for legacy reasons we check
 	// and return true should it be the case
 	if c.InitialRenterFunds.IsZero() {
 		return true
 	}
-
-	sectorPrice, _ := pt.BaseCost().
-		Add(pt.AppendSectorCost(cfg.Contracts.Period)).
-		Add(pt.ReadSectorCost(rhpv2.SectorSize)).
-		Total()
-	percentRemaining, _ := big.NewRat(0, 1).SetFrac(c.RenterFunds().Big(), c.InitialRenterFunds.Big()).Float64()
-
-	return c.RenterFunds().Cmp(sectorPrice.Mul64(3)) < 0 || percentRemaining < minContractFundUploadThreshold
+	// contract is out of funds when the remaining funds are less than 10% of
+	// the initial funds
+	return c.RenterFunds().Cmp(c.InitialRenterFunds.Div64(10)) <= 0
 }
 
-// isOutOfCollateral returns 'true' if the remaining/unallocated collateral in
-// the contract is below a certain threshold of the collateral we would try to
-// put into a contract upon renew.
-func isOutOfCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, c contract, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) bool {
-	minCollateral := minRemainingCollateral(cfg, rs, c.RenterFunds(), s, pt)
-	return c.RemainingCollateral().Cmp(minCollateral) < 0
-}
-
-// minNewCollateral returns the minimum amount of unallocated collateral that a
-// contract should contain after a refresh given the current amount of
-// unallocated collateral.
-func minRemainingCollateral(cfg api.AutopilotConfig, rs api.RedundancySettings, renterFunds types.Currency, s rhpv2.HostSettings, pt rhpv3.HostPriceTable) types.Currency {
-	// Compute the expected storage for the contract given its remaining funds.
-	// Note: we use the full period here even though we are checking whether to
-	// do a refresh. Otherwise, the 'expectedStorage' would would become
-	// ridiculously large the closer the contract is to its end height.
-	expectedStorage := renterFundsToExpectedStorage(renterFunds, cfg.Contracts.Period, pt)
-
-	// Cap the expected storage at twice the ideal amount of data we expect to
-	// store on a host. Even if we could afford more storage, there is no point
-	// in locking up more collateral than we expect to require.
-	idealDataPerHost := float64(cfg.Contracts.Storage) * rs.Redundancy() / float64(cfg.Contracts.Amount)
-	allocationPerHost := idealDataPerHost * 2
-	if expectedStorage > uint64(allocationPerHost) {
-		expectedStorage = uint64(allocationPerHost)
+func (c contract) IsOutOfCollateral() bool {
+	// InitialRenterFunds should never be zero but for legacy reasons we check
+	// and return true should it be the case
+	if c.InitialRenterFunds.IsZero() {
+		return true
 	}
-
-	// Cap the expected storage at the remaining storage of the host. If the
-	// host doesn't have any storage left, there is no point in adding
-	// collateral.
-	if expectedStorage > s.RemainingStorage {
-		expectedStorage = s.RemainingStorage
-	}
-
-	// If no storage is expected, return zero.
-	if expectedStorage == 0 {
-		return types.ZeroCurrency
-	}
-
-	// Computet the collateral for a single sector.
-	_, sectorCollateral := pt.BaseCost().
-		Add(pt.AppendSectorCost(cfg.Contracts.Period)).
-		Add(pt.ReadSectorCost(rhpv2.SectorSize)).
-		Total()
-
-	// The expectedStorageCollateral is 5% of the collateral we'd need to store
-	// all of the expectedStorage.
-	minExpectedStorageCollateral := sectorCollateral.Mul64(expectedStorage / rhpv2.SectorSize).Div64(minContractCollateralDenominator)
-
-	// The absolute minimum collateral we want to put into a contract is 3
-	// sectors worth of collateral.
-	minCollateral := sectorCollateral.Mul64(3)
-
-	// Return the larger of the two.
-	if minExpectedStorageCollateral.Cmp(minCollateral) > 0 {
-		minCollateral = minExpectedStorageCollateral
-	}
-	return minCollateral
+	// contract is out of collateral if the remaining collateral is below
+	// MinCollateral
+	return c.RemainingCollateral().Cmp(MinCollateral) <= 0
 }
 
 func isUpForRenewal(cfg api.AutopilotConfig, r api.Revision, blockHeight uint64) (shouldRenew, secondHalf bool) {
