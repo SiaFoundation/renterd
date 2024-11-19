@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,34 +16,59 @@ import (
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.uber.org/zap"
+
 	"lukechampine.com/frand"
 )
 
-// BenchmarkRenameDirectories benchmarks renaming a directory.
+// BenchmarkObjects benchmarks the performance of various object-related
+// database operations.
 //
-// M1 Max | 54057 ns/op | 10418 B/op | 251 allocs/op
-func BenchmarkRenameDirectories(b *testing.B) {
-	// create database
+// cpu: Apple M1 Max
+// BenchmarkObjects/ObjectEntries-10   	   11618	     102732 ns/op	     7074 B/op	     99 allocs/op
+// BenchmarkObjects/RenameObjects-10   	   12705         94236 ns/op         3506 B/op       81 allocs/op
+func BenchmarkObjects(b *testing.B) {
 	db, err := newTestDB(context.Background(), b.TempDir())
 	if err != nil {
 		b.Fatal(err)
 	}
 
+	// test parameters
+	objects := int(1e2)
+	bucket := "bucket"
+
 	// prepare database
-	if err := insertDirectories(db, b.Name()); err != nil {
+	dirs, err := insertObjects(db.DB(), bucket, objects)
+	if err != nil {
 		b.Fatal(err)
 	}
 
-	// start benchmark
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-			_, err := tx.RenameDirectories(context.Background(), b.Name(), "/a/b/c/", "/c/b/a/")
-			return err
-		}); err != nil {
-			b.Fatal(err)
+	b.Run("ObjectEntries", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+				_, _, err := tx.ObjectEntries(context.Background(), bucket, dirs[i%len(dirs)], "", "", "", "", 0, -1)
+				return err
+			}); err != nil {
+				b.Fatal(err)
+			}
 		}
-	}
+	})
+
+	// start rename benchmark
+	b.Run("RenameObjects", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+				err := tx.RenameObjects(context.Background(), bucket, dirs[frand.Intn(i+1)%len(dirs)], dirs[frand.Intn(i+1)%len(dirs)], true)
+				if err != nil && !errors.Is(err, api.ErrObjectNotFound) {
+					return err
+				}
+				return nil
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 // BenchmarkPrunableContractRoots benchmarks diffing the roots of a contract
@@ -93,22 +119,51 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
+func insertObjects(db *isql.DB, bucket string, n int) (dirs []string, _ error) {
+	var bucketID int64
+	res, err := db.Exec(context.Background(), "INSERT INTO buckets (created_at, name) VALUES (?, ?)", time.Now(), bucket)
+	if err != nil {
+		return nil, err
+	} else if bucketID, err = res.LastInsertId(); err != nil {
+		return nil, err
+	}
+
+	stmt, err := db.Prepare(context.Background(), "INSERT INTO objects (created_at,object_id, db_bucket_id, size, mime_type, etag) VALUES (?, ?, ?, ?, '', '')")
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	var path string
+	seen := make(map[string]struct{})
+	for i := 0; i < n; i++ {
+		for {
+			path = generateRandomPath(6)
+			if _, used := seen[path]; !used {
+				break
+			}
+		}
+		seen[path] = struct{}{}
+
+		size := frand.Intn(1e3)
+		if frand.Intn(10) == 0 {
+			path += "/"
+			size = 0
+			dirs = append(dirs, path)
+		}
+		_, err := stmt.Exec(context.Background(), time.Now(), path, bucketID, size)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return dirs, nil
+}
+
 func insertContractSectors(db *isql.DB, fcid types.FileContractID, n int) (roots []types.Hash256, _ error) {
 	// insert host
 	hk := types.PublicKey{1}
 	res, err := db.Exec(context.Background(), `
-INSERT INTO hosts (public_key) VALUES (?)`, sql.PublicKey(hk))
-	if err != nil {
-		return nil, err
-	}
-	hostID, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// insert contract
-	res, err = db.Exec(context.Background(), `
-INSERT INTO contracts (host_id, fcid,start_height) VALUES (?, ?, ?)`, hostID, sql.FileContractID(fcid), 0)
+INSERT INTO contracts (fcid, host_key, start_height, v2) VALUES (?, ?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +186,7 @@ INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.Encr
 
 	// insert sectors
 	insertSectorStmt, err := db.Prepare(context.Background(), `
-INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?, ?) RETURNING id`)
+INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?) RETURNING id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -140,7 +195,7 @@ INSERT INTO sectors (db_slab_id, slab_index, latest_host, root) VALUES (?, ?, ?,
 	for i := 0; i < n; i++ {
 		var sectorID int64
 		roots = append(roots, frand.Entropy256())
-		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.PublicKey(hk), sql.Hash256(roots[i])).Scan(&sectorID)
+		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.Hash256(roots[i])).Scan(&sectorID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert sector: %w", err)
 		}
@@ -175,14 +230,16 @@ WHERE c.fcid = ?`, sql.FileContractID(fcid)).Scan(&cnt)
 	return
 }
 
-func insertDirectories(db *sqlite.MainDatabase, bucket string) error {
-	return db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-		if err := tx.CreateBucket(context.Background(), bucket, api.BucketPolicy{}); err != nil {
-			return err
-		}
-		_, err := tx.InsertDirectories(context.Background(), bucket, "/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z")
-		return err
-	})
+func generateRandomPath(maxLevels int) string {
+	numLevels := frand.Intn(maxLevels) + 1
+	letters := "abcdef"
+
+	var path []string
+	for i := 0; i < numLevels; i++ {
+		path = append(path, string(letters[frand.Intn(len(letters))]))
+	}
+
+	return "/" + strings.Join(path, "/")
 }
 
 func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {
