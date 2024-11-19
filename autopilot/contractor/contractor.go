@@ -755,7 +755,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 	var filteredContracts []api.ContractMetadata
 	keepContract := func(c api.ContractMetadata, h api.Host) {
 		filteredContracts = append(filteredContracts, c)
-		ipFilter.Add(h)
+		ipFilter.Add(ctx, h)
 	}
 	churnReasons := make(map[types.FileContractID]string)
 
@@ -873,7 +873,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// check if host has a redundant ip
-		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
+		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(ctx, host) {
 			logger.Info("host has redundant IP")
 			churnReasons[c.ID] = api.ErrUsabilityHostRedundantIP.Error()
 			continue
@@ -1010,7 +1010,7 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 	addContract := func(c api.ContractMetadata, h api.Host) {
 		formedContracts = append(formedContracts, c)
 		wanted--
-		ipFilter.Add(h)
+		ipFilter.Add(ctx, h)
 	}
 
 	// early check to avoid fetching all candidates
@@ -1084,7 +1084,7 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 		logger := logger.With("hostKey", candidate.host.PublicKey)
 
 		// check if we already have a contract with a host on that address
-		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
+		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(ctx, candidate.host) {
 			logger.Info("host has redundant IP")
 			continue
 		}
