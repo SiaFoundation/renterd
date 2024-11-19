@@ -141,9 +141,8 @@ type (
 
 	// UploadSettings contains various settings related to uploads.
 	UploadSettings struct {
-		DefaultContractSet string                `json:"defaultContractSet"`
-		Packing            UploadPackingSettings `json:"packing"`
-		Redundancy         RedundancySettings    `json:"redundancy"`
+		Packing    UploadPackingSettings `json:"packing"`
+		Redundancy RedundancySettings    `json:"redundancy"`
 	}
 
 	UploadPackingSettings struct {

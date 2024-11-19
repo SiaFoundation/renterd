@@ -30,7 +30,7 @@ type Bus interface {
 	DeleteBucket(ctx context.Context, bucketName string) error
 	ListBuckets(ctx context.Context) (buckets []api.Bucket, err error)
 
-	AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) (err error)
+	AddObject(ctx context.Context, bucket, key string, o object.Object, opts api.AddObjectOptions) (err error)
 	CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error)
 	DeleteObject(ctx context.Context, bucket, key string) (err error)
 	Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)

@@ -50,13 +50,6 @@ type (
 		Timestamp time.Time        `json:"timestamp"`
 	}
 
-	EventContractSetUpdate struct {
-		Name      string                 `json:"name"`
-		ToAdd     []types.FileContractID `json:"toAdd"`
-		ToRemove  []types.FileContractID `json:"toRemove"`
-		Timestamp time.Time              `json:"timestamp"`
-	}
-
 	EventHostUpdate struct {
 		HostKey   types.PublicKey `json:"hostKey"`
 		NetAddr   string          `json:"netAddr"`
@@ -109,15 +102,6 @@ var (
 		}
 	}
 
-	WebhookContractSetUpdate = func(url string, headers map[string]string) webhooks.Webhook {
-		return webhooks.Webhook{
-			Event:   EventUpdate,
-			Headers: headers,
-			Module:  ModuleContractSet,
-			URL:     url,
-		}
-	}
-
 	WebhookHostUpdate = func(url string, headers map[string]string) webhooks.Webhook {
 		return webhooks.Webhook{
 			Event:   EventUpdate,
@@ -159,14 +143,6 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		case EventRenew:
 			var e EventContractRenew
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-	case ModuleContractSet:
-		if event.Event == EventUpdate {
-			var e EventContractSetUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}

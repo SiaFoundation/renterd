@@ -62,28 +62,22 @@ func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 		return nil, nil
 	}
 
-	// fetch autopilot
-	autopilot, err := ap.bus.Autopilot(ctx)
+	// fetch good contracts
+	contracts, err := ap.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return nil, err
 	}
 
-	// fetch contract set contracts
-	csc, err := ap.bus.Contracts(ctx, api.ContractsOpts{ContractSet: autopilot.Contracts.Set})
-	if err != nil {
-		return nil, err
-	}
-
-	// build a map of in-set contracts
-	contracts := make(map[types.FileContractID]struct{})
-	for _, contract := range csc {
-		contracts[contract.ID] = struct{}{}
+	// build a map of good contracts
+	good := make(map[types.FileContractID]struct{})
+	for _, c := range contracts {
+		good[c.ID] = struct{}{}
 	}
 
 	// filter out contracts that are not in the set
-	for _, contract := range res.Contracts {
-		if _, ok := contracts[contract.ID]; ok && contract.Prunable > 0 {
-			prunable = append(prunable, contract)
+	for _, c := range res.Contracts {
+		if _, ok := good[c.ID]; ok && c.Prunable > 0 {
+			prunable = append(prunable, c)
 		}
 	}
 	return

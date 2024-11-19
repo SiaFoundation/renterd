@@ -198,12 +198,12 @@ func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.Redundan
 			defer mem.Release()
 
 			// fetch packed slab to upload
-			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet, 1)
+			packedSlabs, err := w.bus.PackedSlabsForUpload(ctx, defaultPackedSlabsLockDuration, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), 1)
 			if err != nil {
 				w.logger.With(zap.Error(err)).Error("couldn't fetch packed slabs from bus")
 			} else if len(packedSlabs) > 0 {
 				// upload packed slab
-				if err := w.uploadPackedSlab(ctx, mem, packedSlabs[0], up.rs, up.contractSet); err != nil {
+				if err := w.uploadPackedSlab(ctx, mem, packedSlabs[0], up.rs); err != nil {
 					w.logger.With(zap.Error(err)).Error("failed to upload packed slab")
 				}
 			}
@@ -211,13 +211,13 @@ func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.Redundan
 	}
 
 	// make sure there's a goroutine uploading any packed slabs
-	go w.threadedUploadPackedSlabs(up.rs, up.contractSet)
+	go w.threadedUploadPackedSlabs(up.rs)
 
 	return eTag, nil
 }
 
-func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSet string) {
-	key := fmt.Sprintf("%d-%d_%s", rs.MinShards, rs.TotalShards, contractSet)
+func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings) {
+	key := fmt.Sprintf("%d-%d", rs.MinShards, rs.TotalShards)
 	w.uploadsMu.Lock()
 	if _, ok := w.uploadingPackedSlabs[key]; ok {
 		w.uploadsMu.Unlock()
@@ -246,7 +246,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 		}
 
 		// fetch packed slab to upload
-		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), contractSet, 1)
+		packedSlabs, err := w.bus.PackedSlabsForUpload(interruptCtx, defaultPackedSlabsLockDuration, uint8(rs.MinShards), uint8(rs.TotalShards), 1)
 		if err != nil {
 			w.logger.Errorf("couldn't fetch packed slabs from bus: %v", err)
 			mem.Release()
@@ -271,7 +271,7 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 			defer cancel()
 
 			// upload packed slab
-			if err := w.uploadPackedSlab(ctx, mem, ps, rs, contractSet); err != nil {
+			if err := w.uploadPackedSlab(ctx, mem, ps, rs); err != nil {
 				w.logger.Error(err)
 				interruptCancel() // prevent new uploads from being launched
 			}
@@ -282,9 +282,9 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings, contractSe
 	wg.Wait()
 }
 
-func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api.PackedSlab, rs api.RedundancySettings, contractSet string) error {
+func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api.PackedSlab, rs api.RedundancySettings) error {
 	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: contractSet})
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return fmt.Errorf("couldn't fetch contracts from bus: %v", err)
 	}
@@ -537,7 +537,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	// add partial slabs
 	if len(partialSlab) > 0 {
 		var pss []object.SlabSlice
-		pss, bufferSizeLimitReached, err = mgr.os.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards), up.contractSet)
+		pss, bufferSizeLimitReached, err = mgr.os.AddPartialSlab(ctx, partialSlab, uint8(up.rs.MinShards), uint8(up.rs.TotalShards))
 		if err != nil {
 			return false, "", err
 		}
@@ -546,13 +546,13 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 
 	if up.multipart {
 		// persist the part
-		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.key, up.contractSet, eTag, up.uploadID, up.partNumber, o.Slabs)
+		err = mgr.os.AddMultipartPart(ctx, up.bucket, up.key, eTag, up.uploadID, up.partNumber, o.Slabs)
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add multi part: %w", err)
 		}
 	} else {
 		// persist the object
-		err = mgr.os.AddObject(ctx, up.bucket, up.key, up.contractSet, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
+		err = mgr.os.AddObject(ctx, up.bucket, up.key, o, api.AddObjectOptions{MimeType: up.mimeType, ETag: eTag, Metadata: up.metadata})
 		if err != nil {
 			return bufferSizeLimitReached, "", fmt.Errorf("couldn't add object: %w", err)
 		}
@@ -618,7 +618,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contractSet string, contracts []api.ContractMetadata, bh uint64, mem memory.Memory) (err error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contracts []api.ContractMetadata, bh uint64, mem memory.Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

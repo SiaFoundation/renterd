@@ -32,7 +32,6 @@ type (
 	// UploadParams contains the metadata needed by a worker to upload an object.
 	UploadParams struct {
 		CurrentHeight uint64
-		ContractSet   string
 		UploadPacking bool
 		GougingParams
 	}
@@ -78,11 +77,6 @@ type (
 	ExplorerState struct {
 		Enabled bool   `json:"enabled"`
 		URL     string `json:"url,omitempty"`
-	}
-
-	ContractSetUpdateRequest struct {
-		ToAdd    []types.FileContractID `json:"toAdd"`
-		ToRemove []types.FileContractID `json:"toRemove"`
 	}
 
 	// HostScanRequest is the request type for the /host/scan endpoint.

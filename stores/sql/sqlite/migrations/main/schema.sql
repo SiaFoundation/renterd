@@ -23,14 +23,6 @@ CREATE INDEX `idx_contracts_usability` ON `contracts`(`usability`);
 CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
 CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);
 
--- dbContractSet
-CREATE TABLE `contract_sets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`name` text UNIQUE);
-CREATE INDEX `idx_contract_sets_name` ON `contract_sets`(`name`);
-
--- dbContractSet <-> dbContract
-CREATE TABLE `contract_set_contracts` (`db_contract_set_id` integer,`db_contract_id` integer,PRIMARY KEY (`db_contract_set_id`,`db_contract_id`),CONSTRAINT `fk_contract_set_contracts_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_contract_set_contracts_db_contract` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts`(`id`) ON DELETE CASCADE);
-CREATE INDEX `idx_contract_set_contracts_db_contract_id` ON `contract_set_contracts`(`db_contract_id`);
-
 -- dbBucket
 CREATE TABLE `buckets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`policy` text,`name` text NOT NULL UNIQUE);
 CREATE INDEX `idx_buckets_name` ON `buckets`(`name`);
@@ -63,7 +55,7 @@ CREATE UNIQUE INDEX `idx_multipart_uploads_upload_id` ON `multipart_uploads`(`up
 CREATE TABLE `buffered_slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`filename` text);
 
 -- dbSlab
-CREATE TABLE `slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_contract_set_id` integer,`db_buffered_slab_id` integer DEFAULT NULL,`health` real NOT NULL DEFAULT 1,`health_valid_until` integer NOT NULL DEFAULT 0,`key` blob NOT NULL UNIQUE,`min_shards` integer,`total_shards` integer,CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs`(`id`),CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets`(`id`));
+CREATE TABLE `slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_contract_set_id` integer,`db_buffered_slab_id` integer DEFAULT NULL,`health` real NOT NULL DEFAULT 1,`health_valid_until` integer NOT NULL DEFAULT 0,`key` blob NOT NULL UNIQUE,`min_shards` integer,`total_shards` integer,CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs`(`id`));
 CREATE INDEX `idx_slabs_db_contract_set_id` ON `slabs`(`db_contract_set_id`);
 CREATE INDEX `idx_slabs_total_shards` ON `slabs`(`total_shards`);
 CREATE INDEX `idx_slabs_min_shards` ON `slabs`(`min_shards`);

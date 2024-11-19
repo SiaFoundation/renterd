@@ -224,12 +224,9 @@ type (
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-		RemoveContractSet(ctx context.Context, name string) error
 		PutContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 		UpdateContractUsability(ctx context.Context, id types.FileContractID, usability string) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
@@ -254,10 +251,10 @@ type (
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
 		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
-		UpdateObject(ctx context.Context, bucketName, key, contractSet, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
+		UpdateObject(ctx context.Context, bucketName, key, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
 
 		AbortMultipartUpload(ctx context.Context, bucketName, key string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucketName, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		AddMultipartPart(ctx context.Context, bucketName, key, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 		CompleteMultipartUpload(ctx context.Context, bucketName, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucketName, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
@@ -265,14 +262,14 @@ type (
 		MultipartUploadParts(ctx context.Context, bucketName, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
-		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
-		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, bufferSize int64, err error)
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, bufferSize int64, err error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 	}
 
@@ -424,9 +421,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contracts/form":         b.contractsFormHandler,
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
-		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"POST   /contracts/set/:set":     b.contractsSetHandlerPUT,
-		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,

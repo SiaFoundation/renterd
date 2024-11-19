@@ -79,9 +79,9 @@ func TestFormContract(t *testing.T) {
 		return nil
 	})
 
-	// assert the contract is part of the contract set
+	// assert the contract is good
 	tt.Retry(300, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
+		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		tt.OK(err)
 		if len(contracts) != 1 {
 			return fmt.Errorf("expected 1 contract, got %v", len(contracts))

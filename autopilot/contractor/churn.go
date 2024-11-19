@@ -21,7 +21,7 @@ func newAccumulatedChurn() *accumulatedChurn {
 	}
 }
 
-func (c *accumulatedChurn) Alert(name string) alerts.Alert {
+func (c *accumulatedChurn) Alert() alerts.Alert {
 	var hint string
 	if len(c.removals) > 0 {
 		hint = "A high churn rate can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded from the set."
@@ -32,7 +32,6 @@ func (c *accumulatedChurn) Alert(name string) alerts.Alert {
 		Severity: alerts.SeverityInfo,
 		Message:  "Contract set changed",
 		Data: map[string]any{
-			"name":         name,
 			"setAdditions": c.additions,
 			"setRemovals":  c.removals,
 			"hint":         hint,

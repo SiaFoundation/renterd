@@ -21,7 +21,7 @@ func TestUploadFailedAlertErrorSet(t *testing.T) {
 	}
 	wrapped := fmt.Errorf("wrapped error: %w", hostErrSet)
 
-	alert := newUploadFailedAlert("bucket", "path", "set", "mimeType", 1, 2, 3, true, false, wrapped)
+	alert := newUploadFailedAlert("bucket", "path", "mimeType", 1, 2, 3, true, false, wrapped)
 
 	alert.ID = types.Hash256{1, 2, 3}
 	alert.Timestamp = time.Time{}
@@ -31,10 +31,9 @@ func TestUploadFailedAlertErrorSet(t *testing.T) {
 		Severity: alerts.SeverityError,
 		Message:  "Upload failed",
 		Data: map[string]any{
-			"bucket":      "bucket",
-			"contractSet": "set",
-			"contracts":   3,
-			"error":       wrapped.Error(),
+			"bucket":    "bucket",
+			"contracts": 3,
+			"error":     wrapped.Error(),
 			"hosts": map[string]string{
 				types.PublicKey{1, 1, 1}.String(): "test",
 			},

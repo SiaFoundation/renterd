@@ -54,7 +54,7 @@ type (
 		Accounts(ctx context.Context, owner string) ([]api.Account, error)
 
 		// AddMultipartPart adds a part to an unfinished multipart upload.
-		AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
+		AddMultipartPart(ctx context.Context, bucket, key, eTag, uploadID string, partNumber int, slices object.SlabSlices) error
 
 		// AddPeer adds a peer to the store.
 		AddPeer(ctx context.Context, addr string) error
@@ -103,15 +103,6 @@ type (
 		// Contracts returns contract metadata for all active contracts. The
 		// opts argument can be used to filter the result.
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-
-		// ContractSetID returns the ID of the contract set with the given name.
-		// NOTE: Our locking strategy requires that the contract set ID is
-		// unique. So even after a contract set was deleted, the ID must not be
-		// reused.
-		ContractSetID(ctx context.Context, contractSet string) (int64, error)
-
-		// ContractSets returns the names of all contract sets.
-		ContractSets(ctx context.Context) ([]string, error)
 
 		// ContractSize returns the size of the contract with the given ID as
 		// well as the estimated number of bytes that can be pruned from it.
@@ -173,7 +164,7 @@ type (
 		// includes the creation of a buffered slab as well as the corresponding
 		// regular slab it is linked to. It returns the ID of the buffered slab
 		// that was created.
-		InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
+		InsertBufferedSlab(ctx context.Context, fileName string, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error)
 
 		// InsertDirectories inserts the directories for the given path and
 		// returns the ID of the immediate parent directory.
@@ -184,7 +175,7 @@ type (
 		InsertMultipartUpload(ctx context.Context, bucket, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (string, error)
 
 		// InsertObject inserts a new object into the database.
-		InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
+		InsertObject(ctx context.Context, bucket, key string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error
 
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.
@@ -267,10 +258,6 @@ type (
 		// increasing the successful/failed interactions accordingly.
 		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 
-		// RemoveContractSet removes the contract set with the given name from
-		// the database.
-		RemoveContractSet(ctx context.Context, contractSet string) error
-
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures
 		// times. The contracts of those hosts are also removed.
@@ -316,16 +303,12 @@ type (
 		// Slab returns the slab with the given ID or api.ErrSlabNotFound.
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
-		// SlabBuffers returns the filenames and associated contract sets of all
-		// slab buffers.
-		SlabBuffers(ctx context.Context) (map[string]string, error)
-
 		// Tip returns the sync height.
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
 		// UnhealthySlabs returns up to 'limit' slabs belonging to the contract
 		// set 'set' with a health smaller than or equal to 'healthCutoff'
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
@@ -339,11 +322,6 @@ type (
 
 		// UpdateContract sets the given metadata on the contract with given fcid.
 		UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error
-
-		// UpdateContractSet adds/removes the provided contract ids to/from
-		// the contract set. The contract set is created in the process if
-		// it doesn't exist already.
-		UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error
 
 		// UpdateContractUsability updates the usability of the given contract.
 		UpdateContractUsability(ctx context.Context, fcid types.FileContractID, usability string) error
@@ -449,13 +427,12 @@ type (
 	}
 
 	LoadedSlabBuffer struct {
-		ID            int64
-		ContractSetID int64
-		Filename      string
-		Key           object.EncryptionKey
-		MinShards     uint8
-		Size          int64
-		TotalShards   uint8
+		ID          int64
+		Filename    string
+		Key         object.EncryptionKey
+		MinShards   uint8
+		Size        int64
+		TotalShards uint8
 	}
 
 	UsedContract struct {

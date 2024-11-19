@@ -319,26 +319,11 @@ func TestContractPruneMetrics(t *testing.T) {
 }
 
 func TestContractSetMetrics(t *testing.T) {
-	testStart := time.Now().Round(time.Millisecond).UTC()
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	metrics, err := ss.ContractSetMetrics(context.Background(), testStart, 1, time.Minute, api.ContractSetMetricsQueryOpts{})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(metrics) != 1 {
-		t.Fatal(err)
-	} else if m := metrics[0]; m.Contracts != 0 {
-		t.Fatalf("expected 0 contracts, got %v", m.Contracts)
-	} else if ti := time.Time(m.Timestamp); !ti.Equal(testStart) {
-		t.Fatalf("expected time to match start time, %v != %v", ti, testStart)
-	} else if m.Name != testContractSet {
-		t.Fatalf("expected name to be %v, got %v", testContractSet, m.Name)
-	}
-
-	// Record 3 more contract set metrics some time apart from each other.
-	// The recorded timestamps are out of order to test that the query ordery by
-	// time.
+	// Record contract set metrics some time apart from each other. The recorded
+	// timestamps are out of order to test that the query ordery by time.
 	cs := t.Name()
 	times := []time.Time{time.UnixMilli(200), time.UnixMilli(100), time.UnixMilli(150)}
 	for i, recordedTime := range times {

@@ -359,7 +359,7 @@ func newObjectStoreMock(bucket string, cs ContractStore) *objectStoreMock {
 	return os
 }
 
-func (os *objectStoreMock) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (os *objectStoreMock) AddMultipartPart(ctx context.Context, bucket, path, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	return nil
 }
 
@@ -394,7 +394,7 @@ func (os *objectStoreMock) DeleteObject(ctx context.Context, bucket, key string)
 	return nil
 }
 
-func (os *objectStoreMock) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) error {
+func (os *objectStoreMock) AddObject(ctx context.Context, bucket, path string, o object.Object, opts api.AddObjectOptions) error {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -407,7 +407,7 @@ func (os *objectStoreMock) AddObject(ctx context.Context, bucket, path, contract
 	return nil
 }
 
-func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
+func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -427,7 +427,7 @@ func (os *objectStoreMock) AddPartialSlab(ctx context.Context, data []byte, minS
 
 	// update store
 	os.partials[ec.String()] = &packedSlabMock{
-		parameterKey: fmt.Sprintf("%d-%d-%v", minShards, totalShards, contractSet),
+		parameterKey: fmt.Sprintf("%d-%d", minShards, totalShards),
 		bufferID:     os.bufferIDCntr,
 		slabKey:      ec,
 		data:         data,
@@ -537,7 +537,7 @@ func (os *objectStoreMock) UpdateSlab(ctx context.Context, key object.Encryption
 	return err
 }
 
-func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (pss []api.PackedSlab, _ error) {
+func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) (pss []api.PackedSlab, _ error) {
 	os.mu.Lock()
 	defer os.mu.Unlock()
 
@@ -545,7 +545,7 @@ func (os *objectStoreMock) PackedSlabsForUpload(ctx context.Context, lockingDura
 		limit = math.MaxInt
 	}
 
-	parameterKey := fmt.Sprintf("%d-%d-%v", minShards, totalShards, set)
+	parameterKey := fmt.Sprintf("%d-%d", minShards, totalShards)
 	for _, ps := range os.partials {
 		if ps.parameterKey == parameterKey && time.Now().After(ps.lockedUntil) {
 			ps.lockedUntil = time.Now().Add(lockingDuration)

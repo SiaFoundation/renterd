@@ -393,10 +393,9 @@ var (
 						} else {
 							enabled = true
 						}
-						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, current_period = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							enabled,
 							period,
-							cfg.Contracts.Set,
 							cfg.Contracts.Amount,
 							cfg.Contracts.Period,
 							cfg.Contracts.RenewWindow,
@@ -420,6 +419,21 @@ var (
 
 					// drop autopilots table
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_autopilot_2", log)
+				},
+			},
+			{
+				ID: "00029_slab_buffers",
+				Migrate: func(tx Tx) error {
+					// 1. fetch all filenames
+					// 2. move all files using the contract set id
+					// 3. rename all filenames
+
+					// 1. upload settings have default contract set id
+
+					// 1. autopilot state has set
+
+					// CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`)
+					return nil
 				},
 			},
 		}

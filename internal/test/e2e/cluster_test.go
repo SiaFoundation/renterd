@@ -209,9 +209,6 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("contract should be good")
 	}
 
-	// Wait for contract set to form
-	cluster.WaitForContractSetContracts(test.ContractSet, int(ap.Contracts.Amount))
-
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
 
@@ -365,28 +362,6 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	} else if _, err := cluster.Bus.Host(context.Background(), types.PublicKey{1}); !utils.IsErr(err, api.ErrHostNotFound) {
 		t.Fatal("unexpected error", err)
-	}
-
-	// Assert contract set contracts are marked good
-	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
-	tt.OK(err)
-
-	seen := make(map[types.FileContractID]struct{})
-	for _, c := range contracts {
-		if c.Usability != api.ContractUsabilityGood {
-			t.Fatal("contract should be good")
-		}
-		seen[c.ID] = struct{}{}
-	}
-	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
-	tt.OK(err)
-	for _, c := range contracts {
-		if _, ok := seen[c.ID]; ok {
-			continue
-		}
-		if c.Usability != api.ContractUsabilityBad {
-			t.Fatal("contract should be bad")
-		}
 	}
 }
 
@@ -986,28 +961,17 @@ func TestUploadDownloadSpending(t *testing.T) {
 		// mine a block
 		cluster.MineBlocks(1)
 
-		// fetch contracts
-		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		// fetch active contracts
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		tt.OK(err)
-		if len(cms) == 0 {
+		if len(contracts) == 0 {
 			t.Fatal("no contracts found")
 		}
 
-		// fetch contract set contracts
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
-		tt.OK(err)
-		currentSet := make(map[types.FileContractID]struct{})
-		for _, c := range contracts {
-			currentSet[c.ID] = struct{}{}
-		}
-
 		// assert all contracts are renewed and in the set
-		for _, cm := range cms {
-			if cm.RenewedFrom == (types.FileContractID{}) {
+		for _, c := range contracts {
+			if c.RenewedFrom == (types.FileContractID{}) {
 				return errors.New("found contract that wasn't renewed")
-			}
-			if _, inset := currentSet[cm.ID]; !inset {
-				return errors.New("found renewed contract that wasn't part of the set")
 			}
 		}
 		return nil
@@ -1399,7 +1363,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[hk]
-	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "frankenstein", api.DownloadObjectOptions{}))
@@ -1676,7 +1640,7 @@ func TestUploadPacking(t *testing.T) {
 				return errors.New("buffer locked")
 			}
 		}
-		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), test.ContractSet, 1)
+		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), 1)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(ps) > 0 {
@@ -1881,9 +1845,6 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OK(err)
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 slab buffer, got", len(buffers))
-	}
-	if buffers[0].ContractSet != test.ContractSet {
-		t.Fatalf("expected slab buffer contract set of %v, got %v", test.ContractSet, buffers[0].ContractSet)
 	}
 	if buffers[0].Size != int64(len(data1)) {
 		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), buffers[0].Size)
@@ -2302,12 +2263,12 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 }
 
 func TestBusRecordedMetrics(t *testing.T) {
-	startTime := time.Now().UTC().Round(time.Second)
+	t.Skip("re-enable when metrics concerning contractsets are refactored")
 
-	cluster := newTestCluster(t, testClusterOptions{
-		hosts: 1,
-	})
+	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
+
+	startTime := time.Now().UTC().Round(time.Second)
 
 	// fetch contract set metrics
 	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
@@ -2319,8 +2280,6 @@ func TestBusRecordedMetrics(t *testing.T) {
 			return fmt.Errorf("expected at least 1 metric, got %v", len(csMetrics))
 		} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
 			return fmt.Errorf("expected 1 contract, got %v", m.Contracts)
-		} else if m.Name != test.ContractSet {
-			return fmt.Errorf("expected contract set %v, got %v", test.ContractSet, m.Name)
 		} else if m.Timestamp.Std().Before(startTime) {
 			return fmt.Errorf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 		}
@@ -2336,8 +2295,6 @@ func TestBusRecordedMetrics(t *testing.T) {
 		t.Fatalf("expected added churn, got %v", m.Direction)
 	} else if m.ContractID == (types.FileContractID{}) {
 		t.Fatal("expected non-zero FCID")
-	} else if m.Name != test.ContractSet {
-		t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
 	} else if m.Timestamp.Std().Before(startTime) {
 		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
 	}

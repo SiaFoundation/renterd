@@ -90,7 +90,6 @@ type Bus interface {
 	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
 	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
 	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
 }
@@ -100,7 +99,7 @@ type HostScanner interface {
 }
 
 type contractChecker interface {
-	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string)
+	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string)
 	pruneContractRefreshFailures(contracts []api.ContractMetadata)
 	shouldArchive(c contract, bh uint64, network consensus.Network) error
 }
@@ -546,8 +545,6 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 }
 
 func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, logger *zap.SugaredLogger, oldSet, newSet []api.ContractMetadata, toStopUsing map[types.FileContractID]string) (bool, error) {
-	name := ctx.ContractSet()
-
 	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch all contracts: %w", err)
@@ -634,7 +631,6 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	var metrics []api.ContractSetChurnMetric
 	for fcid := range setAdditions {
 		metrics = append(metrics, api.ContractSetChurnMetric{
-			Name:       ctx.ContractSet(),
 			ContractID: fcid,
 			Direction:  api.ChurnDirAdded,
 			Timestamp:  now,
@@ -642,7 +638,6 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 	}
 	for fcid, removal := range setRemovals {
 		metrics = append(metrics, api.ContractSetChurnMetric{
-			Name:       ctx.ContractSet(),
 			ContractID: fcid,
 			Direction:  api.ChurnDirRemoved,
 			Reason:     removal.Removals[0].Reason,
@@ -683,7 +678,7 @@ func computeContractSetChanged(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn
 			churn.Reset()
 		}
 		churn.Apply(setAdditions, setRemovals)
-		alerter.RegisterAlert(ctx, churn.Alert(name))
+		alerter.RegisterAlert(ctx, churn.Alert())
 	}
 	return hasChanged, nil
 }
@@ -812,14 +807,12 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 	logger.With("contracts", len(contracts)).Info("checking existing contracts")
 	var renewed, refreshed int
 	for _, c := range contracts {
-		inSet := c.InSet(ctx.ContractSet())
-
 		logger := logger.With("contractID", c.ID).
-			With("inSet", inSet).
 			With("hostKey", c.HostKey).
 			With("revisionNumber", c.RevisionNumber).
 			With("size", c.FileSize()).
 			With("state", c.State).
+			With("usability", c.Usability).
 			With("remainingLeeway", remainingLeeway).
 			With("revisionAvailable", c.Revision != nil).
 			With("filteredContracts", len(filteredContracts)).
@@ -891,7 +884,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		// NOTE: if we have a contract with a host that is not scanned, we either
 		// added the host and contract manually or reset the host scans. In that case,
 		// we ignore the fact that the host is not scanned for now to avoid churn.
-		if inSet && host.Checks.UsabilityBreakdown.NotCompletingScan {
+		if c.Usability == api.ContractUsabilityGood && host.Checks.UsabilityBreakdown.NotCompletingScan {
 			keepContract(c.ContractMetadata, host)
 			logger.Info("ignoring contract with unscanned host")
 			continue // no more checks until host is scanned
@@ -907,7 +900,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 		// check if revision is available
 		if c.Revision == nil {
-			if inSet && remainingLeeway > 0 {
+			if c.Usability == api.ContractUsabilityGood && remainingLeeway > 0 {
 				logger.Debug("keeping contract due to leeway")
 				keepContract(c.ContractMetadata, host)
 				remainingLeeway--
@@ -919,7 +912,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		}
 
 		// check if contract is usable
-		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, inSet, bh, ipFilter)
+		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, bh, ipFilter)
 
 		// extend logger
 		logger = logger.With("usable", usable).
@@ -985,7 +978,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 		// if the contract is not usable we ignore it
 		if !usable {
-			if inSet {
+			if c.Usability == api.ContractUsabilityGood {
 				logger.Info("contract is not usable, removing from set")
 			} else {
 				logger.Debug("contract is not usable, remains out of set")
@@ -1161,7 +1154,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	if err != nil {
 		return fmt.Errorf("failed to fetch all contracts: %w", err)
 	}
-	setContracts, err := bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
+	goodContracts, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
@@ -1175,7 +1168,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	}
 
 	// run revision broadcast on contracts in the new set
-	rb.broadcastRevisions(ctx, setContracts, logger)
+	rb.broadcastRevisions(ctx, goodContracts, logger)
 
 	// register alerts for used hosts with lost sectors
 	var toDismiss []types.Hash256
@@ -1199,8 +1192,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 
 func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
-		Named(hex.EncodeToString(frand.Bytes(16))). // uuid for this iteration
-		With("contractSet", ctx.ContractSet())
+		Named(hex.EncodeToString(frand.Bytes(16))) // uuid for this iteration
 
 	// check if we want to run maintenance
 	if reason, skip := canSkipContractMaintenance(ctx, ctx.ContractsConfig()); skip {
@@ -1235,9 +1227,9 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	}
 
 	// fetch old set
-	oldSet, err := bus.Contracts(ctx, api.ContractsOpts{ContractSet: ctx.ContractSet()})
-	if err != nil && !utils.IsErr(err, api.ErrContractSetNotFound) {
-		return false, fmt.Errorf("failed to fetch old contract set: %w", err)
+	oldSet, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch good contracts: %w", err)
 	}
 
 	// merge kept and formed contracts into new set
@@ -1281,9 +1273,6 @@ func updateContractSet(ctx *mCtx, bus Bus, oldSet, newSet []api.ContractMetadata
 	var toRemove []types.FileContractID
 	for id := range inOldSet {
 		toRemove = append(toRemove, id)
-	}
-	if err := bus.UpdateContractSet(ctx, ctx.ContractSet(), newSetIDs, toRemove); err != nil {
-		return fmt.Errorf("failed to update contract set: %w", err)
 	}
 	for _, id := range toRemove {
 		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityBad); err != nil {

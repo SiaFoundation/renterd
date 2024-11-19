@@ -108,8 +108,8 @@ func TestSectorPruning(t *testing.T) {
 	// wait until we have accounts
 	cluster.WaitForAccounts()
 
-	// wait until we have a contract set
-	cluster.WaitForContractSetContracts(test.ContractSet, rs.TotalShards)
+	// wait until we have contracts
+	cluster.WaitForContracts()
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {

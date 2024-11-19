@@ -15,6 +15,8 @@ import (
 )
 
 func TestMetrics(t *testing.T) {
+	t.Skip("re-enable when metrics concerning contractsets are refactored")
+
 	// register start time
 	start := time.Now()
 

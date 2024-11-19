@@ -117,20 +117,10 @@ func (tx *MainDatabaseTx) Accounts(ctx context.Context, owner string) ([]api.Acc
 	return ssql.Accounts(ctx, tx, owner)
 }
 
-func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, contractSet, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
-	// fetch contract set
-	var csID int64
-	err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE name = ?", contractSet).
-		Scan(&csID)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return api.ErrContractSetNotFound
-	} else if err != nil {
-		return fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-
+func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, eTag, uploadID string, partNumber int, slices object.SlabSlices) error {
 	// find multipart upload
 	var muID int64
-	err = tx.QueryRow(ctx, "SELECT id FROM multipart_uploads WHERE upload_id = ?", uploadID).
+	err := tx.QueryRow(ctx, "SELECT id FROM multipart_uploads WHERE upload_id = ?", uploadID).
 		Scan(&muID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch multipart upload: %w", err)
@@ -158,7 +148,7 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, co
 	}
 
 	// create slices
-	return tx.insertSlabs(ctx, nil, &partID, contractSet, slices)
+	return tx.insertSlabs(ctx, nil, &partID, slices)
 }
 
 func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
@@ -305,14 +295,6 @@ func (tx *MainDatabaseTx) Contracts(ctx context.Context, opts api.ContractsOpts)
 	return ssql.Contracts(ctx, tx, opts)
 }
 
-func (tx *MainDatabaseTx) ContractSetID(ctx context.Context, contractSet string) (int64, error) {
-	return ssql.ContractSetID(ctx, tx, contractSet)
-}
-
-func (tx *MainDatabaseTx) ContractSets(ctx context.Context) ([]string, error) {
-	return ssql.ContractSets(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) ContractSize(ctx context.Context, id types.FileContractID) (api.ContractSize, error) {
 	return ssql.ContractSize(ctx, tx, id)
 }
@@ -453,8 +435,8 @@ INSERT IGNORE INTO autopilot_config (
 	return err
 }
 
-func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
-	return ssql.InsertBufferedSlab(ctx, tx, fileName, contractSetID, ec, minShards, totalShards)
+func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName string, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+	return ssql.InsertBufferedSlab(ctx, tx, fileName, ec, minShards, totalShards)
 }
 
 func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
@@ -517,7 +499,7 @@ func (tx *MainDatabaseTx) InsertMultipartUpload(ctx context.Context, bucket, key
 	return ssql.InsertMultipartUpload(ctx, tx, bucket, key, ec, mimeType, metadata)
 }
 
-func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contractSet string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
+func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key string, dirID int64, o object.Object, mimeType, eTag string, md api.ObjectUserMetadata) error {
 	// get bucket id
 	var bucketID int64
 	err := tx.QueryRow(ctx, "SELECT id FROM buckets WHERE buckets.name = ?", bucket).Scan(&bucketID)
@@ -534,7 +516,7 @@ func (tx *MainDatabaseTx) InsertObject(ctx context.Context, bucket, key, contrac
 	}
 
 	// insert slabs
-	if err := tx.insertSlabs(ctx, &objID, nil, contractSet, o.Slabs); err != nil {
+	if err := tx.insertSlabs(ctx, &objID, nil, o.Slabs); err != nil {
 		return fmt.Errorf("failed to insert slabs: %w", err)
 	}
 
@@ -824,10 +806,6 @@ func (tx *MainDatabaseTx) RecordPriceTables(ctx context.Context, priceTableUpdat
 	return ssql.RecordPriceTables(ctx, tx, priceTableUpdates)
 }
 
-func (tx *MainDatabaseTx) RemoveContractSet(ctx context.Context, contractSet string) error {
-	return ssql.RemoveContractSet(ctx, tx, contractSet)
-}
-
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
@@ -993,16 +971,12 @@ func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (o
 	return ssql.Slab(ctx, tx, key)
 }
 
-func (tx *MainDatabaseTx) SlabBuffers(ctx context.Context) (map[string]string, error) {
-	return ssql.SlabBuffers(ctx, tx)
-}
-
 func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
 	return ssql.Tip(ctx, tx.Tx)
 }
 
-func (tx *MainDatabaseTx) UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
-	return ssql.UnhealthySlabs(ctx, tx, healthCutoff, set, limit)
+func (tx *MainDatabaseTx) UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error) {
+	return ssql.UnhealthySlabs(ctx, tx, healthCutoff, limit)
 }
 
 func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {
@@ -1019,62 +993,6 @@ func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string,
 
 func (tx *MainDatabaseTx) UpdateContract(ctx context.Context, fcid types.FileContractID, c api.ContractMetadata) error {
 	return ssql.UpdateContract(ctx, tx, fcid, c)
-}
-
-func (tx *MainDatabaseTx) UpdateContractSet(ctx context.Context, name string, toAdd, toRemove []types.FileContractID) error {
-	res, err := tx.Exec(ctx, "INSERT INTO contract_sets (name) VALUES (?) ON DUPLICATE KEY UPDATE id = last_insert_id(id)", name)
-	if err != nil {
-		return fmt.Errorf("failed to insert contract set: %w", err)
-	}
-
-	// if no changes are needed, return after creating the set
-	if len(toAdd)+len(toRemove) == 0 {
-		return nil
-	}
-
-	csID, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-
-	prepareQuery := func(fcids []types.FileContractID) (string, []any) {
-		args := []any{csID}
-		query := strings.Repeat("?, ", len(fcids)-1) + "?"
-		for _, fcid := range fcids {
-			args = append(args, ssql.FileContractID(fcid))
-		}
-		return query, args
-	}
-
-	// remove unwanted contracts first
-	if len(toRemove) > 0 {
-		query, args := prepareQuery(toRemove)
-		_, err = tx.Exec(ctx, fmt.Sprintf(`
-			DELETE csc
-			FROM contract_set_contracts csc
-			INNER JOIN contracts c ON c.id = csc.db_contract_id
-			WHERE csc.db_contract_set_id = ? AND c.fcid IN (%s)
-		`, query), args...)
-		if err != nil {
-			return fmt.Errorf("failed to remove contracts: %w", err)
-		}
-	}
-
-	// add new contracts
-	if len(toAdd) > 0 {
-		query, args := prepareQuery(toAdd)
-		_, err = tx.Exec(ctx, fmt.Sprintf(`
-			INSERT INTO contract_set_contracts (db_contract_set_id, db_contract_id)
-			SELECT ?, c.id
-			FROM contracts c
-			WHERE c.fcid IN (%s)
-			ON DUPLICATE KEY UPDATE db_contract_set_id = VALUES(db_contract_set_id)
-		`, query), args...)
-		if err != nil {
-			return fmt.Errorf("failed to add contract set contracts: %w", err)
-		}
-	}
-	return nil
 }
 
 func (tx *MainDatabaseTx) UpdateContractUsability(ctx context.Context, fcid types.FileContractID, usability string) error {
@@ -1309,7 +1227,7 @@ func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, err
 	return ssql.Webhooks(ctx, tx)
 }
 
-func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, contractSet string, slices object.SlabSlices) error {
+func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, slices object.SlabSlices) error {
 	if (objID == nil) == (partID == nil) {
 		return errors.New("exactly one of objID and partID must be set")
 	} else if len(slices) == 0 {
@@ -1321,16 +1239,9 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
 	}
 
-	// get contract set id
-	var contractSetID int64
-	if err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", contractSet).
-		Scan(&contractSetID); err != nil {
-		return fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-
 	// insert slabs
-	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, db_contract_set_id, `+"`key`"+`, min_shards, total_shards)
-						VALUES (?, ?, ?, ?, ?)
+	insertSlabStmt, err := tx.Prepare(ctx, `INSERT INTO slabs (created_at, `+"`key`"+`, min_shards, total_shards)
+						VALUES (?, ?, ?, ?)
 						ON DUPLICATE KEY UPDATE id = last_insert_id(id)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert slab: %w", err)
@@ -1347,7 +1258,6 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 	for i := range slices {
 		res, err := insertSlabStmt.Exec(ctx,
 			time.Now(),
-			contractSetID,
 			ssql.EncryptionKey(slices[i].EncryptionKey),
 			slices[i].MinShards,
 			uint8(len(slices[i].Shards)),

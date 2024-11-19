@@ -3,6 +3,7 @@ package contractor
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -43,10 +44,6 @@ func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
 
 func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
 	return ctx.state.ContractsConfig()
-}
-
-func (ctx *mCtx) ContractSet() string {
-	return ctx.state.ContractsConfig().Set
 }
 
 func (ctx *mCtx) Deadline() (deadline time.Time, ok bool) {
@@ -101,7 +98,14 @@ func (ctx *mCtx) WantedContracts() uint64 {
 }
 
 func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
-	sortContractsForMaintenance(ctx.state.ContractsConfig(), contracts)
+	sort.SliceStable(contracts, func(i, j int) bool {
+		iUsable := contracts[i].Usability == api.ContractUsabilityGood
+		jUsable := contracts[j].Usability == api.ContractUsabilityGood
+		if iUsable != jUsable {
+			return iUsable
+		}
+		return contracts[i].FileSize() > contracts[j].FileSize()
+	})
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {

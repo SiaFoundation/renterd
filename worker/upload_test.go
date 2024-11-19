@@ -18,7 +18,6 @@ import (
 
 var (
 	testBucket             = "testbucket"
-	testContractSet        = "testcontractset"
 	testRedundancySettings = api.RedundancySettings{MinShards: 2, TotalShards: 6}
 )
 
@@ -142,8 +141,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	// create upload params
 	params := testParameters(t.Name())
 	params.packing = true
-	opts := testOpts()
-	opts = append(opts, WithPacking(true))
+	opts := []UploadOption{WithPacking(true)}
 
 	// create test data
 	data := frand.Bytes(128)
@@ -175,7 +173,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	}
 
 	// fetch packed slabs for upload
-	pss, err := os.PackedSlabsForUpload(context.Background(), time.Minute, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, 1)
+	pss, err := os.PackedSlabsForUpload(context.Background(), time.Minute, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(pss) != 1 {
@@ -350,7 +348,7 @@ func TestMigrateLostSector(t *testing.T) {
 
 	// migrate the shard away from the bad host
 	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, contracts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +462,7 @@ func TestUploadShards(t *testing.T) {
 
 	// migrate those shards away from bad hosts
 	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, contracts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +628,7 @@ func TestUploadRegression(t *testing.T) {
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := w.upload(ctx, params.bucket, params.key, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
+	_, err := w.upload(ctx, params.bucket, params.key, testRedundancySettings, bytes.NewReader(data), w.Contracts())
 	if !errors.Is(err, errUploadInterrupted) {
 		t.Fatal(err)
 	}
@@ -639,7 +637,7 @@ func TestUploadRegression(t *testing.T) {
 	unblock()
 
 	// upload data
-	_, err = w.upload(context.Background(), params.bucket, params.key, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
+	_, err = w.upload(context.Background(), params.bucket, params.key, testRedundancySettings, bytes.NewReader(data), w.Contracts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,13 +697,6 @@ func testParameters(key string) uploadParameters {
 		ec:               object.GenerateEncryptionKey(object.EncryptionKeyTypeBasic), // random key
 		encryptionOffset: 0,                                                           // from the beginning
 
-		contractSet: testContractSet,
-		rs:          testRedundancySettings,
-	}
-}
-
-func testOpts() []UploadOption {
-	return []UploadOption{
-		WithContractSet(testContractSet),
+		rs: testRedundancySettings,
 	}
 }

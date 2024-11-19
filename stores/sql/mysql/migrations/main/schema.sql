@@ -106,16 +106,6 @@ CREATE TABLE `contracts` (
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbContractSet
-CREATE TABLE `contract_sets` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `name` varchar(191) DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `name` (`name`),
-  KEY `idx_contract_sets_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbSlab
 CREATE TABLE `slabs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -135,8 +125,7 @@ CREATE TABLE `slabs` (
   KEY `idx_slabs_db_buffered_slab_id` (`db_buffered_slab_id`),
   KEY `idx_slabs_health` (`health`),
   KEY `idx_slabs_health_valid_until` (`health_valid_until`),
-  CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs` (`id`),
-  CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`)
+  CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbSector
@@ -164,16 +153,6 @@ CREATE TABLE `contract_sectors` (
   KEY `idx_contract_sectors_db_contract_id` (`db_contract_id`),
   CONSTRAINT `fk_contract_sectors_db_contract` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_contract_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- dbContractSet <-> dbContract
-CREATE TABLE `contract_set_contracts` (
-  `db_contract_set_id` bigint unsigned NOT NULL,
-  `db_contract_id` bigint unsigned NOT NULL,
-  PRIMARY KEY (`db_contract_set_id`,`db_contract_id`),
-  KEY `idx_contract_set_contracts_db_contract_id` (`db_contract_id`),
-  CONSTRAINT `fk_contract_set_contracts_db_contract` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_contract_set_contracts_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbAccount

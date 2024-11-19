@@ -104,9 +104,9 @@ type (
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
 		// NOTE: used for upload
-		AddObject(ctx context.Context, bucket, key, contractSet string, o object.Object, opts api.AddObjectOptions) error
-		AddMultipartPart(ctx context.Context, bucket, key, contractSet, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
-		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
+		AddObject(ctx context.Context, bucket, key string, o object.Object, opts api.AddObjectOptions) error
+		AddMultipartPart(ctx context.Context, bucket, key, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
 		AddUploadingSectors(ctx context.Context, uID api.UploadID, root []types.Hash256) error
 		FinishUpload(ctx context.Context, uID api.UploadID) error
 		Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
@@ -119,7 +119,7 @@ type (
 		Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (api.Object, error)
 		DeleteObject(ctx context.Context, bucket, key string) error
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, err error)
-		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) ([]api.PackedSlab, error)
 		RemoveObjects(ctx context.Context, bucket, prefix string) error
 	}
 
@@ -232,26 +232,6 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// NOTE: migrations do not use the default contract set but instead require
-	// the user to specify the contract set through the query string parameter,
-	// this to avoid accidentally migration to the default set if the autopilot
-	// configuration is missing a contract set
-	up.ContractSet = ""
-
-	// decode the contract set from the query string
-	var contractset string
-	if jc.DecodeForm("contractset", &contractset) != nil {
-		return
-	} else if contractset != "" {
-		up.ContractSet = contractset
-	}
-
-	// cancel the migration if no contract set is specified
-	if up.ContractSet == "" {
-		jc.Error(fmt.Errorf("migrations require the contract set to be passed as a query string parameter; %w", api.ErrContractSetNotSpecified), http.StatusBadRequest)
-		return
-	}
-
 	// cancel the upload if consensus is not synced
 	if !up.ConsensusState.Synced {
 		w.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
@@ -262,22 +242,20 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch all contracts
-	dlContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{})
+	// fetch download contracts
+	dlContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
 
 	// filter upload contracts
-	var ulContracts []api.ContractMetadata
-	for _, c := range dlContracts {
-		if c.InSet(up.ContractSet) {
-			ulContracts = append(ulContracts, c)
-		}
+	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if jc.Check("couldn't fetch contracts from bus", err) != nil {
+		return
 	}
 
 	// migrate the slab and handle alerts
-	err = w.migrate(ctx, slab, up.ContractSet, dlContracts, ulContracts, up.CurrentHeight)
+	err = w.migrate(ctx, slab, dlContracts, ulContracts, up.CurrentHeight)
 	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
 		var objects []api.ObjectMetadata
 		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
@@ -470,12 +448,6 @@ func (w *Worker) objectHandlerPUT(jc jape.Context) {
 	// grab the path
 	path := jc.PathParam("key")
 
-	// decode the contract set from the query string
-	var contractset string
-	if jc.DecodeForm("contractset", &contractset) != nil {
-		return
-	}
-
 	// decode the mimetype from the query string
 	var mimeType string
 	if jc.DecodeForm("mimetype", &mimeType) != nil {
@@ -512,7 +484,6 @@ func (w *Worker) objectHandlerPUT(jc jape.Context) {
 	resp, err := w.UploadObject(ctx, jc.Request.Body, bucket, path, api.UploadObjectOptions{
 		MinShards:     minShards,
 		TotalShards:   totalShards,
-		ContractSet:   contractset,
 		ContentLength: jc.Request.ContentLength,
 		MimeType:      mimeType,
 		Metadata:      metadata,
@@ -522,9 +493,6 @@ func (w *Worker) objectHandlerPUT(jc jape.Context) {
 		return
 	} else if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(err, http.StatusNotFound)
-		return
-	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
-		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
 		jc.Error(err, http.StatusServiceUnavailable)
@@ -543,12 +511,6 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// grab the path
 	path := jc.PathParam("key")
-
-	// decode the contract set from the query string
-	var contractset string
-	if jc.DecodeForm("contractset", &contractset) != nil {
-		return
-	}
 
 	// decode the bucket from the query string
 	var bucket string
@@ -585,7 +547,6 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 
 	// prepare options
 	opts := api.UploadMultipartUploadPartOptions{
-		ContractSet:      contractset,
 		MinShards:        minShards,
 		TotalShards:      totalShards,
 		EncryptionOffset: nil,
@@ -607,9 +568,6 @@ func (w *Worker) multipartUploadHandlerPUT(jc jape.Context) {
 		return
 	} else if utils.IsErr(err, api.ErrBucketNotFound) {
 		jc.Error(err, http.StatusNotFound)
-		return
-	} else if utils.IsErr(err, api.ErrContractSetNotSpecified) {
-		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if utils.IsErr(err, api.ErrConsensusNotSynced) {
 		jc.Error(err, http.StatusServiceUnavailable)
@@ -991,7 +949,7 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 
 func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
 	// prepare upload params
-	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
+	up, err := w.prepareUploadParams(ctx, bucket, opts.MinShards, opts.TotalShards)
 	if err != nil {
 		return nil, err
 	}
@@ -1000,7 +958,7 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -1008,7 +966,6 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	// upload
 	eTag, err := w.upload(ctx, bucket, key, up.RedundancySettings, r, contracts,
 		WithBlockHeight(up.CurrentHeight),
-		WithContractSet(up.ContractSet),
 		WithMimeType(opts.MimeType),
 		WithPacking(up.UploadPacking),
 		WithObjectUserMetadata(opts.Metadata),
@@ -1016,7 +973,7 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	if err != nil {
 		w.logger.With(zap.Error(err)).With("key", key).With("bucket", bucket).Error("failed to upload object")
 		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
-			w.registerAlert(newUploadFailedAlert(bucket, key, up.ContractSet, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+			w.registerAlert(newUploadFailedAlert(bucket, key, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return nil, fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -1027,7 +984,7 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 
 func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, bucket, path, uploadID string, partNumber int, opts api.UploadMultipartUploadPartOptions) (*api.UploadMultipartUploadPartResponse, error) {
 	// prepare upload params
-	up, err := w.prepareUploadParams(ctx, bucket, opts.ContractSet, opts.MinShards, opts.TotalShards)
+	up, err := w.prepareUploadParams(ctx, bucket, opts.MinShards, opts.TotalShards)
 	if err != nil {
 		return nil, err
 	}
@@ -1044,7 +1001,6 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	// prepare opts
 	uploadOpts := []UploadOption{
 		WithBlockHeight(up.CurrentHeight),
-		WithContractSet(up.ContractSet),
 		WithPacking(up.UploadPacking),
 		WithCustomKey(upload.EncryptionKey),
 		WithPartNumber(partNumber),
@@ -1061,7 +1017,7 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	}
 
 	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{ContractSet: up.ContractSet})
+	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -1071,7 +1027,7 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	if err != nil {
 		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
 		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
-			w.registerAlert(newUploadFailedAlert(bucket, path, up.ContractSet, "", up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
+			w.registerAlert(newUploadFailedAlert(bucket, path, "", up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return nil, fmt.Errorf("couldn't upload object: %w", err)
 	}
@@ -1088,7 +1044,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	return err
 }
 
-func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, contractSet string, minShards, totalShards int) (api.UploadParams, error) {
+func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, minShards, totalShards int) (api.UploadParams, error) {
 	// return early if the bucket does not exist
 	_, err := w.bus.Bucket(ctx, bucket)
 	if err != nil {
@@ -1099,10 +1055,6 @@ func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, contrac
 	up, err := w.bus.UploadParams(ctx)
 	if err != nil {
 		return api.UploadParams{}, fmt.Errorf("couldn't fetch upload parameters from bus: %w", err)
-	} else if contractSet != "" {
-		up.ContractSet = contractSet
-	} else if up.ContractSet == "" {
-		return api.UploadParams{}, api.ErrContractSetNotSpecified
 	}
 
 	// cancel the upload if consensus is not synced

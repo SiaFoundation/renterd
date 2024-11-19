@@ -24,9 +24,8 @@ import (
 )
 
 const (
-	testContractSet = "test"
-	testMimeType    = "application/octet-stream"
-	testETag        = "d34db33f"
+	testMimeType = "application/octet-stream"
+	testETag     = "d34db33f"
 )
 
 var (
@@ -188,12 +187,6 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		t.Fatal("failed to create test bucket", err)
 	}
 
-	if !cfg.skipContractSet {
-		err = sqlStore.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{}, nil)
-		if err != nil {
-			t.Fatal("failed to set contract set", err)
-		}
-	}
 	return &testSQLStore{
 		cfg:      cfg,
 		t:        t,
@@ -287,7 +280,7 @@ func (s *testSQLStore) Retry(tries int, durationBetweenAttempts time.Duration, f
 }
 
 func (s *testSQLStore) addTestObject(key string, o object.Object) (api.Object, error) {
-	if err := s.UpdateObjectBlocking(context.Background(), testBucket, key, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
+	if err := s.UpdateObjectBlocking(context.Background(), testBucket, key, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err
 	} else if obj, err := s.Object(context.Background(), testBucket, key); err != nil {
 		return api.Object{}, err
