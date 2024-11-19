@@ -55,8 +55,7 @@ CREATE UNIQUE INDEX `idx_multipart_uploads_upload_id` ON `multipart_uploads`(`up
 CREATE TABLE `buffered_slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`filename` text);
 
 -- dbSlab
-CREATE TABLE `slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_contract_set_id` integer,`db_buffered_slab_id` integer DEFAULT NULL,`health` real NOT NULL DEFAULT 1,`health_valid_until` integer NOT NULL DEFAULT 0,`key` blob NOT NULL UNIQUE,`min_shards` integer,`total_shards` integer,CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs`(`id`));
-CREATE INDEX `idx_slabs_db_contract_set_id` ON `slabs`(`db_contract_set_id`);
+CREATE TABLE `slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_buffered_slab_id` integer DEFAULT NULL,`health` real NOT NULL DEFAULT 1,`health_valid_until` integer NOT NULL DEFAULT 0,`key` blob NOT NULL UNIQUE,`min_shards` integer,`total_shards` integer,CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs`(`id`));
 CREATE INDEX `idx_slabs_total_shards` ON `slabs`(`total_shards`);
 CREATE INDEX `idx_slabs_min_shards` ON `slabs`(`min_shards`);
 CREATE INDEX `idx_slabs_health_valid_until` ON `slabs`(`health_valid_until`);
@@ -169,4 +168,4 @@ CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_i
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
 
 -- dbAutopilot
-CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, enabled integer NOT NULL DEFAULT 0, contracts_set text, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);
+CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, enabled integer NOT NULL DEFAULT 0, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);

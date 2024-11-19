@@ -32,9 +32,6 @@ type (
 	Database interface {
 		io.Closer
 
-		// LoadSlabBuffers loads the slab buffers from the database.
-		LoadSlabBuffers(ctx context.Context) ([]LoadedSlabBuffer, []string, error)
-
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
 
@@ -180,6 +177,9 @@ type (
 		// InvalidateSlabHealthByFCID invalidates the health of all slabs that
 		// are associated with any of the provided contracts.
 		InvalidateSlabHealthByFCID(ctx context.Context, fcids []types.FileContractID, limit int64) (int64, error)
+
+		// LoadSlabBuffers loads the slab buffers from the database.
+		LoadSlabBuffers(ctx context.Context) ([]LoadedSlabBuffer, []string, error)
 
 		// MakeDirsForPathDeprecated creates all directories for a given
 		// object's path. This method is deprecated and should not be used, it's

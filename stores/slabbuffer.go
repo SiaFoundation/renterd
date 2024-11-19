@@ -58,9 +58,12 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 		return nil, fmt.Errorf("invalid slabBufferCompletionThreshold %v", slabBufferCompletionThreshold)
 	}
 
-	// load existing buffers
-	buffers, orphans, err := db.LoadSlabBuffers(ctx)
-	if err != nil {
+	var buffers []sql.LoadedSlabBuffer
+	var orphans []string
+	if err := db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		buffers, orphans, err = tx.LoadSlabBuffers(ctx)
+		return
+	}); err != nil {
 		return nil, fmt.Errorf("failed to load slab buffers: %w", err)
 	}
 

@@ -67,10 +67,6 @@ func (b *MainDatabase) DB() *sql.DB {
 	return b.db
 }
 
-func (b *MainDatabase) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBuffer, []string, error) {
-	return ssql.LoadSlabBuffers(ctx, b.db)
-}
-
 func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
 	mtx := b.wrapTxn(tx)
 	return mtx.InitAutopilot(ctx)
@@ -79,6 +75,18 @@ func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
 	return mtx.InsertDirectories(ctx, bucket, path)
+}
+
+func (b *MainDatabase) SlabBuffers(ctx context.Context, tx sql.Tx) (filenames []string, err error) {
+	mtx := b.wrapTxn(tx)
+	buffers, _, err := mtx.LoadSlabBuffers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, buffer := range buffers {
+		filenames = append(filenames, buffer.Filename)
+	}
+	return
 }
 
 func (b *MainDatabase) MakeDirsForPath(ctx context.Context, tx sql.Tx, path string) (int64, error) {
@@ -405,7 +413,6 @@ INSERT IGNORE INTO autopilot_config (
 	id,
 	created_at,
 	current_period,
-	contracts_set,
 	contracts_amount,
 	contracts_period,
 	contracts_renew_window,
@@ -417,7 +424,7 @@ INSERT IGNORE INTO autopilot_config (
 	hosts_max_consecutive_scan_failures,
 	hosts_max_downtime_hours,
 	hosts_min_protocol_version
-) VALUES (?, ?, 0, "autopilot", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		sql.AutopilotID,
 		time.Now(),
 		api.DefaultAutopilotConfig.Contracts.Amount,
@@ -556,6 +563,10 @@ func (tx *MainDatabaseTx) InvalidateSlabHealthByFCID(ctx context.Context, fcids 
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) LoadSlabBuffers(ctx context.Context) ([]ssql.LoadedSlabBuffer, []string, error) {
+	return ssql.LoadSlabBuffers(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) MakeDirsForPathDeprecated(ctx context.Context, path string) (int64, error) {

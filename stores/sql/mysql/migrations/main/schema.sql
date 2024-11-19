@@ -110,7 +110,6 @@ CREATE TABLE `contracts` (
 CREATE TABLE `slabs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `db_contract_set_id` bigint unsigned DEFAULT NULL,
   `db_buffered_slab_id` bigint unsigned DEFAULT NULL,
   `health` double NOT NULL DEFAULT '1',
   `health_valid_until` bigint NOT NULL DEFAULT '0',
@@ -121,7 +120,6 @@ CREATE TABLE `slabs` (
   UNIQUE KEY `key` (`key`),
   KEY `idx_slabs_min_shards` (`min_shards`),
   KEY `idx_slabs_total_shards` (`total_shards`),
-  KEY `idx_slabs_db_contract_set_id` (`db_contract_set_id`),
   KEY `idx_slabs_db_buffered_slab_id` (`db_buffered_slab_id`),
   KEY `idx_slabs_health` (`health`),
   KEY `idx_slabs_health_valid_until` (`health_valid_until`),
@@ -470,7 +468,6 @@ CREATE TABLE `autopilot_config` (
   `current_period` bigint unsigned DEFAULT 0,
   `enabled` boolean NOT NULL DEFAULT false,
 
-  `contracts_set` varchar(191) DEFAULT NULL,
   `contracts_amount` bigint unsigned DEFAULT NULL,
   `contracts_period` bigint unsigned DEFAULT NULL,
   `contracts_renew_window` bigint unsigned DEFAULT NULL,

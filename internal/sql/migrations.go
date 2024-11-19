@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -37,6 +39,7 @@ type (
 		InitAutopilot(ctx context.Context, tx Tx) error
 		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		SlabBuffers(ctx context.Context, tx Tx) ([]string, error)
 		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
@@ -424,16 +427,72 @@ var (
 			{
 				ID: "00029_slab_buffers",
 				Migrate: func(tx Tx) error {
-					// 1. fetch all filenames
-					// 2. move all files using the contract set id
-					// 3. rename all filenames
+					// prepare statement to rename the buffer
+					stmt, err := tx.Prepare(ctx, "UPDATE slab_buffers SET filename = ? WHERE filename = ?")
+					if err != nil {
+						return fmt.Errorf("failed to prepare update statement: %w", err)
+					}
+					defer stmt.Close()
 
-					// 1. upload settings have default contract set id
+					// prepare a helper to safely copy and sync the file
+					copyBuffer := func(buffer string) (string, error) {
+						parts := strings.Split(buffer, "-")
+						if len(parts) != 4 {
+							return "", fmt.Errorf("invalid buffer filename '%s'", buffer)
+						}
 
-					// 1. autopilot state has set
+						src, err := os.Open(buffer)
+						if err != nil {
+							return "", fmt.Errorf("failed to open buffer: %w", err)
+						}
+						defer src.Close()
 
-					// CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`)
-					return nil
+						dstFile, err := os.Create(strings.Join(parts[1:], "-"))
+						if err != nil {
+							return "", fmt.Errorf("failed to create destination buffer: %w", err)
+						}
+						defer dstFile.Close()
+
+						_, err = io.Copy(dstFile, src)
+						if err != nil {
+							return "", fmt.Errorf("failed to copy buffer: %w", err)
+						}
+
+						err = dstFile.Sync()
+						if err != nil {
+							return "", fmt.Errorf("failed to sync buffer: %w", err)
+						}
+
+						return dstFile.Name(), nil
+					}
+
+					// fetch all buffers
+					buffers, err := m.SlabBuffers(ctx, tx)
+					if err != nil {
+						return err
+					}
+
+					// copy all buffers
+					for _, buffer := range buffers {
+						if dst, err := copyBuffer(buffer); err != nil {
+							return fmt.Errorf("failed to copy buffer '%s': %w", buffer, err)
+						} else if res, err := stmt.Exec(ctx, buffer, dst); err != nil {
+							return fmt.Errorf("failed to update buffer '%s': %w", buffer, err)
+						} else if n, err := res.RowsAffected(); err != nil {
+							return fmt.Errorf("failed to fetch rows affected: %w", err)
+						} else if n != 1 {
+							return fmt.Errorf("failed to update buffer '%s': %w", buffer, err)
+						}
+					}
+					// remove original buffers
+					for _, buffer := range buffers {
+						if err := os.Remove(buffer); err != nil {
+							return fmt.Errorf("failed to remove buffer '%s': %w", buffer, err)
+						}
+					}
+
+					// perform database migration
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_slab_buffers", log)
 				},
 			},
 		}
