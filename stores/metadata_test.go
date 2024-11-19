@@ -389,6 +389,7 @@ func TestSQLContractStore(t *testing.T) {
 		Size:           4,
 		StartHeight:    5,
 		State:          api.ContractStateActive,
+		Usability:      api.ContractUsabilityGood,
 		WindowStart:    6,
 		WindowEnd:      7,
 
@@ -574,6 +575,7 @@ func TestAncestorsContracts(t *testing.T) {
 		expected := newTestContract(fcids[len(fcids)-2-i], hk)
 		expected.RenewedFrom = renewedFrom
 		expected.RenewedTo = renewedTo
+		expected.Usability = api.ContractUsabilityBad
 		expected.ArchivalReason = api.ContractArchivalReasonRenewed
 		expected.StartHeight = uint64(len(fcids) - 2 - i)
 		if !reflect.DeepEqual(contracts[i], expected) {
@@ -658,6 +660,7 @@ func newTestContract(fcid types.FileContractID, hk types.PublicKey) api.Contract
 		ID:                 fcid,
 		HostKey:            hk,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityGood,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
 	}
@@ -835,6 +838,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		ID:                 fcid1,
 		HostKey:            hk1,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityGood,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
 	}
@@ -857,6 +861,7 @@ func TestSQLMetadataStore(t *testing.T) {
 		ID:                 fcid2,
 		HostKey:            hk2,
 		State:              api.ContractStatePending,
+		Usability:          api.ContractUsabilityGood,
 		ContractPrice:      types.NewCurrency64(1),
 		InitialRenterFunds: types.NewCurrency64(2),
 	}
@@ -4636,6 +4641,7 @@ func TestPutContract(t *testing.T) {
 		Size:           6,
 		StartHeight:    7,
 		State:          api.ContractStateComplete,
+		Usability:      api.ContractUsabilityGood,
 		WindowStart:    8,
 		WindowEnd:      9,
 
@@ -4675,6 +4681,7 @@ func TestPutContract(t *testing.T) {
 		Size:           21,
 		StartHeight:    22,
 		State:          api.ContractStateFailed,
+		Usability:      api.ContractUsabilityGood,
 		WindowStart:    23,
 		WindowEnd:      24,
 
