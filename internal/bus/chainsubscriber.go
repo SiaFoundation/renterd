@@ -21,7 +21,7 @@ import (
 const (
 	// maxAddrsPerProtocol is the maximum number of announced addresses we will
 	// track per host, per protocol for a V2 announcement
-	maxAddrsPerProtocol = 5
+	maxAddrsPerProtocol = 2
 
 	// updatesBatchSize is the maximum number of updates to fetch in a single
 	// call to the chain manager when we request updates since a given index.
