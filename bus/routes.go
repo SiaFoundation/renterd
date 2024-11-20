@@ -493,7 +493,7 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
 	var infos []api.HostInfo
 	for _, h := range hosts {
@@ -905,7 +905,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't fetch gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
 	// apply timeout
 	pruneCtx := ctx
@@ -2359,7 +2359,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
 	// fetch host settings
 	settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, rfr.HostIP)

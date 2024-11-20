@@ -40,5 +40,5 @@ func newGougingChecker(settings api.GougingSettings, cs api.ConsensusState, crit
 			settings.MaxDownloadPrice = adjustedMaxDownloadPrice
 		}
 	}
-	return gouging.NewChecker(settings, cs, nil, nil)
+	return gouging.NewChecker(settings, cs)
 }
