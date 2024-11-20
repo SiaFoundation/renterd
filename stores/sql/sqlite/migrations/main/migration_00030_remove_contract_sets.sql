@@ -14,7 +14,7 @@ CREATE INDEX `idx_slabs_health` ON `slabs`(`health`);
 CREATE INDEX `idx_slabs_db_buffered_slab_id` ON `slabs`(`db_buffered_slab_id`);
 
 -- update usability
-UPDATE contracts SET usability = CASE WHEN id IN (SELECT db_contract_id FROM contract_set_contracts) THEN 2 ELSE 1 END;
+UPDATE contracts SET usability = CASE WHEN EXISTS (SELECT 1 FROM contract_set_contracts WHERE db_contract_id = contracts.id) THEN 2 ELSE 1 END;
 
 -- drop contract set tables
 DROP TABLE contract_set_contracts;

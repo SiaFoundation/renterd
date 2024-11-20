@@ -203,6 +203,10 @@ func (cm ContractMetadata) EndHeight() uint64 {
 	return cm.WindowStart
 }
 
+func (cm ContractMetadata) IsGood() bool {
+	return cm.Usability == ContractUsabilityGood
+}
+
 type (
 	Revision struct {
 		ContractID types.FileContractID `json:"contractID"`

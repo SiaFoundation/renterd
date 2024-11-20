@@ -711,7 +711,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		// NOTE: if we have a contract with a host that is not scanned, we either
 		// added the host and contract manually or reset the host scans. In that case,
 		// we ignore the fact that the host is not scanned for now to avoid churn.
-		if c.Usability == api.ContractUsabilityGood && host.Checks.UsabilityBreakdown.NotCompletingScan {
+		if c.IsGood() && host.Checks.UsabilityBreakdown.NotCompletingScan {
 			keepContract(c.ContractMetadata, host)
 			logger.Info("ignoring contract with unscanned host")
 			continue // no more checks until host is scanned
@@ -726,7 +726,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 		// check if revision is available
 		if c.Revision == nil {
-			if c.Usability == api.ContractUsabilityGood && remainingLeeway > 0 {
+			if c.IsGood() && remainingLeeway > 0 {
 				logger.Debug("keeping contract due to leeway")
 				keepContract(c.ContractMetadata, host)
 				remainingLeeway--
@@ -972,7 +972,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	}
 	var goodContracts []api.ContractMetadata
 	for _, c := range allContracts {
-		if c.Usability == api.ContractUsabilityGood {
+		if c.IsGood() {
 			goodContracts = append(goodContracts, c)
 		}
 	}
@@ -1076,7 +1076,7 @@ func updateContractUsability(ctx *mCtx, bus Bus, oldGC, newGC []api.ContractMeta
 			if err := bus.UpdateContractUsability(ctx, c.ID, api.ContractUsabilityGood); err != nil {
 				return changed, fmt.Errorf("failed to update contract usability: %w", err)
 			}
-			logger.Debugf("marked contract %v as good", c.ID)
+			logger.Infof("marked contract %v as good", c.ID)
 			changed = changed || true
 		}
 		delete(wasGC, c.ID) // keep contracts to mark bad
@@ -1086,7 +1086,7 @@ func updateContractUsability(ctx *mCtx, bus Bus, oldGC, newGC []api.ContractMeta
 		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityBad); err != nil {
 			return changed, fmt.Errorf("failed to update contract usability: %w", err)
 		}
-		logger.Debugf("marked contract %v as bad", id)
+		logger.Infof("marked contract %v as bad", id)
 	}
 
 	return changed, nil

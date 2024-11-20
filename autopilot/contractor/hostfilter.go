@@ -117,13 +117,13 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSetti
 	} else {
 		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
-			usable = usable && contract.Usability == api.ContractUsabilityGood && c.shouldForgiveFailedRefresh(contract.ID)
+			usable = usable && contract.IsGood() && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			usable = usable && contract.Usability == api.ContractUsabilityGood && c.shouldForgiveFailedRefresh(contract.ID)
+			usable = usable && contract.IsGood() && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}

@@ -453,9 +453,15 @@ var (
 						}
 						defer src.Close()
 
-						dstFile, err := os.Create(strings.Join(parts[1:], "-"))
+						path := strings.Join(parts[1:], "-")
+						err = os.Remove(path)
+						if err != nil && !os.IsNotExist(err) {
+							return "", fmt.Errorf("failed to remove existing file at '%s': %w", path, err)
+						}
+
+						dstFile, err := os.Create(path)
 						if err != nil {
-							return "", fmt.Errorf("failed to create destination buffer: %w", err)
+							return "", fmt.Errorf("failed to create destination buffer at '%s': %w", path, err)
 						}
 						defer dstFile.Close()
 

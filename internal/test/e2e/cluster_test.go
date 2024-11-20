@@ -970,7 +970,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 
 		// assert good contracts were renewed
 		for _, c := range contracts {
-			if c.Usability == api.ContractUsabilityGood && c.RenewedFrom == (types.FileContractID{}) {
+			if c.IsGood() && c.RenewedFrom == (types.FileContractID{}) {
 				return errors.New("found contract that wasn't renewed")
 			}
 		}

@@ -99,8 +99,8 @@ func (ctx *mCtx) WantedContracts() uint64 {
 
 func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
 	sort.SliceStable(contracts, func(i, j int) bool {
-		iUsable := contracts[i].Usability == api.ContractUsabilityGood
-		jUsable := contracts[j].Usability == api.ContractUsabilityGood
+		iUsable := contracts[i].IsGood()
+		jUsable := contracts[j].IsGood()
 		if iUsable != jUsable {
 			return iUsable
 		}
