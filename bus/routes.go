@@ -2367,9 +2367,9 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
-	// send V2 transaction if we're passed the V2 hardfork allow height
+	// use RHP4 if we're passed the V2 hardfork allow height
 	var contract api.ContractMetadata
-	if h.IsV2() {
+	if b.isPassedV2AllowHeight() {
 		// fetch host settings
 		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
 
