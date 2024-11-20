@@ -10,46 +10,46 @@ import (
 )
 
 const (
-	SettingGouging = "gouging"
-	SettingPinned  = "pinned"
-	SettingS3      = "s3"
-	SettingUpload  = "upload"
+	settingGouging = "gouging"
+	settingPinned  = "pinned"
+	settingS3      = "s3"
+	settingUpload  = "upload"
 )
 
 func (s *SQLStore) GougingSettings(ctx context.Context) (gs api.GougingSettings, err error) {
-	err = s.fetchSetting(ctx, SettingGouging, &gs)
+	err = s.fetchSetting(ctx, settingGouging, &gs)
 	return
 }
 
 func (s *SQLStore) UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error {
-	return s.updateSetting(ctx, SettingGouging, gs)
+	return s.updateSetting(ctx, settingGouging, gs)
 }
 
 func (s *SQLStore) PinnedSettings(ctx context.Context) (ps api.PinnedSettings, err error) {
-	err = s.fetchSetting(ctx, SettingPinned, &ps)
+	err = s.fetchSetting(ctx, settingPinned, &ps)
 	return
 }
 
 func (s *SQLStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error {
-	return s.updateSetting(ctx, SettingPinned, ps)
+	return s.updateSetting(ctx, settingPinned, ps)
 }
 
 func (s *SQLStore) UploadSettings(ctx context.Context) (us api.UploadSettings, err error) {
-	err = s.fetchSetting(ctx, SettingUpload, &us)
+	err = s.fetchSetting(ctx, settingUpload, &us)
 	return
 }
 
 func (s *SQLStore) UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error {
-	return s.updateSetting(ctx, SettingUpload, us)
+	return s.updateSetting(ctx, settingUpload, us)
 }
 
 func (s *SQLStore) S3Settings(ctx context.Context) (ss api.S3Settings, err error) {
-	err = s.fetchSetting(ctx, SettingS3, &ss)
+	err = s.fetchSetting(ctx, settingS3, &ss)
 	return
 }
 
 func (s *SQLStore) UpdateS3Settings(ctx context.Context, ss api.S3Settings) error {
-	return s.updateSetting(ctx, SettingS3, ss)
+	return s.updateSetting(ctx, settingS3, ss)
 }
 
 func (s *SQLStore) fetchSetting(ctx context.Context, key string, out interface{}) error {
