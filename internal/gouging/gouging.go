@@ -57,7 +57,7 @@ type (
 
 var _ Checker = checker{}
 
-func NewChecker(gs api.GougingSettings, cs api.ConsensusState, period, renewWindow *uint64) Checker {
+func NewChecker(gs api.GougingSettings, cs api.ConsensusState) Checker {
 	return checker{
 		consensusState: cs,
 		settings:       gs,
@@ -136,6 +136,7 @@ func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	}
 
 	// general gouging
+	// TODO: remove this in next update of core deps
 	const sectorDuration = 144 * 3
 	const sectorBatchSize = 25600
 
@@ -146,19 +147,17 @@ func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	if hs.MaxCollateral.IsZero() {
 		errs = append(errs, errors.New("max collateral is zero"))
 	}
-	if hs.MaxSectorDuration < sectorDuration {
-		errs = append(errs, fmt.Errorf("max sector duration is less than %v: %v", sectorDuration, hs.MaxSectorDuration))
-	}
-	if hs.MaxSectorBatchSize < sectorBatchSize {
-		errs = append(errs, fmt.Errorf("max sector batch size is less than %v: %v", sectorBatchSize, hs.MaxSectorBatchSize))
-	}
 	if hs.Validity < gs.MinPriceTableValidity {
 		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
+	}
+	if err := checkBlockHeight(gc.consensusState, hs.Prices.TipHeight, uint64(gs.HostBlockHeightLeeway)); err != nil {
+		errs = append(errs, err)
 	}
 	if gougingErr := errsToStr(errs...); gougingErr != "" {
 		gb.GougingErr = fmt.Sprintf("%v: %s", ErrPriceTableGouging, gougingErr)
 	}
 	gb.GougingErr = errsToStr(errs...)
+
 	return
 }
 
@@ -263,22 +262,9 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv
 		return fmt.Errorf("LatestRevisionCost of %v exceeds maximum cost of %v", pt.LatestRevisionCost, maxRevisionCost)
 	}
 
-	// check block height - if too much time has passed since the last block
-	// there is a chance we are not up-to-date anymore. So we only check whether
-	// the host's height is at least equal to ours.
-	if !cs.Synced || time.Since(cs.LastBlockTime.Std()) > time.Hour {
-		if pt.HostBlockHeight < cs.BlockHeight {
-			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", pt.HostBlockHeight, cs.BlockHeight)
-		}
-	} else {
-		var minHeight uint64
-		if cs.BlockHeight >= uint64(gs.HostBlockHeightLeeway) {
-			minHeight = cs.BlockHeight - uint64(gs.HostBlockHeightLeeway)
-		}
-		maxHeight := cs.BlockHeight + uint64(gs.HostBlockHeightLeeway)
-		if !(minHeight <= pt.HostBlockHeight && pt.HostBlockHeight <= maxHeight) {
-			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", minHeight, maxHeight, pt.HostBlockHeight)
-		}
+	// check block height
+	if err := checkBlockHeight(cs, pt.HostBlockHeight, uint64(gs.HostBlockHeightLeeway)); err != nil {
+		return err
 	}
 
 	// check TxnFeeMaxRecommended - expect it to be lower or equal than the max contract price
@@ -296,6 +282,27 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv
 		return fmt.Errorf("'Validity' is less than the allowed minimum value, %v < %v", pt.Validity, gs.MinPriceTableValidity)
 	}
 
+	return nil
+}
+
+func checkBlockHeight(cs api.ConsensusState, hostBH, leeway uint64) error {
+	// check block height - if too much time has passed since the last block
+	// there is a chance we are not up-to-date anymore. So we only check whether
+	// the host's height is at least equal to ours.
+	if !cs.Synced || time.Since(cs.LastBlockTime.Std()) > time.Hour {
+		if hostBH < cs.BlockHeight {
+			return fmt.Errorf("consensus not synced and host block height is lower, %v < %v", hostBH, cs.BlockHeight)
+		}
+	} else {
+		var minHeight uint64
+		if cs.BlockHeight >= leeway {
+			minHeight = cs.BlockHeight - leeway
+		}
+		maxHeight := cs.BlockHeight + leeway
+		if !(minHeight <= hostBH && hostBH <= maxHeight) {
+			return fmt.Errorf("consensus is synced and host block height is not within range, %v-%v %v", minHeight, maxHeight, hostBH)
+		}
+	}
 	return nil
 }
 
