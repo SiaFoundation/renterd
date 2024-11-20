@@ -315,6 +315,12 @@ var (
 				},
 			},
 			{
+				ID: "00020_remove_directories",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_remove_directories", log)
+				},
+			},
+			{
 				ID: "00021_archived_contracts",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00021_archived_contracts", log)
@@ -348,12 +354,6 @@ var (
 				ID: "00026_key_prefix",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_key_prefix", log)
-				},
-			},
-			{
-				ID: "00027_remove_directories",
-				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00027_remove_directories", log)
 				},
 			},
 			{
