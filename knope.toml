@@ -1,5 +1,7 @@
 [package]
 changelog = "CHANGELOG.md"
+versioned_files = ["go.mod"]
+ignore_go_major_versioning = true
 
 [[workflows]]
 name = "document-change"
@@ -20,6 +22,7 @@ type = "PrepareRelease"
 [[workflows.steps]]
 type = "Command"
 command = "git commit -m \"chore: prepare release $version\""
+variables = { "$version" = "Version" }
 
 [[workflows.steps]]
 type = "Command"
@@ -40,11 +43,12 @@ variables = { "$version" = "Version" }
 template = "This PR was created automatically. Merging it will finalize the changelog for $version\n\n$changelog"
 variables = { "$changelog" = "ChangelogEntry", "$version" = "Version" }
 
-[[workflows]]
-name = "release"
-
-[[workflows.steps]]
-type = "Release"
+# Do not enable releases, just changelogs for now.
+# [[workflows]]
+# name = "release"
+#
+# [[workflows.steps]]
+# type = "Release"
 
 [github]
 owner = "SiaFoundation"
