@@ -35,6 +35,7 @@ var (
 
 var (
 	ErrUsabilityHostBlocked               = errors.New("host is blocked")
+	ErrUsabilityHostCheckNotFound         = errors.New("host not checked")
 	ErrUsabilityHostNotFound              = errors.New("host not found")
 	ErrUsabilityHostOffline               = errors.New("host is offline")
 	ErrUsabilityHostLowScore              = errors.New("host's score is below minimum")

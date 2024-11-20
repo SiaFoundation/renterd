@@ -581,27 +581,29 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 // no longer be used. The 'ipFilter' is updated to contain all hosts that we
 // keep contracts with. If a contract is refreshed or renewed, the
 // 'remainingFunds' are adjusted.
-func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) ([]api.ContractMetadata, error) {
+func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) ([]api.ContractMetadata, map[types.FileContractID]string, error) {
 	var filteredContracts []api.ContractMetadata
 	keepContract := func(c api.ContractMetadata, h api.Host) {
 		filteredContracts = append(filteredContracts, c)
 		ipFilter.Add(h)
 	}
 
+	reasons := make(map[types.FileContractID]string)
+
 	// fetch network
 	network, err := bus.ConsensusNetwork(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// fetch all contracts we already have
-	logger.Info("fetching existing contracts")
+	// fetch contracts
+	logger.Info("fetching active contracts")
 	start := time.Now()
-	contractMetadatas, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+	contractMetadatas, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	logger.With("elapsed", time.Since(start)).Info("done fetching existing contracts")
+	logger.With("elapsed", time.Since(start)).Info("done fetching active contracts")
 
 	// fetch the revision for each contract
 	var wg sync.WaitGroup
@@ -628,7 +630,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 	}
 	wg.Wait()
 
-	// sort them by whether they are in the current set and their size
+	// sort them by usability and size
 	ctx.SortContractsForMaintenance(contracts)
 
 	// allow for a leeway of 10% of the required contracts for special cases such as failing to fetch
@@ -650,32 +652,24 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 			With("revisionAvailable", c.Revision != nil).
 			With("filteredContracts", len(filteredContracts)).
 			With("wantedContracts", ctx.WantedContracts())
-
 		logger.Debug("checking contract")
-
-		// abort if we have enough contracts
-		if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
-			logger.Debug("ignoring contract since we have enough contracts")
-			continue
-		}
 
 		// fetch recent consensus state
 		cs, err := bus.ConsensusState(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch consensus state: %w", err)
+			return nil, nil, fmt.Errorf("failed to fetch consensus state: %w", err)
 		}
 		bh := cs.BlockHeight
 		logger = logger.With("blockHeight", bh)
 
 		// check if contract is ready to be archived.
 		if reason := cc.shouldArchive(c, bh, network); reason != nil {
-			if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
-				c.ID: reason.Error(),
-			}); err != nil {
+			if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{c.ID: reason.Error()}); err != nil {
 				logger.With(zap.Error(err)).Error("failed to archive contract")
 			} else {
 				logger.Debug("successfully archived contract")
 			}
+			reasons[c.ID] = reason.Error()
 			continue
 		}
 
@@ -683,6 +677,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		host, err := bus.Host(ctx, c.HostKey)
 		if err != nil {
 			logger.With(zap.Error(err)).Warn("missing host")
+			reasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
 			continue
 		}
 
@@ -693,18 +688,21 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		// check if host is blocked
 		if host.Blocked {
 			logger.Info("host is blocked")
+			reasons[c.ID] = api.ErrUsabilityHostBlocked.Error()
 			continue
 		}
 
 		// check if host has a redundant ip
 		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
 			logger.Info("host has redundant IP")
+			reasons[c.ID] = api.ErrUsabilityHostRedundantIP.Error()
 			continue
 		}
 
 		// get check
 		if host.Checks == (api.HostChecks{}) {
 			logger.Warn("missing host check")
+			reasons[c.ID] = api.ErrUsabilityHostCheckNotFound.Error()
 			continue
 		}
 
@@ -719,8 +717,9 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 		// check usability
 		if !host.Checks.UsabilityBreakdown.IsUsable() {
-			reasons := strings.Join(host.Checks.UsabilityBreakdown.UnusableReasons(), ",")
-			logger.With("reasons", reasons).Info("unusable host")
+			unusable := strings.Join(host.Checks.UsabilityBreakdown.UnusableReasons(), ",")
+			logger.With("reasons", unusable).Info("unusable host")
+			reasons[c.ID] = unusable
 			continue
 		}
 
@@ -732,18 +731,24 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 				remainingLeeway--
 			} else {
 				logger.Debug("ignoring contract without revision")
+				reasons[c.ID] = errContractNoRevision.Error()
 			}
 			continue // no more checks without revision
 		}
 
 		// check if contract is usable
-		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, bh, ipFilter)
+		usable, needsRefresh, needsRenew, unusable := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, bh, ipFilter)
 
 		// extend logger
 		logger = logger.With("usable", usable).
 			With("needsRefresh", needsRefresh).
 			With("needsRenew", needsRenew).
-			With("reasons", reasons)
+			With("reasons", unusable)
+
+		// remember reason for potential drop of contract
+		if len(reasons) > 0 {
+			reasons[c.ID] = strings.Join(unusable, ",")
+		}
 
 		contract := c.ContractMetadata
 
@@ -810,7 +815,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		With("renewed", renewed).
 		With("filteredContracts", len(filteredContracts)).
 		Info("checking existing contracts done")
-	return filteredContracts, nil
+	return filteredContracts, reasons, nil
 }
 
 // performContracdtFormations forms up to 'wanted' new contracts with hosts. The
@@ -1033,7 +1038,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc c
 		logger:          logger.Named("ipFilter"),
 		subnetToHostKey: make(map[string]string),
 	}
-	keptContracts, err := performContractChecks(ctx, alerter, bus, cc, cr, ipFilter, logger)
+	keptContracts, reasons, err := performContractChecks(ctx, alerter, bus, cc, cr, ipFilter, logger)
 	if err != nil {
 		return false, err
 	}
@@ -1052,7 +1057,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc c
 	newGC := make([]api.ContractMetadata, 0, len(keptContracts)+len(formedContracts))
 	newGC = append(newGC, keptContracts...)
 	newGC = append(newGC, formedContracts...)
-	updated, err := updateContractUsability(ctx, bus, oldGC, newGC, logger)
+	updated, err := updateContractUsability(ctx, bus, alerter, oldGC, newGC, reasons, logger)
 	if err != nil {
 		return false, fmt.Errorf("failed to update contracts: %w", err)
 	}
@@ -1064,30 +1069,37 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc c
 	return updated, nil
 }
 
-func updateContractUsability(ctx *mCtx, bus Bus, oldGC, newGC []api.ContractMetadata, logger *zap.SugaredLogger) (bool, error) {
+func updateContractUsability(ctx *mCtx, bus Bus, alerter alerts.Alerter, oldGC, newGC []api.ContractMetadata, reasons map[types.FileContractID]string, logger *zap.SugaredLogger) (bool, error) {
 	wasGC := make(map[types.FileContractID]struct{})
 	for _, c := range oldGC {
 		wasGC[c.ID] = struct{}{}
 	}
 
-	var changed bool
+	var cug, cub []types.FileContractID
 	for _, c := range newGC {
 		if _, ok := wasGC[c.ID]; !ok {
 			if err := bus.UpdateContractUsability(ctx, c.ID, api.ContractUsabilityGood); err != nil {
-				return changed, fmt.Errorf("failed to update contract usability: %w", err)
+				return len(cug)+len(cub) > 0, fmt.Errorf("failed to update contract usability: %w", err)
 			}
 			logger.Infof("marked contract %v as good", c.ID)
-			changed = changed || true
+			cug = append(cug, c.ID)
 		}
 		delete(wasGC, c.ID) // keep contracts to mark bad
 	}
 
 	for id := range wasGC {
 		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityBad); err != nil {
-			return changed, fmt.Errorf("failed to update contract usability: %w", err)
+			return len(cug)+len(cub) > 0, fmt.Errorf("failed to update contract usability: %w", err)
 		}
 		logger.Infof("marked contract %v as bad", id)
+		cub = append(cub, id)
 	}
 
+	changed := len(cug)+len(cub) > 0
+	if changed {
+		if err := alerter.RegisterAlert(ctx, newContractUsabilityUpdatedAlert(cug, cub, reasons)); err != nil {
+			return changed, fmt.Errorf("failed to register contract usability updated alert: %w", err)
+		}
+	}
 	return changed, nil
 }
