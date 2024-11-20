@@ -524,7 +524,7 @@ func TestUsableHosts(t *testing.T) {
 	// create gouging checker
 	gs := test.GougingSettings
 	cs := api.ConsensusState{Synced: true}
-	gc := gouging.NewChecker(gs, cs, nil, nil)
+	gc := gouging.NewChecker(gs, cs)
 
 	// assert h1 is not gouging
 	h1 := hosts[0]

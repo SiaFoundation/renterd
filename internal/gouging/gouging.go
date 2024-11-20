@@ -136,10 +136,6 @@ func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	}
 
 	// general gouging
-	// TODO: remove this in next update of core deps
-	const sectorDuration = 144 * 3
-	const sectorBatchSize = 25600
-
 	var errs []error
 	if prices.ContractPrice.Cmp(gs.MaxContractPrice) > 0 {
 		errs = append(errs, fmt.Errorf("contract price exceeds max contract price: %v > %v", prices.ContractPrice, gs.MaxContractPrice))
