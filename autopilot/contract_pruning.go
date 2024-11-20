@@ -74,7 +74,7 @@ func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 		good[c.ID] = struct{}{}
 	}
 
-	// filter out contracts that are not in the set
+	// filter out contracts that are not good
 	for _, c := range res.Contracts {
 		if _, ok := good[c.ID]; ok && c.Prunable > 0 {
 			prunable = append(prunable, c)

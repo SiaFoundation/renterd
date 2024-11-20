@@ -962,15 +962,15 @@ func TestUploadDownloadSpending(t *testing.T) {
 		cluster.MineBlocks(1)
 
 		// fetch active contracts
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 		tt.OK(err)
 		if len(contracts) == 0 {
 			t.Fatal("no contracts found")
 		}
 
-		// assert all contracts are renewed and in the set
+		// assert good contracts were renewed
 		for _, c := range contracts {
-			if c.RenewedFrom == (types.FileContractID{}) {
+			if c.Usability == api.ContractUsabilityGood && c.RenewedFrom == (types.FileContractID{}) {
 				return errors.New("found contract that wasn't renewed")
 			}
 		}

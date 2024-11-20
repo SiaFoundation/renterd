@@ -11,11 +11,10 @@ import (
 )
 
 const (
-	ModuleConsensus   = "consensus"
-	ModuleContract    = "contract"
-	ModuleContractSet = "contract_set"
-	ModuleHost        = "host"
-	ModuleSetting     = "setting"
+	ModuleConsensus = "consensus"
+	ModuleContract  = "contract"
+	ModuleHost      = "host"
+	ModuleSetting   = "setting"
 
 	EventAdd     = "add"
 	EventUpdate  = "update"

@@ -35,7 +35,6 @@ var (
 	errContractOutOfFunds            = errors.New("contract is out of funds")
 	errContractUpForRenewal          = errors.New("contract is up for renewal")
 	errContractMaxRevisionNumber     = errors.New("contract has reached max revision number")
-	errContractNoRevision            = errors.New("contract has no revision")
 	errContractExpired               = errors.New("contract has expired")
 	errContractNotConfirmed          = errors.New("contract hasn't been confirmed on chain in time")
 )

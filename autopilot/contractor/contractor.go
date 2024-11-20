@@ -117,7 +117,6 @@ type (
 	Contractor struct {
 		alerter alerts.Alerter
 		bus     Bus
-		churn   *accumulatedChurn
 		logger  *zap.SugaredLogger
 
 		revisionBroadcastInterval time.Duration
@@ -132,27 +131,6 @@ type (
 		sb    api.HostScoreBreakdown
 		score float64
 	}
-
-	contractSetAdditions struct {
-		HostKey   types.PublicKey       `json:"hostKey"`
-		Additions []contractSetAddition `json:"additions"`
-	}
-
-	contractSetAddition struct {
-		Size uint64          `json:"size"`
-		Time api.TimeRFC3339 `json:"time"`
-	}
-
-	contractSetRemovals struct {
-		HostKey  types.PublicKey      `json:"hostKey"`
-		Removals []contractSetRemoval `json:"removals"`
-	}
-
-	contractSetRemoval struct {
-		Size   uint64          `json:"size"`
-		Reason string          `json:"reasons"`
-		Time   api.TimeRFC3339 `json:"time"`
-	}
 )
 
 func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
@@ -160,7 +138,6 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
-		churn:   newAccumulatedChurn(),
 		logger:  logger,
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
@@ -172,7 +149,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
-	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, c, c, c, c.logger)
+	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c, c, c, c.logger)
 }
 
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
@@ -353,10 +330,8 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	return renewal, true, nil
 }
 
-// broadcastRevisions broadcasts contract revisions from the current set of
-// contracts. Since we are migrating away from all contracts not in the set and
-// are not uploading to those contracts anyway, we only worry about contracts in
-// the set.
+// broadcastRevisions broadcasts contract revisions, we only broadcast the
+// revision of good contracts since we're migrating away from bad contracts.
 func (c *Contractor) broadcastRevisions(ctx context.Context, contracts []api.ContractMetadata, logger *zap.SugaredLogger) {
 	if c.revisionBroadcastInterval == 0 {
 		return // not enabled
@@ -543,122 +518,6 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	return "", false
 }
 
-func computeChangeSet(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, logger *zap.SugaredLogger, oldSet, newSet []api.ContractMetadata, toStopUsing map[types.FileContractID]string) (bool, error) {
-	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
-	if err != nil {
-		return false, fmt.Errorf("failed to fetch all contracts: %w", err)
-	}
-	contractData := make(map[types.FileContractID]uint64)
-	for _, c := range allContracts {
-		contractData[c.ID] = c.Size
-	}
-
-	// build set lookups
-	inOldSet := make(map[types.FileContractID]struct{})
-	for _, c := range oldSet {
-		inOldSet[c.ID] = struct{}{}
-	}
-	inNewSet := make(map[types.FileContractID]struct{})
-	for _, c := range newSet {
-		inNewSet[c.ID] = struct{}{}
-	}
-
-	// build renewal lookups
-	renewalsFromTo := make(map[types.FileContractID]types.FileContractID)
-	renewalsToFrom := make(map[types.FileContractID]types.FileContractID)
-	for _, c := range allContracts {
-		if c.RenewedFrom != (types.FileContractID{}) {
-			renewalsFromTo[c.RenewedFrom] = c.ID
-			renewalsToFrom[c.ID] = c.RenewedFrom
-		}
-	}
-
-	// log added and removed contracts
-	setAdditions := make(map[types.FileContractID]contractSetAdditions)
-	setRemovals := make(map[types.FileContractID]contractSetRemovals)
-	now := api.TimeNow()
-	for _, contract := range oldSet {
-		_, exists := inNewSet[contract.ID]
-		_, renewed := inNewSet[renewalsFromTo[contract.ID]]
-		if !exists && !renewed {
-			reason, ok := toStopUsing[contract.ID]
-			if !ok {
-				reason = "unknown"
-			}
-
-			if _, exists := setRemovals[contract.ID]; !exists {
-				setRemovals[contract.ID] = contractSetRemovals{
-					HostKey: contract.HostKey,
-				}
-			}
-			removals := setRemovals[contract.ID]
-			removals.Removals = append(removals.Removals, contractSetRemoval{
-				Size:   contractData[contract.ID],
-				Reason: reason,
-				Time:   now,
-			})
-			setRemovals[contract.ID] = removals
-			logger.Infof("contract %v was removed from the contract set, size: %v, reason: %v", contract.ID, contractData[contract.ID], reason)
-		}
-	}
-	for _, contract := range newSet {
-		_, existed := inOldSet[contract.ID]
-		_, renewed := inOldSet[renewalsToFrom[contract.ID]]
-		if !existed && !renewed {
-			if _, exists := setAdditions[contract.ID]; !exists {
-				setAdditions[contract.ID] = contractSetAdditions{
-					HostKey: contract.HostKey,
-				}
-			}
-			additions := setAdditions[contract.ID]
-			additions.Additions = append(additions.Additions, contractSetAddition{
-				Size: contractData[contract.ID],
-				Time: now,
-			})
-			setAdditions[contract.ID] = additions
-			logger.Infof("contract %v was added to the contract set, size: %v", contract.ID, contractData[contract.ID])
-		}
-	}
-
-	// log a warning if the contract set does not contain enough contracts
-	logFn := logger.Infow
-	if len(newSet) < int(ctx.state.RS.TotalShards) {
-		logFn = logger.Warnw
-	}
-
-	// log the contract set after maintenance
-	logFn(
-		"contractset after maintenance",
-		"contracts", len(newSet),
-		"added", len(setAdditions),
-		"removed", len(setRemovals),
-	)
-
-	hasAlert := func(id types.Hash256) bool {
-		ar, err := alerter.Alerts(ctx, alerts.AlertsOpts{Offset: 0, Limit: -1})
-		if err != nil {
-			logger.Errorf("failed to fetch alerts: %v", err)
-			return false
-		}
-		for _, alert := range ar.Alerts {
-			if alert.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-
-	hasChanged := len(setAdditions)+len(setRemovals) > 0
-	if hasChanged {
-		if !hasAlert(alertChurnID) {
-			churn.Reset()
-		}
-		churn.Apply(setAdditions, setRemovals)
-		alerter.RegisterAlert(ctx, churn.Alert())
-	}
-	return hasChanged, nil
-}
-
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding types.Currency) types.Currency {
 	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
 	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
@@ -720,21 +579,19 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 // performContractChecks performs maintenance on existing contracts,
 // renewing/refreshing any that need it and filtering out contracts that should
 // no longer be used. The 'ipFilter' is updated to contain all hosts that we
-// keep contracts with and the 'dropOutReasons' map is updated with the reasons
-// for dropping out of the set. If a contract is refreshed or renewed, the
+// keep contracts with. If a contract is refreshed or renewed, the
 // 'remainingFunds' are adjusted.
-func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) ([]api.ContractMetadata, map[types.FileContractID]string, error) {
+func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) ([]api.ContractMetadata, error) {
 	var filteredContracts []api.ContractMetadata
 	keepContract := func(c api.ContractMetadata, h api.Host) {
 		filteredContracts = append(filteredContracts, c)
 		ipFilter.Add(h)
 	}
-	churnReasons := make(map[types.FileContractID]string)
 
 	// fetch network
 	network, err := bus.ConsensusNetwork(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// fetch all contracts we already have
@@ -742,7 +599,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 	start := time.Now()
 	contractMetadatas, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	logger.With("elapsed", time.Since(start)).Info("done fetching existing contracts")
 
@@ -798,7 +655,6 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 		// abort if we have enough contracts
 		if uint64(len(filteredContracts)) >= ctx.WantedContracts() {
-			churnReasons[c.ID] = "truncated"
 			logger.Debug("ignoring contract since we have enough contracts")
 			continue
 		}
@@ -806,7 +662,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		// fetch recent consensus state
 		cs, err := bus.ConsensusState(ctx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch consensus state: %w", err)
+			return nil, fmt.Errorf("failed to fetch consensus state: %w", err)
 		}
 		bh := cs.BlockHeight
 		logger = logger.With("blockHeight", bh)
@@ -820,7 +676,6 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 			} else {
 				logger.Debug("successfully archived contract")
 			}
-			churnReasons[c.ID] = reason.Error()
 			continue
 		}
 
@@ -828,7 +683,6 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		host, err := bus.Host(ctx, c.HostKey)
 		if err != nil {
 			logger.With(zap.Error(err)).Warn("missing host")
-			churnReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
 			continue
 		}
 
@@ -839,21 +693,18 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		// check if host is blocked
 		if host.Blocked {
 			logger.Info("host is blocked")
-			churnReasons[c.ID] = api.ErrUsabilityHostBlocked.Error()
 			continue
 		}
 
 		// check if host has a redundant ip
 		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
 			logger.Info("host has redundant IP")
-			churnReasons[c.ID] = api.ErrUsabilityHostRedundantIP.Error()
 			continue
 		}
 
 		// get check
 		if host.Checks == (api.HostChecks{}) {
 			logger.Warn("missing host check")
-			churnReasons[c.ID] = api.ErrUsabilityHostNotFound.Error()
 			continue
 		}
 
@@ -870,7 +721,6 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		if !host.Checks.UsabilityBreakdown.IsUsable() {
 			reasons := strings.Join(host.Checks.UsabilityBreakdown.UnusableReasons(), ",")
 			logger.With("reasons", reasons).Info("unusable host")
-			churnReasons[c.ID] = reasons
 			continue
 		}
 
@@ -882,7 +732,6 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 				remainingLeeway--
 			} else {
 				logger.Debug("ignoring contract without revision")
-				churnReasons[c.ID] = errContractNoRevision.Error()
 			}
 			continue // no more checks without revision
 		}
@@ -895,11 +744,6 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 			With("needsRefresh", needsRefresh).
 			With("needsRenew", needsRenew).
 			With("reasons", reasons)
-
-			// remember reason for potential drop of contract
-		if len(reasons) > 0 {
-			churnReasons[c.ID] = strings.Join(reasons, ",")
-		}
 
 		contract := c.ContractMetadata
 
@@ -954,23 +798,19 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 		// if the contract is not usable we ignore it
 		if !usable {
-			if c.Usability == api.ContractUsabilityGood {
-				logger.Info("contract is not usable, removing from set")
-			} else {
-				logger.Debug("contract is not usable, remains out of set")
-			}
+			logger.Info("contract is not usable")
 			continue
 		}
 
 		// we keep the contract, add the host to the filter
-		logger.Debug("contract is usable and is added / stays in set")
+		logger.Debug("contract is usable")
 		keepContract(contract, host)
 	}
 	logger.With("refreshed", refreshed).
 		With("renewed", renewed).
 		With("filteredContracts", len(filteredContracts)).
 		Info("checking existing contracts done")
-	return filteredContracts, churnReasons, nil
+	return filteredContracts, nil
 }
 
 // performContracdtFormations forms up to 'wanted' new contracts with hosts. The
@@ -1130,9 +970,11 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	if err != nil {
 		return fmt.Errorf("failed to fetch all contracts: %w", err)
 	}
-	goodContracts, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
-	if err != nil {
-		return fmt.Errorf("failed to fetch contracts: %w", err)
+	var goodContracts []api.ContractMetadata
+	for _, c := range allContracts {
+		if c.Usability == api.ContractUsabilityGood {
+			goodContracts = append(goodContracts, c)
+		}
 	}
 	allHosts, err := bus.Hosts(ctx, api.HostOptions{})
 	if err != nil {
@@ -1166,7 +1008,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	return nil
 }
 
-func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
+func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
 		Named(hex.EncodeToString(frand.Bytes(16))) // uuid for this iteration
 
@@ -1191,7 +1033,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		logger:          logger.Named("ipFilter"),
 		subnetToHostKey: make(map[string]string),
 	}
-	keptContracts, churnReasons, err := performContractChecks(ctx, alerter, bus, cc, cr, ipFilter, logger)
+	keptContracts, err := performContractChecks(ctx, alerter, bus, cc, cr, ipFilter, logger)
 	if err != nil {
 		return false, err
 	}
@@ -1202,63 +1044,50 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 		return false, err
 	}
 
-	// fetch old set
-	oldSet, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// STEP 4: update contract usability
+	oldGC, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch good contracts: %w", err)
 	}
-
-	// merge kept and formed contracts into new set
-	newSet := make([]api.ContractMetadata, 0, len(keptContracts)+len(formedContracts))
-	newSet = append(newSet, keptContracts...)
-	newSet = append(newSet, formedContracts...)
-
-	// STEP 4: update contract set
-	if err := updateContractSet(ctx, bus, oldSet, newSet); err != nil {
-		return false, err
+	newGC := make([]api.ContractMetadata, 0, len(keptContracts)+len(formedContracts))
+	newGC = append(newGC, keptContracts...)
+	newGC = append(newGC, formedContracts...)
+	updated, err := updateContractUsability(ctx, bus, oldGC, newGC, logger)
+	if err != nil {
+		return false, fmt.Errorf("failed to update contracts: %w", err)
 	}
 
-	// STEP 5: perform minor maintenance such as cleanups and broadcasting
-	// revisions
+	// STEP 5: perform post maintenance tasks
 	if err := performPostMaintenanceTasks(ctx, bus, alerter, cc, rb, logger); err != nil {
-		return false, err
+		return updated, err
 	}
-
-	// STEP 6: log changes and register alerts
-	return computeChangeSet(ctx, alerter, bus, churn, logger, oldSet, newSet, churnReasons)
+	return updated, nil
 }
 
-func updateContractSet(ctx *mCtx, bus Bus, oldSet, newSet []api.ContractMetadata) error {
-	var newSetIDs []types.FileContractID
-	for _, contract := range newSet {
-		newSetIDs = append(newSetIDs, contract.ID)
-	}
-	inOldSet := make(map[types.FileContractID]struct{})
-	for _, c := range oldSet {
-		inOldSet[c.ID] = struct{}{}
-	}
-	var toAdd []types.FileContractID
-	for _, c := range newSet {
-		if _, ok := inOldSet[c.ID]; !ok {
-			toAdd = append(toAdd, c.ID)
-		}
-		// only keep contracts that are in the old but not the new set
-		delete(inOldSet, c.ID)
+func updateContractUsability(ctx *mCtx, bus Bus, oldGC, newGC []api.ContractMetadata, logger *zap.SugaredLogger) (bool, error) {
+	wasGC := make(map[types.FileContractID]struct{})
+	for _, c := range oldGC {
+		wasGC[c.ID] = struct{}{}
 	}
 
-	var toRemove []types.FileContractID
-	for id := range inOldSet {
-		toRemove = append(toRemove, id)
+	var changed bool
+	for _, c := range newGC {
+		if _, ok := wasGC[c.ID]; !ok {
+			if err := bus.UpdateContractUsability(ctx, c.ID, api.ContractUsabilityGood); err != nil {
+				return changed, fmt.Errorf("failed to update contract usability: %w", err)
+			}
+			logger.Debugf("marked contract %v as good", c.ID)
+			changed = changed || true
+		}
+		delete(wasGC, c.ID) // keep contracts to mark bad
 	}
-	for _, id := range toRemove {
+
+	for id := range wasGC {
 		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityBad); err != nil {
-			return fmt.Errorf("failed to record contract set change: %w", err)
+			return changed, fmt.Errorf("failed to update contract usability: %w", err)
 		}
+		logger.Debugf("marked contract %v as bad", id)
 	}
-	for _, id := range toAdd {
-		if err := bus.UpdateContractUsability(ctx, id, api.ContractUsabilityGood); err != nil {
-			return fmt.Errorf("failed to record contract set change: %w", err)
-		}
-	}
-	return nil
+
+	return changed, nil
 }

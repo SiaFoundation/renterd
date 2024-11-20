@@ -16,7 +16,6 @@ const (
 )
 
 var (
-	alertChurnID                      = alerts.RandomAlertID() // constant until restarted
 	alertContractMaintenanceSkippedID = alerts.RandomAlertID() // constant until restarted
 	alertLostSectorsID                = alerts.RandomAlertID() // constant until restarted
 	alertRenewalFailedID              = alerts.RandomAlertID() // constant until restarted
