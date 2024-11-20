@@ -1007,6 +1007,8 @@ func testApCfg() config.Autopilot {
 }
 
 func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	partialSlabDir := filepath.Join(dir, "partial_slabs")
+
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -1030,7 +1032,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -1050,7 +1052,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1069,7 +1071,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		Alerts:                        alerts.WithOrigin(am, "bus"),
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
 		Logger:                        logger,

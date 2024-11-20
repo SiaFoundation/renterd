@@ -35,6 +35,9 @@ type (
 		// Migrate runs all missing migrations on the database.
 		Migrate(ctx context.Context) error
 
+		// PartialSlabDir returns the directory where partial slabs are stored.
+		PartialSlabDir() string
+
 		// Transaction starts a new transaction.
 		Transaction(ctx context.Context, fn func(DatabaseTx) error) error
 

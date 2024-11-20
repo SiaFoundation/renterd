@@ -55,7 +55,7 @@ func randomDBName() string {
 	return "db" + hex.EncodeToString(frand.Bytes(16))
 }
 
-func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabase, error) {
+func (cfg *testSQLStoreConfig) dbConnections(partialSlabDir string) (sql.Database, sql.MetricsDatabase, error) {
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
 	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
@@ -94,7 +94,7 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, partialSlabDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -112,7 +112,7 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, partialSlabDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -130,7 +130,7 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open ephemeral SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, partialSlabDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite main database: %w", err)
 		}
@@ -160,7 +160,8 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 
 	// create db connections
-	dbMain, dbMetrics, err := cfg.dbConnections()
+	partialSlabDir := filepath.Join(cfg.dir, "partial_slabs")
+	dbMain, dbMetrics, err := cfg.dbConnections(partialSlabDir)
 	if err != nil {
 		t.Fatal("failed to create db connections", err)
 	}
@@ -170,7 +171,7 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		Alerts:                        alerts,
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                cfg.dir,
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       !cfg.skipMigrate,
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop(),

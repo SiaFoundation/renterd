@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -434,7 +435,7 @@ var (
 				ID: "00030_remove_contract_sets",
 				Migrate: func(tx Tx) error {
 					// prepare statement to rename the buffer
-					stmt, err := tx.Prepare(ctx, "UPDATE slab_buffers SET filename = ? WHERE filename = ?")
+					stmt, err := tx.Prepare(ctx, "UPDATE buffered_slabs SET filename = ? WHERE filename = ?")
 					if err != nil {
 						return fmt.Errorf("failed to prepare update statement: %w", err)
 					}
@@ -485,20 +486,21 @@ var (
 					}
 
 					// copy all buffers
+					partialSlabDir := m.DB().partialSlabDir
 					for _, buffer := range buffers {
-						if dst, err := copyBuffer(buffer); err != nil {
+						if dst, err := copyBuffer(filepath.Join(partialSlabDir, buffer)); err != nil {
 							return fmt.Errorf("failed to copy buffer '%s': %w", buffer, err)
-						} else if res, err := stmt.Exec(ctx, buffer, dst); err != nil {
+						} else if res, err := stmt.Exec(ctx, dst, buffer); err != nil {
 							return fmt.Errorf("failed to update buffer '%s': %w", buffer, err)
 						} else if n, err := res.RowsAffected(); err != nil {
 							return fmt.Errorf("failed to fetch rows affected: %w", err)
 						} else if n != 1 {
-							return fmt.Errorf("failed to update buffer '%s': %w", buffer, err)
+							return fmt.Errorf("failed to update buffer, no rows affected when updating '%s' -> %s", buffer, dst)
 						}
 					}
 					// remove original buffers
 					for _, buffer := range buffers {
-						if err := os.Remove(buffer); err != nil {
+						if err := os.Remove(filepath.Join(partialSlabDir, buffer)); err != nil {
 							return fmt.Errorf("failed to remove buffer '%s': %w", buffer, err)
 						}
 					}
