@@ -71,7 +71,7 @@ func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) host.Download
 	}
 }
 
-func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
+func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	var amount types.Currency
 	return h.acc.WithWithdrawal(func() (types.Currency, error) {
 		pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
@@ -82,7 +82,7 @@ func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types
 		amount = uptc
 
 		// check for download gouging specifically
-		gc, err := GougingCheckerFromContext(ctx, overpay)
+		gc, err := GougingCheckerFromContext(ctx)
 		if err != nil {
 			return amount, err
 		}

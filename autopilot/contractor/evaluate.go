@@ -11,7 +11,7 @@ import (
 var ErrMissingRequiredFields = errors.New("missing required fields in configuration, both allowance and amount must be set")
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
-	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
+	gc := gouging.NewChecker(gs, cs)
 	for _, host := range hosts {
 		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore, period)
 		if hc.UsabilityBreakdown.IsUsable() {
@@ -31,7 +31,7 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	}
 
 	period := cfg.Contracts.Period
-	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
+	gc := gouging.NewChecker(gs, cs)
 
 	resp.Hosts = uint64(len(hosts))
 	for i, host := range hosts {

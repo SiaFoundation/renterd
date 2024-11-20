@@ -739,7 +739,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	}
 
 	// renew contract
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
 	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {
