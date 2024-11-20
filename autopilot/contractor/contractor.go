@@ -1232,6 +1232,82 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	return nil
 }
 
+// performV2ContractMigration migrates v1 contracts to v2 contracts once the v2
+// allow height is reached. That means:
+// - we form a v2 contract with all hosts that we currently have a v1 contract with
+// - we delete the v1 contract afterwards
+// - migrations will take over
+func performV2ContractMigration(ctx *mCtx, bus Bus, cr contractReviser, logger *zap.SugaredLogger) {
+	logger = logger.Named("v2ContractMigration")
+
+	network, err := bus.ConsensusNetwork(ctx)
+	if err != nil {
+		logger.With(zap.Error(err)).Error("failed to fetch consensus network")
+		return
+	}
+
+	cs, err := bus.ConsensusState(ctx)
+	if err != nil {
+		logger.With(zap.Error(err)).Error("failed to fetch consensus state")
+		return
+	} else if cs.BlockHeight < network.HardforkV2.AllowHeight {
+		return // nothing to do yet
+	}
+
+	contracts, err := bus.Contracts(ctx, api.ContractsOpts{
+		FilterMode: api.ContractFilterModeAll, // TODO: change to usable
+	})
+	if err != nil {
+		logger.With(zap.Error(err)).Error("failed to fetch contracts for migration")
+		return
+	}
+
+	hostsWithV2Contract := make(map[types.PublicKey]struct{})
+	for _, contract := range contracts {
+		if contract.V2 {
+			hostsWithV2Contract[contract.HostKey] = struct{}{}
+		}
+	}
+	toArchive := make(map[types.FileContractID]struct{})
+
+	for _, contract := range contracts {
+		if contract.V2 {
+			continue // nothing to do
+		} else if _, exists := hostsWithV2Contract[contract.HostKey]; exists {
+			toArchive[contract.ID] = struct{}{}
+			continue // nothing more to do
+		}
+		logger = logger.With("contractID", contract.ID).
+			With("hostKey", contract.HostKey)
+
+		host, err := bus.Host(ctx, contract.HostKey)
+		if err != nil {
+			logger.Error("failed to fetch host for v1 contract")
+			continue
+		}
+
+		// form a new contract with the same host
+		contract, _, err := cr.formContract(ctx, bus, host, InitialContractFunding, logger)
+		if err != nil {
+			logger.Errorf("failed to form a v2 contract with the host")
+			continue
+		}
+
+		// remember for archival
+		toArchive[contract.ID] = struct{}{}
+	}
+
+	// archive contracts
+	for id := range toArchive {
+		if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
+			id: "migrated to v2",
+		}); err != nil {
+			logger.Errorf("failed to archive migrated contract")
+			continue
+		}
+	}
+}
+
 func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
 		Named(hex.EncodeToString(frand.Bytes(16))). // uuid for this iteration
@@ -1252,6 +1328,9 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	if err := performHostChecks(ctx, bus, logger); err != nil {
 		return false, err
 	}
+
+	// COMPATv2: perform v2 contract migration
+	performV2ContractMigration(ctx, bus, cr, logger)
 
 	// STEP 2: perform contract maintenance
 	ipFilter := newHostSet(logger.Named("ipFilter"))
