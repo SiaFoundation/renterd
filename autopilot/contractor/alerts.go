@@ -42,15 +42,14 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, ourFault bool,
 	}
 }
 
-func newContractUsabilityUpdatedAlert(good, bad []types.FileContractID, reasons map[types.FileContractID]string) alerts.Alert {
+func newContractUsabilityUpdatedAlert(markedGood, markedBad map[types.FileContractID]string) alerts.Alert {
 	return alerts.Alert{
 		ID:       alertContractUsabilityUpdated,
 		Severity: alerts.SeverityInfo,
 		Message:  "Contract usability updated",
 		Data: map[string]interface{}{
-			"markedGood": good,
-			"markedBad":  bad,
-			"reasons":    reasons,
+			"markedGood": markedGood,
+			"markedBad":  markedBad,
 		},
 		Timestamp: time.Now(),
 	}

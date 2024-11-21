@@ -3,7 +3,6 @@ package contractor
 import (
 	"context"
 	"errors"
-	"sort"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -95,17 +94,6 @@ func (ctx *mCtx) Value(key interface{}) interface{} {
 
 func (ctx *mCtx) WantedContracts() uint64 {
 	return ctx.state.AP.Contracts.Amount
-}
-
-func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
-	sort.SliceStable(contracts, func(i, j int) bool {
-		iUsable := contracts[i].IsGood()
-		jUsable := contracts[j].IsGood()
-		if iUsable != jUsable {
-			return iUsable
-		}
-		return contracts[i].FileSize() > contracts[j].FileSize()
-	})
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
