@@ -17,6 +17,7 @@ import (
 
 	"github.com/gotd/contrib/http_range"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -966,7 +967,15 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	return res, err
 }
 
-func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
+func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
+	// handle v2 host
+	if host.IsV2() {
+		account := w.accounts.ForHost(host.PublicKey)
+		return account.WithSync(func() (types.Currency, error) {
+			return w.rhp4Client.AccountBalance(ctx, rhpv4.Account(account.ID()))
+		})
+	}
+
 	// attach gouging checker
 	gp, err := w.cache.GougingParams(ctx)
 	if err != nil {
@@ -975,8 +984,8 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// sync the account
-	h := w.Host(hk, fcid, siamuxAddr)
-	err = w.withRevision(ctx, fcid, hk, siamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+	h := w.Host(host.PublicKey, fcid, host.SiamuxAddr)
+	err = w.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})
 	if err != nil {
@@ -1080,7 +1089,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

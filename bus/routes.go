@@ -1158,7 +1158,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		}
 	}()
 
-	// send V2 transaction if we're passed the V2 hardfork allow height
+	// use RHP4 if we're passed the V2 hardfork allow height
 	var contract api.ContractMetadata
 	if b.isPassedV2AllowHeight() {
 		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight)
