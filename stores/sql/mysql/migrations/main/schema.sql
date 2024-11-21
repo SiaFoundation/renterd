@@ -457,7 +457,6 @@ CREATE TABLE `autopilot_config` (
   `contracts_storage` bigint unsigned DEFAULT NULL,
   `contracts_prune` boolean NOT NULL DEFAULT false,
 
-  `hosts_allow_redundant_ips` boolean NOT NULL DEFAULT false,
   `hosts_max_downtime_hours` bigint unsigned DEFAULT NULL,
   `hosts_min_protocol_version` varchar(191) DEFAULT NULL,
   `hosts_max_consecutive_scan_failures` bigint unsigned DEFAULT NULL,

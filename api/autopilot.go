@@ -44,7 +44,6 @@ type (
 
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
-		AllowRedundantIPs          bool   `json:"allowRedundantIPs"`
 		MaxConsecutiveScanFailures uint64 `json:"maxConsecutiveScanFailures"`
 		MaxDowntimeHours           uint64 `json:"maxDowntimeHours"`
 		MinProtocolVersion         string `json:"minProtocolVersion"`
@@ -64,7 +63,6 @@ var (
 			Prune:       false,
 		},
 		Hosts: HostsConfig{
-			AllowRedundantIPs:          false,
 			MaxConsecutiveScanFailures: 10,
 			MaxDowntimeHours:           24 * 7 * 2,
 			MinProtocolVersion:         "1.6.0",

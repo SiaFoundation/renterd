@@ -224,7 +224,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 
 	// initialise autopilot
 	if cfg.Autopilot.Enabled {
-		ap, err := autopilot.New(cfg.Autopilot, bc, workers, logger)
+		ap, err := autopilot.New(cfg.Autopilot, bc, workers, false, logger)
 		if err != nil {
 			logger.Fatal("failed to create autopilot: " + err.Error())
 		}
