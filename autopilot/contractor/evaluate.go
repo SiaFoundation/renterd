@@ -143,7 +143,7 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 
 // optimiseGougingSetting tries to optimise one field of the gouging settings to
 // try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, currentPeriod uint64, rs api.RedundancySettings, hosts []api.Host) bool {
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, hosts []api.Host) bool {
 	if cfg.Contracts.Amount == 0 {
 		return true // nothing to do
 	}
@@ -154,7 +154,7 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 	nSteps := 0
 	prevVal := *field // to keep accurate value
 	for {
-		nUsable := countUsableHosts(cfg, cs, currentPeriod, rs, *gs, hosts)
+		nUsable := countUsableHosts(cfg, cs, period, rs, *gs, hosts)
 		targetHit := nUsable >= cfg.Contracts.Amount
 
 		if targetHit && nSteps == 0 {

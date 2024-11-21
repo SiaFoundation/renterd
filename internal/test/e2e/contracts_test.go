@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -35,7 +34,7 @@ func TestFormContract(t *testing.T) {
 
 	// form a contract using the bus
 	wallet, _ := b.Wallet(context.Background())
-	ap, err := b.Autopilot(context.Background())
+	ap, err := b.AutopilotConfig(context.Background())
 	tt.OK(err)
 	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
 	tt.OK(err)
@@ -47,20 +46,12 @@ func TestFormContract(t *testing.T) {
 	// mine to the renew window
 	cluster.MineToRenewWindow()
 
-	// wait until autopilot updated the current period
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		if curr, _ := b.Autopilot(context.Background()); curr.CurrentPeriod == ap.CurrentPeriod {
-			return errors.New("autopilot didn't update the current period")
-		}
-		return nil
-	})
-
 	// update autopilot config to allow for 1 contract, this won't form a
 	// contract but will ensure we don't skip contract maintenance, which should
 	// renew the contract we formed
 	contracts := ap.Contracts
 	contracts.Amount = 1
-	tt.OK(b.UpdateAutopilot(context.Background(), client.WithContractsConfig(contracts)))
+	tt.OK(b.UpdateAutopilotConfig(context.Background(), client.WithContractsConfig(contracts)))
 
 	// assert the contract gets renewed and thus maintained
 	var renewalID types.FileContractID

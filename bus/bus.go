@@ -183,9 +183,9 @@ type (
 
 	// A AutopilotStore stores autopilot state.
 	AutopilotStore interface {
-		Autopilot(ctx context.Context) (api.Autopilot, error)
-		InitAutopilot(ctx context.Context) error
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		InitAutopilotConfig(ctx context.Context) error
+		UpdateAutopilotConfig(ctx context.Context, ap api.AutopilotConfig) error
 	}
 
 	// BackupStore is the interface of a store that can be backed up.
@@ -360,8 +360,8 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 		rhp4Client: rhp4.New(dialer),
 	}
 
-	// ensure autopilot state
-	err = store.InitAutopilot(ctx)
+	// initialize autopilot config
+	err = store.InitAutopilotConfig(ctx)
 	if err != nil {
 		return nil, err
 	}

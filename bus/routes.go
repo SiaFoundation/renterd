@@ -1720,8 +1720,8 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 }
 
 func (b *Bus) autopilotHandlerGET(jc jape.Context) {
-	ap, err := b.store.Autopilot(jc.Request.Context())
-	if jc.Check("failed to fetch autopilot", err) != nil {
+	ap, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot config", err) != nil {
 		return
 	}
 	jc.Encode(ap)
@@ -1737,9 +1737,9 @@ func (b *Bus) autopilotHandlerPUT(jc jape.Context) {
 		return
 	}
 
-	// fetch the autopilot
-	ap, err := b.store.Autopilot(jc.Request.Context())
-	if jc.Check("failed to fetch autopilot", err) != nil {
+	// fetch current config
+	cfg, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch current configuration", err) != nil {
 		return
 	}
 
@@ -1749,7 +1749,7 @@ func (b *Bus) autopilotHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("failed to update autopilot, contracts config is invalid: %w", err), http.StatusBadRequest)
 			return
 		}
-		ap.Contracts = *req.Contracts
+		cfg.Contracts = *req.Contracts
 	}
 
 	// update the hosts config
@@ -1758,20 +1758,15 @@ func (b *Bus) autopilotHandlerPUT(jc jape.Context) {
 			jc.Error(fmt.Errorf("failed to update autopilot, hosts config is invalid: %w", err), http.StatusBadRequest)
 			return
 		}
-		ap.Hosts = *req.Hosts
+		cfg.Hosts = *req.Hosts
 	}
 
 	// enable/disable the autopilot
 	if req.Enabled != nil {
-		ap.Enabled = *req.Enabled
+		cfg.Enabled = *req.Enabled
 	}
 
-	// update the current period
-	if req.CurrentPeriod != nil {
-		ap.CurrentPeriod = *req.CurrentPeriod
-	}
-
-	jc.Check("failed to update autopilot", b.store.UpdateAutopilot(jc.Request.Context(), ap))
+	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
 }
 
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {

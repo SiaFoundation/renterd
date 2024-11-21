@@ -24,13 +24,7 @@ var (
 )
 
 type (
-	// Autopilot contains its configuration as well as the current period.
-	Autopilot struct {
-		CurrentPeriod uint64 `json:"currentPeriod"`
-		AutopilotConfig
-	}
-
-	// AutopilotConfig contains configuration settings for the autopilot.
+	// AutopilotConfig contains host and contracts settings for the autopilot.
 	AutopilotConfig struct {
 		Enabled   bool            `json:"enabled"`
 		Contracts ContractsConfig `json:"contracts"`
@@ -137,8 +131,8 @@ type (
 	}
 )
 
-func (ap Autopilot) EndHeight() uint64 {
-	return ap.CurrentPeriod + ap.Contracts.Period + ap.Contracts.RenewWindow
+func (ap AutopilotConfig) EndHeight() uint64 {
+	return ap.Contracts.Period + ap.Contracts.RenewWindow
 }
 
 func (cc ContractsConfig) Validate() error {

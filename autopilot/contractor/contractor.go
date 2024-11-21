@@ -166,7 +166,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	renterFunds := initialContractFunding(scan.Settings, txnFee, minInitialContractFunds)
 
 	// calculate the host collateral
-	endHeight := ctx.EndHeight()
+	endHeight := ctx.EndHeight(cs.BlockHeight)
 	expectedStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
 	hostCollateral := rhpv2.ContractFormationCollateral(ctx.Period(), expectedStorage, scan.Settings)
 
@@ -286,7 +286,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	renterFunds := renewFundingEstimate(minRenterFunds, contract.InitialRenterFunds, contract.RenterFunds(), logger)
 
 	// sanity check the endheight is not the same on renewals
-	endHeight := ctx.EndHeight()
+	endHeight := ctx.EndHeight(cs.BlockHeight)
 	if endHeight <= rev.ProofHeight {
 		logger.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.ContractsConfig().Period, "bh", cs.BlockHeight)
 		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())

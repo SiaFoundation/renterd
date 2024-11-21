@@ -19,7 +19,7 @@ func TestAutopilot(t *testing.T) {
 	b := cluster.Bus
 
 	// assert autopilot is enabled by default
-	ap, err := b.Autopilot(context.Background())
+	ap, err := b.AutopilotConfig(context.Background())
 	tt.OK(err)
 	if !ap.Enabled {
 		t.Fatal("autopilot should be enabled by default")
@@ -35,36 +35,36 @@ func TestAutopilot(t *testing.T) {
 	// assert h config is validated
 	h := ap.Hosts
 	h.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
-	if err := b.UpdateAutopilot(context.Background(), client.WithHostsConfig(h)); !utils.IsErr(err, api.ErrMaxDowntimeHoursTooHigh) {
+	if err := b.UpdateAutopilotConfig(context.Background(), client.WithHostsConfig(h)); !utils.IsErr(err, api.ErrMaxDowntimeHoursTooHigh) {
 		t.Fatal("unexpected", err)
 	}
 	h.MaxDowntimeHours = 99 * 365 * 24 // allowed max
-	tt.OK(b.UpdateAutopilot(context.Background(), client.WithHostsConfig(h)))
+	tt.OK(b.UpdateAutopilotConfig(context.Background(), client.WithHostsConfig(h)))
 
 	h.MinProtocolVersion = "not a version"
-	if err := b.UpdateAutopilot(context.Background(), client.WithHostsConfig(h)); !utils.IsErr(err, api.ErrInvalidReleaseVersion) {
+	if err := b.UpdateAutopilotConfig(context.Background(), client.WithHostsConfig(h)); !utils.IsErr(err, api.ErrInvalidReleaseVersion) {
 		t.Fatal("unexpected")
 	}
 
 	// assert c config is validated
 	c := ap.Contracts
 	c.Period = 0 // invalid period
-	if err := b.UpdateAutopilot(context.Background(), client.WithContractsConfig(c)); err == nil || !strings.Contains(err.Error(), "period must be greater than 0") {
+	if err := b.UpdateAutopilotConfig(context.Background(), client.WithContractsConfig(c)); err == nil || !strings.Contains(err.Error(), "period must be greater than 0") {
 		t.Fatal("unexpected", err)
 	}
 	c.Period = 1      // valid period
 	c.RenewWindow = 0 // invalid renew window
-	if err := b.UpdateAutopilot(context.Background(), client.WithContractsConfig(c)); err == nil || !strings.Contains(err.Error(), "renewWindow must be greater than 0") {
+	if err := b.UpdateAutopilotConfig(context.Background(), client.WithContractsConfig(c)); err == nil || !strings.Contains(err.Error(), "renewWindow must be greater than 0") {
 		t.Fatal("unexpected", err)
 	}
 	c.RenewWindow = 1 // valid renew window
-	if err := b.UpdateAutopilot(context.Background(), client.WithContractsConfig(c)); err != nil {
+	if err := b.UpdateAutopilotConfig(context.Background(), client.WithContractsConfig(c)); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert we can disable the autopilot
-	tt.OK(b.UpdateAutopilot(context.Background(), client.WithAutopilotEnabled(false)))
-	ap, err = b.Autopilot(context.Background())
+	tt.OK(b.UpdateAutopilotConfig(context.Background(), client.WithAutopilotEnabled(false)))
+	ap, err = b.AutopilotConfig(context.Background())
 	tt.OK(err)
 	if ap.Enabled {
 		t.Fatal("autopilot should be disabled")

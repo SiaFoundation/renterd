@@ -449,7 +449,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
 		tt.OKAll(
-			busClient.UpdateAutopilot(ctx,
+			busClient.UpdateAutopilotConfig(ctx,
 				client.WithContractsConfig(apConfig.Contracts),
 				client.WithHostsConfig(apConfig.Hosts),
 				client.WithAutopilotEnabled(true),
@@ -646,21 +646,37 @@ func announceHosts(hosts []*Host) error {
 	return nil
 }
 
-// MineToRenewWindow is a helper which mines enough blocks for the autopilot to
-// reach its renew window.
+// MineToRenewWindow is a helper which mines to the height where all existing
+// contracts entered their respective renew window.
 func (c *TestCluster) MineToRenewWindow() {
 	c.tt.Helper()
+
+	// fetch autopilot config
+	cfg, err := c.Bus.AutopilotConfig(context.Background())
+	c.tt.OK(err)
+
+	// fetch consensus state
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	ap, err := c.Bus.Autopilot(context.Background())
+	// fetch all contracts
+	contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 	c.tt.OK(err)
 
-	renewWindowStart := ap.CurrentPeriod + ap.Contracts.Period
-	if cs.BlockHeight >= renewWindowStart {
-		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Contracts.Period, renewWindowStart)
+	// find max window start
+	var maxEndHeight uint64
+	for _, contract := range contracts {
+		if contract.EndHeight() > maxEndHeight {
+			maxEndHeight = contract.EndHeight()
+		}
 	}
-	c.MineBlocks(renewWindowStart - cs.BlockHeight)
+	if maxEndHeight < cfg.Contracts.RenewWindow {
+		return // already in renew window
+	} else if targetBH := maxEndHeight - cfg.Contracts.RenewWindow; cs.BlockHeight >= targetBH {
+		return // already in renew window
+	} else {
+		c.MineBlocks(targetBH - cs.BlockHeight)
+	}
 }
 
 // MineBlocks mines n blocks

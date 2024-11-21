@@ -193,11 +193,10 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	return nil
 }
 
-func Autopilot(ctx context.Context, tx sql.Tx) (ap api.Autopilot, err error) {
+func AutopilotConfig(ctx context.Context, tx sql.Tx) (cfg api.AutopilotConfig, err error) {
 	err = tx.QueryRow(ctx, `
 SELECT
 	enabled,
-	current_period,
 	contracts_amount,
 	contracts_period,
 	contracts_renew_window,
@@ -211,25 +210,19 @@ SELECT
 	hosts_max_consecutive_scan_failures
 FROM autopilot_config
 WHERE id = ?`, sql.AutopilotID).Scan(
-		&ap.Enabled,
-		&ap.CurrentPeriod,
-		&ap.Contracts.Amount,
-		&ap.Contracts.Period,
-		&ap.Contracts.RenewWindow,
-		&ap.Contracts.Download,
-		&ap.Contracts.Upload,
-		&ap.Contracts.Storage,
-		&ap.Contracts.Prune,
-		&ap.Hosts.AllowRedundantIPs,
-		&ap.Hosts.MaxDowntimeHours,
-		&ap.Hosts.MinProtocolVersion,
-		&ap.Hosts.MaxConsecutiveScanFailures,
+		&cfg.Enabled,
+		&cfg.Contracts.Amount,
+		&cfg.Contracts.Period,
+		&cfg.Contracts.RenewWindow,
+		&cfg.Contracts.Download,
+		&cfg.Contracts.Upload,
+		&cfg.Contracts.Storage,
+		&cfg.Contracts.Prune,
+		&cfg.Hosts.AllowRedundantIPs,
+		&cfg.Hosts.MaxDowntimeHours,
+		&cfg.Hosts.MinProtocolVersion,
+		&cfg.Hosts.MaxConsecutiveScanFailures,
 	)
-	return
-}
-
-func AutopilotPeriod(ctx context.Context, tx sql.Tx) (period uint64, err error) {
-	err = tx.QueryRow(ctx, `SELECT current_period FROM autopilot_config WHERE id = ?`, sql.AutopilotID).Scan(&period)
 	return
 }
 
@@ -1991,11 +1984,10 @@ func UpdateContractUsability(ctx context.Context, tx sql.Tx, fcid types.FileCont
 	return err
 }
 
-func UpdateAutopilot(ctx context.Context, tx sql.Tx, ap api.Autopilot) error {
+func UpdateAutopilotConfig(ctx context.Context, tx sql.Tx, cfg api.AutopilotConfig) error {
 	_, err := tx.Exec(ctx, `
 UPDATE autopilot_config
 SET enabled = ?,
-	current_period = ?,
 	contracts_amount = ?,
 	contracts_period = ?,
 	contracts_renew_window = ?,
@@ -2008,19 +2000,18 @@ SET enabled = ?,
 	hosts_min_protocol_version = ?,
 	hosts_max_consecutive_scan_failures = ?
 WHERE id = ?`,
-		ap.Enabled,
-		ap.CurrentPeriod,
-		ap.Contracts.Amount,
-		ap.Contracts.Period,
-		ap.Contracts.RenewWindow,
-		ap.Contracts.Download,
-		ap.Contracts.Upload,
-		ap.Contracts.Storage,
-		ap.Contracts.Prune,
-		ap.Hosts.AllowRedundantIPs,
-		ap.Hosts.MaxDowntimeHours,
-		ap.Hosts.MinProtocolVersion,
-		ap.Hosts.MaxConsecutiveScanFailures,
+		cfg.Enabled,
+		cfg.Contracts.Amount,
+		cfg.Contracts.Period,
+		cfg.Contracts.RenewWindow,
+		cfg.Contracts.Download,
+		cfg.Contracts.Upload,
+		cfg.Contracts.Storage,
+		cfg.Contracts.Prune,
+		cfg.Hosts.AllowRedundantIPs,
+		cfg.Hosts.MaxDowntimeHours,
+		cfg.Hosts.MinProtocolVersion,
+		cfg.Hosts.MaxConsecutiveScanFailures,
 		sql.AutopilotID)
 	return err
 }
