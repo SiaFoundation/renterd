@@ -110,9 +110,7 @@ func TestShouldArchive(t *testing.T) {
 			V2:             true,
 		},
 		Revision: &api.Revision{
-			V2FileContract: types.V2FileContract{
-				RevisionNumber: 1,
-			},
+			RevisionNumber: 1,
 		},
 	}
 
