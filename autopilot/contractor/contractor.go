@@ -282,7 +282,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	if contract.IsOutOfFunds() {
 		renterFunds = c.refreshFundingEstimate(contract, logger)
 	} else {
-		renterFunds = rev.RenterOutput.Value // don't increase funds
+		renterFunds = rev.RenterFunds // don't increase funds
 	}
 
 	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
@@ -329,7 +329,6 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	// convenience variables
 	pt := host.PriceTable.HostPriceTable
 	fcid := contract.ID
-	rev := contract.Revision
 
 	// fetch consensus state
 	cs, err := c.bus.ConsensusState(ctx)
@@ -344,9 +343,9 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 
 	// sanity check the endheight is not the same on renewals
 	endHeight := ctx.EndHeight()
-	if endHeight <= rev.ProofHeight {
-		logger.Infow("invalid renewal endheight", "oldEndheight", rev.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
-		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, rev.EndHeight())
+	if endHeight <= contract.ProofHeight {
+		logger.Infow("invalid renewal endheight", "oldEndheight", contract.EndHeight(), "newEndHeight", endHeight, "period", ctx.state.Period, "bh", cs.BlockHeight)
+		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, contract.EndHeight())
 	}
 
 	// calculate the expected new storage

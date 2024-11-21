@@ -200,12 +200,14 @@ func TestNewTestCluster(t *testing.T) {
 	// Verify startHeight and endHeight of the contract.
 	cfg, currentPeriod := cluster.AutopilotConfig(context.Background())
 	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	if contract.EndHeight() != expectedEndHeight || revision.EndHeight() != expectedEndHeight {
-		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight())
+	if contract.EndHeight() != expectedEndHeight {
+		t.Fatal("wrong endHeight", contract.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	} else if contract.Usability != api.ContractUsabilityGood {
 		t.Fatal("contract should be good")
+	} else if revision.ContractID != contract.ID {
+		t.Fatalf("wrong contract id %v != %v", revision.ContractID, contract.ID)
 	}
 
 	// Wait for contract set to form

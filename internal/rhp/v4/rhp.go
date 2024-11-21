@@ -90,8 +90,12 @@ func (c *Client) FundAccounts(ctx context.Context, cs consensus.State, signer rh
 }
 
 // LatestRevision returns the latest revision of a contract.
-func (c *Client) LatestRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, error) {
-	panic("not implemented")
+func (c *Client) LatestRevision(ctx context.Context, hk types.PublicKey, addr string, contractID types.FileContractID) (revision types.V2FileContract, _ error) {
+	err := c.tpool.withTransport(ctx, hk, addr, func(c rhp.TransportClient) (err error) {
+		revision, err = rhp.RPCLatestRevision(ctx, c, contractID)
+		return err
+	})
+	return revision, err
 }
 
 // SectorRoots returns the sector roots for a contract.

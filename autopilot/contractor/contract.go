@@ -21,12 +21,12 @@ func (c contract) FileSize() uint64 {
 	if c.Revision == nil {
 		return c.Size // use latest recorded value if we don't have a recent revision
 	}
-	return c.Revision.Filesize
+	return c.Revision.Size
 }
 
 // RenterFunds returns the funds remaining in the contract's Renter payout.
 func (c contract) RenterFunds() types.Currency {
-	return c.Revision.RenterOutput.Value
+	return c.Revision.RenterFunds
 }
 
 // RemainingCollateral returns the remaining collateral in the contract.

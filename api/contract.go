@@ -220,11 +220,10 @@ func (cm ContractMetadata) InSet(set string) bool {
 
 type (
 	Revision struct {
-		ContractID types.FileContractID `json:"contractID"`
-		types.V2FileContract
+		ContractID      types.FileContractID `json:"contractID"`
+		MissedHostValue types.Currency       `json:"missedHostValue"`
+		RenterFunds     types.Currency       `json:"renterFunds"`
+		RevisionNumber  uint64               `json:"revisionNumber"`
+		Size            uint64               `json:"size"`
 	}
 )
-
-func (rev *Revision) EndHeight() uint64 {
-	return rev.ProofHeight
-}

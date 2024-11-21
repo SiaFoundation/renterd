@@ -114,7 +114,7 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, contract contract
 			refresh = true
 			renew = false
 		}
-		if shouldRenew, secondHalf := isUpForRenewal(cfg, *contract.Revision, bh); shouldRenew {
+		if shouldRenew, secondHalf := isUpForRenewal(cfg, contract.EndHeight(), bh); shouldRenew {
 			reasons = append(reasons, fmt.Errorf("%w; second half: %t", errContractUpForRenewal, secondHalf).Error())
 			usable = usable && !secondHalf // only unusable if in second half of renew window
 			refresh = false
@@ -136,19 +136,16 @@ func (c contract) IsOutOfFunds() bool {
 }
 
 func (c contract) IsOutOfCollateral() bool {
-	// InitialRenterFunds should never be zero but for legacy reasons we check
-	// and return true should it be the case
-	if c.InitialRenterFunds.IsZero() {
-		return true
-	}
 	// contract is out of collateral if the remaining collateral is below
 	// MinCollateral
+	// TODO: after the allowheight is reached, we can use the TotalCollateral
+	// field on the V2FileContract as a reference as well
 	return c.RemainingCollateral().Cmp(MinCollateral) <= 0
 }
 
-func isUpForRenewal(cfg api.AutopilotConfig, r api.Revision, blockHeight uint64) (shouldRenew, secondHalf bool) {
-	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= r.EndHeight()
-	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= r.EndHeight()
+func isUpForRenewal(cfg api.AutopilotConfig, endHeight, blockHeight uint64) (shouldRenew, secondHalf bool) {
+	shouldRenew = blockHeight+cfg.Contracts.RenewWindow >= endHeight
+	secondHalf = blockHeight+cfg.Contracts.RenewWindow/2 >= endHeight
 	return
 }
 
