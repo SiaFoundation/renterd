@@ -20,6 +20,7 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	cRhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
@@ -552,23 +553,12 @@ func (b *Bus) addContract(ctx context.Context, contract api.ContractMetadata) (a
 	return added, err
 }
 
-func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.store.AddRenewal(ctx, api.ContractMetadata{
-		ID:                 rev.ID(),
-		HostKey:            rev.HostKey(),
-		RenewedFrom:        renewedFrom,
-		StartHeight:        startHeight,
-		State:              state,
-		Usability:          api.ContractUsabilityGood,
-		WindowStart:        rev.Revision.WindowStart,
-		WindowEnd:          rev.Revision.WindowEnd,
-		ContractPrice:      contractPrice,
-		InitialRenterFunds: initialRenterFunds,
-	}); err != nil {
+func (b *Bus) addRenewal(ctx context.Context, contract api.ContractMetadata) (api.ContractMetadata, error) {
+	if err := b.store.AddRenewal(ctx, contract); err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
 	}
 
-	renewal, err := b.store.Contract(ctx, rev.ID())
+	renewal, err := b.store.Contract(ctx, contract.ID)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -788,25 +778,14 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 	}
 }
 
-func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
-
-	// acquire contract lock indefinitely and defer the release
-	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
-	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't acquire contract lock; %w", err)
-	}
-	defer func() {
-		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
-		}
-	}()
 
 	// fetch the revision
 	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
 	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
+		return api.ContractMetadata{}, err
 	}
 
 	// renew contract
@@ -814,13 +793,90 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.Goug
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
 	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
+		return api.ContractMetadata{}, err
 	}
 
 	// broadcast the transaction set
 	b.s.BroadcastTransactionSet(txnSet)
 
-	return newRevision, contractPrice, fundAmount, nil
+	return api.ContractMetadata{
+		ID:                 newRevision.ID(),
+		HostKey:            newRevision.HostKey(),
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        newRevision.Revision.WindowStart,
+		WindowEnd:          newRevision.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: fundAmount,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 false,
+	}, nil
+}
+
+func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+	signer := ibus.NewFormContractSigner(b.w, renterKey)
+
+	// fetch the revision
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	// fetch prices and check them
+	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.V2SiamuxAddr())
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	if gb := gc.CheckV2(settings); gb.Gouging() {
+		return api.ContractMetadata{}, errors.New(gb.String())
+	}
+
+	var contract cRhp4.ContractRevision
+	var txnSet cRhp4.TransactionSet
+	if c.EndHeight() == endHeight {
+		var res cRhp4.RPCRefreshContractResult
+		res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
+			ContractID: c.ID,
+			Allowance:  renterFunds,
+			Collateral: minNewCollateral,
+		})
+		contract = res.Contract
+		txnSet = res.RenewalSet
+	} else {
+		var res cRhp4.RPCRenewContractResult
+		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
+			ContractID:  c.ID,
+			Allowance:   renterFunds,
+			Collateral:  minNewCollateral,
+			ProofHeight: endHeight,
+		})
+		contract = res.Contract
+		txnSet = res.RenewalSet
+	}
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	// broadcast the transaction set
+	b.s.BroadcastV2TransactionSet(txnSet.Basis, txnSet.Transactions)
+
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            h.PublicKey,
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ExpirationHeight,
+		ContractPrice:      settings.Prices.ContractPrice,
+		InitialRenterFunds: contract.Revision.RenterOutput.Value,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
 }
 
 func isErrHostUnreachable(err error) bool {
