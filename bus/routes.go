@@ -854,33 +854,34 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 	} else if jc.Check("failed to fetch contract", err) != nil {
 		return
 	}
+	host, err := b.store.Host(jc.Request.Context(), contract.HostKey)
+	if jc.Check("failed to fetch host for contract", err) != nil {
+		return
+	}
 
-	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+	if host.IsV2() {
+		revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.V2SiamuxAddr(), fcid)
+		if jc.Check("failed to fetch revision", err) != nil {
+			return
+		}
+		jc.Encode(api.Revision{
+			ContractID:      fcid,
+			MissedHostValue: revision.MissedHostValue,
+			RenterFunds:     revision.RenterOutput.Value,
+			RevisionNumber:  revision.RevisionNumber,
+			Size:            revision.Filesize,
+		})
 	} else {
 		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, contract.SiamuxAddr)
 		if jc.Check("failed to fetch revision", err) != nil {
 			return
 		}
 		jc.Encode(api.Revision{
-			ContractID: revision.ParentID,
-			V2FileContract: types.V2FileContract{
-				Capacity:         revision.Filesize, // same as size for v1
-				Filesize:         revision.Filesize,
-				FileMerkleRoot:   revision.FileMerkleRoot,
-				ProofHeight:      revision.WindowStart,
-				ExpirationHeight: revision.WindowEnd,
-				RenterOutput:     revision.ValidRenterOutput(),
-				HostOutput:       revision.ValidHostOutput(),
-				MissedHostValue:  revision.MissedHostPayout(),
-				TotalCollateral:  types.ZeroCurrency, // unknown in v1
-				RenterPublicKey:  types.PublicKey(revision.UnlockConditions.PublicKeys[0].Key),
-				HostPublicKey:    types.PublicKey(revision.UnlockConditions.PublicKeys[1].Key),
-				RevisionNumber:   revision.RevisionNumber,
-
-				RenterSignature: types.Signature{}, // unavailable in v1
-				HostSignature:   types.Signature{}, // unavailable in v1
-			},
+			ContractID:      fcid,
+			MissedHostValue: revision.MissedHostPayout(),
+			RenterFunds:     revision.ValidRenterPayout(),
+			RevisionNumber:  revision.RevisionNumber,
+			Size:            revision.Filesize,
 		})
 	}
 }
