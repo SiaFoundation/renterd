@@ -1115,23 +1115,34 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
+	if jc.Check("failed to acquire contract for renewal", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
 	// send V2 transaction if we're passed the V2 hardfork allow height
-	var newRevision rhpv2.ContractRevision
-	var contractPrice, initialRenterFunds types.Currency
+	var contract api.ContractMetadata
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight)
 	} else {
-		newRevision, contractPrice, initialRenterFunds, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
+		contract, err = b.renewContractV1(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
 			jc.Error(err, http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't renew contract", err) != nil {
-			return
 		}
+	}
+	if jc.Check("couldn't renew contract", err) != nil {
+		return
 	}
 
 	// add the renewal
-	metadata, err := b.addRenewal(ctx, fcid, newRevision, contractPrice, initialRenterFunds, cs.Index.Height, api.ContractStatePending)
+	metadata, err := b.addRenewal(ctx, contract)
 	if jc.Check("couldn't add renewal", err) == nil {
 		jc.Encode(metadata)
 	}
