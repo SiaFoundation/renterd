@@ -655,6 +655,11 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	return usedContracts, nil
 }
 
+func HasMigration(ctx context.Context, tx sql.Tx, id string) (applied bool, err error) {
+	err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM migrations WHERE id = ?)", id).Scan(&applied)
+	return
+}
+
 func HostAllowlist(ctx context.Context, tx sql.Tx) ([]types.PublicKey, error) {
 	rows, err := tx.Query(ctx, "SELECT entry FROM host_allowlist_entries")
 	if err != nil {

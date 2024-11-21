@@ -54,6 +54,10 @@ func (b *MetricsDatabase) CreateMigrationTable(ctx context.Context) error {
 	return createMigrationTable(ctx, b.db)
 }
 
+func (b *MetricsDatabase) HasMigration(ctx context.Context, tx sql.Tx, id string) (bool, error) {
+	return ssql.HasMigration(ctx, tx, id)
+}
+
 func (b *MetricsDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "metrics", sql.MetricsMigrations(ctx, migrationsFs, b.log))
 }

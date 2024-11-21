@@ -23,6 +23,7 @@ type (
 	// required during migrations
 	Migrator interface {
 		ApplyMigration(ctx context.Context, fn func(tx Tx) (bool, error)) error
+		HasMigration(ctx context.Context, tx Tx, id string) (bool, error)
 		CreateMigrationTable(ctx context.Context) error
 		DB() *DB
 	}
@@ -311,12 +312,22 @@ var (
 			{
 				ID: "00020_idx_db_directory",
 				Migrate: func(tx Tx) error {
+					if applied, err := m.HasMigration(ctx, tx, "00027_remove_directories"); err != nil {
+						return fmt.Errorf("failed to check if migration '00027_remove_directories' was already applied: %w", err)
+					} else if applied {
+						return nil
+					}
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_idx_db_directory", log)
 				},
 			},
 			{
 				ID: "00020_remove_directories",
 				Migrate: func(tx Tx) error {
+					if applied, err := m.HasMigration(ctx, tx, "00027_remove_directories"); err != nil {
+						return fmt.Errorf("failed to check if migration '00027_remove_directories' was already applied: %w", err)
+					} else if applied {
+						return nil
+					}
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_remove_directories", log)
 				},
 			},
