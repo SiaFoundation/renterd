@@ -94,9 +94,8 @@ type (
 
 	// UpdateAutopilotRequest is the request type for the /autopilot endpoint.
 	UpdateAutopilotRequest struct {
-		Enabled       *bool            `json:"enabled"`
-		Contracts     *ContractsConfig `json:"contracts"`
-		CurrentPeriod *uint64          `json:"currentPeriod"`
-		Hosts         *HostsConfig     `json:"hosts"`
+		Enabled   *bool            `json:"enabled"`
+		Contracts *ContractsConfig `json:"contracts"`
+		Hosts     *HostsConfig     `json:"hosts"`
 	}
 )

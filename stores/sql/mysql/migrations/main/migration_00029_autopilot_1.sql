@@ -10,7 +10,6 @@ ALTER TABLE host_checks ADD CONSTRAINT fk_host_checks_host FOREIGN KEY (db_host_
 CREATE TABLE `autopilot_config` (
   `id` bigint unsigned NOT NULL DEFAULT 1,
   `created_at` datetime(3) DEFAULT NULL,
-  `current_period` bigint unsigned DEFAULT 0,
   `enabled` boolean NOT NULL DEFAULT false,
 
   `contracts_amount` bigint unsigned DEFAULT NULL,

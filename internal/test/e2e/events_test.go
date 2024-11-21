@@ -101,7 +101,6 @@ func TestEvents(t *testing.T) {
 		tt.Fatalf("expected 1 contract, got %v", len(contracts))
 	}
 	c := contracts[0]
-
 	// mine blocks to update consensus & to renew
 	cluster.MineToRenewWindow()
 

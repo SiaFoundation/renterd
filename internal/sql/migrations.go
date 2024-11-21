@@ -387,9 +387,8 @@ var (
 
 					// fetch existing autopilot and override the blank config
 					var cfgraw []byte
-					var period uint64
 					var cfg api.AutopilotConfig
-					err := tx.QueryRow(ctx, `SELECT config, current_period FROM autopilots WHERE identifier = "autopilot"`).Scan(&cfgraw, &period)
+					err := tx.QueryRow(ctx, `SELECT config FROM autopilots WHERE identifier = "autopilot"`).Scan(&cfgraw)
 					if errors.Is(dsql.ErrNoRows, err) {
 						log.Warn("existing autopilot not found, the autopilot will be recreated with default values and the period will be reset")
 					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
@@ -403,9 +402,8 @@ var (
 						} else {
 							enabled = true
 						}
-						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, current_period = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							enabled,
-							period,
 							cfg.Contracts.Amount,
 							cfg.Contracts.Period,
 							cfg.Contracts.RenewWindow,

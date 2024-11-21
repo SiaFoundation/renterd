@@ -68,7 +68,7 @@ func (b *MainDatabase) DB() *sql.DB {
 
 func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
 	mtx := b.wrapTxn(tx)
-	return mtx.InitAutopilot(ctx)
+	return mtx.InitAutopilotConfig(ctx)
 }
 
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
@@ -199,8 +199,8 @@ func (tx *MainDatabaseTx) ArchiveContract(ctx context.Context, fcid types.FileCo
 	return ssql.ArchiveContract(ctx, tx, fcid, reason)
 }
 
-func (tx *MainDatabaseTx) Autopilot(ctx context.Context) (api.Autopilot, error) {
-	return ssql.Autopilot(ctx, tx)
+func (tx *MainDatabaseTx) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error) {
+	return ssql.AutopilotConfig(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) BanPeer(ctx context.Context, addr string, duration time.Duration, reason string) error {
@@ -390,12 +390,11 @@ func (tx *MainDatabaseTx) Hosts(ctx context.Context, opts api.HostOptions) ([]ap
 	return ssql.Hosts(ctx, tx, opts)
 }
 
-func (tx *MainDatabaseTx) InitAutopilot(ctx context.Context) error {
+func (tx *MainDatabaseTx) InitAutopilotConfig(ctx context.Context) error {
 	_, err := tx.Exec(ctx, `
 INSERT OR IGNORE INTO autopilot_config (
 		id,
 	created_at,
-	current_period,
 	contracts_amount,
 	contracts_period,
 	contracts_renew_window,
@@ -407,7 +406,7 @@ INSERT OR IGNORE INTO autopilot_config (
 	hosts_max_consecutive_scan_failures,
 	hosts_max_downtime_hours,
 	hosts_min_protocol_version
-) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
 		sql.AutopilotID,
 		time.Now(),
 		api.DefaultAutopilotConfig.Contracts.Amount,
@@ -963,8 +962,8 @@ func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements 
 	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
 
-func (tx *MainDatabaseTx) UpdateAutopilot(ctx context.Context, ap api.Autopilot) error {
-	return ssql.UpdateAutopilot(ctx, tx, ap)
+func (tx *MainDatabaseTx) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) error {
+	return ssql.UpdateAutopilotConfig(ctx, tx, cfg)
 }
 
 func (tx *MainDatabaseTx) UpdateBucketPolicy(ctx context.Context, bucket string, policy api.BucketPolicy) error {

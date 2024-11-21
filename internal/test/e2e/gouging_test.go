@@ -3,7 +3,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -21,13 +20,9 @@ func TestGouging(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 
-	cfg := test.AutopilotConfig.Contracts
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
-
-	// mine enough blocks for the current period to become > period
-	cluster.MineBlocks(cfg.Period + 1)
 
 	// add hosts
 	n := int(test.AutopilotConfig.Contracts.Amount)
@@ -40,14 +35,6 @@ func TestGouging(t *testing.T) {
 	if len(h) != n {
 		t.Fatal("unexpected number of hosts")
 	}
-
-	// assert that the current period is greater than the period
-	tt.Retry(10, time.Second, func() error {
-		if ap, _ := b.Autopilot(context.Background()); ap.CurrentPeriod <= cfg.Period {
-			return errors.New("current period is not greater than period")
-		}
-		return nil
-	})
 
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
@@ -153,7 +140,7 @@ func TestHostMinVersion(t *testing.T) {
 	// set min version to a high value
 	hosts := test.AutopilotConfig.Hosts
 	hosts.MinProtocolVersion = "99.99.99"
-	tt.OK(cluster.Bus.UpdateAutopilot(context.Background(), client.WithHostsConfig(hosts)))
+	tt.OK(cluster.Bus.UpdateAutopilotConfig(context.Background(), client.WithHostsConfig(hosts)))
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {

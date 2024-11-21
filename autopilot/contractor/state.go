@@ -17,7 +17,7 @@ type (
 	MaintenanceState struct {
 		GS api.GougingSettings
 		RS api.RedundancySettings
-		AP api.Autopilot
+		AP api.AutopilotConfig
 
 		Address                types.Address
 		Fee                    types.Currency
@@ -38,7 +38,7 @@ func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
 }
 
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
-	return ctx.state.AP.AutopilotConfig
+	return ctx.state.AP
 }
 
 func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
@@ -53,8 +53,8 @@ func (ctx *mCtx) Done() <-chan struct{} {
 	return ctx.ctx.Done()
 }
 
-func (ctx *mCtx) EndHeight() uint64 {
-	return ctx.state.AP.CurrentPeriod + ctx.state.AP.Contracts.Period + ctx.state.AP.Contracts.RenewWindow
+func (ctx *mCtx) EndHeight(bh uint64) uint64 {
+	return bh + ctx.state.AP.Contracts.Period + ctx.state.AP.Contracts.RenewWindow
 }
 
 func (ctx *mCtx) Err() error {

@@ -193,7 +193,7 @@ func TestNewTestCluster(t *testing.T) {
 	contract := contracts[0]
 
 	// fetch autopilot
-	ap, err := cluster.Bus.Autopilot(context.Background())
+	apCfg, err := cluster.Bus.AutopilotConfig(context.Background())
 	tt.OK(err)
 
 	// fetch revision
@@ -201,8 +201,8 @@ func TestNewTestCluster(t *testing.T) {
 	tt.OK(err)
 
 	// verify startHeight and endHeight of the contract.
-	if contract.EndHeight() != ap.EndHeight() || revision.EndHeight() != ap.EndHeight() {
-		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), ap.EndHeight())
+	if contract.EndHeight() == 0 || contract.EndHeight() != revision.EndHeight() || contract.EndHeight() < apCfg.EndHeight() {
+		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), apCfg.EndHeight())
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	} else if contract.Usability != api.ContractUsabilityGood {
@@ -2247,7 +2247,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 
 	// enable the autopilot by configuring it
 	tt.OK(
-		b.UpdateAutopilot(
+		b.UpdateAutopilotConfig(
 			context.Background(),
 			client.WithContractsConfig(test.AutopilotConfig.Contracts),
 			client.WithHostsConfig(test.AutopilotConfig.Hosts),

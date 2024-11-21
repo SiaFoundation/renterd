@@ -447,7 +447,6 @@ CREATE TABLE `wallet_outputs` (
 CREATE TABLE `autopilot_config` (
   `id` bigint unsigned NOT NULL DEFAULT 1,
   `created_at` datetime(3) DEFAULT NULL,
-  `current_period` bigint unsigned DEFAULT 0,
   `enabled` boolean NOT NULL DEFAULT false,
 
   `contracts_amount` bigint unsigned DEFAULT NULL,
