@@ -86,7 +86,7 @@ type HostScanner interface {
 }
 
 type contractChecker interface {
-	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string)
+	isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, bh uint64) (usable, refresh, renew bool, reasons []string)
 	pruneContractRefreshFailures(contracts []api.ContractMetadata)
 	shouldArchive(c contract, bh uint64, network consensus.Network) error
 }
@@ -108,6 +108,8 @@ type (
 		churn   accumulatedChurn
 		logger  *zap.SugaredLogger
 
+		allowRedundantIPs bool
+
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
 		revisionSubmissionBuffer  uint64
@@ -122,13 +124,15 @@ type (
 	}
 )
 
-func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration) *Contractor {
+func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantIPs bool, logger *zap.SugaredLogger) *Contractor {
 	logger = logger.Named("contractor")
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
 		churn:   make(accumulatedChurn),
 		logger:  logger,
+
+		allowRedundantIPs: allowRedundantIPs,
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
@@ -139,7 +143,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
-	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, c, c, c, c.logger)
+	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, c, c, c, c.allowRedundantIPs, c.logger)
 }
 
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
@@ -629,7 +633,7 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 // need it and marking contracts that should no longer be used as bad. The
 // 'ipFilter' is updated to contain all hosts that we keep contracts with. If a
 // contract is refreshed or renewed, the 'remainingFunds' are adjusted.
-func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) (uint64, uint64, error) {
+func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, hf hostFilter, logger *zap.SugaredLogger) (uint64, uint64, error) {
 	// fetch network
 	network, err := bus.ConsensusNetwork(ctx)
 	if err != nil {
@@ -730,7 +734,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 		}
 
 		// check if host has a redundant ip
-		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(host) {
+		if hf.HasRedundantIP(host) {
 			logger.Info("host has redundant IP")
 			updateUsability(ctx, cm, api.ContractUsabilityBad, api.ErrUsabilityHostRedundantIP.Error(), usability)
 			continue
@@ -748,7 +752,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 		// In that case, we ignore the fact that the host is not scanned for now
 		// to avoid churn.
 		if c.IsGood() && host.Checks.UsabilityBreakdown.NotCompletingScan {
-			ipFilter.Add(host)
+			hf.Add(host)
 			logger.Info("ignoring contract with unscanned host")
 			updateUsability(ctx, cm, api.ContractUsabilityGood, "not completing scan", usability)
 			continue // no more checks until host is scanned
@@ -770,7 +774,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 		}
 
 		// check if contract is usable
-		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, cs.BlockHeight, ipFilter)
+		usable, needsRefresh, needsRenew, reasons := cc.isUsableContract(ctx.AutopilotConfig(), host.Settings, host.PriceTable.HostPriceTable, ctx.state.RS, c, cs.BlockHeight)
 
 		// extend logger
 		logger = logger.With("usable", usable).
@@ -840,7 +844,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 		// we keep the contract, add the host to the filter
 		logger.Debug("contract is usable")
 		updateUsability(ctx, cm, api.ContractUsabilityGood, "contract is usable", usability)
-		ipFilter.Add(host)
+		hf.Add(host)
 	}
 
 	// update churn and register alert
@@ -864,7 +868,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 
 // performContracdtFormations forms up to 'wanted' new contracts with hosts. The
 // 'ipFilter' and 'remainingFunds' are updated with every new contract.
-func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger, wanted uint64) (uint64, error) {
+func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, hf hostFilter, logger *zap.SugaredLogger, wanted uint64) (uint64, error) {
 	// early check to avoid fetching all candidates
 	if wanted <= 0 {
 		logger.Info("already have enough contracts, no need to form new ones")
@@ -941,7 +945,7 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 			With("hostKey", candidate.host.PublicKey)
 
 		// check if we already have a contract with a host on that address
-		if ctx.ShouldFilterRedundantIPs() && ipFilter.HasRedundantIP(candidate.host) {
+		if hf.HasRedundantIP(candidate.host) {
 			logger.Info("host has redundant IP")
 			usability.Infof("host has redundant IP")
 			continue
@@ -959,7 +963,7 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter 
 
 		// add new contract and host
 		usability.With("contractID", formedContract.ID).Info("formed contract, usability set to good")
-		ipFilter.Add(candidate.host)
+		hf.Add(candidate.host)
 		nFormed++
 		wanted--
 	}
@@ -1059,7 +1063,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	return nil
 }
 
-func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
+func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, allowRedundantIPs bool, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
 		Named(hex.EncodeToString(frand.Bytes(16))) // uuid for this iteration
 
@@ -1080,11 +1084,8 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	}
 
 	// STEP 2: perform contract maintenance
-	ipFilter := &hostSet{
-		logger:          logger.Named("ipFilter"),
-		subnetToHostKey: make(map[string]string),
-	}
-	nGood, nUpdated, err := performContractChecks(ctx, alerter, bus, churn, cc, cr, ipFilter, logger)
+	hf := newHostFilter(allowRedundantIPs, logger)
+	nGood, nUpdated, err := performContractChecks(ctx, alerter, bus, churn, cc, cr, hf, logger)
 	if err != nil {
 		return false, err
 	}
@@ -1094,7 +1095,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	if ctx.WantedContracts() > nGood {
 		wanted = ctx.WantedContracts() - nGood
 	}
-	nFormed, err := performContractFormations(ctx, bus, cr, ipFilter, logger, wanted)
+	nFormed, err := performContractFormations(ctx, bus, cr, hf, logger, wanted)
 	if err != nil {
 		return false, err
 	}

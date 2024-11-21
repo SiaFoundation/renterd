@@ -84,10 +84,6 @@ func (ctx *mCtx) RenewWindow() uint64 {
 	return ctx.state.AP.Contracts.RenewWindow
 }
 
-func (ctx *mCtx) ShouldFilterRedundantIPs() bool {
-	return !ctx.state.AP.Hosts.AllowRedundantIPs
-}
-
 func (ctx *mCtx) Value(key interface{}) interface{} {
 	return ctx.ctx.Value(key)
 }

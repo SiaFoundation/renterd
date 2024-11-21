@@ -120,7 +120,7 @@ type Autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_ *Autopilot, err error) {
+func New(cfg config.Autopilot, bus Bus, workers []Worker, allowRedundantIps bool, logger *zap.Logger) (_ *Autopilot, err error) {
 	logger = logger.Named("autopilot")
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ap := &Autopilot{
@@ -142,7 +142,7 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_
 		return
 	}
 
-	ap.c = contractor.New(bus, bus, ap.logger, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval)
+	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, allowRedundantIps, ap.logger)
 	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
 
 	return ap, nil

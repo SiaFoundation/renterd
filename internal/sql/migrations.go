@@ -402,7 +402,7 @@ var (
 						} else {
 							enabled = true
 						}
-						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							enabled,
 							cfg.Contracts.Amount,
 							cfg.Contracts.Period,
@@ -411,7 +411,6 @@ var (
 							cfg.Contracts.Upload,
 							cfg.Contracts.Storage,
 							cfg.Contracts.Prune,
-							cfg.Hosts.AllowRedundantIPs,
 							cfg.Hosts.MaxDowntimeHours,
 							cfg.Hosts.MinProtocolVersion,
 							cfg.Hosts.MaxConsecutiveScanFailures,
