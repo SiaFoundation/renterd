@@ -105,7 +105,7 @@ type (
 	Contractor struct {
 		alerter alerts.Alerter
 		bus     Bus
-		churn   *accumulatedChurn
+		churn   accumulatedChurn
 		logger  *zap.SugaredLogger
 
 		revisionBroadcastInterval time.Duration
@@ -127,7 +127,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
-		churn:   newAccumulatedChurn(),
+		churn:   make(accumulatedChurn),
 		logger:  logger,
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
@@ -625,12 +625,11 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 	return expectedStorage.Big().Uint64()
 }
 
-// performContractChecks performs maintenance on existing contracts,
-// renewing/refreshing any that need it and filtering out contracts that should
-// no longer be used. The 'ipFilter' is updated to contain all hosts that we
-// keep contracts with. If a contract is refreshed or renewed, the
-// 'remainingFunds' are adjusted.
-func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) (uint64, uint64, error) {
+// performContractChecks checks existing contracts, renewing/refreshing any that
+// need it and marking contracts that should no longer be used as bad. The
+// 'ipFilter' is updated to contain all hosts that we keep contracts with. If a
+// contract is refreshed or renewed, the 'remainingFunds' are adjusted.
+func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) (uint64, uint64, error) {
 	// fetch network
 	network, err := bus.ConsensusNetwork(ctx)
 	if err != nil {
@@ -644,22 +643,23 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *ac
 	}
 
 	// define a helper to a contract's usability
-	markedBad := make(map[types.FileContractID]string)
-	markedGood := make(map[types.FileContractID]string)
+	var markedBad, markedGood uint64
+	var updates []usabilityUpdate
 	updateUsability := func(ctx context.Context, c api.ContractMetadata, usability, context string, logger *zap.SugaredLogger) {
 		if c.Usability == usability {
-			logger.Infof("contract is still %s: %s", usability, context)
+			logger.With("reasons", context).Info("usability unchanged")
 			return
 		}
 		if err := bus.UpdateContractUsability(ctx, c.ID, usability); err != nil {
 			logger.Errorf("failed to update contract usability from %s -> %s: %v", c.Usability, usability, err)
 			return
-		}
-		if c.IsGood() {
-			markedBad[c.ID] = context
+		} else if c.IsGood() {
+			markedBad++
 		} else {
-			markedGood[c.ID] = context
+			markedGood++
 		}
+
+		updates = append(updates, usabilityUpdate{c.ID, c.Usability, usability, context})
 		logger.Infof("updated contract usability from %s -> %s, reason: %v", c.Usability, usability, context)
 	}
 
@@ -825,15 +825,15 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *ac
 		// if the renewal/refresh failing was our fault (e.g. we ran out of
 		// funds), we should not drop the contract
 		if !usable && ourFault {
-			logger.Info("keeping contract even though renewal/refresh failed")
-			updateUsability(ctx, cm, api.ContractUsabilityGood, fmt.Sprintf("not usable because of %s, but that is our fault", strings.Join(reasons, ",")), usability)
+			logger.Info("contract is not usable, host is not to blame")
+			updateUsability(ctx, cm, api.ContractUsabilityBad, strings.Join(reasons, ","), usability)
 			usable = true
 		}
 
 		// if the contract is not usable we ignore it
 		if !usable {
 			logger.Info("contract is not usable")
-			updateUsability(ctx, cm, api.ContractUsabilityBad, fmt.Sprintf("not usable because of %s", strings.Join(reasons, ",")), usability)
+			updateUsability(ctx, cm, api.ContractUsabilityBad, strings.Join(reasons, ","), usability)
 			continue
 		}
 
@@ -843,16 +843,12 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *ac
 		ipFilter.Add(host)
 	}
 
-	// update churn
-	nUpdated := len(markedGood) + len(markedBad)
-	if nUpdated > 0 {
-		// check if we have to reset the churn
-		if hasAlert(ctx, alerter, alertChurnID, logger) {
+	// update churn and register alert
+	if len(updates) > 0 {
+		if !hasAlert(ctx, alerter, alertChurnID, logger) {
 			churn.Reset()
 		}
-
-		// register new churn alert
-		if err := alerter.RegisterAlert(ctx, churn.Update(markedGood, markedBad)); err != nil {
+		if err := alerter.RegisterAlert(ctx, churn.ApplyUpdates(updates)); err != nil {
 			logger.Errorf("failed to register contract usability updated alert: %v", err)
 		}
 	}
@@ -860,10 +856,10 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *ac
 	logger.
 		With("refreshed", refreshed).
 		With("renewed", renewed).
-		With("markedGood", len(markedGood)).
-		With("markedBad", len(markedBad)).
+		With("markedGood", markedGood).
+		With("markedBad", markedBad).
 		Info("checking existing contracts done")
-	return wasGood + uint64(len(markedGood)) - uint64(len(markedBad)), uint64(nUpdated), nil
+	return wasGood + markedGood - markedBad, uint64(len(updates)), nil
 }
 
 // performContracdtFormations forms up to 'wanted' new contracts with hosts. The
@@ -1063,7 +1059,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	return nil
 }
 
-func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
+func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
 		Named(hex.EncodeToString(frand.Bytes(16))) // uuid for this iteration
 

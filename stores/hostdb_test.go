@@ -466,7 +466,7 @@ func TestUsableHosts(t *testing.T) {
 	// assert h1 is now gouging
 	h1 = hosts[0]
 	if !gc.Check(&h1.HS, &h1.PT).Gouging() {
-		t.Fatal("unexpected")
+		t.Fatal("unexpected", h1.PT.UploadBandwidthCost, gs.MaxUploadPrice)
 	}
 
 	// create helper to assert number of usable hosts

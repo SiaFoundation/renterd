@@ -9,42 +9,36 @@ import (
 )
 
 type (
-	accumulatedChurn struct {
-		updates map[types.FileContractID][]usabilityUpdate
-	}
+	accumulatedChurn map[types.FileContractID][]churnUpdate
 
-	usabilityUpdate struct {
+	churnUpdate struct {
 		Time   api.TimeRFC3339 `json:"time"`
 		From   string          `json:"from"`
 		To     string          `json:"to"`
 		Reason string          `json:"reason"`
 	}
+
+	usabilityUpdate struct {
+		fcid   types.FileContractID
+		from   string
+		to     string
+		reason string
+	}
 )
 
-func newAccumulatedChurn() *accumulatedChurn {
-	return &accumulatedChurn{updates: make(map[types.FileContractID][]usabilityUpdate)}
-}
-
-func (c *accumulatedChurn) Update(markedGood, markedBad map[types.FileContractID]string) alerts.Alert {
+func (c accumulatedChurn) ApplyUpdates(updates []usabilityUpdate) alerts.Alert {
 	now := time.Now()
-	for fcid, reason := range markedGood {
-		c.updates[fcid] = append(c.updates[fcid], usabilityUpdate{
+	for _, u := range updates {
+		c[u.fcid] = append(c[u.fcid], churnUpdate{
 			Time:   api.TimeRFC3339(now),
-			From:   api.ContractUsabilityBad,
-			To:     api.ContractUsabilityGood,
-			Reason: reason,
+			From:   u.from,
+			To:     u.to,
+			Reason: u.reason,
 		})
 	}
-	for fcid, reason := range markedBad {
-		c.updates[fcid] = append(c.updates[fcid], usabilityUpdate{
-			Time:   api.TimeRFC3339(now),
-			From:   api.ContractUsabilityGood,
-			To:     api.ContractUsabilityBad,
-			Reason: reason,
-		})
-	}
+
 	var hint string
-	for _, updates := range c.updates {
+	for _, updates := range c {
 		if updates[len(updates)-1].To == api.ContractUsabilityBad {
 			hint = "High usability churn can lead to a lot of unnecessary migrations, it might be necessary to tweak your configuration depending on the reason hosts are being discarded."
 		}
@@ -55,13 +49,13 @@ func (c *accumulatedChurn) Update(markedGood, markedBad map[types.FileContractID
 		Severity: alerts.SeverityInfo,
 		Message:  "Contract usability updated",
 		Data: map[string]interface{}{
-			"updates": c.updates,
-			"hint":    hint,
+			"churn": c,
+			"hint":  hint,
 		},
 		Timestamp: now,
 	}
 }
 
 func (c *accumulatedChurn) Reset() {
-	c.updates = make(map[types.FileContractID][]usabilityUpdate)
+	*c = make(accumulatedChurn)
 }

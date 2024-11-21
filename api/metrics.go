@@ -14,8 +14,8 @@ var (
 const (
 	MetricMaxIntervals = 1000
 
-	MetricContractPrune = "contractprune"
 	MetricContract      = "contract"
+	MetricContractPrune = "contractprune"
 	MetricPerformance   = "performance"
 	MetricWallet        = "wallet"
 )
