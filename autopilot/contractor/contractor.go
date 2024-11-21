@@ -105,6 +105,7 @@ type (
 	Contractor struct {
 		alerter alerts.Alerter
 		bus     Bus
+		churn   *accumulatedChurn
 		logger  *zap.SugaredLogger
 
 		revisionBroadcastInterval time.Duration
@@ -126,6 +127,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
+		churn:   newAccumulatedChurn(),
 		logger:  logger,
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
@@ -137,7 +139,7 @@ func New(bus Bus, alerter alerts.Alerter, logger *zap.SugaredLogger, revisionSub
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
-	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c, c, c, c.logger)
+	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, c, c, c, c.logger)
 }
 
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
@@ -551,6 +553,20 @@ func canSkipContractMaintenance(ctx context.Context, cfg api.ContractsConfig) (s
 	return "", false
 }
 
+func hasAlert(ctx context.Context, alerter alerts.Alerter, id types.Hash256, logger *zap.SugaredLogger) bool {
+	ar, err := alerter.Alerts(ctx, alerts.AlertsOpts{Offset: 0, Limit: -1})
+	if err != nil {
+		logger.Errorf("failed to fetch alerts: %v", err)
+		return false
+	}
+	for _, alert := range ar.Alerts {
+		if alert.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func initialContractFunding(settings rhpv2.HostSettings, txnFee, minFunding types.Currency) types.Currency {
 	funding := settings.ContractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
 	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
@@ -614,7 +630,7 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 // no longer be used. The 'ipFilter' is updated to contain all hosts that we
 // keep contracts with. If a contract is refreshed or renewed, the
 // 'remainingFunds' are adjusted.
-func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) (uint64, uint64, error) {
+func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger) (uint64, uint64, error) {
 	// fetch network
 	network, err := bus.ConsensusNetwork(ctx)
 	if err != nil {
@@ -827,10 +843,16 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 		ipFilter.Add(host)
 	}
 
-	// register an alert if any contract usability was updated
+	// update churn
 	nUpdated := len(markedGood) + len(markedBad)
 	if nUpdated > 0 {
-		if err := alerter.RegisterAlert(ctx, newContractUsabilityUpdatedAlert(markedGood, markedBad)); err != nil {
+		// check if we have to reset the churn
+		if hasAlert(ctx, alerter, alertChurnID, logger) {
+			churn.Reset()
+		}
+
+		// register new churn alert
+		if err := alerter.RegisterAlert(ctx, churn.Update(markedGood, markedBad)); err != nil {
 			logger.Errorf("failed to register contract usability updated alert: %v", err)
 		}
 	}
@@ -1041,7 +1063,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	return nil
 }
 
-func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
+func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn *accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
 		Named(hex.EncodeToString(frand.Bytes(16))) // uuid for this iteration
 
@@ -1066,7 +1088,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc c
 		logger:          logger.Named("ipFilter"),
 		subnetToHostKey: make(map[string]string),
 	}
-	nGood, nUpdated, err := performContractChecks(ctx, alerter, bus, cc, cr, ipFilter, logger)
+	nGood, nUpdated, err := performContractChecks(ctx, alerter, bus, churn, cc, cr, ipFilter, logger)
 	if err != nil {
 		return false, err
 	}

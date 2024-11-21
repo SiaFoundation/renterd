@@ -16,6 +16,7 @@ const (
 )
 
 var (
+	alertChurnID                      = alerts.RandomAlertID() // constant until restarted
 	alertContractMaintenanceSkippedID = alerts.RandomAlertID() // constant until restarted
 	alertContractUsabilityUpdated     = alerts.RandomAlertID() // constant until restarted
 	alertLostSectorsID                = alerts.RandomAlertID() // constant until restarted
@@ -37,19 +38,6 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, ourFault bool,
 			"hostError":  !ourFault,
 			"contractID": contract.ID.String(),
 			"hostKey":    contract.HostKey.String(),
-		},
-		Timestamp: time.Now(),
-	}
-}
-
-func newContractUsabilityUpdatedAlert(markedGood, markedBad map[types.FileContractID]string) alerts.Alert {
-	return alerts.Alert{
-		ID:       alertContractUsabilityUpdated,
-		Severity: alerts.SeverityInfo,
-		Message:  "Contract usability updated",
-		Data: map[string]interface{}{
-			"markedGood": markedGood,
-			"markedBad":  markedBad,
 		},
 		Timestamp: time.Now(),
 	}
