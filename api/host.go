@@ -206,6 +206,14 @@ func (hc HostCheck) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (h Host) Info() HostInfo {
+	return HostInfo{
+		PublicKey:         h.PublicKey,
+		SiamuxAddr:        h.Settings.SiamuxAddr(),
+		V2SiamuxAddresses: h.V2SiamuxAddresses,
+	}
+}
+
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {
 	return !h.LastAnnouncement.IsZero()
@@ -222,11 +230,19 @@ func (h Host) IsOnline() bool {
 }
 
 func (h Host) IsV2() bool {
+	return h.Info().IsV2()
+}
+
+func (h Host) V2SiamuxAddr() string {
+	return h.Info().V2SiamuxAddr()
+}
+
+func (h HostInfo) IsV2() bool {
 	// consider a host to be v2 if it has announced a v2 address
 	return len(h.V2SiamuxAddresses) > 0
 }
 
-func (h Host) V2SiamuxAddr() string {
+func (h HostInfo) V2SiamuxAddr() string {
 	// NOTE: eventually we can improve this by implementing a dialer wrapper that
 	// can be created from a slice of addresses and tries them in order. It
 	// should also be aware of whether we support v4 or v6 and pick addresses
