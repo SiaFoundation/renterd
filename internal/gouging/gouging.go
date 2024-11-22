@@ -106,7 +106,6 @@ func (gc checker) CheckV1(hs *rhpv2.HostSettings, pt *rhpv3.HostPriceTable) api.
 	}
 }
 
-// TODO: write tests
 func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	prices := hs.Prices
 	gs := gc.settings
