@@ -60,21 +60,20 @@ type (
 
 type (
 	AccountMgr struct {
-		alerts                   alerts.Alerter
-		funder                   AccountFunder
-		syncer                   AccountSyncer
-		cs                       ContractStore
-		hs                       HostStore
-		css                      ConsensusStateStore
-		s                        AccountStore
-		key                      utils.AccountsKey
-		logger                   *zap.SugaredLogger
-		owner                    string
-		refillInterval           time.Duration
-		revisionSubmissionBuffer uint64
-		shutdownCtx              context.Context
-		shutdownCancel           context.CancelFunc
-		wg                       sync.WaitGroup
+		alerts         alerts.Alerter
+		funder         AccountFunder
+		syncer         AccountSyncer
+		cs             ContractStore
+		hs             HostStore
+		css            ConsensusStateStore
+		s              AccountStore
+		key            utils.AccountsKey
+		logger         *zap.SugaredLogger
+		owner          string
+		refillInterval time.Duration
+		shutdownCtx    context.Context
+		shutdownCancel context.CancelFunc
+		wg             sync.WaitGroup
 
 		mu                  sync.Mutex
 		byID                map[rhpv3.Account]*Account
