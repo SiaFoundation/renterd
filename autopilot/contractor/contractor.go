@@ -108,7 +108,7 @@ type (
 		churn   accumulatedChurn
 		logger  *zap.SugaredLogger
 
-		allowRedundantIPs bool
+		allowRedundantHostIPs bool
 
 		revisionBroadcastInterval time.Duration
 		revisionLastBroadcast     map[types.FileContractID]time.Time
@@ -124,7 +124,7 @@ type (
 	}
 )
 
-func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantIPs bool, logger *zap.SugaredLogger) *Contractor {
+func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.SugaredLogger) *Contractor {
 	logger = logger.Named("contractor")
 	return &Contractor{
 		bus:     bus,
@@ -132,7 +132,7 @@ func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revis
 		churn:   make(accumulatedChurn),
 		logger:  logger,
 
-		allowRedundantIPs: allowRedundantIPs,
+		allowRedundantHostIPs: allowRedundantHostIPs,
 
 		revisionBroadcastInterval: revisionBroadcastInterval,
 		revisionLastBroadcast:     make(map[types.FileContractID]time.Time),
@@ -143,7 +143,7 @@ func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revis
 }
 
 func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
-	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, c, c, c, c.allowRedundantIPs, c.logger)
+	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.bus, c.churn, c, c, c, c.allowRedundantHostIPs, c.logger)
 }
 
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
@@ -1063,7 +1063,7 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc 
 	return nil
 }
 
-func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, allowRedundantIPs bool, logger *zap.SugaredLogger) (bool, error) {
+func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn accumulatedChurn, cc contractChecker, cr contractReviser, rb revisionBroadcaster, allowRedundantHostIPs bool, logger *zap.SugaredLogger) (bool, error) {
 	logger = logger.Named("performContractMaintenance").
 		Named(hex.EncodeToString(frand.Bytes(16))) // uuid for this iteration
 
@@ -1084,7 +1084,7 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, bus Bus, chur
 	}
 
 	// STEP 2: perform contract maintenance
-	hf := newHostFilter(allowRedundantIPs, logger)
+	hf := newHostFilter(allowRedundantHostIPs, logger)
 	nGood, nUpdated, err := performContractChecks(ctx, alerter, bus, churn, cc, cr, hf, logger)
 	if err != nil {
 		return false, err

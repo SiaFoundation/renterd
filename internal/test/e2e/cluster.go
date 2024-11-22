@@ -378,7 +378,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, err := autopilot.New(apCfg, busClient, []autopilot.Worker{workerClient}, true, logger)
+	ap, err := autopilot.New(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
@@ -1012,6 +1012,7 @@ func testWorkerCfg() config.Worker {
 
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
+		AllowRedundantHostIPs:          true,
 		Heartbeat:                      time.Second,
 		MigrationHealthCutoff:          0.99,
 		MigratorParallelSlabsPerWorker: 1,

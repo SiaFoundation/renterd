@@ -28,8 +28,8 @@ type (
 func (n noopFilter) Add(api.Host)                 {}
 func (n noopFilter) HasRedundantIP(api.Host) bool { return false }
 
-func newHostFilter(allowRedundantIPs bool, logger *zap.SugaredLogger) hostFilter {
-	if allowRedundantIPs {
+func newHostFilter(allowRedundantHostIPs bool, logger *zap.SugaredLogger) hostFilter {
+	if allowRedundantHostIPs {
 		return noopFilter{}
 	}
 
