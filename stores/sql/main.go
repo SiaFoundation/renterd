@@ -2272,15 +2272,16 @@ EXISTS (
 		}
 
 		// exclude hosts with invalid address
+		var siamuxAddr string
 		host, _, err := net.SplitHostPort(addr)
-		if err != nil || host == "" {
-			continue
+		if err == nil {
+			siamuxAddr = net.JoinHostPort(host, port)
 		}
 
 		hosts = append(hosts, HostInfo{
 			api.HostInfo{
 				PublicKey:  types.PublicKey(hk),
-				SiamuxAddr: net.JoinHostPort(host, port),
+				SiamuxAddr: siamuxAddr,
 			},
 			rhpv2.HostSettings(hs),
 			rhpv3.HostPriceTable(pt),
