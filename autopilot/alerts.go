@@ -28,7 +28,7 @@ func (ap *Autopilot) DismissAlert(ctx context.Context, ids ...types.Hash256) {
 	}
 }
 
-func newAccountLowBalanceAlert(address types.Address, balance, initialFunding types.Currency, bh, renewWindow uint64) alerts.Alert {
+func newAccountLowBalanceAlert(address types.Address, balance, initialFunding types.Currency) alerts.Alert {
 	return alerts.Alert{
 		ID:       alertLowBalanceID,
 		Severity: alerts.SeverityWarning,

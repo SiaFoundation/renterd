@@ -120,7 +120,7 @@ type Autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(cfg config.Autopilot, bus Bus, workers []Worker, allowRedundantIps bool, logger *zap.Logger) (_ *Autopilot, err error) {
+func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_ *Autopilot, err error) {
 	logger = logger.Named("autopilot")
 	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
 	ap := &Autopilot{
@@ -142,7 +142,7 @@ func New(cfg config.Autopilot, bus Bus, workers []Worker, allowRedundantIps bool
 		return
 	}
 
-	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, allowRedundantIps, ap.logger)
+	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, ap.logger)
 	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
 
 	return ap, nil
@@ -546,19 +546,11 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	// convenience variables
 	b := ap.bus
 	l := ap.logger
-	renewWindow := cfg.Contracts.RenewWindow
 
 	// no contracts - nothing to do
 	if cfg.Contracts.Amount == 0 {
 		l.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
-	}
-
-	// fetch consensus state
-	cs, err := ap.bus.ConsensusState(ctx)
-	if err != nil {
-		l.Warnf("wallet maintenance skipped, fetching consensus state failed with err: %v", err)
-		return err
 	}
 
 	// fetch wallet balance
@@ -571,7 +563,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 
 	// register an alert if balance is low
 	if balance.Cmp(contractor.InitialContractFunding.Mul64(cfg.Contracts.Amount)) < 0 {
-		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, contractor.InitialContractFunding, cs.BlockHeight, renewWindow))
+		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, contractor.InitialContractFunding))
 	} else {
 		ap.DismissAlert(ctx, alertLowBalanceID)
 	}
