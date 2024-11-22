@@ -15,7 +15,10 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 
+	rhp4utils "go.sia.tech/coreutils/rhp/v4"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
@@ -48,6 +51,11 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	if jc.Check("failed to fetch contract metadata", err) != nil {
 		return
 	}
+	// host
+	host, err := b.store.Host(jc.Request.Context(), cm.HostKey)
+	if jc.Check("failed to fetch host for contract", err) != nil {
+		return
+	}
 
 	rk := b.masterKey.DeriveContractKey(cm.HostKey)
 
@@ -58,47 +66,84 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
-	// latest revision
-	rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
-	if jc.Check("failed to fetch contract revision", err) != nil {
-		return
-	}
+	var deposit types.Currency
+	var spending api.ContractSpendingRecord
+	if b.isPassedV2AllowHeight() {
+		// latest revision
+		rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.V2SiamuxAddr(), req.ContractID)
+		if jc.Check("failed to fetch contract revision", err) != nil {
+			return
+		}
+		// cap the deposit by what's left in the contract
+		renterFunds := rev.RenterOutput.Value
+		if renterFunds.IsZero() {
+			jc.Error(errors.New("contract is out of funds"), http.StatusBadRequest)
+			return
+		} else if req.Amount.Cmp(renterFunds) > 0 {
+			req.Amount = renterFunds
+		}
+		deposit = req.Amount
+		// fund the account
+		signer := ibus.NewFormContractSigner(b.w, rk)
+		err = b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
+			{
+				Account: rhpv4.Account(req.AccountID),
+				Amount:  deposit,
+			},
+		})
+		if jc.Check("failed to fund v2 account", err) != nil {
+			return
+		}
+		spending = api.ContractSpendingRecord{
+			ContractSpending: api.ContractSpending{
+				FundAccount: deposit,
+			},
+			ContractID:     req.ContractID,
+			RevisionNumber: rev.RevisionNumber,
+			Size:           rev.Filesize,
 
-	// ensure we have at least 2H in the contract to cover the costs
-	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
-		jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
-		return
-	}
+			MissedHostPayout:  rev.MissedHostValue,
+			ValidRenterPayout: rev.RenterOutput.Value,
+		}
+	} else {
+		// latest revision
+		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+		if jc.Check("failed to fetch contract revision", err) != nil {
+			return
+		}
 
-	// price table
-	pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
-	if jc.Check("failed to fetch price table", err) != nil {
-		return
-	}
+		// ensure we have at least 2H in the contract to cover the costs
+		if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
+			jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
+			return
+		}
 
-	// check only the FundAccountCost
-	if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
-		jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
-		return
-	}
+		// price table
+		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+		if jc.Check("failed to fetch price table", err) != nil {
+			return
+		}
 
-	// cap the deposit by what's left in the contract
-	deposit := req.Amount
-	cost := pt.FundAccountCost
-	availableFunds := rev.ValidRenterPayout().Sub(cost)
-	if deposit.Cmp(availableFunds) > 0 {
-		deposit = availableFunds
-	}
+		// check only the FundAccountCost
+		if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
+			jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
+			return
+		}
 
-	// fund the account
-	err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
-	if jc.Check("failed to fund account", err) != nil {
-		return
-	}
+		// cap the deposit by what's left in the contract
+		deposit := req.Amount
+		cost := pt.FundAccountCost
+		availableFunds := rev.ValidRenterPayout().Sub(cost)
+		if deposit.Cmp(availableFunds) > 0 {
+			deposit = availableFunds
+		}
 
-	// record spending
-	err = b.store.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
-		{
+		// fund the account
+		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
+		if jc.Check("failed to fund account", err) != nil {
+			return
+		}
+		spending = api.ContractSpendingRecord{
 			ContractSpending: api.ContractSpending{
 				FundAccount: deposit.Add(cost),
 			},
@@ -108,7 +153,12 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 
 			MissedHostPayout:  rev.MissedHostPayout(),
 			ValidRenterPayout: rev.ValidRenterPayout(),
-		},
+		}
+	}
+
+	// record spending
+	err = b.store.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+		spending,
 	})
 	if err != nil {
 		b.logger.Error("failed to record contract spending", zap.Error(err))
