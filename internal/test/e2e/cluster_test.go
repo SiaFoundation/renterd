@@ -184,6 +184,10 @@ func TestNewTestCluster(t *testing.T) {
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
+	// fetch consensus state
+	res, err := cluster.Bus.ConsensusState(context.Background())
+	tt.OK(err)
+
 	// add a host & wait for contracts to form
 	cluster.AddHosts(1)
 	contracts := cluster.WaitForContracts()
@@ -201,8 +205,9 @@ func TestNewTestCluster(t *testing.T) {
 	tt.OK(err)
 
 	// verify startHeight and endHeight of the contract.
-	if contract.EndHeight() == 0 || contract.EndHeight() != revision.EndHeight() || contract.EndHeight() < apCfg.EndHeight() {
-		t.Fatal("wrong endHeight", contract.EndHeight(), revision.EndHeight(), apCfg.EndHeight())
+	minEndHeight := res.BlockHeight + apCfg.Contracts.Period + apCfg.Contracts.RenewWindow
+	if contract.EndHeight() < minEndHeight || contract.EndHeight() != revision.EndHeight() {
+		t.Fatal("wrong endHeight")
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	} else if contract.Usability != api.ContractUsabilityGood {
