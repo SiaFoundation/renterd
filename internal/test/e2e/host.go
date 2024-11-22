@@ -306,7 +306,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	}
 	go rhpv3.Serve()
 
-	rhpv4 := rhp4.NewServer(privKey, cm, s, contracts, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute), rhp4.WithContractProofWindowBuffer(72))
+	rhpv4 := rhp4.NewServer(privKey, cm, s, contracts, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute), rhp4.WithContractProofWindowBuffer(1))
 	go rhp.ServeRHP4SiaMux(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
