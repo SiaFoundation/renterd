@@ -972,7 +972,7 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hos
 	if host.IsV2() {
 		account := w.accounts.ForHost(host.PublicKey)
 		return account.WithSync(func() (types.Currency, error) {
-			return w.rhp4Client.AccountBalance(ctx, rhpv4.Account(account.ID()))
+			return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
 		})
 	}
 

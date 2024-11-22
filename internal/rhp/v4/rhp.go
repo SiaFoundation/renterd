@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -85,8 +86,15 @@ func (c *Client) AppendSectors(ctx context.Context, cs consensus.State, prices r
 }
 
 // FundAccounts funds accounts on the host.
-func (c *Client) FundAccounts(ctx context.Context, cs consensus.State, signer rhp.ContractSigner, contract rhp.ContractRevision, deposits []rhp4.AccountDeposit) (rhp.RPCFundAccountResult, error) {
-	panic("not implemented")
+func (c *Client) FundAccounts(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, signer rhp.ContractSigner, contract rhp.ContractRevision, deposits []rhp4.AccountDeposit) error {
+	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
+		_, err = rhp.RPCFundAccounts(ctx, c, cs, signer, contract, deposits)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }
 
 // LatestRevision returns the latest revision of a contract.
@@ -104,8 +112,20 @@ func (c *Client) SectorRoots(ctx context.Context, cs consensus.State, prices rhp
 }
 
 // AccountBalance returns the balance of an account.
-func (c *Client) AccountBalance(ctx context.Context, account rhp4.Account) (types.Currency, error) {
-	panic("not implemented")
+func (c *Client) AccountBalance(ctx context.Context, hk types.PublicKey, hostIP string, account rhp4.Account) (balance types.Currency, _ error) {
+	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
+		balance, err = rhp.RPCAccountBalance(ctx, c, account)
+		if err != nil {
+			// TODO: remove this hack once the host is fixed
+			if strings.Contains(err.Error(), "internal error") {
+				err = nil
+				balance = types.ZeroCurrency
+			}
+			return err
+		}
+		return err
+	})
+	return balance, err
 }
 
 // FormContract forms a contract with a host
