@@ -234,16 +234,13 @@ func TestCollateralScore(t *testing.T) {
 	storageCost := uint64(100)
 	score := func(collateral, maxCollateral uint64) float64 {
 		t.Helper()
-		cfg := api.ContractsConfig{
-			Period: period,
-		}
 		pt := rhpv3.HostPriceTable{
 			CollateralCost: types.NewCurrency64(collateral),
 			MaxCollateral:  types.NewCurrency64(maxCollateral),
 			WriteStoreCost: types.NewCurrency64(storageCost),
 		}
 		appendSectorCost := pt.AppendSectorCost(period).Storage
-		return collateralScore(cfg, appendSectorCost, pt.MaxCollateral, pt.CollateralCost, rhpv2.SectorSize)
+		return collateralScore(appendSectorCost, pt.MaxCollateral, pt.CollateralCost, rhpv2.SectorSize, period)
 	}
 
 	round := func(f float64) float64 {

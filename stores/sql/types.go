@@ -589,7 +589,7 @@ func (hs *V2HostSettings) Scan(value interface{}) error {
 	case []byte:
 		bytes = value
 	default:
-		return errors.New(fmt.Sprint("failed to unmarshal V2Settings value:", value))
+		return errors.New(fmt.Sprint("failed to unmarshal V2HostSettings value:", value))
 	}
 	return json.Unmarshal(bytes, hs)
 }
