@@ -64,43 +64,45 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	allocationPerHost := idealDataPerHost * 2
 
 	// extract inputs from the host depending on whether the host supports v1 or v2
-	var appendSectorCost types.Currency
+	var uploadSectorCost types.Currency
 	var collateral, maxCollateral types.Currency
-	var dppb, uppb, sppb types.Currency
+	var egressPrice, ingressPrice, storagePrice types.Currency
 	var remainingStorage uint64
 	var version string
 	if h.IsV2() {
-		appendSectorCost = h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).Storage
+		appendCost := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost()
+		uploadCost := h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize, 144*3).RenterCost()
+		uploadSectorCost = appendCost.Add(uploadCost)
 		maxCollateral = h.V2Settings.MaxCollateral
 		collateral = h.V2Settings.Prices.Collateral
-		dppb = h.V2Settings.Prices.EgressPrice
-		uppb = h.V2Settings.Prices.IngressPrice
-		sppb = h.V2Settings.Prices.StoragePrice
+		egressPrice = h.V2Settings.Prices.RPCReadSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
+		ingressPrice = h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize, 144*3).RenterCost().Div64(rhpv2.SectorSize)
+		storagePrice = h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost().Div64(rhpv2.SectorSize)
 		remainingStorage = h.V2Settings.RemainingStorage
 		version = fmt.Sprintf("%d.%d.%d", h.V2Settings.ProtocolVersion[0], h.V2Settings.ProtocolVersion[1], h.V2Settings.ProtocolVersion[2])
 	} else {
 		var overflow bool
-		appendSectorCost = h.PriceTable.AppendSectorCost(cfg.Contracts.Period).Storage
+		uploadSectorCost = h.PriceTable.AppendSectorCost(cfg.Contracts.Period).Storage
 		maxCollateral = h.PriceTable.MaxCollateral
 		collateral = h.PriceTable.CollateralCost
-		dppb, overflow = gouging.DownloadPricePerByte(h.PriceTable.HostPriceTable)
+		egressPrice, overflow = gouging.DownloadPricePerByte(h.PriceTable.HostPriceTable)
 		if overflow {
-			dppb = types.MaxCurrency
+			egressPrice = types.MaxCurrency
 		}
-		uppb, overflow = gouging.UploadPricePerByte(h.PriceTable.HostPriceTable)
+		ingressPrice, overflow = gouging.UploadPricePerByte(h.PriceTable.HostPriceTable)
 		if overflow {
-			uppb = types.MaxCurrency
+			ingressPrice = types.MaxCurrency
 		}
-		sppb = h.PriceTable.WriteStoreCost
+		storagePrice = h.PriceTable.WriteStoreCost
 		remainingStorage = h.Settings.RemainingStorage
 		version = h.Settings.Version
 	}
 
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h), // not clamped since values are hardcoded
-		Collateral:       clampScore(collateralScore(cCfg, appendSectorCost, maxCollateral, collateral, uint64(allocationPerHost))),
+		Collateral:       clampScore(collateralScore(uploadSectorCost, maxCollateral, collateral, uint64(allocationPerHost), cCfg.Period)),
 		Interactions:     clampScore(interactionScore(h)),
-		Prices:           clampScore(priceAdjustmentScore(dppb, uppb, sppb, gs)),
+		Prices:           clampScore(priceAdjustmentScore(egressPrice, ingressPrice, storagePrice, gs)),
 		StorageRemaining: clampScore(storageRemainingScore(remainingStorage, h.StoredData, allocationPerHost)),
 		Uptime:           clampScore(uptimeScore(h)),
 		Version:          clampScore(versionScore(version, cfg.Hosts.MinProtocolVersion)),
@@ -203,7 +205,14 @@ func ageScore(h api.Host) float64 {
 	return weight
 }
 
-func collateralScore(cfg api.ContractsConfig, appendSectorCost, maxCollateral, collateralCost types.Currency, allocationPerHost uint64) float64 {
+// collateralScore computes the score a host receives for its collateral
+// settings relative to its prices. The params have the following meaning
+// 'uploadSectorCost' - the cost of uploading and storing a sector worth of data
+// 'maxCollateral' - the maximum collateral the host is willing to put up
+// 'collateralCost' - the amount of collateral the host is willing to put up per byte
+// 'allocationPerHost' - amount of data we expect to store on the host
+// 'period' - the period for which the collateral is put up
+func collateralScore(uploadSectorCost, maxCollateral, collateralCost types.Currency, allocationPerHost, period uint64) float64 {
 	// Ignore hosts which have set their max collateral to 0.
 	if maxCollateral.IsZero() || collateralCost.IsZero() {
 		return 0
@@ -215,10 +224,10 @@ func collateralScore(cfg api.ContractsConfig, appendSectorCost, maxCollateral, c
 
 	// compute the cost of storing
 	numSectors := bytesToSectors(allocationPerHost)
-	storageCost := appendSectorCost.Mul64(numSectors)
+	storageCost := uploadSectorCost.Mul64(numSectors)
 
 	// calculate the expected collateral for the host allocation.
-	expectedCollateral := collateralCost.Mul64(allocationPerHost).Mul64(cfg.Period)
+	expectedCollateral := collateralCost.Mul64(allocationPerHost).Mul64(period)
 	if expectedCollateral.Cmp(maxCollateral) > 0 {
 		expectedCollateral = maxCollateral
 	}

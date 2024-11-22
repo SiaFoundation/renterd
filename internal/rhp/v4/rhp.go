@@ -46,9 +46,13 @@ func (c *Client) Settings(ctx context.Context, hk types.PublicKey, addr string) 
 		if err != nil {
 			return err
 		}
+		var validity time.Duration
+		if v := time.Until(settings.Prices.ValidUntil); v > 0 {
+			validity = v
+		}
 		hs = HostSettings{
 			HostSettings: settings,
-			Validity:     time.Until(settings.Prices.ValidUntil),
+			Validity:     validity,
 		}
 		return err
 	})
