@@ -726,7 +726,7 @@ func (c *TestCluster) WaitForContracts() []api.ContractMetadata {
 	c.waitForHostContracts(hostsMap)
 
 	// fetch all contracts
-	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	c.tt.OK(err)
 	return resp
 }
@@ -900,7 +900,7 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(3000, time.Millisecond, func() error {
-		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,8 @@ const (
 
 type (
 	MainDatabase struct {
+		partialSlabDir string
+
 		db  *sql.DB
 		log *zap.SugaredLogger
 	}
@@ -44,10 +47,11 @@ type (
 // NewMainDatabase creates a new MySQL backend.
 func NewMainDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration, partialSlabDir string) (*MainDatabase, error) {
 	log = log.Named("main")
-	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd, partialSlabDir)
+	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
 	return &MainDatabase{
-		db:  store,
-		log: log.Sugar(),
+		partialSlabDir: partialSlabDir,
+		db:             store,
+		log:            log.Sugar(),
 	}, err
 }
 
@@ -84,7 +88,7 @@ func (b *MainDatabase) SlabBuffers(ctx context.Context, tx sql.Tx) (filenames []
 		return nil, err
 	}
 	for _, buffer := range buffers {
-		filenames = append(filenames, buffer.Filename)
+		filenames = append(filenames, filepath.Join(b.partialSlabDir, buffer.Filename))
 	}
 	return
 }
