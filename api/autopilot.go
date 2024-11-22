@@ -129,10 +129,6 @@ type (
 	}
 )
 
-func (ap AutopilotConfig) EndHeight() uint64 {
-	return ap.Contracts.Period + ap.Contracts.RenewWindow
-}
-
 func (cc ContractsConfig) Validate() error {
 	if cc.Period == 0 {
 		return errors.New("period must be greater than 0")

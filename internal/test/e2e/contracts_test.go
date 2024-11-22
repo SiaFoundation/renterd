@@ -32,11 +32,16 @@ func TestFormContract(t *testing.T) {
 	h, err := b.Host(context.Background(), hosts[0].PublicKey())
 	tt.OK(err)
 
+	// fetch consensus state
+	cs, err := b.ConsensusState(context.Background())
+	tt.OK(err)
+
 	// form a contract using the bus
 	wallet, _ := b.Wallet(context.Background())
 	ap, err := b.AutopilotConfig(context.Background())
 	tt.OK(err)
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), ap.EndHeight())
+	endHeight := cs.BlockHeight + ap.Contracts.Period + ap.Contracts.RenewWindow
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
 	tt.OK(err)
 
 	// assert the contract was added to the bus

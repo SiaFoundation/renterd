@@ -671,7 +671,7 @@ func (c *TestCluster) MineToRenewWindow() {
 		}
 	}
 	if maxEndHeight < cfg.Contracts.RenewWindow {
-		return // already in renew window
+		c.tt.Fatal("contract was already in renew window")
 	} else if targetBH := maxEndHeight - cfg.Contracts.RenewWindow; cs.BlockHeight >= targetBH {
 		return // already in renew window
 	} else {
