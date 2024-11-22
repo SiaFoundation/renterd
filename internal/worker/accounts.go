@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
@@ -412,7 +413,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	}
 
 	// fund the account
-	err := a.funder.FundAccount(ctx, contract.ID, contract.HostKey, maxBalance)
+	err := a.funder.FundAccount(ctx, contract.ID, host.PublicKey, maxBalance)
 	if err != nil {
 		return false, fmt.Errorf("failed to fund account: %w", err)
 	}
@@ -485,7 +486,7 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	amt, err := amtFn()
 
 	// in case of an insufficient balance, we schedule a sync
-	if rhp3.IsBalanceInsufficient(err) {
+	if rhp3.IsBalanceInsufficient(err) || rhp4.IsBalanceInsufficient(err) {
 		a.ScheduleSync()
 	}
 
