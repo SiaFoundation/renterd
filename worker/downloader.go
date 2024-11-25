@@ -297,7 +297,7 @@ func (d *downloader) trackFailure(err error) {
 		return
 	}
 
-	if rhp3.IsBalanceInsufficient(err) ||
+	if utils.IsBalanceInsufficient(err) ||
 		rhp3.IsPriceTableExpired(err) ||
 		rhp3.IsPriceTableNotFound(err) ||
 		rhp3.IsSectorNotFound(err) {
