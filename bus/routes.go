@@ -1219,7 +1219,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 			return
 		}
 	}
-	if jc.Check("couldn't renew contract", err) != nil {
+	if jc.Check("couldn't renew/refresh contract", err) != nil {
 		return
 	}
 
