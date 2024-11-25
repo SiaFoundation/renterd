@@ -446,10 +446,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		tt.Fatalf("failed to setup worker, err: %v", err)
 	}
 
-	// Set the test contract set to make sure we can add objects at the
-	// beginning of a test right away.
-	tt.OK(busClient.UpdateContractSet(ctx, test.ContractSet, nil, nil))
-
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
 		tt.OKAll(
@@ -510,7 +506,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForPeers()
 		cluster.WaitForContracts()
-		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
 	}
 
@@ -731,53 +726,9 @@ func (c *TestCluster) WaitForContracts() []api.ContractMetadata {
 	c.waitForHostContracts(hostsMap)
 
 	// fetch all contracts
-	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{
-		FilterMode: api.ContractFilterModeActive,
-	})
+	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	c.tt.OK(err)
 	return resp
-}
-
-func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
-	c.tt.Helper()
-
-	// limit n to number of hosts we have
-	if n > len(c.hosts) {
-		n = len(c.hosts)
-	}
-
-	c.tt.Retry(3000, time.Millisecond, func() error {
-		sets, err := c.Bus.ContractSets(context.Background())
-		if err != nil {
-			return err
-		}
-
-		// check if set exists
-		if len(sets) == 0 {
-			return errors.New("no contract sets found")
-		} else {
-			var found bool
-			for _, s := range sets {
-				if s == set {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("set '%v' not found, sets: %v", set, sets)
-			}
-		}
-
-		// check if it contains the desired number of contracts
-		csc, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: set})
-		if err != nil {
-			return err
-		}
-		if len(csc) != n {
-			return fmt.Errorf("contract set does not contain the desired number of contracts, %v!=%v", len(csc), n)
-		}
-		return nil
-	})
 }
 
 func (c *TestCluster) WaitForPeers() {
@@ -944,23 +895,6 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	})
 }
 
-func (c *TestCluster) WaitForContractSet(set string, n int) {
-	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
-		contracts, err := c.Bus.Contracts(ctx, api.ContractsOpts{ContractSet: set})
-		if err != nil {
-			return err
-		}
-		if len(contracts) != n {
-			return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), n)
-		}
-		return nil
-	})
-}
-
 // waitForHostContracts will fetch the contracts from the bus and wait until we
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
@@ -1073,6 +1007,8 @@ func testApCfg() config.Autopilot {
 }
 
 func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	partialSlabDir := filepath.Join(dir, "partial_slabs")
+
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -1096,7 +1032,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -1116,7 +1052,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1135,7 +1071,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		Alerts:                        alerts.WithOrigin(am, "bus"),
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
 		Logger:                        logger,

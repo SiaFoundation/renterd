@@ -50,7 +50,7 @@ type Bus interface {
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
-	UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
+	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 
@@ -61,7 +61,6 @@ type Bus interface {
 	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
 
 	// metrics
-	RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
 	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
 	// buckets
@@ -71,7 +70,7 @@ type Bus interface {
 	Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 	RefreshHealth(ctx context.Context) error
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
-	SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
+	SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 
 	// scanner
 	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (resp api.HostScanResponse, err error)

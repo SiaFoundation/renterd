@@ -4,5 +4,22 @@ INSERT INTO `host_checks_temp` SELECT `id`, `created_at`, `db_host_id`, `usabili
 DROP TABLE `host_checks`;
 ALTER TABLE `host_checks_temp` RENAME TO `host_checks`;
 
+CREATE UNIQUE INDEX `idx_host_checks_id` ON `host_checks` (`db_host_id`);
+CREATE INDEX `idx_host_checks_usability_blocked` ON `host_checks` (`usability_blocked`);
+CREATE INDEX `idx_host_checks_usability_offline` ON `host_checks` (`usability_offline`);
+CREATE INDEX `idx_host_checks_usability_low_score` ON `host_checks` (`usability_low_score`);
+CREATE INDEX `idx_host_checks_usability_redundant_ip` ON `host_checks` (`usability_redundant_ip`);
+CREATE INDEX `idx_host_checks_usability_gouging` ON `host_checks` (`usability_gouging`);
+CREATE INDEX `idx_host_checks_usability_not_accepting_contracts` ON `host_checks` (`usability_not_accepting_contracts`);
+CREATE INDEX `idx_host_checks_usability_not_announced` ON `host_checks` (`usability_not_announced`);
+CREATE INDEX `idx_host_checks_usability_not_completing_scan` ON `host_checks` (`usability_not_completing_scan`);
+CREATE INDEX `idx_host_checks_score_age` ON `host_checks` (`score_age`);
+CREATE INDEX `idx_host_checks_score_collateral` ON `host_checks` (`score_collateral`);
+CREATE INDEX `idx_host_checks_score_interactions` ON `host_checks` (`score_interactions`);
+CREATE INDEX `idx_host_checks_score_storage_remaining` ON `host_checks` (`score_storage_remaining`);
+CREATE INDEX `idx_host_checks_score_uptime` ON `host_checks` (`score_uptime`);
+CREATE INDEX `idx_host_checks_score_version` ON `host_checks` (`score_version`);
+CREATE INDEX `idx_host_checks_score_prices` ON `host_checks` (`score_prices`);
+
 -- create autopilot table & insert blank state object
-CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, enabled integer NOT NULL DEFAULT 0, contracts_set text, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);
+CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, current_period integer DEFAULT 0, enabled integer NOT NULL DEFAULT 0, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_allow_redundant_ips integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);

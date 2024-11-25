@@ -31,10 +31,6 @@ var (
 	// ErrContractNotFound is returned when a contract can't be retrieved from
 	// the database.
 	ErrContractNotFound = errors.New("couldn't find contract")
-
-	// ErrContractSetNotFound is returned when a contract set can't be retrieved
-	// from the database.
-	ErrContractSetNotFound = errors.New("couldn't find contract set")
 )
 
 type ContractState string
@@ -70,9 +66,8 @@ type (
 		Spending           ContractSpending `json:"spending"`
 
 		// following fields are decorated
-		HostIP       string   `json:"hostIP"`
-		ContractSets []string `json:"contractSets,omitempty"`
-		SiamuxAddr   string   `json:"siamuxAddr,omitempty"`
+		HostIP     string `json:"hostIP"`
+		SiamuxAddr string `json:"siamuxAddr,omitempty"`
 
 		// following fields are only set on archived contracts
 		ArchivalReason string               `json:"archivalReason,omitempty"`
@@ -186,8 +181,7 @@ type (
 	}
 
 	ContractsOpts struct {
-		ContractSet string `json:"contractset"`
-		FilterMode  string `json:"filterMode"`
+		FilterMode string `json:"filterMode"`
 	}
 )
 
@@ -209,14 +203,8 @@ func (cm ContractMetadata) EndHeight() uint64 {
 	return cm.WindowStart
 }
 
-// InSet returns whether the contract is in the given set.
-func (cm ContractMetadata) InSet(set string) bool {
-	for _, s := range cm.ContractSets {
-		if s == set {
-			return true
-		}
-	}
-	return false
+func (cm ContractMetadata) IsGood() bool {
+	return cm.Usability == ContractUsabilityGood
 }
 
 type (

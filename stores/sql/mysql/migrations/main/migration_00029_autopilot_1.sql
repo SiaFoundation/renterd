@@ -13,7 +13,6 @@ CREATE TABLE `autopilot_config` (
   `current_period` bigint unsigned DEFAULT 0,
   `enabled` boolean NOT NULL DEFAULT false,
 
-  `contracts_set` varchar(191) DEFAULT NULL,
   `contracts_amount` bigint unsigned DEFAULT NULL,
   `contracts_period` bigint unsigned DEFAULT NULL,
   `contracts_renew_window` bigint unsigned DEFAULT NULL,

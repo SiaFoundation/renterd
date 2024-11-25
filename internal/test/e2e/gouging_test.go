@@ -55,9 +55,9 @@ func TestGouging(t *testing.T) {
 		hostsMap[h.PublicKey().String()] = h
 	}
 
-	// upload and download some data, asserting we have a working contract set
+	// generate random data
 	data := make([]byte, rhpv2.SectorSize/12)
-	tt.OKAll(frand.Read(data))
+	frand.Read(data)
 
 	// upload the data
 	path := fmt.Sprintf("data_%v", len(data))
@@ -145,9 +145,8 @@ func TestGouging(t *testing.T) {
 
 func TestHostMinVersion(t *testing.T) {
 	// create a new test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		hosts: int(test.AutopilotConfig.Contracts.Amount),
-	})
+	n := int(test.AutopilotConfig.Contracts.Amount)
+	cluster := newTestCluster(t, testClusterOptions{hosts: n})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
@@ -158,7 +157,7 @@ func TestHostMinVersion(t *testing.T) {
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.ContractSet})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		tt.OK(err)
 		if len(contracts) != 0 {
 			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))

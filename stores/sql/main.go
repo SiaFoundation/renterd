@@ -151,7 +151,7 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 			c.contract_price, c.initial_renter_funds,
 			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
-			"", COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
+			COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
 		FROM contracts AS c
 		LEFT JOIN hosts h ON h.public_key = c.host_key
 		WHERE start_height >= ? AND archival_reason IS NOT NULL
@@ -180,7 +180,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	}
 
 	// archive contract
-	_, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ? WHERE fcid = ?", reason, FileContractID(fcid))
+	_, err := tx.Exec(ctx, "UPDATE contracts SET host_id = NULL, archival_reason = ?, usability = ? WHERE fcid = ?", reason, contractUsabilityBad, FileContractID(fcid))
 	if err != nil {
 		return fmt.Errorf("failed to archive contract: %w", err)
 	}
@@ -198,7 +198,6 @@ func Autopilot(ctx context.Context, tx sql.Tx) (ap api.Autopilot, err error) {
 SELECT
 	enabled,
 	current_period,
-	contracts_set,
 	contracts_amount,
 	contracts_period,
 	contracts_renew_window,
@@ -214,7 +213,6 @@ FROM autopilot_config
 WHERE id = ?`, sql.AutopilotID).Scan(
 		&ap.Enabled,
 		&ap.CurrentPeriod,
-		&ap.Contracts.Set,
 		&ap.Contracts.Amount,
 		&ap.Contracts.Period,
 		&ap.Contracts.RenewWindow,
@@ -298,17 +296,6 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	var whereExprs []string
 	var whereArgs []any
-	if opts.ContractSet != "" {
-		var contractSetID int64
-		err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE contract_sets.name = ?", opts.ContractSet).
-			Scan(&contractSetID)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return nil, api.ErrContractSetNotFound
-		}
-		whereExprs = append(whereExprs, "cs.id = ?")
-		whereArgs = append(whereArgs, contractSetID)
-	}
-
 	if opts.FilterMode != "" {
 		// validate filter mode
 		switch opts.FilterMode {
@@ -316,6 +303,9 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 			whereExprs = append(whereExprs, "c.archival_reason IS NULL")
 		case api.ContractFilterModeArchived:
 			whereExprs = append(whereExprs, "c.archival_reason IS NOT NULL")
+		case api.ContractFilterModeGood:
+			whereExprs = append(whereExprs, "c.archival_reason IS NULL AND c.usability = ?")
+			whereArgs = append(whereArgs, contractUsabilityGood)
 		case api.ContractFilterModeAll:
 		default:
 			return nil, fmt.Errorf("invalid filter mode: %v", opts.FilterMode)
@@ -326,35 +316,6 @@ func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.Co
 	}
 
 	return QueryContracts(ctx, tx, whereExprs, whereArgs)
-}
-
-func ContractSetID(ctx context.Context, tx sql.Tx, contractSet string) (int64, error) {
-	var id int64
-	err := tx.QueryRow(ctx, "SELECT id FROM contract_sets WHERE name = ?", contractSet).Scan(&id)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return 0, api.ErrContractSetNotFound
-	} else if err != nil {
-		return 0, fmt.Errorf("failed to fetch contract set id: %w", err)
-	}
-	return id, nil
-}
-
-func ContractSets(ctx context.Context, tx sql.Tx) ([]string, error) {
-	rows, err := tx.Query(ctx, "SELECT name FROM contract_sets")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract sets: %w", err)
-	}
-	defer rows.Close()
-
-	var sets []string
-	for rows.Next() {
-		var cs string
-		if err := rows.Scan(&cs); err != nil {
-			return nil, fmt.Errorf("failed to scan contract set: %w", err)
-		}
-		sets = append(sets, cs)
-	}
-	return sets, nil
 }
 
 func ContractSize(ctx context.Context, tx sql.Tx, id types.FileContractID) (api.ContractSize, error) {
@@ -917,7 +878,7 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 	return hosts, nil
 }
 
-func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contractSetID int64, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
+func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, ec object.EncryptionKey, minShards, totalShards uint8) (int64, error) {
 	// insert buffered slab
 	res, err := tx.Exec(ctx, `INSERT INTO buffered_slabs (created_at, filename) VALUES (?, ?)`,
 		time.Now(), fileName)
@@ -930,9 +891,9 @@ func InsertBufferedSlab(ctx context.Context, tx sql.Tx, fileName string, contrac
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO slabs (created_at, db_contract_set_id, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-		time.Now(), contractSetID, bufferedSlabID, EncryptionKey(ec), minShards, totalShards)
+		INSERT INTO slabs (created_at, db_buffered_slab_id, `+"`key`"+`, min_shards, total_shards)
+			VALUES (?, ?, ?, ?, ?)`,
+		time.Now(), bufferedSlabID, EncryptionKey(ec), minShards, totalShards)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert slab: %w", err)
 	}
@@ -1007,68 +968,65 @@ func InsertObject(ctx context.Context, tx sql.Tx, key string, bucketID, size int
 	return res.LastInsertId()
 }
 
-func LoadSlabBuffers(ctx context.Context, db *sql.DB) (bufferedSlabs []LoadedSlabBuffer, orphanedBuffers []string, err error) {
-	err = db.Transaction(ctx, func(tx sql.Tx) error {
-		// collect all buffers
-		rows, err := db.Query(ctx, `
-			SELECT bs.id, bs.filename, sla.db_contract_set_id, sla.key, sla.min_shards, sla.total_shards
+func LoadSlabBuffers(ctx context.Context, tx sql.Tx) (bufferedSlabs []LoadedSlabBuffer, orphanedBuffers []string, err error) {
+	// collect all buffers
+	rows, err := tx.Query(ctx, `
+			SELECT bs.id, bs.filename, sla.key, sla.min_shards, sla.total_shards
 			FROM buffered_slabs bs
 			INNER JOIN slabs sla ON sla.db_buffered_slab_id = bs.id
 		`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
 
-		for rows.Next() {
-			var bs LoadedSlabBuffer
-			if err := rows.Scan(&bs.ID, &bs.Filename, &bs.ContractSetID, (*EncryptionKey)(&bs.Key), &bs.MinShards, &bs.TotalShards); err != nil {
-				return fmt.Errorf("failed to scan buffered slab: %w", err)
-			}
-			bufferedSlabs = append(bufferedSlabs, bs)
+	for rows.Next() {
+		var bs LoadedSlabBuffer
+		if err := rows.Scan(&bs.ID, &bs.Filename, (*EncryptionKey)(&bs.Key), &bs.MinShards, &bs.TotalShards); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan buffered slab: %w", err)
 		}
+		bufferedSlabs = append(bufferedSlabs, bs)
+	}
 
-		// fill in sizes
-		for i := range bufferedSlabs {
-			err = tx.QueryRow(ctx, `
+	// fill in sizes
+	for i := range bufferedSlabs {
+		err = tx.QueryRow(ctx, `
 				SELECT COALESCE(MAX(offset+length), 0)
 				FROM slabs sla
 				INNER JOIN slices sli ON sla.id = sli.db_slab_id
 				WHERE sla.db_buffered_slab_id = ?
 		`, bufferedSlabs[i].ID).Scan(&bufferedSlabs[i].Size)
-			if err != nil {
-				return fmt.Errorf("failed to fetch buffered slab size: %w", err)
-			}
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch buffered slab size: %w", err)
 		}
+	}
 
-		// find orphaned buffers and delete them
-		rows, err = tx.Query(ctx, `
+	// find orphaned buffers and delete them
+	rows, err = tx.Query(ctx, `
 			SELECT bs.id, bs.filename
 			FROM buffered_slabs bs
 			LEFT JOIN slabs ON slabs.db_buffered_slab_id = bs.id
 			WHERE slabs.id IS NULL
 		`)
-		if err != nil {
-			return fmt.Errorf("failed to fetch orphaned buffers: %w", err)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch orphaned buffers: %w", err)
+	}
+	var toDelete []int64
+	for rows.Next() {
+		var id int64
+		var filename string
+		if err := rows.Scan(&id, &filename); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan orphaned buffer: %w", err)
 		}
-		var toDelete []int64
-		for rows.Next() {
-			var id int64
-			var filename string
-			if err := rows.Scan(&id, &filename); err != nil {
-				return fmt.Errorf("failed to scan orphaned buffer: %w", err)
-			}
-			orphanedBuffers = append(orphanedBuffers, filename)
-			toDelete = append(toDelete, id)
+		orphanedBuffers = append(orphanedBuffers, filename)
+		toDelete = append(toDelete, id)
+	}
+	for _, id := range toDelete {
+		if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", id); err != nil {
+			return nil, nil, fmt.Errorf("failed to delete orphaned buffer: %w", err)
 		}
-		for _, id := range toDelete {
-			if _, err := tx.Exec(ctx, "DELETE FROM buffered_slabs WHERE id = ?", id); err != nil {
-				return fmt.Errorf("failed to delete orphaned buffer: %w", err)
-			}
-		}
-		return nil
-	})
-	return
+	}
+	return bufferedSlabs, orphanedBuffers, nil
 }
 
 func UpdateMetadata(ctx context.Context, tx sql.Tx, objID int64, md api.ObjectUserMetadata) error {
@@ -1085,26 +1043,27 @@ func PrepareSlabHealth(ctx context.Context, tx sql.Tx, limit int64, now time.Tim
 	if err != nil {
 		return fmt.Errorf("failed to drop temporary table: %w", err)
 	}
+
 	_, err = tx.Exec(ctx, `
-		CREATE TEMPORARY TABLE slabs_health AS
-			SELECT slabs.id as id, CASE WHEN (slabs.min_shards = slabs.total_shards)
-			THEN
-				CASE WHEN (COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_key END)) < slabs.min_shards)
-				THEN -1
-				ELSE 1
-				END
-			ELSE (CAST(COUNT(DISTINCT(CASE WHEN cs.name IS NULL THEN NULL ELSE c.host_key END)) AS FLOAT) - CAST(slabs.min_shards AS FLOAT)) / Cast(slabs.total_shards - slabs.min_shards AS FLOAT)
-			END as health
-			FROM slabs
-			INNER JOIN sectors s ON s.db_slab_id = slabs.id
-			LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
-			LEFT JOIN contracts c ON se.db_contract_id = c.id
-			LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id AND csc.db_contract_set_id = slabs.db_contract_set_id
-			LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
-			WHERE slabs.health_valid_until <= ?
-			GROUP BY slabs.id
-			LIMIT ?
-	`, now.Unix(), limit)
+CREATE TEMPORARY TABLE slabs_health AS
+	SELECT
+		id,
+		CASE WHEN no_redundancy THEN CASE WHEN unique_hosts < min_shards THEN -1 ELSE 1 END ELSE (unique_hosts - min_shards) / (total_shards - min_shards) END as health
+	FROM (
+		SELECT
+			slabs.id as id,
+			CAST(COUNT(DISTINCT(c.host_key)) AS FLOAT) as unique_hosts,
+			CAST(slabs.min_shards AS FLOAT) as min_shards,
+			CAST(slabs.total_shards AS FLOAT) as total_shards,
+			slabs.min_shards = slabs.total_shards as no_redundancy
+		FROM slabs
+		INNER JOIN sectors s ON s.db_slab_id = slabs.id
+		LEFT JOIN contract_sectors se ON s.id = se.db_sector_id
+		LEFT JOIN contracts c ON se.db_contract_id = c.id AND c.usability = ?
+		WHERE slabs.health_valid_until <= ?
+		GROUP BY slabs.id
+		LIMIT ?
+	) as t`, contractUsabilityGood, now.Unix(), limit)
 	if err != nil {
 		return fmt.Errorf("failed to create temporary table: %w", err)
 	}
@@ -1723,14 +1682,6 @@ func RecordPriceTables(ctx context.Context, tx sql.Tx, priceTableUpdates []api.H
 	return nil
 }
 
-func RemoveContractSet(ctx context.Context, tx sql.Tx, contractSet string) error {
-	_, err := tx.Exec(ctx, "DELETE FROM contract_sets WHERE name = ?", contractSet)
-	if err != nil {
-		return fmt.Errorf("failed to delete contract set: %w", err)
-	}
-	return nil
-}
-
 func RemoveOfflineHosts(ctx context.Context, tx sql.Tx, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	// fetch contracts belonging to offline hosts
 	rows, err := tx.Query(ctx, `
@@ -1779,11 +1730,9 @@ SELECT
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
 	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
-	COALESCE(cs.name, ""), COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+	COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
 FROM contracts AS c
 LEFT JOIN hosts h ON h.public_key = c.host_key
-LEFT JOIN contract_set_contracts csc ON csc.db_contract_id = c.id
-LEFT JOIN contract_sets cs ON cs.id = csc.db_contract_set_id
 %s
 ORDER BY c.id ASC`, whereExpr), whereArgs...)
 	if err != nil {
@@ -1813,8 +1762,6 @@ ORDER BY c.id ASC`, whereExpr), whereArgs...)
 			break
 		} else if current.ID != types.FileContractID(scannedRows[0].FCID) {
 			contracts = append(contracts, current)
-		} else if scannedRows[0].ContractSet != "" {
-			current.ContractSets = append(current.ContractSets, scannedRows[0].ContractSet)
 		}
 		current, scannedRows = scannedRows[0].ContractMetadata(), scannedRows[1:]
 	}
@@ -1938,30 +1885,6 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	return slab, nil
 }
 
-func SlabBuffers(ctx context.Context, tx sql.Tx) (map[string]string, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT buffered_slabs.filename, cs.name
-		FROM buffered_slabs
-		INNER JOIN slabs sla ON sla.db_buffered_slab_id = buffered_slabs.id
-		INNER JOIN contract_sets cs ON cs.id = sla.db_contract_set_id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract sets")
-	}
-	defer rows.Close()
-
-	fileNameToContractSet := make(map[string]string)
-	for rows.Next() {
-		var fileName string
-		var contractSetName string
-		if err := rows.Scan(&fileName, &contractSetName); err != nil {
-			return nil, fmt.Errorf("failed to scan contract set: %w", err)
-		}
-		fileNameToContractSet[fileName] = contractSetName
-	}
-	return fileNameToContractSet, nil
-}
-
 func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	var id Hash256
 	var height uint64
@@ -1979,15 +1902,14 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	}, nil
 }
 
-func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error) {
+func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, limit int) ([]api.UnhealthySlab, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT sla.key, sla.health
 		FROM slabs sla
-		INNER JOIN contract_sets cs ON sla.db_contract_set_id = cs.id
-		WHERE sla.health <= ? AND cs.name = ? AND sla.health_valid_until > ? AND sla.db_buffered_slab_id IS NULL
+		WHERE sla.health <= ? AND sla.health_valid_until > ? AND sla.db_buffered_slab_id IS NULL
 		ORDER BY sla.health ASC
 		LIMIT ?
-	`, healthCutoff, set, time.Now().Unix(), limit)
+	`, healthCutoff, time.Now().Unix(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
 	}
@@ -2056,12 +1978,24 @@ WHERE fcid = ?`,
 	return nil
 }
 
+func UpdateContractUsability(ctx context.Context, tx sql.Tx, fcid types.FileContractID, usability string) error {
+	var u ContractUsability
+	if err := u.LoadString(usability); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(ctx, `UPDATE contracts SET usability = ? WHERE fcid = ?`, u, FileContractID(fcid))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return api.ErrContractNotFound
+	}
+	return err
+}
+
 func UpdateAutopilot(ctx context.Context, tx sql.Tx, ap api.Autopilot) error {
 	_, err := tx.Exec(ctx, `
 UPDATE autopilot_config
 SET enabled = ?,
 	current_period = ?,
-	contracts_set = ?,
 	contracts_amount = ?,
 	contracts_period = ?,
 	contracts_renew_window = ?,
@@ -2076,7 +2010,6 @@ SET enabled = ?,
 WHERE id = ?`,
 		ap.Enabled,
 		ap.CurrentPeriod,
-		ap.Contracts.Set,
 		ap.Contracts.Amount,
 		ap.Contracts.Period,
 		ap.Contracts.RenewWindow,

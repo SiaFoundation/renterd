@@ -515,7 +515,6 @@ func (up UploadParams) PrometheusMetric() (metrics []prometheus.Metric) {
 	metrics = append(metrics, prometheus.Metric{
 		Name: "renterd_upload_currentheight",
 		Labels: map[string]any{
-			"contract_set":   up.ContractSet,
 			"upload_packing": boolToFloat(up.UploadPacking),
 		},
 		Value: float64(up.CurrentHeight),

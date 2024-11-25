@@ -35,8 +35,8 @@ var (
 	errContractOutOfFunds            = errors.New("contract is out of funds")
 	errContractUpForRenewal          = errors.New("contract is up for renewal")
 	errContractMaxRevisionNumber     = errors.New("contract has reached max revision number")
-	errContractNoRevision            = errors.New("contract has no revision")
 	errContractExpired               = errors.New("contract has expired")
+	errContractNoRevision            = errors.New("contract has no revision")
 	errContractNotConfirmed          = errors.New("contract hasn't been confirmed on chain in time")
 )
 
@@ -99,11 +99,11 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 }
 
 // isUsableContract returns whether the given contract is
-// - usable -> can be used in the contract set
-// - recoverable -> can be usable in the contract set if it is refreshed/renewed
+// - usable -> can be used
+// - recoverable -> can be usable if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, inSet bool, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
+func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSettings, pt rhpv3.HostPriceTable, rs api.RedundancySettings, contract contract, bh uint64, f *hostSet) (usable, refresh, renew bool, reasons []string) {
 	usable = true
 	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())
@@ -118,13 +118,13 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, s rhpv2.HostSetti
 	} else {
 		if isOutOfCollateral(cfg, rs, contract, s, pt) {
 			reasons = append(reasons, errContractOutOfCollateral.Error())
-			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
+			usable = usable && contract.IsGood() && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}
 		if isOutOfFunds(cfg, pt, contract) {
 			reasons = append(reasons, errContractOutOfFunds.Error())
-			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
+			usable = usable && contract.IsGood() && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}

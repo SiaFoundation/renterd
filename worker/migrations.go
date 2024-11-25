@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (w *Worker) migrate(ctx context.Context, s object.Slab, contractSet string, dlHosts []api.HostInfo, ulContracts []api.ContractMetadata, bh uint64) error {
+func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulContracts []api.ContractMetadata, bh uint64) error {
 	// map usable hosts
 	usableHosts := make(map[types.PublicKey]struct{})
 	for _, h := range dlHosts {
@@ -112,7 +112,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, contractSet, allowed, bh, mem)
+	err = w.uploadManager.UploadShards(ctx, s, shardIndices, shards, allowed, bh, mem)
 	if err != nil {
 		w.logger.Debugw("slab migration failed",
 			zap.Error(err),

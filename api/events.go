@@ -11,11 +11,10 @@ import (
 )
 
 const (
-	ModuleConsensus   = "consensus"
-	ModuleContract    = "contract"
-	ModuleContractSet = "contract_set"
-	ModuleHost        = "host"
-	ModuleSetting     = "setting"
+	ModuleConsensus = "consensus"
+	ModuleContract  = "contract"
+	ModuleHost      = "host"
+	ModuleSetting   = "setting"
 
 	EventAdd     = "add"
 	EventUpdate  = "update"
@@ -48,13 +47,6 @@ type (
 	EventContractRenew struct {
 		Renewal   ContractMetadata `json:"renewal"`
 		Timestamp time.Time        `json:"timestamp"`
-	}
-
-	EventContractSetUpdate struct {
-		Name      string                 `json:"name"`
-		ToAdd     []types.FileContractID `json:"toAdd"`
-		ToRemove  []types.FileContractID `json:"toRemove"`
-		Timestamp time.Time              `json:"timestamp"`
 	}
 
 	EventHostUpdate struct {
@@ -109,15 +101,6 @@ var (
 		}
 	}
 
-	WebhookContractSetUpdate = func(url string, headers map[string]string) webhooks.Webhook {
-		return webhooks.Webhook{
-			Event:   EventUpdate,
-			Headers: headers,
-			Module:  ModuleContractSet,
-			URL:     url,
-		}
-	}
-
 	WebhookHostUpdate = func(url string, headers map[string]string) webhooks.Webhook {
 		return webhooks.Webhook{
 			Event:   EventUpdate,
@@ -159,14 +142,6 @@ func ParseEventWebhook(event webhooks.Event) (interface{}, error) {
 			return e, nil
 		case EventRenew:
 			var e EventContractRenew
-			if err := json.Unmarshal(bytes, &e); err != nil {
-				return nil, err
-			}
-			return e, nil
-		}
-	case ModuleContractSet:
-		if event.Event == EventUpdate {
-			var e EventContractSetUpdate
 			if err := json.Unmarshal(bytes, &e); err != nil {
 				return nil, err
 			}

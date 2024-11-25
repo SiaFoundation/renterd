@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -37,6 +40,7 @@ type (
 		InitAutopilot(ctx context.Context, tx Tx) error
 		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		SlabBuffers(ctx context.Context, tx Tx) ([]string, error)
 		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
@@ -399,10 +403,9 @@ var (
 						} else {
 							enabled = true
 						}
-						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, current_period = ?, contracts_set = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, current_period = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_allow_redundant_ips = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
 							enabled,
 							period,
-							cfg.Contracts.Set,
 							cfg.Contracts.Amount,
 							cfg.Contracts.Period,
 							cfg.Contracts.RenewWindow,
@@ -426,6 +429,84 @@ var (
 
 					// drop autopilots table
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_autopilot_2", log)
+				},
+			},
+			{
+				ID: "00030_remove_contract_sets",
+				Migrate: func(tx Tx) error {
+					// prepare statement to rename the buffer
+					stmt, err := tx.Prepare(ctx, "UPDATE buffered_slabs SET filename = ? WHERE filename = ?")
+					if err != nil {
+						return fmt.Errorf("failed to prepare update statement: %w", err)
+					}
+					defer stmt.Close()
+
+					// prepare a helper to safely copy and sync the file
+					copyBuffer := func(buffer string) (string, error) {
+						parts := strings.Split(buffer, "-")
+						if len(parts) != 4 {
+							return "", fmt.Errorf("invalid buffer filename '%s'", buffer)
+						}
+
+						src, err := os.Open(buffer)
+						if err != nil {
+							return "", fmt.Errorf("failed to open buffer: %w", err)
+						}
+						defer src.Close()
+
+						path := strings.Join(parts[1:], "-")
+						err = os.Remove(path)
+						if err != nil && !os.IsNotExist(err) {
+							return "", fmt.Errorf("failed to remove existing file at '%s': %w", path, err)
+						}
+
+						dstFile, err := os.Create(path)
+						if err != nil {
+							return "", fmt.Errorf("failed to create destination buffer at '%s': %w", path, err)
+						}
+						defer dstFile.Close()
+
+						_, err = io.Copy(dstFile, src)
+						if err != nil {
+							return "", fmt.Errorf("failed to copy buffer: %w", err)
+						}
+
+						err = dstFile.Sync()
+						if err != nil {
+							return "", fmt.Errorf("failed to sync buffer: %w", err)
+						}
+
+						return dstFile.Name(), nil
+					}
+
+					// fetch all buffers
+					buffers, err := m.SlabBuffers(ctx, tx)
+					if err != nil {
+						return err
+					}
+
+					// copy all buffers
+					partialSlabDir := m.DB().partialSlabDir
+					for _, buffer := range buffers {
+						if dst, err := copyBuffer(filepath.Join(partialSlabDir, buffer)); err != nil {
+							return fmt.Errorf("failed to copy buffer '%s': %w", buffer, err)
+						} else if res, err := stmt.Exec(ctx, dst, buffer); err != nil {
+							return fmt.Errorf("failed to update buffer '%s': %w", buffer, err)
+						} else if n, err := res.RowsAffected(); err != nil {
+							return fmt.Errorf("failed to fetch rows affected: %w", err)
+						} else if n != 1 {
+							return fmt.Errorf("failed to update buffer, no rows affected when updating '%s' -> %s", buffer, dst)
+						}
+					}
+					// remove original buffers
+					for _, buffer := range buffers {
+						if err := os.Remove(filepath.Join(partialSlabDir, buffer)); err != nil {
+							return fmt.Errorf("failed to remove buffer '%s': %w", buffer, err)
+						}
+					}
+
+					// perform database migration
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_remove_contract_sets", log)
 				},
 			},
 		}
@@ -459,6 +540,12 @@ var (
 				ID: "00004_contract_spending",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_contract_spending", log)
+				},
+			},
+			{
+				ID: "00005_remove_contract_sets",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00005_remove_contract_sets", log)
 				},
 			},
 		}

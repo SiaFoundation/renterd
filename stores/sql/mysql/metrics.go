@@ -32,7 +32,7 @@ var _ ssql.MetricsDatabaseTx = (*MetricsDatabaseTx)(nil)
 // NewMetricsDatabase creates a new MySQL backend.
 func NewMetricsDatabase(db *dsql.DB, log *zap.Logger, lqd, ltd time.Duration) (*MetricsDatabase, error) {
 	log = log.Named("metrics")
-	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd)
+	store, err := sql.NewDB(db, log, deadlockMsgs, lqd, ltd, "")
 	return &MetricsDatabase{
 		db:  store,
 		log: log.Sugar(),
@@ -81,14 +81,6 @@ func (tx *MetricsDatabaseTx) ContractPruneMetrics(ctx context.Context, start tim
 	return ssql.ContractPruneMetrics(ctx, tx, start, n, interval, opts)
 }
 
-func (tx *MetricsDatabaseTx) ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	return ssql.ContractSetChurnMetrics(ctx, tx, start, n, interval, opts)
-}
-
-func (tx *MetricsDatabaseTx) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, _ error) {
-	return ssql.ContractSetMetrics(ctx, tx, start, n, interval, opts)
-}
-
 func (tx *MetricsDatabaseTx) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
 	return ssql.PruneMetrics(ctx, tx, metric, cutoff)
 }
@@ -99,14 +91,6 @@ func (tx *MetricsDatabaseTx) RecordContractMetric(ctx context.Context, metrics .
 
 func (tx *MetricsDatabaseTx) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
 	return ssql.RecordContractPruneMetric(ctx, tx, metrics...)
-}
-
-func (tx *MetricsDatabaseTx) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
-	return ssql.RecordContractSetChurnMetric(ctx, tx, metrics...)
-}
-
-func (tx *MetricsDatabaseTx) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
-	return ssql.RecordContractSetMetric(ctx, tx, metrics...)
 }
 
 func (tx *MetricsDatabaseTx) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {

@@ -38,7 +38,7 @@ func (s *testSQLStore) InsertSlab(slab object.Slab) {
 			},
 		},
 	}
-	err := s.UpdateObject(context.Background(), testBucket, "/"+hex.EncodeToString(frand.Bytes(16)), testContractSet, "", "", api.ObjectUserMetadata{}, obj)
+	err := s.UpdateObject(context.Background(), testBucket, "/"+hex.EncodeToString(frand.Bytes(16)), "", "", api.ObjectUserMetadata{}, obj)
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -80,14 +80,14 @@ func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld,
 	return s.waitForPruneLoop(ts)
 }
 
-func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, contractSet, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
+func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
 	var ts time.Time
 	_, err := s.Object(ctx, bucket, path)
 	if err == nil {
 		ts = time.Now()
 		time.Sleep(time.Millisecond)
 	}
-	if err := s.UpdateObject(ctx, bucket, path, contractSet, eTag, mimeType, metadata, o); err != nil {
+	if err := s.UpdateObject(ctx, bucket, path, eTag, mimeType, metadata, o); err != nil {
 		return err
 	}
 	return s.waitForPruneLoop(ts)
@@ -428,37 +428,6 @@ func TestSQLContractStore(t *testing.T) {
 		t.Fatal("contract mismatch")
 	}
 
-	// add a contract set, assert we can fetch it and it holds our contract
-	if err := ss.UpdateContractSet(context.Background(), "foo", []types.FileContractID{fcid}, nil); err != nil {
-		t.Fatal(err)
-	} else if contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: "foo"}); err != nil {
-		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatalf("should have 1 contracts but got %v", len(contracts))
-	}
-
-	// assert api.ErrContractSetNotFound is returned
-	if _, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: "bar"}); !errors.Is(err, api.ErrContractSetNotFound) {
-		t.Fatal(err)
-	}
-
-	// add another contract set
-	if err := ss.UpdateContractSet(context.Background(), "foo2", []types.FileContractID{fcid}, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	// fetch all sets
-	sets, err := ss.ContractSets(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sets) != 3 { // 2 sets + default set
-		t.Fatal("wrong number of sets")
-	}
-	if sets[0] != "foo" || sets[1] != "foo2" || sets[2] != testContractSet {
-		t.Fatal("wrong sets returned", sets)
-	}
-
 	// archive the contract
 	if err := ss.ArchiveContract(context.Background(), fcid, api.ContractArchivalReasonRemoved); err != nil {
 		t.Fatal(err)
@@ -527,6 +496,60 @@ func TestContractRoots(t *testing.T) {
 	}
 	if len(roots) != 1 || roots[0] != root {
 		t.Fatal("unexpected", roots)
+	}
+}
+
+func TestContractUsability(t *testing.T) {
+	// create a SQL store
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add two contracts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert both contracts are usable
+	contracts, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 2 {
+		t.Fatal("wrong number of contracts", len(contracts))
+	}
+
+	// archive a contract
+	err = ss.ArchiveContract(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert only one contract is usbale now
+	contracts, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("wrong number of contracts", len(contracts))
+	} else if contracts[0].HostKey != hks[1] {
+		t.Fatal("wrong contract", contracts[0])
+	}
+
+	// update the usability of the remaining contract
+	err = ss.UpdateContractUsability(context.Background(), fcids[1], api.ContractUsabilityBad)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert no contracts are usable
+	contracts, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("wrong number of contracts", len(contracts))
 	}
 }
 
@@ -623,7 +646,7 @@ func TestArchiveContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(active) != 1 || active[0].ID != fcids[0] {
+	if len(active) != 1 || active[0].ID != fcids[0] || active[0].Usability != api.ContractUsabilityGood {
 		t.Fatal("wrong contracts", active)
 	}
 
@@ -631,7 +654,7 @@ func TestArchiveContracts(t *testing.T) {
 	ffcids := make([]sql.FileContractID, 2)
 	ffcids[0] = sql.FileContractID(fcids[1])
 	ffcids[1] = sql.FileContractID(fcids[2])
-	rows, err := ss.DB().Query(context.Background(), "SELECT archival_reason FROM contracts WHERE fcid IN (?, ?)",
+	rows, err := ss.DB().Query(context.Background(), "SELECT archival_reason, usability FROM contracts WHERE fcid IN (?, ?)",
 		sql.FileContractID(ffcids[0]), sql.FileContractID(ffcids[1]))
 	if err != nil {
 		t.Fatal(err)
@@ -641,12 +664,15 @@ func TestArchiveContracts(t *testing.T) {
 	var cnt int
 	for rows.Next() {
 		var reason string
-		if err := rows.Scan(&reason); err != nil {
+		var usability uint8
+		if err := rows.Scan(&reason, &usability); err != nil {
 			t.Fatal(err)
 		} else if cnt == 0 && reason != "foo" {
 			t.Fatal("unexpected reason", reason)
 		} else if cnt == 1 && reason != "bar" {
 			t.Fatal("unexpected reason", reason)
+		} else if usability != 1 { // marked as bad
+			t.Fatal("unexpected usability", usability)
 		}
 		cnt++
 	}
@@ -963,11 +989,6 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// all contracts are good
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids, nil); err != nil {
-		t.Fatal(err)
-	}
-
 	// add an object with 2 slabs
 	add := object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
@@ -1017,7 +1038,7 @@ func TestObjectHealth(t *testing.T) {
 	}
 
 	// update contract to impact the object's health
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3], fcids[4]}, []types.FileContractID{fcids[1]}); err != nil {
+	if err := ss.UpdateContractUsability(context.Background(), fcids[1], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.RefreshHealth(context.Background()); err != nil {
@@ -1054,8 +1075,8 @@ func TestObjectHealth(t *testing.T) {
 		t.Fatal("wrong health", entries[0].Health)
 	}
 
-	// update contract set again to make sure the 2nd slab has even worse health
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{fcids[0], fcids[2], fcids[3]}, []types.FileContractID{fcids[4]}); err != nil {
+	// update contract usability again to make sure the 2nd slab has even worse health
+	if err := ss.UpdateContractUsability(context.Background(), fcids[4], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
 	if err := ss.RefreshHealth(context.Background()); err != nil {
@@ -1473,9 +1494,8 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 	fcid1, fcid2, fcid3, fcid4 := fcids[0], fcids[1], fcids[2], fcids[3]
 
-	// update the contract set
-	goodContracts := []types.FileContractID{fcid1, fcid2, fcid3}
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, goodContracts, nil); err != nil {
+	// mark the 4th one as bad
+	if err := ss.UpdateContractUsability(context.Background(), fcid4, api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1563,7 +1583,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// add a partial slab
-	_, _, err = ss.AddPartialSlab(context.Background(), []byte{1, 2, 3}, 1, 3, testContractSet)
+	_, _, err = ss.AddPartialSlab(context.Background(), []byte{1, 2, 3}, 1, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1571,7 +1591,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1592,7 +1612,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.49, testContractSet, -1)
+	slabs, err = ss.UnhealthySlabs(context.Background(), 0.49, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1606,18 +1626,6 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(slabs, expected) {
 		t.Fatal("slabs are not returned in the correct order", slabs, expected)
-	}
-
-	// Fetch unhealthy slabs again but for different contract set.
-	if err := ss.RefreshHealth(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.49, t.Name(), -1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(slabs) != 0 {
-		t.Fatal("expected no slabs to migrate", len(slabs))
 	}
 }
 
@@ -1639,11 +1647,6 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	fcid1 := fcids[0]
-
-	// add it to the contract set
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids, nil); err != nil {
-		t.Fatal(err)
-	}
 
 	// create an object
 	obj := object.Object{
@@ -1671,7 +1674,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1699,11 +1702,6 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	}
 	fcid1 := fcids[0]
 
-	// add it to the contract set
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids, nil); err != nil {
-		t.Fatal(err)
-	}
-
 	// create an object
 	obj := object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
@@ -1727,7 +1725,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1749,7 +1747,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
+	slabs, err = ss.UnhealthySlabs(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1776,11 +1774,13 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fcid1, fcid2, fcid3 := fcids[0], fcids[1], fcids[2]
+	fcid1, fcid2, fcid3, fcid4 := fcids[0], fcids[1], fcids[2], fcids[3]
 
-	// select the first two contracts as good contracts
-	goodContracts := []types.FileContractID{fcid1, fcid2}
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, goodContracts, nil); err != nil {
+	// mark two contracts as bad
+	if err := ss.UpdateContractUsability(context.Background(), fcid3, api.ContractUsabilityBad); err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.UpdateContractUsability(context.Background(), fcid4, api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1817,7 +1817,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, testContractSet, -1)
+	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1982,9 +1982,8 @@ func TestUpdateSlab(t *testing.T) {
 		}
 	}
 
-	// select contracts h1 and h3 as good contracts (h2 is bad)
-	goodContracts := []types.FileContractID{fcid1, fcid3}
-	if err := ss.UpdateContractSet(ctx, testContractSet, goodContracts, nil); err != nil {
+	// mark the second contract as bad
+	if err := ss.UpdateContractUsability(ctx, fcid2, api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1992,7 +1991,7 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	toMigrate, err := ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	toMigrate, err := ss.UnhealthySlabs(ctx, 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2037,7 +2036,7 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	toMigrate, err = ss.UnhealthySlabs(ctx, 0.99, testContractSet, -1)
+	toMigrate, err = ss.UnhealthySlabs(ctx, 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2516,9 +2515,6 @@ func TestPartialSlab(t *testing.T) {
 		if buf == (api.SlabBuffer{}) {
 			t.Fatal("buffer not found for name", name)
 		}
-		if buf.ContractSet != testContractSet {
-			t.Fatal("wrong contract set", buf.ContractSet, testContractSet)
-		}
 		if buf.Filename != name {
 			t.Fatal("wrong filename", buf.Filename, name)
 		}
@@ -2546,7 +2542,7 @@ func TestPartialSlab(t *testing.T) {
 
 	// Add the first slab.
 	ctx := context.Background()
-	slabs, bufferSize, err := ss.AddPartialSlab(ctx, slab1Data, 1, 2, testContractSet)
+	slabs, bufferSize, err := ss.AddPartialSlab(ctx, slab1Data, 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2623,7 +2619,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add the second slab.
-	slabs, bufferSize, err = ss.AddPartialSlab(ctx, slab2Data, 1, 2, testContractSet)
+	slabs, bufferSize, err = ss.AddPartialSlab(ctx, slab2Data, 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2654,7 +2650,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add third slab.
-	slabs, bufferSize, err = ss.AddPartialSlab(ctx, slab3Data, 1, 2, testContractSet)
+	slabs, bufferSize, err = ss.AddPartialSlab(ctx, slab3Data, 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2694,7 +2690,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Fetch the buffer for uploading
-	packedSlabs, err := ss.PackedSlabsForUpload(ctx, time.Hour, 1, 2, testContractSet, 100)
+	packedSlabs, err := ss.PackedSlabsForUpload(ctx, time.Hour, 1, 2, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2749,11 +2745,11 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add 2 more partial slabs.
-	slices1, _, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	slices1, _, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slices2, bufferSize, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2, testContractSet)
+	slices2, bufferSize, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3038,7 +3034,7 @@ func TestBucketObjects(t *testing.T) {
 
 	// Adding an object to a bucket that doesn't exist shouldn't work.
 	obj := newTestObject(1)
-	err := ss.UpdateObject(context.Background(), "unknown-bucket", "/foo", testContractSet, testETag, testMimeType, testMetadata, obj)
+	err := ss.UpdateObject(context.Background(), "unknown-bucket", "/foo", testETag, testMimeType, testMetadata, obj)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected ErrBucketNotFound", err)
 	}
@@ -3069,7 +3065,7 @@ func TestBucketObjects(t *testing.T) {
 		obj := newTestObject(frand.Intn(9) + 1)
 		obj.Slabs = obj.Slabs[:1]
 		obj.Slabs[0].Length = uint32(o.size)
-		err := ss.UpdateObject(ctx, o.bucket, o.path, testContractSet, testETag, testMimeType, testMetadata, obj)
+		err := ss.UpdateObject(ctx, o.bucket, o.path, testETag, testMimeType, testMetadata, obj)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3221,7 +3217,7 @@ func TestCopyObject(t *testing.T) {
 
 	// Create one object.
 	obj := newTestObject(1)
-	err := ss.UpdateObject(ctx, "src", "/foo", testContractSet, testETag, testMimeType, testMetadata, obj)
+	err := ss.UpdateObject(ctx, "src", "/foo", testETag, testMimeType, testMetadata, obj)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3273,7 +3269,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 
 	// create a full buffered slab.
 	completeSize := bufferedSlabSize(1)
-	slabs, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1, testContractSet)
+	slabs, _, err := ss.AddPartialSlab(context.Background(), frand.Bytes(completeSize), 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3288,7 +3284,7 @@ func TestMarkSlabUploadedAfterRenew(t *testing.T) {
 	}
 
 	// fetch it for upload.
-	packedSlabs, err := ss.PackedSlabsForUpload(context.Background(), time.Hour, 1, 1, testContractSet, 100)
+	packedSlabs, err := ss.PackedSlabsForUpload(context.Background(), time.Hour, 1, 1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3701,7 +3697,7 @@ func TestSlabHealthInvalidation(t *testing.T) {
 
 	// prepare a slab with pieces on h3 and h4
 	s2 := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
-	err = ss.UpdateObject(context.Background(), testBucket, "/o2", testContractSet, testETag, testMimeType, testMetadata, object.Object{
+	err = ss.UpdateObject(context.Background(), testBucket, "/o2", testETag, testMimeType, testMetadata, object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 		Slabs: []object.SlabSlice{{Slab: object.Slab{
 			EncryptionKey: s2,
@@ -3715,46 +3711,43 @@ func TestSlabHealthInvalidation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert there are 0 contracts in the contract set
-	cscs, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
-	if err != nil {
+	// mark contracts 3 and 4 as bad
+	if err := ss.UpdateContractUsability(context.Background(), fcids[2], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
-	} else if len(cscs) != 0 {
-		t.Fatal("expected 0 contracts", len(cscs))
-	}
-
-	// refresh health
-	refreshHealth(s1, s2)
-
-	// add 2 contracts to the contract set
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids[:2], nil); err != nil {
+	} else if err := ss.UpdateContractUsability(context.Background(), fcids[3], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
 	}
-	assertHealthValid(s1, false)
-	assertHealthValid(s2, true)
 
-	// refresh health
-	refreshHealth(s1, s2)
-
-	// switch out the contract set with two new contracts
-	if err := ss.UpdateContractSet(context.Background(), testContractSet, fcids[2:], fcids[:2]); err != nil {
-		t.Fatal(err)
-	}
+	// assert both slabs have invalid health
 	assertHealthValid(s1, false)
 	assertHealthValid(s2, false)
+	refreshHealth(s1, s2) // reset
 
-	// assert there are 2 contracts in the contract set
-	cscs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: testContractSet})
-	if err != nil {
+	// switch out the usabe contracts
+	if err := ss.UpdateContractUsability(context.Background(), fcids[0], api.ContractUsabilityBad); err != nil {
 		t.Fatal(err)
-	} else if len(cscs) != 2 {
-		t.Fatal("expected 2 contracts", len(cscs))
-	} else if cscs[0].ID != (types.FileContractID{3}) || cscs[1].ID != (types.FileContractID{4}) {
-		t.Fatal("unexpected contracts", cscs)
+	} else if err := ss.UpdateContractUsability(context.Background(), fcids[1], api.ContractUsabilityBad); err != nil {
+		t.Fatal(err)
+	} else if err := ss.UpdateContractUsability(context.Background(), fcids[2], api.ContractUsabilityGood); err != nil {
+		t.Fatal(err)
+	} else if err := ss.UpdateContractUsability(context.Background(), fcids[3], api.ContractUsabilityGood); err != nil {
+		t.Fatal(err)
 	}
 
-	// refresh health
-	refreshHealth(s1, s2)
+	// assert health has been invalidated
+	assertHealthValid(s1, false)
+	assertHealthValid(s2, false)
+	refreshHealth(s1, s2) // reset
+
+	// assert there are 2 good contracts
+	good, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(good) != 2 {
+		t.Fatal("expected 2 contracts", len(good))
+	} else if good[0].ID != (types.FileContractID{3}) || good[1].ID != (types.FileContractID{4}) {
+		t.Fatal("unexpected contracts", good)
+	}
 
 	// archive the contract for h3 and assert s2 was invalidated
 	if err := ss.ArchiveContract(context.Background(), types.FileContractID{3}, "test"); err != nil {
@@ -3835,11 +3828,6 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal("unexpected", len(ancestors))
 	}
 
-	// create a contract set
-	if err := ss.UpdateContractSet(context.Background(), t.Name(), []types.FileContractID{fcid}, nil); err != nil {
-		t.Fatal(err)
-	}
-
 	// create an object
 	obj := object.Object{
 		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
@@ -3863,7 +3851,7 @@ func TestRenewedContract(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, "/"+t.Name(), 10); err != nil {
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, 10); err != nil {
 		t.Fatal(err)
 	} else if len(slabs) > 0 {
 		t.Fatal("shouldn't return any slabs", len(slabs))
@@ -3893,8 +3881,8 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 
-	// assert the contract set was updated.
-	csc, err := ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
+	// assert the renewal is marked as good
+	csc, err := ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(csc) != 1 {
@@ -3907,7 +3895,7 @@ func TestRenewedContract(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, "/"+t.Name(), 10); err != nil {
+	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, 10); err != nil {
 		t.Fatal(err)
 	} else if len(slabs) > 0 {
 		t.Fatal("shouldn't return any slabs", len(slabs))
@@ -3937,8 +3925,8 @@ func TestRenewedContract(t *testing.T) {
 		t.Fatal("unexpected number of contracts", len(cs))
 	}
 
-	// assert the archived contract is not in the set
-	cs, err = ss.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name(), FilterMode: api.ContractFilterModeAll})
+	// assert the archived contract is no longer good
+	cs, err = ss.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		t.Fatal(err)
 	} else if len(cs) != 1 {
@@ -3982,12 +3970,8 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add test contract & set it as contract set
+	// add test contract
 	fcids, _, err := ss.addTestContracts(hks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4031,8 +4015,8 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", added.Health)
 	}
 
-	// update contract set to not contain the first contract
-	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids[1:], fcids[:1])
+	// mark the first contract as bad
+	err = ss.UpdateContractUsability(context.Background(), fcids[0], api.ContractUsabilityBad)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4046,9 +4030,17 @@ func TestRefreshHealth(t *testing.T) {
 		t.Fatal("expected health to be 1, got", health(o2))
 	}
 
-	// update contract set again to increase health of o1 again and lower health
-	// of o2
-	err = ss.UpdateContractSet(context.Background(), testContractSet, fcids[:6], fcids[6:])
+	// mark the first contract as good and last two as bad, increasing health of
+	// o1 again and lowering the health of o2
+	err = ss.UpdateContractUsability(context.Background(), fcids[0], api.ContractUsabilityGood)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.UpdateContractUsability(context.Background(), fcids[6], api.ContractUsabilityBad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ss.UpdateContractUsability(context.Background(), fcids[7], api.ContractUsabilityBad)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4084,15 +4076,6 @@ func TestSlabCleanup(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// create contract set
-	err := ss.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-		return tx.UpdateContractSet(context.Background(), testContractSet, nil, nil)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	csID := ss.ContractSetID(testContractSet)
-
 	// create buffered slab
 	bsID := uint(1)
 	if _, err := ss.DB().Exec(context.Background(), "INSERT INTO buffered_slabs (filename) VALUES ('foo');"); err != nil {
@@ -4124,7 +4107,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create a slab
 	var slabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?);", csID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (`key`, health_valid_until) VALUES (?, ?);", sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
 		t.Fatal(err)
 	} else if slabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4165,7 +4148,7 @@ func TestSlabCleanup(t *testing.T) {
 
 	// create another slab referencing the buffered slab
 	var bufferedSlabID int64
-	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, db_contract_set_id, `key`, health_valid_until) VALUES (?, ?, ?, ?);", bsID, csID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
+	if res, err := ss.DB().Exec(context.Background(), "INSERT INTO slabs (db_buffered_slab_id, `key`, health_valid_until) VALUES (?, ?, ?);", bsID, sql.EncryptionKey(object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)), 100); err != nil {
 		t.Fatal(err)
 	} else if bufferedSlabID, err = res.LastInsertId(); err != nil {
 		t.Fatal(err)
@@ -4331,14 +4314,13 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	// helper type to fetch a slab
 	type slab struct {
 		ID               int64
-		ContractSetID    int64
 		Health           float64
 		HealthValidUntil int64
 		MinShards        uint8
 		TotalShards      uint8
 		Key              object.EncryptionKey
 	}
-	fetchSlabStmt, err := ss.DB().Prepare(context.Background(), "SELECT id, db_contract_set_id, health, health_valid_until, min_shards, total_shards, `key` FROM slabs WHERE id = ?")
+	fetchSlabStmt, err := ss.DB().Prepare(context.Background(), "SELECT id, health, health_valid_until, min_shards, total_shards, `key` FROM slabs WHERE id = ?")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4356,13 +4338,11 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		// fetch the slab
 		var slab slab
 		err = fetchSlabStmt.QueryRow(context.Background(), slice.SlabID).
-			Scan(&slab.ID, &slab.ContractSetID, &slab.Health, &slab.HealthValidUntil, &slab.MinShards, &slab.TotalShards, (*sql.EncryptionKey)(&slab.Key))
+			Scan(&slab.ID, &slab.Health, &slab.HealthValidUntil, &slab.MinShards, &slab.TotalShards, (*sql.EncryptionKey)(&slab.Key))
 		if err != nil {
 			t.Fatal(err)
 		} else if slab.ID != int64(i+1) {
 			t.Fatal("unexpected id", slab.ID)
-		} else if slab.ContractSetID != 1 {
-			t.Fatal("invalid contract set id", slab.ContractSetID)
 		} else if slab.Health != 1 {
 			t.Fatal("invalid health", slab.Health)
 		} else if slab.HealthValidUntil != 0 {
@@ -4456,13 +4436,11 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	// fetch the slab
 	var slab2 slab
 	err = fetchSlabStmt.QueryRow(context.Background(), slice2.SlabID).
-		Scan(&slab2.ID, &slab2.ContractSetID, &slab2.Health, &slab2.HealthValidUntil, &slab2.MinShards, &slab2.TotalShards, (*sql.EncryptionKey)(&slab2.Key))
+		Scan(&slab2.ID, &slab2.Health, &slab2.HealthValidUntil, &slab2.MinShards, &slab2.TotalShards, (*sql.EncryptionKey)(&slab2.Key))
 	if err != nil {
 		t.Fatal(err)
 	} else if slab2.ID != int64(len(slices)+1) {
 		t.Fatal("unexpected id", slab2.ID)
-	} else if slab2.ContractSetID != 1 {
-		t.Fatal("invalid contract set id", slab2.ContractSetID)
 	} else if slab2.Health != 1 {
 		t.Fatal("invalid health", slab2.Health)
 	} else if slab2.HealthValidUntil != 0 {
@@ -4592,7 +4570,7 @@ func TestUpdateObjectParallel(t *testing.T) {
 			}
 
 			// update the object
-			if err := ss.UpdateObject(context.Background(), testBucket, name, testContractSet, testETag, testMimeType, testMetadata, obj); err != nil {
+			if err := ss.UpdateObject(context.Background(), testBucket, name, testETag, testMimeType, testMetadata, obj); err != nil {
 				t.Error(err)
 				return
 			}

@@ -38,6 +38,7 @@ type (
 		log               *zap.Logger
 		longQueryDuration time.Duration
 		longTxDuration    time.Duration
+		partialSlabDir    string
 	}
 
 	// A txn is an interface for executing queries within a transaction.
@@ -62,7 +63,7 @@ type (
 	}
 )
 
-func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration) (*DB, error) {
+func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration, longTxDuration time.Duration, partialSlabDir string) (*DB, error) {
 	if longQueryDuration == 0 || longTxDuration == 0 {
 		return nil, fmt.Errorf("longQueryDuration and longTxDuration must be non-zero: %d %d", longQueryDuration, longTxDuration)
 	}
@@ -72,6 +73,7 @@ func NewDB(db *sql.DB, log *zap.Logger, dbLockedMsgs []string, longQueryDuration
 		log:               log,
 		longQueryDuration: longQueryDuration,
 		longTxDuration:    longTxDuration,
+		partialSlabDir:    partialSlabDir,
 	}, nil
 }
 

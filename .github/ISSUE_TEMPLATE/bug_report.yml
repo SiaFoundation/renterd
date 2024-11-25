@@ -74,18 +74,6 @@ body:
       placeholder: Paste the output of the above commands here
     validations:
       required: true
-  - type: input
-    id: csContracts
-    attributes:
-      label: Contract Set Contracts
-      description: |
-        The number of contracts in your contract set
-        ```bash
-        curl -u ":[YOUR_PASSWORD]" "http://localhost:9980/api/bus/contracts?contractset=autopilot" | grep '"id"' | wc -l
-        ```
-      placeholder: Paste the output of the above command here ```
-    validations:
-      required: true
   - type: textarea
     attributes:
       label: Anything else?

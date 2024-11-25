@@ -12,7 +12,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/webhooks"
 )
 
@@ -24,7 +23,6 @@ func TestEvents(t *testing.T) {
 		api.WebhookConsensusUpdate,
 		api.WebhookContractArchive,
 		api.WebhookContractRenew,
-		api.WebhookContractSetUpdate,
 		api.WebhookHostUpdate,
 		api.WebhookSettingUpdate,
 	}
@@ -154,10 +152,6 @@ func TestEvents(t *testing.T) {
 			}
 		case api.EventContractArchive:
 			if e.ContractID != renewed.ID || e.Reason != t.Name() || e.Timestamp.IsZero() {
-				t.Fatalf("unexpected event %+v", e)
-			}
-		case api.EventContractSetUpdate:
-			if e.Name != test.ContractSet || len(e.ToAdd) != 1 || (e.ToAdd[0] != c.ID && e.ToAdd[0] != renewed.ID) || len(e.ToRemove) != 0 || e.Timestamp.IsZero() {
 				t.Fatalf("unexpected event %+v", e)
 			}
 		case api.EventConsensusUpdate:
