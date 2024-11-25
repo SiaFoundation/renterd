@@ -846,6 +846,7 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		})
 		contract = res.Contract
 		txnSet = res.RenewalSet
+		fmt.Println("RPCRefresh", res.Contract.Revision.MissedHostValue, minNewCollateral, err)
 	} else {
 		var res cRhp4.RPCRenewContractResult
 		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
@@ -856,6 +857,7 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		})
 		contract = res.Contract
 		txnSet = res.RenewalSet
+		fmt.Println("RPCRenew", res.Contract.Revision.MissedHostValue, minNewCollateral, err)
 	}
 	if err != nil {
 		return api.ContractMetadata{}, err
