@@ -57,9 +57,6 @@ var (
 	// sector.
 	ErrSectorNotFound = errors.New("sector not found")
 
-	// errHost is used to wrap rpc errors returned by the host.
-	errHost = errors.New("host responded with error")
-
 	// errTransport is used to wrap rpc errors caused by the transport.
 	errTransport = errors.New("transport error")
 
@@ -92,11 +89,6 @@ var (
 	// has an expiry block height that is in the past.
 	errWithdrawalExpired = errors.New("withdrawal request expired")
 )
-
-// IsErrHost indicates whether an error was returned by a host as part of an RPC.
-func IsErrHost(err error) bool {
-	return utils.IsErr(err, errHost)
-}
 
 func IsBalanceInsufficient(err error) bool { return utils.IsErr(err, ErrBalanceInsufficient) }
 func IsBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }

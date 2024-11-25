@@ -784,7 +784,7 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 	}, nil
 }
 
-func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
@@ -805,14 +805,34 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		return api.ContractMetadata{}, errors.New(gb.String())
 	}
 
+	// determine the new collateral we want the host to put into the
+	// renewed/refreshed contract
+	newCollateral := settings.Prices.Collateral.Mul64(expectedNewStorage).Mul64(endHeight - cs.Index.Height)
+	if newCollateral.Cmp(settings.MaxCollateral) > 0 {
+		newCollateral = settings.MaxCollateral
+	}
+	if newCollateral.Cmp(minNewCollateral) < 0 {
+		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v", newCollateral, minNewCollateral)
+	}
+
 	var contract cRhp4.ContractRevision
 	var txnSet cRhp4.TransactionSet
 	if c.EndHeight() == endHeight {
+		// when refreshing, the 'collateral' is added on top of the existing
+		// collateral so we account for that by subtracting the rolled over
+		// value
+		var collateral types.Currency
+		if rev.MissedHostValue.Cmp(newCollateral) > 0 {
+			collateral = types.ZeroCurrency
+		} else {
+			collateral = newCollateral.Sub(rev.MissedHostValue)
+		}
+		// refresh
 		var res cRhp4.RPCRefreshContractResult
 		res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
 			ContractID: c.ID,
 			Allowance:  renterFunds,
-			Collateral: minNewCollateral,
+			Collateral: collateral,
 		})
 		contract = res.Contract
 		txnSet = res.RenewalSet
@@ -822,7 +842,7 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
 			ContractID:  c.ID,
 			Allowance:   renterFunds,
-			Collateral:  minNewCollateral,
+			Collateral:  newCollateral,
 			ProofHeight: endHeight,
 		})
 		contract = res.Contract
