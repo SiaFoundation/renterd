@@ -228,6 +228,12 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		hostCollateral = maxCollateral
 	}
 
+	// shouldn't go below the minimum immediately so we add some buffer
+	minCollateral := MinCollateral.Mul64(2)
+	if hostCollateral.Cmp(minCollateral) < 0 {
+		hostCollateral = minCollateral
+	}
+
 	// form contract
 	contract, err := c.bus.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
 	if err != nil {
