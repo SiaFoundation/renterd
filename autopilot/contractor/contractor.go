@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -273,8 +272,6 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 
 	// convenience variables
 	pt := host.PriceTable.HostPriceTable
-	fcid := contract.ID
-	hk := contract.HostKey
 	rev := contract.Revision
 
 	// fetch consensus state
@@ -291,8 +288,12 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 		renterFunds = rev.RenterFunds // don't increase funds
 	}
 
-	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
-	unallocatedCollateral := contract.RemainingCollateral()
+	var expectedNewStorage uint64
+	if host.IsV2() {
+		expectedNewStorage = renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
+	} else {
+		expectedNewStorage = renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
+	}
 
 	// a refresh should always result in a contract that has enough collateral
 	minNewCollateral := MinCollateral.Mul64(2)
@@ -300,17 +301,14 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	// renew the contract
 	renewal, err := c.bus.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral, expectedNewStorage)
 	if err != nil {
-		if strings.Contains(err.Error(), "new collateral is too low") {
-			logger.Infow("refresh failed: contract wouldn't have enough collateral after refresh",
-				"hk", hk,
-				"fcid", fcid,
-				"unallocatedCollateral", unallocatedCollateral.String(),
-				"minNewCollateral", minNewCollateral.String(),
-			)
-			return api.ContractMetadata{}, true, err
-		}
-		logger.Errorw("refresh failed", zap.Error(err), "hk", hk, "fcid", fcid)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !rhp3.IsErrHost(err) {
+		logger.Errorw(
+			"refresh failed",
+			zap.Error(err),
+			"endHeight", contract.EndHeight(),
+			"renterFunds", renterFunds,
+			"expectedNewStorage", expectedNewStorage,
+		)
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !utils.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -355,10 +353,20 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	}
 
 	// calculate the expected new storage
-	expectedNewStorage := renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, pt)
+	var expectedNewStorage uint64
+	if host.IsV2() {
+		expectedNewStorage = renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
+	} else {
+		expectedNewStorage = renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
+	}
+
+	// unlike a refresh, a renewal doesn't require a minimum amount of
+	// collateral after the renewal since our primary goal is to extend the
+	// lifetime of our data.
+	minNewCollateral := types.ZeroCurrency
 
 	// renew the contract
-	renewal, err := c.bus.RenewContract(ctx, fcid, endHeight, renterFunds, types.ZeroCurrency, expectedNewStorage)
+	renewal, err := c.bus.RenewContract(ctx, fcid, endHeight, renterFunds, minNewCollateral, expectedNewStorage)
 	if err != nil {
 		logger.Errorw(
 			"renewal failed",
@@ -367,7 +375,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 			"renterFunds", renterFunds,
 			"expectedNewStorage", expectedNewStorage,
 		)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !rhp3.IsErrHost(err) {
+		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !utils.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
 		}
 		return api.ContractMetadata{}, true, err
@@ -761,11 +769,11 @@ func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds 
 // be able to afford given the provided 'renterFunds'.
 func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, pt rhpv3.HostPriceTable) uint64 {
 	costPerSector := sectorUploadCost(pt, duration)
-	// Handle free storage.
+	// handle free storage
 	if costPerSector.IsZero() {
 		costPerSector = types.NewCurrency64(1)
 	}
-	// Catch overflow.
+	// catch overflow
 	expectedStorage := renterFunds.Div(costPerSector).Mul64(rhpv2.SectorSize)
 	if expectedStorage.Cmp(types.NewCurrency64(math.MaxUint64)) > 0 {
 		expectedStorage = types.NewCurrency64(math.MaxUint64)
@@ -778,12 +786,17 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 func renterFundsToExpectedStorageV2(renterFunds types.Currency, duration uint64, hp rhpv4.HostPrices) uint64 {
 	sectorUploadCost := hp.RPCWriteSectorCost(rhpv4.SectorSize, 144*3).RenterCost()
 	sectorStorageCost := hp.RPCAppendSectorsCost(1, duration).RenterCost()
-	costPerByte := sectorUploadCost.Add(sectorStorageCost).Div64(rhpv4.SectorSize)
-	expectedStorage := renterFunds.Div(costPerByte).Big()
-	if !expectedStorage.IsUint64() {
-		return math.MaxUint64
+	costPerSector := sectorUploadCost.Add(sectorStorageCost)
+	// handle free storage
+	if costPerSector.IsZero() {
+		costPerSector = types.NewCurrency64(1)
 	}
-	return expectedStorage.Uint64()
+	// catch overflow
+	expectedStorage := renterFunds.Div(costPerSector).Mul64(rhpv4.SectorSize)
+	if expectedStorage.Cmp(types.NewCurrency64(math.MaxUint64)) > 0 {
+		expectedStorage = types.NewCurrency64(math.MaxUint64)
+	}
+	return expectedStorage.Big().Uint64()
 }
 
 // performContractChecks performs maintenance on existing contracts,
@@ -984,7 +997,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 				// don't register an alert for hosts that are out of funds since the
 				// user can't do anything about it
-				if !(rhp3.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+				if !(utils.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
 					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
 				}
 				logger.Error("failed to renew contract")
@@ -1003,7 +1016,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 
 				// don't register an alert for hosts that are out of funds since the
 				// user can't do anything about it
-				if !(rhp3.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
+				if !(utils.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
 					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(contract, !ourFault, err))
 				}
 				logger.Error("failed to refresh contract")
