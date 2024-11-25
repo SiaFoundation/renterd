@@ -107,21 +107,18 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, contract contract
 			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
-			fmt.Println("needs refresh OOC", contract.RemainingCollateral(), MinCollateral)
 		}
 		if contract.IsOutOfFunds() {
 			reasons = append(reasons, errContractOutOfFunds.Error())
 			usable = usable && inSet && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
-			fmt.Println("needs refresh OOF")
 		}
 		if shouldRenew, secondHalf := isUpForRenewal(cfg, contract.EndHeight(), bh); shouldRenew {
 			reasons = append(reasons, fmt.Errorf("%w; second half: %t", errContractUpForRenewal, secondHalf).Error())
 			usable = usable && !secondHalf // only unusable if in second half of renew window
 			refresh = false
 			renew = true
-			fmt.Println("needs renew")
 		}
 	}
 	return

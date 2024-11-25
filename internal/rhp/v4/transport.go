@@ -2,7 +2,6 @@ package rhp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -52,7 +51,7 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 		err = fn(client)
 		if err != nil && rhpv4.ErrorCode(err) != rhpv4.ErrorCodeTransport {
 			// wrap error to indicate that the error was returned by the host
-			err = errors.Join(utils.ErrHost, err)
+			err = fmt.Errorf("%w: %w", utils.ErrHost, err)
 		}
 		return err
 	}()
