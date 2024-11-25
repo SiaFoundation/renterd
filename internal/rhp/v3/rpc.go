@@ -489,7 +489,7 @@ func wrapRPCErr(err *error, fnName string) {
 		innerErr = errors.Unwrap(innerErr)
 	}
 	if errors.As(*err, new(*rhpv3.RPCError)) {
-		*err = fmt.Errorf("%w: '%w'", errHost, innerErr)
+		*err = fmt.Errorf("%w: '%w'", utils.ErrHost, innerErr)
 	} else {
 		*err = fmt.Errorf("%w: '%w'", errTransport, innerErr)
 	}

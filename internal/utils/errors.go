@@ -11,6 +11,7 @@ import (
 
 // Common i/o related errors
 var (
+	ErrHost                  = errors.New("host responded with error")
 	ErrNoRouteToHost         = errors.New("no route to host")
 	ErrNoSuchHost            = errors.New("no such host")
 	ErrConnectionRefused     = errors.New("connection refused")
@@ -31,6 +32,11 @@ func IsErr(err error, target error) bool {
 	// TODO: we can get rid of the lower casing once siad is gone and
 	// renterd/hostd use the same error messages
 	return strings.Contains(strings.ToLower(err.Error()), strings.ToLower(target.Error()))
+}
+
+// IsErrHost indicates whether an error was returned by a host as part of an RPC.
+func IsErrHost(err error) bool {
+	return IsErr(err, ErrHost)
 }
 
 // WrapErr can be used to defer wrapping an error which is then decorated with
