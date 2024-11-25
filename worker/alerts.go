@@ -42,7 +42,7 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objec
 		"error":   err.Error(),
 		"health":  health,
 		"slabKey": slabKey.String(),
-		"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously. It might be necessary to increase the MigrationSurchargeMultiplier in the gouging settings to ensure it has every chance of succeeding.",
+		"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
 	}
 
 	if len(objects) > 0 {

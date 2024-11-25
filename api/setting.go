@@ -34,7 +34,6 @@ var (
 		MinPriceTableValidity:         5 * time.Minute,                                  // 5 minutes
 		MinAccountExpiry:              24 * time.Hour,                                   // 1 day
 		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                // 1 SC
-		MigrationSurchargeMultiplier:  10,                                               // 10x
 	}
 
 	// DefaultPinnedSettings define the default price pin settings the bus is
@@ -114,12 +113,6 @@ type (
 		// MinMaxEphemeralAccountBalance is the minimum accepted value for
 		// `MaxEphemeralAccountBalance` in the host's price settings.
 		MinMaxEphemeralAccountBalance types.Currency `json:"minMaxEphemeralAccountBalance"`
-
-		// MigrationSurchargeMultiplier is the multiplier applied to the
-		// 'MaxDownloadPrice' when checking whether a host is too expensive,
-		// this multiplier is only applied for when trying to migrate critically
-		// low-health slabs.
-		MigrationSurchargeMultiplier uint64 `json:"migrationSurchargeMultiplier"`
 	}
 
 	// PinnedSettings holds the configuration for pinning certain settings to a
@@ -223,11 +216,6 @@ func (gs GougingSettings) Validate() error {
 	}
 	if gs.MinPriceTableValidity < 10*time.Second {
 		return errors.New("MinPriceTableValidity must be at least 10 seconds")
-	}
-	_, overflow := gs.MaxDownloadPrice.Mul64WithOverflow(gs.MigrationSurchargeMultiplier)
-	if overflow {
-		maxMultiplier := types.MaxCurrency.Div(gs.MaxDownloadPrice).Big().Uint64()
-		return fmt.Errorf("MigrationSurchargeMultiplier must be less than %v, otherwise applying it to MaxDownloadPrice overflows the currency type", maxMultiplier)
 	}
 	return nil
 }

@@ -198,14 +198,13 @@ func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRev
 }
 
 // priceTable fetches a price table from the host. If a revision is provided, it
-// will be used to pay for the price table. The returned price table is
-// guaranteed to be safe to use.
+// will be used to pay for the price table.
 func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
 	pt, cost, err := h.priceTables.fetch(ctx, h.hk, rev)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
 	}
-	gc, err := GougingCheckerFromContext(ctx, false)
+	gc, err := GougingCheckerFromContext(ctx)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, cost, err
 	}
@@ -215,7 +214,7 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 	return pt.HostPriceTable, cost, nil
 }
 
-func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) (err error) {
+func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	return d.acc.WithWithdrawal(func() (types.Currency, error) {
 		pt, ptc, err := d.pts.fetch(ctx, d.hk, nil)
 		if err != nil {
