@@ -44,7 +44,7 @@ var (
 	// errDialTransport is returned when the worker could not dial the host.
 	ErrDialTransport = errors.New("could not dial transport")
 
-	// errBalanceInsufficient occurs when a withdrawal failed because the
+	// ErrBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	ErrBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
@@ -90,8 +90,7 @@ var (
 	errWithdrawalExpired = errors.New("withdrawal request expired")
 )
 
-func IsBalanceInsufficient(err error) bool { return utils.IsErr(err, ErrBalanceInsufficient) }
-func IsBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
+func IsBalanceMaxExceeded(err error) bool { return utils.IsErr(err, errBalanceMaxExceeded) }
 func IsClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }

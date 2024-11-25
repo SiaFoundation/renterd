@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 )
 
 // Common i/o related errors
 var (
+	errBalanceInsufficientV1 = errors.New("ephemeral account balance was insufficient")
 	ErrHost                  = errors.New("host responded with error")
 	ErrNoRouteToHost         = errors.New("no route to host")
 	ErrNoSuchHost            = errors.New("no such host")
@@ -19,6 +21,11 @@ var (
 	ErrConnectionResetByPeer = errors.New("connection reset by peer")
 	ErrIOTimeout             = errors.New("i/o timeout")
 )
+
+func IsBalanceInsufficient(err error) bool {
+	return IsErr(err, rhpv4.ErrNotEnoughFunds) ||
+		IsErr(err, errBalanceInsufficientV1)
+}
 
 // IsErr can be used to compare an error to a target and also works when used on
 // errors that haven't been wrapped since it will fall back to a string
