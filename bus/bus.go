@@ -838,11 +838,14 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 	// determine the new collateral we want the host to put into the
 	// renewed/refreshed contract
 	newCollateral := settings.Prices.Collateral.Mul64(expectedNewStorage).Mul64(endHeight - cs.Index.Height)
+	if newCollateral.Cmp(minNewCollateral) < 0 {
+		newCollateral = minNewCollateral
+	}
 	if newCollateral.Cmp(settings.MaxCollateral) > 0 {
 		newCollateral = settings.MaxCollateral
 	}
 	if newCollateral.Cmp(minNewCollateral) < 0 {
-		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v", newCollateral, minNewCollateral)
+		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v (max: %v)", newCollateral, minNewCollateral, settings.MaxCollateral)
 	}
 
 	var contract cRhp4.ContractRevision
@@ -866,7 +869,6 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		})
 		contract = res.Contract
 		txnSet = res.RenewalSet
-		fmt.Println("RPCRefresh", res.Contract.Revision.MissedHostValue, minNewCollateral, err)
 	} else {
 		var res cRhp4.RPCRenewContractResult
 		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
@@ -877,7 +879,6 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		})
 		contract = res.Contract
 		txnSet = res.RenewalSet
-		fmt.Println("RPCRenew", res.Contract.Revision.MissedHostValue, minNewCollateral, err)
 	}
 	if err != nil {
 		return api.ContractMetadata{}, err

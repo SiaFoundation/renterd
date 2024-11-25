@@ -71,7 +71,7 @@ const (
 
 var (
 	InitialContractFunding = types.Siacoins(10)
-	MinCollateral          = types.Siacoins(2)
+	MinCollateral          = types.Siacoins(1).Div64(10) // 100mS
 )
 
 type Bus interface {
