@@ -236,7 +236,6 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	// form contract
 	contract, err := c.bus.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
 	if err != nil {
-		// TODO: keep track of consecutive failures and break at some point
 		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
 			return api.ContractMetadata{}, false, err
