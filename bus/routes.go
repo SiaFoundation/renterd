@@ -131,7 +131,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 
 		// cap the deposit by what's left in the contract
-		deposit := req.Amount
+		deposit = req.Amount
 		cost := pt.FundAccountCost
 		availableFunds := rev.ValidRenterPayout().Sub(cost)
 		if deposit.Cmp(availableFunds) > 0 {

@@ -556,7 +556,7 @@ func (a *Account) ScheduleSync() {
 
 	// Log scheduling a sync.
 	a.logger.Infow("account sync was scheduled",
-		"account", a.ID,
+		"account", a.ID(),
 		"host", a.acc.HostKey.String(),
 		"balance", a.acc.Balance.String(),
 		"drift", a.acc.Drift.String())
