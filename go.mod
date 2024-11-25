@@ -6,7 +6,7 @@ toolchain go1.23.2
 
 require (
 	github.com/aws/aws-sdk-go v1.55.5
-	github.com/gabriel-vasile/mimetype v1.4.6
+	github.com/gabriel-vasile/mimetype v1.4.7
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/go-cmp v0.6.0
 	github.com/gotd/contrib v0.20.0
@@ -20,7 +20,7 @@ require (
 	go.sia.tech/hostd v1.1.3-0.20241118221702-bd91bb9688a2
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.3.0
-	go.sia.tech/web/renterd v0.66.0
+	go.sia.tech/web/renterd v0.67.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.29.0
 	golang.org/x/sys v0.27.0
@@ -43,7 +43,7 @@ require (
 	go.etcd.io/bbolt v1.3.11 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.30.0 // indirect
+	golang.org/x/net v0.31.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	golang.org/x/tools v0.23.0 // indirect
