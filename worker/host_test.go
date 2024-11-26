@@ -11,6 +11,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/host"
@@ -25,6 +26,7 @@ type (
 		*mocks.Host
 		*mocks.Contract
 		hptFn       func() api.HostPriceTable
+		pFn         func() rhpv4.HostPrices
 		uploadDelay time.Duration
 	}
 
@@ -67,13 +69,14 @@ func (hm *testHostManager) addHost(h *testHost) {
 }
 
 func newTestHost(h *mocks.Host, c *mocks.Contract) *testHost {
-	return newTestHostCustom(h, c, newTestHostPriceTable)
+	return newTestHostCustom(h, c, newTestHostPriceTable, newTestHostPrices)
 }
 
-func newTestHostCustom(h *mocks.Host, c *mocks.Contract, hptFn func() api.HostPriceTable) *testHost {
+func newTestHostCustom(h *mocks.Host, c *mocks.Contract, hptFn func() api.HostPriceTable, pFn func() rhpv4.HostPrices) *testHost {
 	return &testHost{
 		Host:     h,
 		Contract: c,
+		pFn:      pFn,
 		hptFn:    hptFn,
 	}
 }
@@ -85,6 +88,17 @@ func newTestHostPriceTable() api.HostPriceTable {
 	return api.HostPriceTable{
 		HostPriceTable: rhpv3.HostPriceTable{UID: uid, HostBlockHeight: 100, Validity: time.Minute},
 		Expiry:         time.Now().Add(time.Minute),
+	}
+}
+
+func newTestHostPrices() rhpv4.HostPrices {
+	var sig types.Signature
+	frand.Read(sig[:])
+
+	return rhpv4.HostPrices{
+		TipHeight:  100,
+		ValidUntil: time.Now().Add(time.Minute),
+		Signature:  sig,
 	}
 }
 
@@ -122,6 +136,10 @@ func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration
 
 func (h *testHost) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	return h.hptFn(), types.ZeroCurrency, nil
+}
+
+func (h *testHost) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	return h.pFn(), nil
 }
 
 func (h *testHost) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {

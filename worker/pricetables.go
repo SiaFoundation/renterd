@@ -11,7 +11,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/host"
 	"lukechampine.com/frand"
 )
 
@@ -34,17 +33,17 @@ var (
 )
 
 type (
-	priceTables struct {
-		hm host.HostManager
-		hs HostStore
+	priceTableFetcher interface {
+		PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error)
+		PublicKey() types.PublicKey
+	}
 
+	priceTables struct {
 		mu          sync.Mutex
 		priceTables map[types.PublicKey]*priceTable
 	}
 
 	priceTable struct {
-		hm host.HostManager
-		hs HostStore
 		hk types.PublicKey
 
 		mu     sync.Mutex
@@ -59,37 +58,25 @@ type (
 	}
 )
 
-func (w *Worker) initPriceTables() {
-	if w.priceTables != nil {
-		panic("priceTables already initialized") // developer error
-	}
-	w.priceTables = newPriceTables(w, w.bus)
-}
-
-func newPriceTables(hm host.HostManager, hs HostStore) *priceTables {
+func newPriceTables() *priceTables {
 	return &priceTables{
-		hm: hm,
-		hs: hs,
-
 		priceTables: make(map[types.PublicKey]*priceTable),
 	}
 }
 
 // fetch returns a price table for the given host
-func (pts *priceTables) fetch(ctx context.Context, hk types.PublicKey, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
+func (pts *priceTables) fetch(ctx context.Context, h priceTableFetcher, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	pts.mu.Lock()
-	pt, exists := pts.priceTables[hk]
+	pt, exists := pts.priceTables[h.PublicKey()]
 	if !exists {
 		pt = &priceTable{
-			hm: pts.hm,
-			hs: pts.hs,
-			hk: hk,
+			hk: h.PublicKey(),
 		}
-		pts.priceTables[hk] = pt
+		pts.priceTables[h.PublicKey()] = pt
 	}
 	pts.mu.Unlock()
 
-	return pt.fetch(ctx, rev)
+	return pt.fetch(ctx, h, rev)
 }
 
 func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {
@@ -106,7 +93,7 @@ func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {
 	return ongoing, pt.update
 }
 
-func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
+func (p *priceTable) fetch(ctx context.Context, h priceTableFetcher, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
 	// grab the current price table
 	p.mu.Lock()
 	hpt = p.hpt
@@ -158,20 +145,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 		p.mu.Unlock()
 	}()
 
-	// fetch the host, return early if it has a valid price table
-	host, err := p.hs.Host(ctx, p.hk)
-	if err == nil && host.Scanned && time.Now().Add(priceTableValidityLeeway).Before(host.PriceTable.Expiry) {
-		hpt = host.PriceTable
-		return
-	}
-
-	// sanity check the host has been scanned before fetching the price table
-	if !host.Scanned {
-		return api.HostPriceTable{}, types.ZeroCurrency, fmt.Errorf("host %v was not scanned", p.hk)
-	}
-
 	// otherwise fetch it
-	h := p.hm.Host(p.hk, types.FileContractID{}, host.Settings.SiamuxAddr())
 	hpt, cost, err = h.PriceTable(ctx, rev)
 
 	// handle error after recording

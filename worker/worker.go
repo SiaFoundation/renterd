@@ -177,6 +177,7 @@ type Worker struct {
 	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
 	priceTables *priceTables
+	pricesCache *pricesCache
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
@@ -754,6 +755,8 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
+		priceTables:          newPriceTables(),
+		pricesCache:          newPricesCache(),
 		rhp2Client:           rhp2.New(dialer, l),
 		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
@@ -766,7 +769,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
 		return nil, fmt.Errorf("failed to initialize accounts; %w", err)
 	}
-	w.initPriceTables()
 
 	uploadKey := w.masterKey.DeriveUploadKey()
 	w.initDownloadManager(&uploadKey, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
