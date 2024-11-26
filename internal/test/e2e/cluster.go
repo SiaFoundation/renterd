@@ -457,11 +457,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}()
 	}
 
-	// Finish worker setup.
-	if err := w.Setup(ctx, workerAddr, workerPassword); err != nil {
-		tt.Fatalf("failed to setup worker, err: %v", err)
-	}
-
 	// Set the test contract set to make sure we can add objects at the
 	// beginning of a test right away.
 	tt.OK(busClient.UpdateContractSet(ctx, test.ContractSet, nil, nil))
