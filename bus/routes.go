@@ -744,19 +744,7 @@ func (b *Bus) contractsArchiveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	if jc.Check("failed to archive contracts", b.store.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
-		for fcid, reason := range toArchive {
-			b.broadcastAction(webhooks.Event{
-				Module: api.ModuleContract,
-				Event:  api.EventArchive,
-				Payload: api.EventContractArchive{
-					ContractID: fcid,
-					Reason:     reason,
-					Timestamp:  time.Now().UTC(),
-				},
-			})
-		}
-	}
+	jc.Check("failed to archive contracts", b.store.ArchiveContracts(jc.Request.Context(), toArchive))
 }
 
 func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
@@ -775,17 +763,6 @@ func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
 		return
 	} else if jc.Check("could not add contracts to set", b.store.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
 		return
-	} else if len(req.ToAdd)+len(req.ToRemove) > 0 {
-		b.broadcastAction(webhooks.Event{
-			Module: api.ModuleContractSet,
-			Event:  api.EventUpdate,
-			Payload: api.EventContractSetUpdate{
-				Name:      set,
-				ToAdd:     req.ToAdd,
-				ToRemove:  req.ToRemove,
-				Timestamp: time.Now().UTC(),
-			},
-		})
 	}
 }
 
@@ -1069,16 +1046,7 @@ func (b *Bus) contractsHandlerPUT(jc jape.Context) {
 	}
 
 	// upsert the contract
-	if jc.Check("failed to add contract", b.store.PutContract(jc.Request.Context(), c)) == nil {
-		b.broadcastAction(webhooks.Event{
-			Module: api.ModuleContract,
-			Event:  api.EventAdd,
-			Payload: api.EventContractAdd{
-				Added:     c,
-				Timestamp: time.Now().UTC(),
-			},
-		})
-	}
+	jc.Check("failed to add contract", b.store.PutContract(jc.Request.Context(), c))
 }
 
 func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
@@ -1409,24 +1377,15 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 	var gs api.GougingSettings
 	if jc.Decode(&gs) != nil {
 		return
-	} else if err := gs.Validate(); err != nil {
+	}
+	if err := gs.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
-		return
-	} else if err := b.store.UpdateGougingSettings(jc.Request.Context(), gs); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleSetting,
-		Event:  api.EventUpdate,
-		Payload: api.EventSettingUpdate{
-			GougingSettings: &gs,
-			Timestamp:       time.Now().UTC(),
-		},
-	})
-
-	b.pinMgr.TriggerUpdate()
+	if jc.Check("failed to update gouging settings", b.store.UpdateGougingSettings(jc.Request.Context(), gs)) == nil {
+		b.pinMgr.TriggerUpdate()
+	}
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
@@ -1444,26 +1403,18 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 	var ps api.PinnedSettings
 	if jc.Decode(&ps) != nil {
 		return
-	} else if err := ps.Validate(); err != nil {
+	}
+	if err := ps.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update pinned settings, error: %v", err), http.StatusBadRequest)
 		return
 	} else if ps.Enabled() && !b.explorer.Enabled() {
 		jc.Error(fmt.Errorf("can't enable price pinning, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
 		return
-	} else if err := b.store.UpdatePinnedSettings(jc.Request.Context(), ps); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
 	}
 
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleSetting,
-		Event:  api.EventUpdate,
-		Payload: api.EventSettingUpdate{
-			PinnedSettings: &ps,
-			Timestamp:      time.Now().UTC(),
-		},
-	})
-
-	b.pinMgr.TriggerUpdate()
+	if jc.Check("failed to update pinned settings", b.store.UpdatePinnedSettings(jc.Request.Context(), ps)) == nil {
+		b.pinMgr.TriggerUpdate()
+	}
 }
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
@@ -1481,22 +1432,13 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 	var us api.UploadSettings
 	if jc.Decode(&us) != nil {
 		return
-	} else if err := us.Validate(); err != nil {
+	}
+	if err := us.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update upload settings, error: %v", err), http.StatusBadRequest)
-		return
-	} else if err := b.store.UpdateUploadSettings(jc.Request.Context(), us); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleSetting,
-		Event:  api.EventUpdate,
-		Payload: api.EventSettingUpdate{
-			UploadSettings: &us,
-			Timestamp:      time.Now().UTC(),
-		},
-	})
+	jc.Check("failed to update upload settings", b.store.UpdateUploadSettings(jc.Request.Context(), us))
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
@@ -1514,22 +1456,13 @@ func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
 	var s3s api.S3Settings
 	if jc.Decode(&s3s) != nil {
 		return
-	} else if err := s3s.Validate(); err != nil {
+	}
+	if err := s3s.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update S3 settings, error: %v", err), http.StatusBadRequest)
-		return
-	} else if err := b.store.UpdateS3Settings(jc.Request.Context(), s3s); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleSetting,
-		Event:  api.EventUpdate,
-		Payload: api.EventSettingUpdate{
-			S3Settings: &s3s,
-			Timestamp:  time.Now().UTC(),
-		},
-	})
+	jc.Check("failed to update S3 settings", b.store.UpdateS3Settings(jc.Request.Context(), s3s))
 }
 
 func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
