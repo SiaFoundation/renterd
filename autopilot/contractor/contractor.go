@@ -741,17 +741,17 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 			continue // no more checks until host is scanned
 		}
 
-		// check if revision is available
-		if c.Revision == nil {
-			logger.Info("ignoring contract with missing revision")
-			continue // no more checks without revision
-		}
-
 		// check usability
 		if !host.Checks.UsabilityBreakdown.IsUsable() {
 			logger.Info("unusable host")
 			updateUsability(ctx, host, cm, api.ContractUsabilityBad, host.Checks.UsabilityBreakdown.String())
 			continue
+		}
+
+		// check if revision is available
+		if c.Revision == nil {
+			logger.Info("ignoring contract with missing revision")
+			continue // no more checks without revision
 		}
 
 		// check if contract is usable
