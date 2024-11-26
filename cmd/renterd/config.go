@@ -302,7 +302,6 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
 	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
-	flag.StringVar(&cfg.Worker.ExternalAddress, "worker.externalAddress", cfg.Worker.ExternalAddress, "Address of the worker on the network, only necessary when the bus is remote (overrides with RENTERD_WORKER_EXTERNAL_ADDR)")
 
 	// autopilot
 	flag.DurationVar(&cfg.Autopilot.Heartbeat, "autopilot.heartbeat", cfg.Autopilot.Heartbeat, "Interval for autopilot loop execution")
@@ -366,7 +365,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS", &cfg.Worker.AllowUnauthenticatedDownloads)
 	parseEnvVar("RENTERD_WORKER_DOWNLOAD_MAX_MEMORY", &cfg.Worker.DownloadMaxMemory)
 	parseEnvVar("RENTERD_WORKER_UPLOAD_MAX_MEMORY", &cfg.Worker.UploadMaxMemory)
-	parseEnvVar("RENTERD_WORKER_EXTERNAL_ADDR", &cfg.Worker.ExternalAddress)
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)

@@ -168,7 +168,6 @@ type Worker struct {
 	masterKey utils.MasterKey
 	startTime time.Time
 
-	eventSubscriber iworker.EventSubscriber
 	downloadManager *downloadManager
 	uploadManager   *uploadManager
 
@@ -652,17 +651,6 @@ func (w *Worker) accountsResetDriftHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (w *Worker) eventHandlerPOST(jc jape.Context) {
-	var event webhooks.Event
-	if jc.Decode(&event) != nil {
-		return
-	} else if event.Event == webhooks.WebhookEventPing {
-		jc.ResponseWriter.WriteHeader(http.StatusOK)
-	} else {
-		w.eventSubscriber.ProcessEvent(event)
-	}
-}
-
 func (w *Worker) stateHandlerGET(jc jape.Context) {
 	jc.Encode(api.WorkerStateResponse{
 		ID:        w.id,
@@ -708,7 +696,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		alerts:               a,
 		cache:                iworker.NewCache(b, l),
 		dialer:               dialer,
-		eventSubscriber:      iworker.NewEventSubscriber(a, b, l, 10*time.Second),
 		id:                   cfg.ID,
 		bus:                  b,
 		masterKey:            masterKey,
@@ -743,8 +730,6 @@ func (w *Worker) Handler() http.Handler {
 		"POST   /account/:id/resetdrift": w.accountsResetDriftHandlerPOST,
 		"GET    /id":                     w.idHandlerGET,
 
-		"POST   /event": w.eventHandlerPOST,
-
 		"GET    /memory": w.memoryGET,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
@@ -763,19 +748,6 @@ func (w *Worker) Handler() http.Handler {
 	})
 }
 
-// Setup register event webhooks that enable the worker cache.
-func (w *Worker) Setup(ctx context.Context, apiURL, apiPassword string) error {
-	go func() {
-		eventsURL := fmt.Sprintf("%s/event", apiURL)
-		webhookOpts := []webhooks.HeaderOption{webhooks.WithBasicAuth("", apiPassword)}
-		if err := w.eventSubscriber.Register(w.shutdownCtx, eventsURL, webhookOpts...); err != nil {
-			w.logger.Errorw("failed to register webhooks", zap.Error(err))
-		}
-	}()
-
-	return w.cache.Subscribe(w.eventSubscriber)
-}
-
 // Shutdown shuts down the worker.
 func (w *Worker) Shutdown(ctx context.Context) error {
 	// cancel shutdown context
@@ -791,8 +763,7 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// stop recorders
 	w.contractSpendingRecorder.Stop(ctx)
 
-	// shutdown the subscriber
-	return w.eventSubscriber.Shutdown(ctx)
+	return nil
 }
 
 func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadata bool, opts api.HeadObjectOptions) (*api.HeadObjectResponse, api.Object, error) {
@@ -874,7 +845,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 	opts.Range.Length = hor.Range.Length
 
 	// fetch gouging params
-	gp, err := w.cache.GougingParams(ctx)
+	gp, err := w.bus.GougingParams(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
 	}
@@ -928,7 +899,7 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 
 func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
 	// attach gouging checker
-	gp, err := w.cache.GougingParams(ctx)
+	gp, err := w.bus.GougingParams(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't get gouging parameters; %w", err)
 	}

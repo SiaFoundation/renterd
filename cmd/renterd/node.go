@@ -68,9 +68,6 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	if cfg.Bus.RemoteAddr != "" && !cfg.Worker.Enabled && !cfg.Autopilot.Enabled {
 		return nil, errors.New("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
-	if cfg.Worker.Enabled && cfg.Bus.RemoteAddr != "" && cfg.Worker.ExternalAddress == "" {
-		return nil, errors.New("can't enable the worker using a remote bus, without configuring the worker's external address")
-	}
 	if cfg.Autopilot.Enabled && !cfg.Worker.Enabled && len(cfg.Worker.Remotes) == 0 {
 		return nil, errors.New("can't enable autopilot without providing either workers to connect to or creating a worker")
 	}
@@ -162,32 +159,18 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			workerAddr := cfg.HTTP.Address + "/api/worker"
-			var workerExternAddr string
-			if cfg.Bus.RemoteAddr != "" {
-				workerExternAddr = cfg.Worker.ExternalAddress
-			} else {
-				workerExternAddr = workerAddr
-			}
-
 			workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
 			w, err := worker.New(cfg.Worker, workerKey, bc, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			setupFns = append(setupFns, fn{
-				name: "Worker",
-				fn: func(ctx context.Context) error {
-					return w.Setup(ctx, workerExternAddr, cfg.HTTP.Password)
-				},
-			})
 			shutdownFns = append(shutdownFns, fn{
 				name: "Worker",
 				fn:   w.Shutdown,
 			})
 
 			mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
-			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
+			wc := worker.NewClient(cfg.HTTP.Address+"/api/worker", cfg.HTTP.Password)
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {

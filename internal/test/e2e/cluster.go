@@ -441,11 +441,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}()
 	}
 
-	// Finish worker setup.
-	if err := w.Setup(ctx, workerAddr, workerPassword); err != nil {
-		tt.Fatalf("failed to setup worker, err: %v", err)
-	}
-
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
 		tt.OKAll(

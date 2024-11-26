@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/stores/sql"
-	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -37,10 +36,9 @@ type (
 
 type (
 	pinManager struct {
-		a           alerts.Alerter
-		e           ExchangeRateExplorer
-		s           Store
-		broadcaster webhooks.Broadcaster
+		a alerts.Alerter
+		e ExchangeRateExplorer
+		s Store
 
 		updateInterval time.Duration
 		rateWindow     time.Duration
@@ -60,12 +58,11 @@ type (
 // NewPinManager returns a new PinManager, responsible for pinning prices to a
 // fixed value in an underlying currency. The returned pin manager is already
 // running and can be stopped by calling Shutdown.
-func NewPinManager(alerts alerts.Alerter, broadcaster webhooks.Broadcaster, e ExchangeRateExplorer, s Store, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
+func NewPinManager(alerts alerts.Alerter, e ExchangeRateExplorer, s Store, updateInterval, rateWindow time.Duration, l *zap.Logger) *pinManager {
 	pm := &pinManager{
-		a:           alerts,
-		e:           e,
-		s:           s,
-		broadcaster: broadcaster,
+		a: alerts,
+		e: e,
+		s: s,
 
 		logger: l.Named("pricemanager").Sugar(),
 
@@ -258,21 +255,7 @@ func (pm *pinManager) updateGougingSettings(ctx context.Context, pins api.Gougin
 	}
 
 	// update settings
-	err = pm.s.UpdateGougingSettings(ctx, gs)
-
-	// broadcast event
-	if err == nil {
-		pm.broadcaster.BroadcastAction(ctx, webhooks.Event{
-			Module: api.ModuleSetting,
-			Event:  api.EventUpdate,
-			Payload: api.EventSettingUpdate{
-				GougingSettings: &gs,
-				Timestamp:       time.Now().UTC(),
-			},
-		})
-	}
-
-	return err
+	return pm.s.UpdateGougingSettings(ctx, gs)
 }
 
 func (pm *pinManager) updatePrices(ctx context.Context, forced bool) error {

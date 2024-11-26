@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/hostd/host/settings/pin"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -56,15 +55,6 @@ func (ma *mockAlerter) DismissAlerts(_ context.Context, ids ...types.Hash256) er
 			}
 		}
 	}
-	return nil
-}
-
-type mockBroadcaster struct {
-	events []webhooks.Event
-}
-
-func (meb *mockBroadcaster) BroadcastAction(ctx context.Context, e webhooks.Event) error {
-	meb.events = append(meb.events, e)
 	return nil
 }
 
@@ -155,12 +145,11 @@ func (ms *mockPinStore) UpdatePinnedSettings(ctx context.Context, ps api.PinnedS
 func TestPinManager(t *testing.T) {
 	// mock dependencies
 	a := &mockAlerter{}
-	b := &mockBroadcaster{}
 	e := &mockExplorer{rate: 1}
 	s := newTestStore()
 
 	// create a pinmanager
-	pm := NewPinManager(a, b, e, s, testUpdateInterval, time.Minute, zap.NewNop())
+	pm := NewPinManager(a, e, s, testUpdateInterval, time.Minute, zap.NewNop())
 	defer func() {
 		if err := pm.Shutdown(context.Background()); err != nil {
 			t.Fatal(err)

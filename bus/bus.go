@@ -370,7 +370,7 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
@@ -541,21 +541,7 @@ func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contr
 		return api.ContractMetadata{}, err
 	}
 
-	added, err := b.store.Contract(ctx, rev.ID())
-	if err != nil {
-		return api.ContractMetadata{}, err
-	}
-
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventAdd,
-		Payload: api.EventContractAdd{
-			Added:     added,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-
-	return added, err
+	return b.store.Contract(ctx, rev.ID())
 }
 
 func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
@@ -574,21 +560,7 @@ func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, 
 		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
 	}
 
-	renewal, err := b.store.Contract(ctx, rev.ID())
-	if err != nil {
-		return api.ContractMetadata{}, err
-	}
-
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventRenew,
-		Payload: api.EventContractRenew{
-			Renewal:   renewal,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-
-	return renewal, err
+	return b.store.Contract(ctx, rev.ID())
 }
 
 func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
