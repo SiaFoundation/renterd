@@ -439,27 +439,28 @@ var (
 					defer stmt.Close()
 
 					// prepare a helper to safely copy and sync the file
-					copyBuffer := func(buffer string) (string, error) {
-						parts := strings.Split(buffer, "-")
+					copyBuffer := func(path string) (string, error) {
+						parts := strings.Split(filepath.Base(path), "-")
 						if len(parts) != 4 {
-							return "", fmt.Errorf("invalid buffer filename '%s'", buffer)
+							return "", fmt.Errorf("invalid path '%s'", path)
 						}
 
-						src, err := os.Open(buffer)
+						src, err := os.Open(path)
 						if err != nil {
 							return "", fmt.Errorf("failed to open buffer: %w", err)
 						}
 						defer src.Close()
 
-						path := strings.Join(parts[1:], "-")
-						err = os.Remove(path)
+						dstFilename := strings.Join(parts[1:], "-")
+						dstPath := filepath.Join(filepath.Dir(path), dstFilename)
+						err = os.Remove(dstPath)
 						if err != nil && !os.IsNotExist(err) {
-							return "", fmt.Errorf("failed to remove existing file at '%s': %w", path, err)
+							return "", fmt.Errorf("failed to remove existing file at '%s': %w", dstPath, err)
 						}
 
-						dstFile, err := os.Create(path)
+						dstFile, err := os.Create(dstPath)
 						if err != nil {
-							return "", fmt.Errorf("failed to create destination buffer at '%s': %w", path, err)
+							return "", fmt.Errorf("failed to create destination buffer at '%s': %w", dstPath, err)
 						}
 						defer dstFile.Close()
 
@@ -473,7 +474,7 @@ var (
 							return "", fmt.Errorf("failed to sync buffer: %w", err)
 						}
 
-						return dstFile.Name(), nil
+						return dstFilename, nil
 					}
 
 					// fetch all buffers
@@ -483,22 +484,23 @@ var (
 					}
 
 					// copy all buffers
-					partialSlabDir := m.DB().partialSlabDir
-					for _, buffer := range buffers {
-						if dst, err := copyBuffer(filepath.Join(partialSlabDir, buffer)); err != nil {
-							return fmt.Errorf("failed to copy buffer '%s': %w", buffer, err)
-						} else if res, err := stmt.Exec(ctx, dst, buffer); err != nil {
-							return fmt.Errorf("failed to update buffer '%s': %w", buffer, err)
+					for _, path := range buffers {
+						filename := filepath.Base(path)
+						if updated, err := copyBuffer(path); err != nil {
+							return fmt.Errorf("failed to copy buffer '%s': %w", path, err)
+						} else if res, err := stmt.Exec(ctx, updated, filename); err != nil {
+							return fmt.Errorf("failed to update buffer '%s': %w", filepath.Base(path), err)
 						} else if n, err := res.RowsAffected(); err != nil {
 							return fmt.Errorf("failed to fetch rows affected: %w", err)
 						} else if n != 1 {
-							return fmt.Errorf("failed to update buffer, no rows affected when updating '%s' -> %s", buffer, dst)
+							return fmt.Errorf("failed to update buffer, no rows affected when updating '%s' -> %s", filename, updated)
 						}
 					}
+
 					// remove original buffers
-					for _, buffer := range buffers {
-						if err := os.Remove(filepath.Join(partialSlabDir, buffer)); err != nil {
-							return fmt.Errorf("failed to remove buffer '%s': %w", buffer, err)
+					for _, path := range buffers {
+						if err := os.Remove(path); err != nil {
+							return fmt.Errorf("failed to remove buffer '%s': %w", path, err)
 						}
 					}
 

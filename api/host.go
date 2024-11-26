@@ -263,6 +263,10 @@ func (ub HostUsabilityBreakdown) IsUsable() bool {
 	return !ub.Blocked && !ub.Offline && !ub.LowScore && !ub.RedundantIP && !ub.Gouging && !ub.NotAcceptingContracts && !ub.NotAnnounced && !ub.NotCompletingScan
 }
 
+func (ub HostUsabilityBreakdown) String() string {
+	return strings.Join(ub.UnusableReasons(), ", ")
+}
+
 func (ub HostUsabilityBreakdown) UnusableReasons() []string {
 	var reasons []string
 	if ub.Blocked {
