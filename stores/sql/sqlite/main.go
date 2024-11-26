@@ -58,6 +58,10 @@ func (b *MainDatabase) ApplyMigration(ctx context.Context, fn func(tx sql.Tx) (b
 	return applyMigration(ctx, b.db, fn)
 }
 
+func (b *MainDatabase) HasMigration(ctx context.Context, tx sql.Tx, id string) (bool, error) {
+	return ssql.HasMigration(ctx, tx, id)
+}
+
 func (b *MainDatabase) Close() error {
 	return closeDB(b.db, b.log)
 }

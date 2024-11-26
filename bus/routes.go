@@ -17,7 +17,6 @@ import (
 
 	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/gouging"
@@ -35,8 +34,6 @@ import (
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
-
-var ErrSettingFieldNotFound = errors.New("setting field not found")
 
 func (b *Bus) accountsFundHandler(jc jape.Context) {
 	var req api.AccountsFundRequest
@@ -1371,37 +1368,14 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
-	if gs, err := b.fetchSetting(jc.Request.Context(), stores.SettingGouging); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else if gsc, ok := gs.(api.GougingSettings); !ok {
-		panic("unexpected value") // developer error
-	} else {
-		jc.Encode(gsc)
-	}
-}
-
-func (b *Bus) settingsGougingHandlerPATCH(jc jape.Context) {
-	jc.Custom((*map[string]any)(nil), api.GougingSettings{})
-
-	// decode patch
-	var patch map[string]any
-	if jc.Decode(&patch) != nil {
-		return
-	}
-
-	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), stores.SettingGouging, patch)
-	if errors.Is(err, ErrSettingFieldNotFound) {
-		jc.Error(err, http.StatusBadRequest)
+	gs, err := b.store.GougingSettings(jc.Request.Context())
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		gs = api.DefaultGougingSettings
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
-	} else if gs, ok := update.(api.GougingSettings); !ok {
-		panic("unexpected setting") // developer error
-	} else {
-		jc.Encode(gs)
 	}
+	jc.Encode(gs)
 }
 
 func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
@@ -1411,45 +1385,32 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 	} else if err := gs.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingGouging, gs); err != nil {
+	} else if err := b.store.UpdateGougingSettings(jc.Request.Context(), gs); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleSetting,
+		Event:  api.EventUpdate,
+		Payload: api.EventSettingUpdate{
+			GougingSettings: &gs,
+			Timestamp:       time.Now().UTC(),
+		},
+	})
+
+	b.pinMgr.TriggerUpdate()
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	if ps, err := b.fetchSetting(jc.Request.Context(), stores.SettingPinned); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else if psc, ok := ps.(api.PinnedSettings); !ok {
-		panic("unexpected value") // developer error
-	} else {
-		jc.Encode(psc)
-	}
-}
-
-func (b *Bus) settingsPinnedHandlerPATCH(jc jape.Context) {
-	jc.Custom((*map[string]any)(nil), api.PinnedSettings{})
-
-	// decode patch
-	var patch map[string]any
-	if jc.Decode(&patch) != nil {
-		return
-	}
-
-	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), stores.SettingPinned, patch)
-	if errors.Is(err, ErrSettingFieldNotFound) {
-		jc.Error(err, http.StatusBadRequest)
-		return
+	ps, err := b.store.PinnedSettings(jc.Request.Context())
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		ps = api.DefaultPinnedSettings
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
-	} else if gs, ok := update.(api.PinnedSettings); !ok {
-		panic("unexpected setting") // developer error
-	} else {
-		jc.Encode(gs)
 	}
+	jc.Encode(ps)
 }
 
 func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
@@ -1462,44 +1423,31 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 	} else if ps.Enabled() && !b.explorer.Enabled() {
 		jc.Error(fmt.Errorf("can't enable price pinning, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingPinned, ps); err != nil {
+	} else if err := b.store.UpdatePinnedSettings(jc.Request.Context(), ps); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleSetting,
+		Event:  api.EventUpdate,
+		Payload: api.EventSettingUpdate{
+			PinnedSettings: &ps,
+			Timestamp:      time.Now().UTC(),
+		},
+	})
+
+	b.pinMgr.TriggerUpdate()
 }
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
-	if us, err := b.fetchSetting(jc.Request.Context(), stores.SettingUpload); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else if usc, ok := us.(api.UploadSettings); !ok {
-		panic("unexpected value") // developer error
-	} else {
-		jc.Encode(usc)
-	}
-}
-
-func (b *Bus) settingsUploadHandlerPATCH(jc jape.Context) {
-	jc.Custom((*map[string]any)(nil), api.UploadSettings{})
-
-	// decode patch
-	var patch map[string]any
-	if jc.Decode(&patch) != nil {
-		return
-	}
-
-	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), stores.SettingUpload, patch)
-	if errors.Is(err, ErrSettingFieldNotFound) {
-		jc.Error(err, http.StatusBadRequest)
-		return
+	us, err := b.store.UploadSettings(jc.Request.Context())
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		us = api.DefaultUploadSettings(b.cm.TipState().Network.Name)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
-	} else if gs, ok := update.(api.UploadSettings); !ok {
-		panic("unexpected setting") // developer error
-	} else {
-		jc.Encode(gs)
 	}
+	jc.Encode(us)
 }
 
 func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
@@ -1509,45 +1457,30 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 	} else if err := us.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update upload settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingUpload, us); err != nil {
+	} else if err := b.store.UpdateUploadSettings(jc.Request.Context(), us); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleSetting,
+		Event:  api.EventUpdate,
+		Payload: api.EventSettingUpdate{
+			UploadSettings: &us,
+			Timestamp:      time.Now().UTC(),
+		},
+	})
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
-	if s3s, err := b.fetchSetting(jc.Request.Context(), stores.SettingS3); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	} else if s3sc, ok := s3s.(api.S3Settings); !ok {
-		panic("unexpected value") // developer error
-	} else {
-		jc.Encode(s3sc)
-	}
-}
-
-func (b *Bus) settingsS3HandlerPATCH(jc jape.Context) {
-	jc.Custom((*map[string]any)(nil), api.S3Settings{})
-
-	// decode patch
-	var patch map[string]any
-	if jc.Decode(&patch) != nil {
-		return
-	}
-
-	// apply patch
-	update, err := b.patchSetting(jc.Request.Context(), stores.SettingS3, patch)
-	if errors.Is(err, ErrSettingFieldNotFound) {
-		jc.Error(err, http.StatusBadRequest)
-		return
+	s3s, err := b.store.S3Settings(jc.Request.Context())
+	if errors.Is(err, sql.ErrSettingNotFound) {
+		s3s = api.DefaultS3Settings
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
-	} else if gs, ok := update.(api.S3Settings); !ok {
-		panic("unexpected setting") // developer error
-	} else {
-		jc.Encode(gs)
 	}
+	jc.Encode(s3s)
 }
 
 func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
@@ -1557,10 +1490,19 @@ func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
 	} else if err := s3s.Validate(); err != nil {
 		jc.Error(fmt.Errorf("couldn't update S3 settings, error: %v", err), http.StatusBadRequest)
 		return
-	} else if err := b.updateSetting(jc.Request.Context(), stores.SettingS3, s3s); err != nil {
+	} else if err := b.store.UpdateS3Settings(jc.Request.Context(), s3s); err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+
+	b.broadcastAction(webhooks.Event{
+		Module: api.ModuleSetting,
+		Event:  api.EventUpdate,
+		Payload: api.EventSettingUpdate{
+			S3Settings: &s3s,
+			Timestamp:  time.Now().UTC(),
+		},
+	})
 }
 
 func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
