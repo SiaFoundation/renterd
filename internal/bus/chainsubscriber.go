@@ -167,17 +167,6 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 		for hk, ha := range hus {
 			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
-			} else if utils.IsSynced(b) {
-				// broadcast host update
-				s.wm.BroadcastAction(s.shutdownCtx, webhooks.Event{
-					Module: api.ModuleHost,
-					Event:  api.EventUpdate,
-					Payload: api.EventHostUpdate{
-						HostKey:   hk,
-						NetAddr:   ha.NetAddress,
-						Timestamp: time.Now().UTC(),
-					},
-				})
 			}
 		}
 	}
@@ -288,30 +277,13 @@ func (s *chainSubscriber) sync() error {
 		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds(), "batch_size", updatesBatchSize)
 
 		// process updates
-		var block types.Block
 		istart = time.Now()
-		index, block, err = s.processUpdates(s.shutdownCtx, crus, caus)
+		index, err = s.processUpdates(s.shutdownCtx, crus, caus)
 		if err != nil {
 			return fmt.Errorf("failed to process updates: %w", err)
 		}
 		s.logger.Debugw("processed updates successfully", "new_height", index.Height, "new_block_id", index.ID, "ms", time.Since(istart).Milliseconds())
 		cnt++
-
-		// broadcast consensus update
-		if utils.IsSynced(block) {
-			s.wm.BroadcastAction(s.shutdownCtx, webhooks.Event{
-				Module: api.ModuleConsensus,
-				Event:  api.EventUpdate,
-				Payload: api.EventConsensusUpdate{
-					ConsensusState: api.ConsensusState{
-						BlockHeight:   index.Height,
-						LastBlockTime: api.TimeRFC3339(block.Timestamp),
-						Synced:        true,
-					},
-					TransactionFee: s.cm.RecommendedFee(),
-					Timestamp:      time.Now().UTC(),
-				}})
-		}
 	}
 
 	s.logger.Debugw("sync completed", "height", index.Height, "block_id", index.ID, "ms", time.Since(start).Milliseconds(), "iterations", cnt)
@@ -323,8 +295,8 @@ func (s *chainSubscriber) sync() error {
 	return nil
 }
 
-func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, tip types.Block, _ error) {
-	if err := s.cs.ProcessChainUpdate(ctx, func(tx sql.ChainUpdateTx) error {
+func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, err error) {
+	err = s.cs.ProcessChainUpdate(ctx, func(tx sql.ChainUpdateTx) error {
 		// process wallet updates
 		if err := s.wallet.UpdateChainState(tx, crus, caus); err != nil {
 			return fmt.Errorf("failed to process wallet updates: %w", err)
@@ -355,11 +327,8 @@ func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 			return fmt.Errorf("failed to update failed contracts: %w", err)
 		}
 
-		tip = caus[len(caus)-1].Block
 		return nil
-	}); err != nil {
-		return types.ChainIndex{}, types.Block{}, err
-	}
+	})
 	return
 }
 
