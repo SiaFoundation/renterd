@@ -51,7 +51,6 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 
 	// override managers
 	hm := newTestHostManager(t)
-	w.priceTables.hm = hm
 	w.downloadManager.hm = hm
 	w.downloadManager.mm = dlmm
 	w.uploadManager.hm = hm

@@ -74,7 +74,7 @@ func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) host.Download
 func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	var amount types.Currency
 	return h.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, uptc, err := h.priceTables.fetch(ctx, h.hk, nil)
+		pt, uptc, err := h.priceTables.fetch(ctx, h, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -175,7 +175,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		deposit := desired.Sub(balance)
 
 		// fetch pricetable directly to bypass the gouging check
-		pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
+		pt, _, err := h.priceTables.fetch(ctx, h, rev)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -209,7 +209,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 
 func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
-	pt, _, err := h.priceTables.fetch(ctx, h.hk, rev)
+	pt, _, err := h.priceTables.fetch(ctx, h, rev)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRev
 // priceTable fetches a price table from the host. If a revision is provided, it
 // will be used to pay for the price table.
 func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
-	pt, cost, err := h.priceTables.fetch(ctx, h.hk, rev)
+	pt, cost, err := h.priceTables.fetch(ctx, h, rev)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
 	}
@@ -243,7 +243,7 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 
 func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	return d.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, ptc, err := d.pts.fetch(ctx, d.hk, nil)
+		pt, ptc, err := d.pts.fetch(ctx, d, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -254,6 +254,14 @@ func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, ro
 		}
 		return ptc.Add(cost), nil
 	})
+}
+
+func (h *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
+	hpt, err = h.rhp3.PriceTable(ctx, h.hk, h.siamuxAddr, rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
+	if err == nil {
+		cost = hpt.UpdatePriceTableCost
+	}
+	return
 }
 
 func (d *hostDownloadClient) PublicKey() types.PublicKey { return d.hk }
