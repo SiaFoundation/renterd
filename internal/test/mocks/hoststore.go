@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/host"
@@ -104,6 +105,10 @@ func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 
 func (h *Host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	return h.HostPriceTable(), types.NewCurrency64(1), nil
+}
+
+func (h *Host) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	return h.hi.V2Settings.Prices, nil
 }
 
 func (h *Host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
