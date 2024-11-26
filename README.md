@@ -79,7 +79,6 @@ overview of all settings configurable through the CLI.
 | `Worker.UploadOverdriveTimeout`      | Timeout for overdriving slab uploads                 | `3s`                              | `--worker.uploadOverdriveTimeout` | -                                              | `worker.uploadOverdriveTimeout`     |
 | `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
 | `Worker.AllowUnauthenticatedDownloads` | Allows unauthenticated downloads                    | -                                 | `--worker.unauthenticatedDownloads` | `RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS` | `worker.allowUnauthenticatedDownloads` |
-| `Worker.ExternalAddress`              | Address of the worker on the network, only necessary when the bus is remote | -                                 | -                                | `RENTERD_WORKER_EXTERNAL_ADDR`                     | `worker.externalAddress`                   |
 | `Worker.RemoteAddrs`                 | List of remote worker addresses (semicolon delimited) | -                                | -                                | `RENTERD_WORKER_REMOTE_ADDRS`                     | `worker.remotes`                    |
 | `Worker.RemotePassword`               | API password for the remote workers                 | -                                | -                                | `RENTERD_WORKER_API_PASSWORD`                     | `worker.remotes`              |
 | `Autopilot.Enabled`					| Enables/disables autopilot							| `true`							| `--autopilot.enabled`			| `RENTERD_AUTOPILOT_ENABLED`						| `autopilot.enabled`					|
@@ -167,7 +166,6 @@ services:
       - RENTERD_API_PASSWORD=worker-pass
       - RENTERD_BUS_API_PASSWORD=bus-pass
       - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
-      - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-1:9980/api/worker
     ports:
       - "9982:9980"
       - "8082:8080"
@@ -182,7 +180,6 @@ services:
       - RENTERD_API_PASSWORD=worker-pass
       - RENTERD_BUS_API_PASSWORD=bus-pass
       - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
-      - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-2:9980/api/worker
     ports:
       - "9983:9980"
       - "8083:8080"
