@@ -54,7 +54,7 @@ body:
       description: |
         The configuration of your autopilot
         ```bash
-        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/autopilot/config
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/autopilot
         ```
       placeholder: Paste the output of the above command here ```
     validations:
