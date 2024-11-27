@@ -824,10 +824,8 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		// when refreshing, the 'collateral' is added on top of the existing
 		// collateral so we account for that by subtracting the rolled over
 		// value
-		var collateral types.Currency
-		if rev.MissedHostValue.Cmp(newCollateral) > 0 {
-			collateral = types.ZeroCurrency
-		} else {
+		collateral := types.ZeroCurrency
+		if rev.MissedHostValue.Cmp(newCollateral) < 0 {
 			collateral = newCollateral.Sub(rev.MissedHostValue)
 		}
 		// refresh
