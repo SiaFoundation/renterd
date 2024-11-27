@@ -56,14 +56,14 @@ func TestPricesCache(t *testing.T) {
 	// update
 	ctx, cancel := context.WithCancel(gCtx)
 	cancel()
-	_, _, err := cache.fetch(ctx, h)
+	_, err := cache.fetch(ctx, h)
 	if !errors.Is(err, errPriceTableUpdateTimedOut) {
 		t.Fatal("expected errPriceTableUpdateTimedOut, got", err)
 	}
 
 	// unblock and assert we paid for the price table
 	close(fetchPTBlockChan)
-	update, _, err := cache.fetch(gCtx, h)
+	update, err := cache.fetch(gCtx, h)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.Signature != validPrices.Signature {
@@ -73,7 +73,7 @@ func TestPricesCache(t *testing.T) {
 	// refresh the price table on the host, update again, assert we receive the
 	// same price table as it hasn't expired yet
 	h.UpdatePriceTable(newTestHostPriceTable())
-	update, _, err = cache.fetch(gCtx, h)
+	update, err = cache.fetch(gCtx, h)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.Signature != validPrices.Signature {
@@ -88,7 +88,7 @@ func TestPricesCache(t *testing.T) {
 	cm.UpdateHeight(validPrices.TipHeight + uint64(blockHeightLeeway) - priceTableBlockHeightLeeway)
 
 	// fetch it again and assert we updated the price table
-	update, _, err = cache.fetch(gCtx, h)
+	update, err = cache.fetch(gCtx, h)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.Signature != h.HostPrices().Signature {

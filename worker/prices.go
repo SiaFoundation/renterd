@@ -43,7 +43,7 @@ func newPricesCache() *pricesCache {
 }
 
 // fetch returns a price table for the given host
-func (c *pricesCache) fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPrices, types.Currency, error) {
+func (c *pricesCache) fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPrices, error) {
 	c.mu.Lock()
 	prices, exists := c.cache[h.PublicKey()]
 	if !exists {
@@ -71,7 +71,7 @@ func (p *cachedPrices) ongoingUpdate() (bool, *pricesUpdate) {
 	return ongoing, p.update
 }
 
-func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4.HostPrices, cost types.Currency, err error) {
+func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4.HostPrices, err error) {
 	// grab the current price table
 	p.mu.Lock()
 	prices = p.prices
@@ -81,7 +81,7 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4
 	// current price table is considered to gouge on the block height
 	gc, err := GougingCheckerFromContext(ctx, false)
 	if err != nil {
-		return rhpv4.HostPrices{}, types.ZeroCurrency, err
+		return rhpv4.HostPrices{}, err
 	}
 
 	// figure out whether we should update the price table, if not we can return
@@ -89,7 +89,7 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4
 		closeToGouging := gc.BlocksUntilBlockHeightGouging(prices.TipHeight) <= priceTableBlockHeightLeeway
 		closeToExpiring := time.Now().Add(priceTableValidityLeeway).After(prices.ValidUntil)
 		if !closeToExpiring && !closeToGouging {
-			return
+			return prices, nil
 		}
 	}
 
@@ -102,10 +102,10 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4
 	} else if ongoing {
 		select {
 		case <-ctx.Done():
-			return rhpv4.HostPrices{}, types.ZeroCurrency, fmt.Errorf("%w; %w", errPriceTableUpdateTimedOut, context.Cause(ctx))
+			return rhpv4.HostPrices{}, fmt.Errorf("%w; %w", errPriceTableUpdateTimedOut, context.Cause(ctx))
 		case <-update.done:
 		}
-		return update.prices, types.ZeroCurrency, update.err
+		return update.prices, update.err
 	}
 
 	// this thread is updating the price table
@@ -123,11 +123,5 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4
 	}()
 
 	// otherwise fetch it
-	prices, err = h.Prices(ctx)
-
-	// handle error after recording
-	if err != nil {
-		return rhpv4.HostPrices{}, types.ZeroCurrency, fmt.Errorf("failed to update pricetable, err %v", err)
-	}
-	return
+	return h.Prices(ctx)
 }
