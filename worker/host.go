@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/host"
+	"go.sia.tech/renterd/internal/prices"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/worker"
 	"go.uber.org/zap"
@@ -28,7 +29,7 @@ type (
 		client                   *rhp3.Client
 		contractSpendingRecorder ContractSpendingRecorder
 		logger                   *zap.SugaredLogger
-		priceTables              *priceTables
+		priceTables              *prices.PriceTables
 	}
 
 	hostDownloadClient struct {
@@ -36,7 +37,7 @@ type (
 		siamuxAddr string
 
 		acc  *worker.Account
-		pts  *priceTables
+		pts  *prices.PriceTables
 		rhp3 *rhp3.Client
 	}
 )
@@ -74,7 +75,7 @@ func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) host.Download
 func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	var amount types.Currency
 	return h.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, uptc, err := h.priceTables.fetch(ctx, h, nil)
+		pt, uptc, err := h.priceTables.Fetch(ctx, h, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -175,7 +176,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		deposit := desired.Sub(balance)
 
 		// fetch pricetable directly to bypass the gouging check
-		pt, _, err := h.priceTables.fetch(ctx, h, rev)
+		pt, _, err := h.priceTables.Fetch(ctx, h, rev)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -209,7 +210,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 
 func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
-	pt, _, err := h.priceTables.fetch(ctx, h, rev)
+	pt, _, err := h.priceTables.Fetch(ctx, h, rev)
 	if err != nil {
 		return err
 	}
@@ -227,7 +228,7 @@ func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRev
 // priceTable fetches a price table from the host. If a revision is provided, it
 // will be used to pay for the price table.
 func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
-	pt, cost, err := h.priceTables.fetch(ctx, h, rev)
+	pt, cost, err := h.priceTables.Fetch(ctx, h, rev)
 	if err != nil {
 		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
 	}
@@ -243,7 +244,7 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 
 func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	return d.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, ptc, err := d.pts.fetch(ctx, d, nil)
+		pt, ptc, err := d.pts.Fetch(ctx, d, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}

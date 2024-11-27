@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -175,8 +176,8 @@ type Worker struct {
 	accounts    *iworker.AccountMgr
 	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
-	priceTables *priceTables
-	pricesCache *pricesCache
+	priceTables *prices.PriceTables
+	pricesCache *prices.PricesCache
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
@@ -742,8 +743,8 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
-		priceTables:          newPriceTables(),
-		pricesCache:          newPricesCache(),
+		priceTables:          prices.NewPriceTables(),
+		pricesCache:          prices.NewPricesCache(),
 		rhp2Client:           rhp2.New(dialer, l),
 		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
