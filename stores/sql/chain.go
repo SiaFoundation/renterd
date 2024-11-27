@@ -156,8 +156,27 @@ func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []Siaco
 	return nil
 }
 
+func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (types.V2FileContractElement, error) {
+	var contract V2Contract
+	var leafIndex uint64
+	var proof MerkleProof
+	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", Hash256(fcid)).
+		Scan(&contract, &leafIndex, &proof)
+	if err != nil {
+		return types.V2FileContractElement{}, err
+	}
+	return types.V2FileContractElement{
+		ID: fcid,
+		StateElement: types.StateElement{
+			LeafIndex:   leafIndex,
+			MerkleProof: proof.Hashes,
+		},
+		V2FileContract: types.V2FileContract(contract),
+	}, nil
+}
+
 func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c INNER JOIN contract_elements ce ON c.id = ce.db_contract_id WHERE c.fcid = ?")
+	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
 	if err != nil {
 		return err
 	}
@@ -186,14 +205,26 @@ func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2F
 }
 
 func RemoveFileContractElements(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) error {
-	deleteStmt, err := tx.Prepare(ctx, "DELETE FROM contract_elements ce INNER JOIN contracts c ON c.id = ce.db_contract_id WHERE c.fcid = ?")
+	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer contractIDStmt.Close()
+
+	deleteStmt, err := tx.Prepare(ctx, "DELETE FROM contract_elements WHERE db_contract_id = ?")
 	if err != nil {
 		return err
 	}
 	defer deleteStmt.Close()
 
 	for _, fcid := range fcids {
-		_, err := deleteStmt.Exec(ctx, Hash256(fcid))
+		var contractID int64
+		if err := contractIDStmt.QueryRow(ctx, Hash256(fcid)).Scan(&contractID); errors.Is(err, dsql.ErrNoRows) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		_, err := deleteStmt.Exec(ctx, contractID)
 		if err != nil {
 			return fmt.Errorf("failed to remove contract element %v: %w", fcid, err)
 		}
