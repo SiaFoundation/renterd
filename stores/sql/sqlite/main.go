@@ -1071,6 +1071,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
 		defer insertStmt.Close()
+
 		joinStmt, err := tx.Prepare(ctx, `
 		INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
 		SELECT ?, id FROM (
@@ -1092,6 +1093,30 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
 			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
 				return fmt.Errorf("failed to join host blocklist entry: %w", err)
+			}
+		}
+
+		v2JoinStmt, err := tx.Prepare(ctx, `
+		INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		SELECT ?, db_host_id FROM (
+			SELECT db_host_id
+			FROM host_addresses
+			WHERE net_address == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE ?
+		)`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare join statement: %w", err)
+		}
+		defer v2JoinStmt.Close()
+
+		for _, entry := range add {
+			if res, err := insertStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to insert v2 host blocklist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch v2 host blocklist entry id: %w", err)
+			} else if _, err := v2JoinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+				return fmt.Errorf("failed to join v2 host blocklist entry: %w", err)
 			}
 		}
 	}
