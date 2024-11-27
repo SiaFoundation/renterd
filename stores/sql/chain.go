@@ -5,6 +5,7 @@ import (
 	dsql "database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -118,18 +119,12 @@ func UpdateWalletSiacoinElementProofs(ctx context.Context, tx sql.Tx, updater wa
 		return nil
 	}
 	for i := range se {
-		ele := types.StateElement{
-			LeafIndex:   se[i].LeafIndex,
-			MerkleProof: se[i].MerkleProof.Hashes,
-		}
-		updater.UpdateElementProof(&ele)
-		se[i].LeafIndex = ele.LeafIndex
-		se[i].MerkleProof.Hashes = ele.MerkleProof
+		updater.UpdateElementProof(&se[i].StateElement)
 	}
 	return updateSiacoinStateElements(ctx, tx, se)
 }
 
-func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []StateElement, err error) {
+func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []SiacoinStateElement, err error) {
 	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof FROM wallet_outputs")
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch state elements: %w", err)
@@ -137,7 +132,7 @@ func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []StateEl
 	defer rows.Close()
 
 	for rows.Next() {
-		el, err := scanStateElement(rows)
+		el, err := scanSiacoinStateElement(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan state element: %w", err)
 		}
@@ -146,15 +141,105 @@ func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []StateEl
 	return elements, rows.Err()
 }
 
-func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []StateElement) error {
-	updateStmt, err := tx.Prepare(ctx, "UPDATE wallet_outputs SET leaf_index = ?, merkle_proof= ?  WHERE output_id = ?")
+func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []SiacoinStateElement) error {
+	updateStmt, err := tx.Prepare(ctx, "UPDATE wallet_outputs SET leaf_index = ?, merkle_proof= ? WHERE output_id = ?")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to update state elements: %w", err)
 	}
 	defer updateStmt.Close()
 
 	for _, el := range elements {
-		if _, err := updateStmt.Exec(ctx, el.LeafIndex, el.MerkleProof, el.ID); err != nil {
+		if _, err := updateStmt.Exec(ctx, el.LeafIndex, MerkleProof{el.MerkleProof}, el.ID); err != nil {
+			return fmt.Errorf("failed to update state element '%v': %w", el.ID, err)
+		}
+	}
+	return nil
+}
+
+func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
+	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c INNER JOIN contract_elements ce ON c.id = contract_elements.db_contract_id WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer contractIDStmt.Close()
+
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof) VALUES (?, ?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, fce := range fces {
+		var contractID int64
+		err = contractIDStmt.QueryRow(ctx, Hash256(fce.ID)).Scan(&contractID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return contractNotFoundErr(fce.ID)
+		} else if err != nil {
+			return err
+		}
+		_, err = insertStmt.Exec(ctx, time.Now().UTC(), contractID, V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, MerkleProof{fce.StateElement.MerkleProof})
+		if err != nil {
+			return fmt.Errorf("failed to insert file contract element: %w", err)
+		}
+	}
+	return nil
+}
+
+func RemoveFileContractElements(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) error {
+	deleteStmt, err := tx.Prepare(ctx, "DELETE FROM contract_elements ce INNER JOIN contracts c ON c.id = ce.db_contract_id WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer deleteStmt.Close()
+
+	for _, fcid := range fcids {
+		_, err := deleteStmt.Exec(ctx, Hash256(fcid))
+		if err != nil {
+			return fmt.Errorf("failed to remove contract element %v: %w", fcid, err)
+		}
+	}
+	return nil
+}
+
+func UpdateFileContractElementProofs(ctx context.Context, tx sql.Tx, updater wallet.ProofUpdater) error {
+	se, err := getFileContractStateElements(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("failed to get contract state elements: %w", err)
+	} else if len(se) == 0 {
+		return nil
+	}
+	for i := range se {
+		updater.UpdateElementProof(&se[i].StateElement)
+	}
+	return updateFileContractStateElements(ctx, tx, se)
+}
+
+func getFileContractStateElements(ctx context.Context, tx sql.Tx) (elements []FileContractStateElement, err error) {
+	rows, err := tx.Query(ctx, "SELECT db_contract_id, leaf_index, merkle_proof FROM contract_elements")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch state elements: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		el, err := scanFileContractStateElement(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan state element: %w", err)
+		}
+		elements = append(elements, el)
+	}
+	return elements, rows.Err()
+}
+
+func updateFileContractStateElements(ctx context.Context, tx sql.Tx, elements []FileContractStateElement) error {
+	updateStmt, err := tx.Prepare(ctx, "UPDATE contract_elements SET leaf_index = ?, merkle_proof= ? WHERE db_contract_id = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to update state elements: %w", err)
+	}
+	defer updateStmt.Close()
+
+	for _, el := range elements {
+		if _, err := updateStmt.Exec(ctx, el.LeafIndex, MerkleProof{el.MerkleProof}, el.ID); err != nil {
 			return fmt.Errorf("failed to update state element '%v': %w", el.ID, err)
 		}
 	}

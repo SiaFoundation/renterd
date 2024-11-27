@@ -200,6 +200,18 @@ func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.
 	return ssql.UpdateContractState(c.ctx, c.tx, fcid, state, c.l)
 }
 
+func (c chainUpdateTx) InsertFileContractElements(fces []types.V2FileContractElement) error {
+	return ssql.InsertFileContractElements(c.ctx, c.tx, fces)
+}
+
+func (c chainUpdateTx) RemoveFileContractElements(fcids []types.FileContractID) error {
+	return ssql.RemoveFileContractElements(c.ctx, c.tx, fcids)
+}
+
+func (c chainUpdateTx) UpdateFileContractElementProofs(updater wallet.ProofUpdater) error {
+	return ssql.UpdateFileContractElementProofs(c.ctx, c.tx, updater)
+}
+
 func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return ssql.UpdateFailedContracts(c.ctx, c.tx, blockHeight, c.l)
 }
