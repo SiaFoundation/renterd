@@ -450,7 +450,18 @@ func TestContractElements(t *testing.T) {
 		}
 		assertContractElement(tx, 1, []types.Hash256{{1}})
 
-		// TODO: update the element's proof
+		// update the element's proof
+		if err := tx.UpdateFileContractElementProofs(&passthroughProofUpdater{
+			fn: func(se *types.StateElement) {
+				*se = types.StateElement{
+					LeafIndex:   2,
+					MerkleProof: []types.Hash256{{2}},
+				}
+			},
+		}); err != nil {
+			return err
+		}
+		assertContractElement(tx, 2, []types.Hash256{{2}})
 
 		// remove the contract element
 		if err := tx.RemoveFileContractElements([]types.FileContractID{fcid}); err != nil {

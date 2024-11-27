@@ -160,7 +160,7 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	var contract V2Contract
 	var leafIndex uint64
 	var proof MerkleProof
-	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", Hash256(fcid)).
+	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", FileContractID(fcid)).
 		Scan(&contract, &leafIndex, &proof)
 	if err != nil {
 		return types.V2FileContractElement{}, err
@@ -196,7 +196,7 @@ func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2F
 		} else if err != nil {
 			return err
 		}
-		_, err = insertStmt.Exec(ctx, time.Now().UTC(), contractID, V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, MerkleProof{fce.StateElement.MerkleProof})
+		_, err = insertStmt.Exec(ctx, time.Now(), contractID, V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, MerkleProof{fce.StateElement.MerkleProof})
 		if err != nil {
 			return fmt.Errorf("failed to insert file contract element: %w", err)
 		}
@@ -219,7 +219,7 @@ func RemoveFileContractElements(ctx context.Context, tx sql.Tx, fcids []types.Fi
 
 	for _, fcid := range fcids {
 		var contractID int64
-		if err := contractIDStmt.QueryRow(ctx, Hash256(fcid)).Scan(&contractID); errors.Is(err, dsql.ErrNoRows) {
+		if err := contractIDStmt.QueryRow(ctx, FileContractID(fcid)).Scan(&contractID); errors.Is(err, dsql.ErrNoRows) {
 			continue
 		} else if err != nil {
 			return err

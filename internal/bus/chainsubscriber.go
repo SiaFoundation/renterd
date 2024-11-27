@@ -247,7 +247,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// reverted contracts
 	if err := tx.RemoveFileContractElements(revertedContracts); err != nil {
-		return fmt.Errorf("failed to insert v2 file contract elements: %w", err)
+		return fmt.Errorf("failed to remove v2 file contract elements: %w", err)
 	}
 
 	// contract proofs
