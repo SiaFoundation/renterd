@@ -4794,7 +4794,7 @@ func TestHostSectors(t *testing.T) {
 	} else if hosts, ok := hs[s2]; !ok || len(hosts) != 1 || hosts[0] != 2 {
 		t.Fatal("unexpected host sector", hs)
 	}
-	return
+
 	// archive the 2nd contract
 	if err := ss.ArchiveContract(context.Background(), fcids[1], "foo"); err != nil {
 		t.Fatal(err)
