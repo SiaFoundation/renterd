@@ -651,7 +651,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 			}
 
 			log.Infof("successfully updated usability to %s", usability)
-			updates = append(updates, usabilityUpdate{c.ID, c.Usability, usability, context})
+			updates = append(updates, usabilityUpdate{c.HostKey, c.ID, c.Size, c.Usability, usability, context})
 		}
 
 		if usability == api.ContractUsabilityGood {

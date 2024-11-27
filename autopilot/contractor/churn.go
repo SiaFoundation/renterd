@@ -12,14 +12,18 @@ type (
 	accumulatedChurn map[types.FileContractID][]churnUpdate
 
 	churnUpdate struct {
-		Time   api.TimeRFC3339 `json:"time"`
-		From   string          `json:"from"`
-		To     string          `json:"to"`
-		Reason string          `json:"reason"`
+		Time    api.TimeRFC3339 `json:"time"`
+		From    string          `json:"from"`
+		To      string          `json:"to"`
+		Reason  string          `json:"reason"`
+		HostKey types.PublicKey `json:"hostKey"`
+		Size    uint64          `json:"size"`
 	}
 
 	usabilityUpdate struct {
+		hk     types.PublicKey
 		fcid   types.FileContractID
+		size   uint64
 		from   string
 		to     string
 		reason string
@@ -30,10 +34,12 @@ func (c accumulatedChurn) ApplyUpdates(updates []usabilityUpdate) alerts.Alert {
 	now := time.Now()
 	for _, u := range updates {
 		c[u.fcid] = append(c[u.fcid], churnUpdate{
-			Time:   api.TimeRFC3339(now),
-			From:   u.from,
-			To:     u.to,
-			Reason: u.reason,
+			Time:    api.TimeRFC3339(now),
+			From:    u.from,
+			To:      u.to,
+			Reason:  u.reason,
+			HostKey: u.hk,
+			Size:    u.size,
 		})
 	}
 
