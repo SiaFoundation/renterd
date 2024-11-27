@@ -179,6 +179,5 @@ CREATE TABLE `contract_elements` (
     `db_contract_id` integer NOT NULL REFERENCES `contracts`(`id`) ON DELETE CASCADE,
     `contract` blob,
     `leaf_index` integer,
-    `merkle_proof` longblob NOT NULL,
-);
-CREATE UNIQUE INDEX `idx_contract_elements_db_contract_id` ON `contracts`(`db_contract_id`);
+    `merkle_proof` longblob NOT NULL);
+CREATE UNIQUE INDEX `idx_contract_elements_db_contract_id` ON `contract_elements`(`db_contract_id`);
