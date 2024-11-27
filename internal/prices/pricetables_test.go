@@ -1,4 +1,4 @@
-package worker
+package prices
 
 import (
 	"context"
@@ -6,19 +6,30 @@ import (
 	"testing"
 	"time"
 
+	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test/mocks"
+	"lukechampine.com/frand"
 )
+
+func newTestHostPriceTable() api.HostPriceTable {
+	var uid rhpv3.SettingsID
+	frand.Read(uid[:])
+
+	return api.HostPriceTable{
+		HostPriceTable: rhpv3.HostPriceTable{UID: uid, HostBlockHeight: 100, Validity: time.Minute},
+		Expiry:         time.Now().Add(time.Minute),
+	}
+}
 
 func TestPriceTables(t *testing.T) {
 	// create host manager & price table
-	pts := newPriceTables()
+	pts := NewPriceTables()
 
 	// create host & contract mock
 	hostMock := mocks.NewHost(types.PublicKey{1})
-	c := mocks.NewContract(hostMock.PublicKey(), types.FileContractID{1})
 
 	// expire its price table
 	expiredPT := newTestHostPriceTable()
@@ -28,16 +39,20 @@ func TestPriceTables(t *testing.T) {
 	// manage the host, make sure fetching the price table blocks
 	fetchPTBlockChan := make(chan struct{})
 	validPT := newTestHostPriceTable()
-	h := newTestHostCustom(hostMock, c, func() api.HostPriceTable {
-		<-fetchPTBlockChan
-		return validPT
-	}, func() rhpv4.HostPrices {
-		t.Fatal("shouldn't be called")
-		return rhpv4.HostPrices{}
-	})
+	h := &pricesFetcher{
+		hk: types.PublicKey{1},
+		hptFn: func() api.HostPriceTable {
+			<-fetchPTBlockChan
+			return validPT
+		},
+		pFn: func() rhpv4.HostPrices {
+			t.Fatal("shouldn't be called")
+			return rhpv4.HostPrices{}
+		},
+	}
 
 	// trigger a fetch to make it block
-	go pts.fetch(context.Background(), h, nil)
+	go pts.Fetch(context.Background(), h, nil)
 	time.Sleep(50 * time.Millisecond)
 
 	// fetch it again but with a canceled context to avoid blocking
@@ -45,14 +60,14 @@ func TestPriceTables(t *testing.T) {
 	// update
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := pts.fetch(ctx, h, nil)
+	_, _, err := pts.Fetch(ctx, h, nil)
 	if !errors.Is(err, errPriceTableUpdateTimedOut) {
 		t.Fatal("expected errPriceTableUpdateTimedOut, got", err)
 	}
 
 	// unblock and assert we paid for the price table
 	close(fetchPTBlockChan)
-	update, _, err := pts.fetch(context.Background(), h, nil)
+	update, _, err := pts.Fetch(context.Background(), h, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != validPT.UID {
@@ -63,8 +78,7 @@ func TestPriceTables(t *testing.T) {
 	// same price table as it hasn't expired yet
 	oldValidPT := validPT
 	validPT = newTestHostPriceTable()
-	h.UpdatePriceTable(validPT)
-	update, _, err = pts.fetch(context.Background(), h, nil)
+	update, _, err = pts.Fetch(context.Background(), h, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != oldValidPT.UID {
@@ -73,7 +87,7 @@ func TestPriceTables(t *testing.T) {
 
 	// manually expire the price table
 	pts.priceTables[h.PublicKey()].renewTime = time.Now().Add(-time.Second)
-	update, _, err = pts.fetch(context.Background(), h, nil)
+	update, _, err = pts.Fetch(context.Background(), h, nil)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.UID != validPT.UID {

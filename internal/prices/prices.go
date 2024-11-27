@@ -1,4 +1,4 @@
-package worker
+package prices
 
 import (
 	"context"
@@ -24,7 +24,7 @@ type (
 		PublicKey() types.PublicKey
 	}
 
-	pricesCache struct {
+	PricesCache struct {
 		mu    sync.Mutex
 		cache map[types.PublicKey]*cachedPrices
 	}
@@ -45,14 +45,14 @@ type (
 	}
 )
 
-func newPricesCache() *pricesCache {
-	return &pricesCache{
+func NewPricesCache() *PricesCache {
+	return &PricesCache{
 		cache: make(map[types.PublicKey]*cachedPrices),
 	}
 }
 
-// fetch returns a price table for the given host
-func (c *pricesCache) fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPrices, error) {
+// Fetch returns a price table for the given host
+func (c *PricesCache) Fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPrices, error) {
 	c.mu.Lock()
 	prices, exists := c.cache[h.PublicKey()]
 	if !exists {

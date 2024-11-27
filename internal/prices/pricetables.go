@@ -1,4 +1,4 @@
-package worker
+package prices
 
 import (
 	"context"
@@ -16,11 +16,6 @@ const (
 	// for use, we essentially add 30 seconds to the current time when checking
 	// whether we are still before a pricetable's expiry time
 	priceTableValidityLeeway = 30 * time.Second
-
-	// priceTableBlockHeightLeeway is the amount of blocks before a price table
-	// is considered gouging on the block height when we renew it even if it is
-	// still valid
-	priceTableBlockHeightLeeway = 2
 )
 
 var (
@@ -35,7 +30,7 @@ type (
 		PublicKey() types.PublicKey
 	}
 
-	priceTables struct {
+	PriceTables struct {
 		mu          sync.Mutex
 		priceTables map[types.PublicKey]*priceTable
 	}
@@ -56,14 +51,14 @@ type (
 	}
 )
 
-func newPriceTables() *priceTables {
-	return &priceTables{
+func NewPriceTables() *PriceTables {
+	return &PriceTables{
 		priceTables: make(map[types.PublicKey]*priceTable),
 	}
 }
 
-// fetch returns a price table for the given host
-func (pts *priceTables) fetch(ctx context.Context, h priceTableFetcher, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
+// Fetch returns a price table for the given host
+func (pts *PriceTables) Fetch(ctx context.Context, h priceTableFetcher, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	pts.mu.Lock()
 	pt, exists := pts.priceTables[h.PublicKey()]
 	if !exists {
