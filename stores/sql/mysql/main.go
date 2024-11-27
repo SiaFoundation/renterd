@@ -1087,6 +1087,31 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to join host blocklist entry: %w", err)
 			}
 		}
+
+		v2JoinStmt, err := tx.Prepare(ctx, `
+		INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
+		SELECT ?, db_host_id FROM (
+			SELECT db_host_id
+			FROM host_addresses
+			WHERE net_address=? OR
+			SUBSTRING_INDEX(net_address,':',1) = ? OR
+			SUBSTRING_INDEX(net_address,':',1) LIKE ?
+		) AS _
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to prepare v2 net address join statement: %w", err)
+		}
+		defer v2JoinStmt.Close()
+
+		for _, entry := range add {
+			if res, err := insertStmt.Exec(ctx, entry); err != nil {
+				return fmt.Errorf("failed to insert v2 host blocklist entry: %w", err)
+			} else if entryID, err := res.LastInsertId(); err != nil {
+				return fmt.Errorf("failed to fetch v2 host blocklist entry id: %w", err)
+			} else if _, err := v2JoinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+				return fmt.Errorf("failed to join v2 host blocklist entry: %w", err)
+			}
+		}
 	}
 
 	if !clear && len(remove) > 0 {

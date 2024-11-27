@@ -174,6 +174,11 @@ func (h *Host) RHPv3Addr() string {
 	return h.rhpv3.LocalAddr()
 }
 
+// RHPv4Addr returns the address of the RHPv4 listener
+func (h *Host) RHPv4Addr() string {
+	return h.rhp4Listener.Addr().String()
+}
+
 // AddVolume adds a new volume to the host
 func (h *Host) AddVolume(ctx context.Context, path string, size uint64) error {
 	result := make(chan error, 1)
