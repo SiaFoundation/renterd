@@ -640,6 +640,9 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 	log := logger.Named("usability")
 	updateUsability := func(ctx context.Context, h api.Host, c api.ContractMetadata, usability, context string) {
 		if c.Usability == usability {
+			if c.IsGood() {
+				hf.Add(h)
+			}
 			return
 		}
 
@@ -751,6 +754,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 		// check if revision is available
 		if c.Revision == nil {
 			logger.Info("ignoring contract with missing revision")
+			updateUsability(ctx, host, cm, c.Usability, "missing revision")
 			continue // no more checks without revision
 		}
 
