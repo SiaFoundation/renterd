@@ -19,6 +19,7 @@ import (
 type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
+		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
 		InsertFileContractElements([]types.V2FileContractElement) error
 		RemoveFileContractElements([]types.FileContractID) error
 		UpdateChainIndex(index types.ChainIndex) error

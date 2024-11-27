@@ -2,8 +2,10 @@ package stores
 
 import (
 	"context"
+	dsql "database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -389,5 +391,76 @@ func TestProcessChainUpdate(t *testing.T) {
 		}, now)
 	}); !errors.Is(err, sql.ErrIndexMissmatch) {
 		t.Fatal("expected ErrIndexMissmatch", err)
+	}
+}
+
+func TestContractElements(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+
+	// add test host and contract
+	hks, err := ss.addTestHosts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(fcids) != 1 {
+		t.Fatal("expected one contract", len(fcids))
+	}
+	fcid := fcids[0]
+
+	// declare some contract data - just enough to make sure it is persisted
+	contract := types.V2FileContract{
+		Capacity: 1,
+		Filesize: 2,
+	}
+
+	assertContractElement := func(tx sql.ChainUpdateTx, leafIndex uint64, proof []types.Hash256) {
+		t.Helper()
+		fce, err := tx.FileContractElement(fcid)
+		if err != nil {
+			t.Fatal(err)
+		} else if fce.ID != fcid {
+			t.Fatalf("unexpected contract id %v", fce.ID)
+		} else if fce.StateElement.LeafIndex != leafIndex {
+			t.Fatalf("unexpected leaf index %v", fce.StateElement.LeafIndex)
+		} else if !reflect.DeepEqual(fce.StateElement.MerkleProof, proof) {
+			t.Fatalf("unexpected merkle proof %v", fce.StateElement.MerkleProof)
+		} else if !reflect.DeepEqual(fce.V2FileContract, contract) {
+			t.Fatalf("unexpected contract %v", fce.V2FileContract)
+		}
+	}
+
+	// check current contract state
+	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+		// add a new contract element
+		err := tx.InsertFileContractElements([]types.V2FileContractElement{
+			{
+				ID: fcid,
+				StateElement: types.StateElement{
+					LeafIndex:   1,
+					MerkleProof: []types.Hash256{{1}},
+				},
+				V2FileContract: contract,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		assertContractElement(tx, 1, []types.Hash256{{1}})
+
+		// TODO: update the element's proof
+
+		// remove the contract element
+		if err := tx.RemoveFileContractElements([]types.FileContractID{fcid}); err != nil {
+			return err
+		} else if _, err := tx.FileContractElement(fcid); !errors.Is(err, dsql.ErrNoRows) {
+			return fmt.Errorf("expected ErrNoRows, got %v", err)
+		}
+
+		return nil
+	}); err != nil {
+		t.Fatal("unexpected error", err)
 	}
 }
