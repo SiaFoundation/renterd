@@ -10,6 +10,14 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	// priceRefreshInterval is the max interval at which we refresh price tables.
+	// It is set to 20 minutes since that equals 2 blocks on average which keeps
+	// prices reasonably up-to-date. If the price table has an expiry shorter
+	// than this, it will be refreshed sooner.
+	priceRefreshInterval = 20 * time.Minute
+)
+
 type (
 	PricesFetcher interface {
 		Prices(ctx context.Context) (rhpv4.HostPrices, error)
@@ -24,9 +32,10 @@ type (
 	cachedPrices struct {
 		hk types.PublicKey
 
-		mu     sync.Mutex
-		prices rhpv4.HostPrices
-		update *pricesUpdate
+		mu        sync.Mutex
+		prices    rhpv4.HostPrices
+		renewTime time.Time
+		update    *pricesUpdate
 	}
 
 	pricesUpdate struct {
@@ -71,26 +80,15 @@ func (p *cachedPrices) ongoingUpdate() (bool, *pricesUpdate) {
 	return ongoing, p.update
 }
 
-func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4.HostPrices, err error) {
+func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPrices, error) {
 	// grab the current price table
 	p.mu.Lock()
-	prices = p.prices
+	prices := p.prices
 	p.mu.Unlock()
 
-	// get gouging checker to figure out how many blocks we have left before the
-	// current price table is considered to gouge on the block height
-	gc, err := GougingCheckerFromContext(ctx, false)
-	if err != nil {
-		return rhpv4.HostPrices{}, err
-	}
-
 	// figure out whether we should update the price table, if not we can return
-	if !prices.ValidUntil.IsZero() {
-		closeToGouging := gc.BlocksUntilBlockHeightGouging(prices.TipHeight) <= priceTableBlockHeightLeeway
-		closeToExpiring := time.Now().Add(priceTableValidityLeeway).After(prices.ValidUntil)
-		if !closeToExpiring && !closeToGouging {
-			return prices, nil
-		}
+	if !p.renewTime.IsZero() && time.Now().Before(p.renewTime) {
+		return prices, nil
 	}
 
 	// figure out whether an update is already ongoing, if there's one ongoing
@@ -98,7 +96,7 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4
 	// we have is still usable
 	ongoing, update := p.ongoingUpdate()
 	if ongoing && time.Now().Add(priceTableValidityLeeway).Before(prices.ValidUntil) {
-		return
+		return prices, nil
 	} else if ongoing {
 		select {
 		case <-ctx.Done():
@@ -109,19 +107,27 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (prices rhpv4
 	}
 
 	// this thread is updating the price table
-	defer func() {
-		update.prices = prices
-		update.err = err
-		close(update.done)
+	prices, err := h.Prices(ctx)
 
-		p.mu.Lock()
-		if err == nil {
-			p.prices = prices
+	// signal the other threads that the update is done
+	update.prices = prices
+	update.err = err
+	close(update.done)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if err == nil {
+		p.prices = prices
+
+		// renew the prices 2 blocks after receiving them or 30 seconds
+		// before expiry, whatever comes first
+		p.renewTime = time.Now().Add(priceRefreshInterval)
+		if expiry := p.prices.ValidUntil.Add(-priceTableValidityLeeway); expiry.Before(p.renewTime) {
+			p.renewTime = expiry
 		}
-		p.update = nil
-		p.mu.Unlock()
-	}()
+	}
+	p.update = nil
 
-	// otherwise fetch it
-	return h.Prices(ctx)
+	return prices, err
 }

@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -46,9 +43,10 @@ type (
 	priceTable struct {
 		hk types.PublicKey
 
-		mu     sync.Mutex
-		hpt    api.HostPriceTable
-		update *priceTableUpdate
+		mu        sync.Mutex
+		hpt       api.HostPriceTable
+		renewTime time.Time
+		update    *priceTableUpdate
 	}
 
 	priceTableUpdate struct {
@@ -93,27 +91,15 @@ func (pt *priceTable) ongoingUpdate() (bool, *priceTableUpdate) {
 	return ongoing, pt.update
 }
 
-func (p *priceTable) fetch(ctx context.Context, h priceTableFetcher, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
+func (p *priceTable) fetch(ctx context.Context, h priceTableFetcher, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	// grab the current price table
 	p.mu.Lock()
-	hpt = p.hpt
+	hpt := p.hpt
 	p.mu.Unlock()
 
-	// get gouging checker to figure out how many blocks we have left before the
-	// current price table is considered to gouge on the block height
-	gc, err := GougingCheckerFromContext(ctx, false)
-	if err != nil {
-		return api.HostPriceTable{}, types.ZeroCurrency, err
-	}
-
 	// figure out whether we should update the price table, if not we can return
-	if hpt.UID != (rhpv3.SettingsID{}) {
-		randomUpdateLeeway := frand.Intn(int(math.Floor(hpt.HostPriceTable.Validity.Seconds() * 0.1)))
-		closeToGouging := gc.BlocksUntilBlockHeightGouging(hpt.HostBlockHeight) <= priceTableBlockHeightLeeway
-		closeToExpiring := time.Now().Add(priceTableValidityLeeway).Add(time.Duration(randomUpdateLeeway) * time.Second).After(hpt.Expiry)
-		if !closeToExpiring && !closeToGouging {
-			return
-		}
+	if !p.renewTime.IsZero() && time.Now().Before(p.renewTime) {
+		return hpt, types.ZeroCurrency, nil
 	}
 
 	// figure out whether an update is already ongoing, if there's one ongoing
@@ -121,7 +107,7 @@ func (p *priceTable) fetch(ctx context.Context, h priceTableFetcher, rev *types.
 	// we have is still usable
 	ongoing, update := p.ongoingUpdate()
 	if ongoing && time.Now().Add(priceTableValidityLeeway).Before(hpt.Expiry) {
-		return
+		return hpt, types.ZeroCurrency, nil
 	} else if ongoing {
 		select {
 		case <-ctx.Done():
@@ -132,25 +118,27 @@ func (p *priceTable) fetch(ctx context.Context, h priceTableFetcher, rev *types.
 	}
 
 	// this thread is updating the price table
-	defer func() {
-		update.hpt = hpt
-		update.err = err
-		close(update.done)
+	hpt, cost, err := h.PriceTable(ctx, rev)
 
-		p.mu.Lock()
-		if err == nil {
-			p.hpt = hpt
+	// signal the other threads that the update is done
+	update.hpt = hpt
+	update.err = err
+	close(update.done)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if err == nil {
+		p.hpt = hpt
+
+		// renew the prices 2 blocks after receiving them or 30 seconds
+		// before expiry, whatever comes first
+		p.renewTime = time.Now().Add(priceRefreshInterval) // 2 blocks
+		if expiry := p.hpt.Expiry.Add(-priceTableValidityLeeway); expiry.Before(p.renewTime) {
+			p.renewTime = expiry
 		}
-		p.update = nil
-		p.mu.Unlock()
-	}()
-
-	// otherwise fetch it
-	hpt, cost, err = h.PriceTable(ctx, rev)
-
-	// handle error after recording
-	if err != nil {
-		return api.HostPriceTable{}, types.ZeroCurrency, fmt.Errorf("failed to update pricetable, err %v", err)
 	}
-	return
+	p.update = nil
+
+	return hpt, cost, err
 }
