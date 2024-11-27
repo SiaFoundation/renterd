@@ -450,9 +450,11 @@ type (
 		ID          int64
 		FCID        FileContractID
 		RenewedFrom FileContractID
+		HostID      int64
 	}
 
 	ContractSector struct {
+		HostID     int64
 		ContractID int64
 		SectorID   int64
 	}

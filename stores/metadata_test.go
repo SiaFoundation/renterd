@@ -4710,3 +4710,102 @@ func TestPutContract(t *testing.T) {
 		t.Fatalf("contracts are not equal, diff: %s", cmp.Diff(contracts[0], u))
 	}
 }
+
+func TestHostSectors(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// add test hosts
+	hks, err := ss.addTestHosts(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fcids, _, err := ss.addTestContracts(hks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create slab
+	s1, s2 := types.Hash256{1}, types.Hash256{2}
+	slab := object.Slab{
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		MinShards:     1,
+		Shards: []object.Sector{
+			newTestShard(hks[0], fcids[0], s1),
+			newTestShard(hks[1], fcids[1], s2),
+		},
+	}
+
+	// add test object
+	_, err = ss.addTestObject("/1", object.Object{
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Slabs: []object.SlabSlice{{Slab: slab}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create a helper to fetch host sectors
+	hostSectors := func() map[types.Hash256][]int64 {
+		t.Helper()
+
+		rows, err := ss.DB().Query(context.Background(), "SELECT s.root, hs.db_host_id FROM host_sectors hs INNER JOIN sectors s ON s.id = hs.db_sector_id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+
+		hs := make(map[types.Hash256][]int64)
+		for rows.Next() {
+			var root sql.Hash256
+			var hostID int64
+			if err := rows.Scan(&root, &hostID); err != nil {
+				t.Fatal(err)
+			}
+			hs[types.Hash256(root)] = append(hs[types.Hash256(root)], hostID)
+		}
+		return hs
+	}
+
+	// assert the host sectors
+	if hs := hostSectors(); len(hs) != 2 {
+		t.Fatal("unexpected number of host sectors", len(hs))
+	} else if hosts, ok := hs[s1]; !ok || len(hosts) != 1 || hosts[0] != 1 {
+		t.Fatal("unexpected host sector", hs)
+	} else if hosts, ok := hs[s2]; !ok || len(hosts) != 1 || hosts[0] != 2 {
+		t.Fatal("unexpected host sector", hs)
+	}
+
+	// update the slab
+	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, []api.UploadedSector{
+		{
+			ContractID: fcids[1],
+			Root:       s1,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the host sectors
+	if hs := hostSectors(); len(hs) != 2 {
+		t.Fatal("unexpected number of host sectors", len(hs))
+	} else if hosts, ok := hs[s1]; !ok || len(hosts) != 2 || hosts[0] != 1 || hosts[1] != 2 {
+		t.Fatal("unexpected host sector", hs)
+	} else if hosts, ok := hs[s2]; !ok || len(hosts) != 1 || hosts[0] != 2 {
+		t.Fatal("unexpected host sector", hs)
+	}
+	return
+	// archive the 2nd contract
+	if err := ss.ArchiveContract(context.Background(), fcids[1], "foo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the host sectors
+	if hs := hostSectors(); len(hs) != 1 {
+		t.Fatal("unexpected number of host sectors", len(hs))
+	} else if hosts, ok := hs[s1]; !ok || len(hosts) != 1 || hosts[0] != 1 {
+		t.Fatal("unexpected host sector", hs)
+	} else if _, ok := hs[s2]; ok {
+		t.Fatal("unexpected host sector", hs)
+	}
+}

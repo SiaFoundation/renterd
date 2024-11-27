@@ -177,6 +177,17 @@ CREATE TABLE `contract_sectors` (
   CONSTRAINT `fk_contract_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- dbHost <-> dbSector
+CREATE TABLE `host_sectors` (
+  `db_sector_id` bigint unsigned NOT NULL,
+  `db_host_id` bigint unsigned NOT NULL,
+  PRIMARY KEY (`db_sector_id`, `db_host_id`),
+  KEY `idx_host_sectors_db_sector_id` (`db_sector_id`),
+  KEY `idx_host_sectors_db_host_id` (`db_host_id`),
+  CONSTRAINT `fk_host_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_host_sectors_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- dbContractSet <-> dbContract
 CREATE TABLE `contract_set_contracts` (
   `db_contract_set_id` bigint unsigned NOT NULL,
