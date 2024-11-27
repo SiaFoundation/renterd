@@ -13,30 +13,17 @@ import (
 )
 
 func TestPricesCache(t *testing.T) {
-	cm := mocks.NewChain(api.ConsensusState{
-		BlockHeight: 1,
-	})
-	cState, _ := cm.ConsensusState(context.Background())
-
-	blockHeightLeeway := 10
-	gCtx := WithGougingChecker(context.Background(), cm, api.GougingParams{
-		ConsensusState: cState,
-		GougingSettings: api.GougingSettings{
-			HostBlockHeightLeeway: blockHeightLeeway,
-		},
-	})
-
 	cache := newPricesCache()
 	hk := types.PublicKey{1}
 	hostMock := mocks.NewHost(hk)
 	c := mocks.NewContract(hk, types.FileContractID{1})
 
-	// expire its price table
+	// expire its prices
 	expiredPT := newTestHostPriceTable()
 	expiredPT.Expiry = time.Now()
 	hostMock.UpdatePriceTable(expiredPT)
 
-	// manage the host, make sure fetching the price table blocks
+	// manage the host, make sure fetching the prices blocks
 	fetchPTBlockChan := make(chan struct{})
 	validPrices := newTestHostPrices()
 	h := newTestHostCustom(hostMock, c, func() api.HostPriceTable {
@@ -48,50 +35,46 @@ func TestPricesCache(t *testing.T) {
 	})
 
 	// trigger a fetch to make it block
-	go cache.fetch(gCtx, h)
+	go cache.fetch(context.Background(), h)
 	time.Sleep(50 * time.Millisecond)
 
 	// fetch it again but with a canceled context to avoid blocking
-	// indefinitely, the error will indicate we were blocking on a price table
+	// indefinitely, the error will indicate we were blocking on a prices
 	// update
-	ctx, cancel := context.WithCancel(gCtx)
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := cache.fetch(ctx, h)
 	if !errors.Is(err, errPriceTableUpdateTimedOut) {
 		t.Fatal("expected errPriceTableUpdateTimedOut, got", err)
 	}
 
-	// unblock and assert we paid for the price table
+	// unblock and assert we paid for the prices
 	close(fetchPTBlockChan)
-	update, err := cache.fetch(gCtx, h)
+	update, err := cache.fetch(context.Background(), h)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.Signature != validPrices.Signature {
-		t.Fatal("price table mismatch")
+		t.Fatal("prices mismatch")
 	}
 
-	// refresh the price table on the host, update again, assert we receive the
-	// same price table as it hasn't expired yet
-	h.UpdatePriceTable(newTestHostPriceTable())
-	update, err = cache.fetch(gCtx, h)
+	// refresh the prices on the host, update again, assert we receive the
+	// same prices as it hasn't expired yet
+	oldValidPrices := validPrices
+	validPrices = newTestHostPrices()
+	h.UpdatePrices(validPrices)
+	update, err = cache.fetch(context.Background(), h)
+	if err != nil {
+		t.Fatal(err)
+	} else if update.Signature != oldValidPrices.Signature {
+		t.Fatal("prices mismatch")
+	}
+
+	// manually expire the prices
+	cache.cache[h.PublicKey()].renewTime = time.Now().Add(-time.Second)
+	update, err = cache.fetch(context.Background(), h)
 	if err != nil {
 		t.Fatal(err)
 	} else if update.Signature != validPrices.Signature {
-		t.Fatal("price table mismatch")
-	}
-
-	// increase the current block height to be exactly
-	// 'priceTableBlockHeightLeeway' blocks before the leeway of the gouging
-	// settings
-	h.UpdatePrices(newTestHostPrices())
-	validPrices = h.HostPrices()
-	cm.UpdateHeight(validPrices.TipHeight + uint64(blockHeightLeeway) - priceTableBlockHeightLeeway)
-
-	// fetch it again and assert we updated the price table
-	update, err = cache.fetch(gCtx, h)
-	if err != nil {
-		t.Fatal(err)
-	} else if update.Signature != h.HostPrices().Signature {
-		t.Fatal("price table mismatch")
+		t.Fatal("prices mismatch")
 	}
 }
