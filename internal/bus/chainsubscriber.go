@@ -189,7 +189,11 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 
 	// v2 contracts
 	cus = make(map[types.FileContractID]contractUpdate)
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	var createdContracts []types.V2FileContractElement
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		if created && s.isKnownContract(fce.ID) {
+			createdContracts = append(createdContracts, fce)
+		}
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
@@ -197,6 +201,18 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
 		}
 	})
+
+	// new contracts
+	if err := tx.InsertFileContractElements(createdContracts); err != nil {
+		return fmt.Errorf("failed to insert v2 file contract elements: %w", err)
+	}
+
+	// contract proofs
+	if err := tx.UpdateFileContractElementProofs(cau); err != nil {
+		return fmt.Errorf("failed to update file contract element proofs: %w", err)
+	}
+
+	// updates
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
 			return fmt.Errorf("failed to apply v2 contract update: %w", err)
@@ -221,15 +237,30 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// v2 contracts
 	cus = cus[:0]
-	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	var revertedContracts []types.FileContractID
+	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		if created && s.isKnownContract(fce.ID) {
+			revertedContracts = append(revertedContracts, fce.ID)
+		}
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
+
+	// reverted contracts
+	if err := tx.RemoveFileContractElements(revertedContracts); err != nil {
+		return fmt.Errorf("failed to insert v2 file contract elements: %w", err)
+	}
+
+	// contract proofs
+	if err := tx.UpdateFileContractElementProofs(cru); err != nil {
+		return fmt.Errorf("failed to update file contract element proofs: %w", err)
+	}
+
+	// updates
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
 			return fmt.Errorf("failed to revert v2 contract update: %w", err)
 		}
 	}
-
 	return nil
 }
 
