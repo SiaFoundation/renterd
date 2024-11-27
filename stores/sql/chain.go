@@ -157,7 +157,7 @@ func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []Siaco
 }
 
 func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c INNER JOIN contract_elements ce ON c.id = contract_elements.db_contract_id WHERE c.fcid = ?")
+	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c INNER JOIN contract_elements ce ON c.id = ce.db_contract_id WHERE c.fcid = ?")
 	if err != nil {
 		return err
 	}
