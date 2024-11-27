@@ -639,27 +639,24 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, churn acc
 	// define a helper to a contract's usability
 	log := logger.Named("usability")
 	updateUsability := func(ctx context.Context, h api.Host, c api.ContractMetadata, usability, context string) {
-		if c.Usability == usability {
-			if c.IsGood() {
-				hf.Add(h)
+		if c.Usability != usability {
+			log = log.
+				With("contractID", c.ID).
+				With("usability", c.Usability).
+				With("hostKey", c.HostKey).
+				With("context", context)
+			if err := bus.UpdateContractUsability(ctx, c.ID, usability); err != nil {
+				log.Errorf("failed to update usability to %s: %v", usability, err)
+				return
 			}
-			return
+
+			log.Infof("successfully updated usability to %s", usability)
+			updates = append(updates, usabilityUpdate{c.ID, c.Usability, usability, context})
 		}
 
-		log = log.
-			With("contractID", c.ID).
-			With("usability", c.Usability).
-			With("hostKey", c.HostKey).
-			With("context", context)
-		if err := bus.UpdateContractUsability(ctx, c.ID, usability); err != nil {
-			log.Errorf("failed to update usability to %s: %v", usability, err)
-			return
-		} else if usability == api.ContractUsabilityGood {
+		if usability == api.ContractUsabilityGood {
 			hf.Add(h)
 		}
-
-		log.Infof("successfully updated usability to %s", usability)
-		updates = append(updates, usabilityUpdate{c.ID, c.Usability, usability, context})
 	}
 
 	// perform checks on contracts one-by-one renewing/refreshing contracts as
