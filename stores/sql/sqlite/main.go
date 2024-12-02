@@ -1074,20 +1074,20 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 
 		joinStmt, err := tx.Prepare(ctx, `
 		INSERT OR IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-		SELECT $1, id FROM (
+		SELECT ?, id FROM (
 			SELECT id
 			FROM hosts
-			WHERE net_address == $2 OR
-				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == $3 OR
-				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE $4
+			WHERE net_address == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE ?
 		)
 		UNION ALL
-		SELECT $1, db_host_id FROM (
+		SELECT ?, db_host_id FROM (
 			SELECT db_host_id
 			FROM host_addresses
-			WHERE net_address == $2 OR
-				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == $3 OR
-				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE $4
+			WHERE net_address == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') == ? OR
+				rtrim(rtrim(net_address, replace(net_address, ':', '')),':') LIKE ?
 		)`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare join statement: %w", err)
@@ -1099,7 +1099,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
 			} else if entryID, err := res.LastInsertId(); err != nil {
 				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
-			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry), entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
 				return fmt.Errorf("failed to join host blocklist entry: %w", err)
 			}
 		}
