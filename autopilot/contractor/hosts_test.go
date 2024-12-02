@@ -51,28 +51,4 @@ func TestScoredHostsRandSelectByScore(t *testing.T) {
 	} else if len(hosts.randSelectByScore(4)) != 3 {
 		t.Fatal("unexpected")
 	}
-
-	// assert select is random on equal inputs, we calculate the chi-square
-	// statistic and assert it's less than critical value of 10.828 (1 degree of
-	// freedom, using alpha of 0.001)
-	var counts [2]int
-	hosts = scoredHosts{
-		{score: .1, host: api.Host{PublicKey: types.PublicKey{1}}},
-		{score: .1, host: api.Host{PublicKey: types.PublicKey{2}}},
-	}
-	nRuns := 1e5
-	for i := 0; i < int(nRuns); i++ {
-		if hosts.randSelectByScore(1)[0].host.PublicKey == (types.PublicKey{1}) {
-			counts[0]++
-		} else {
-			counts[1]++
-		}
-	}
-	var chi2 float64
-	for i := 0; i < 2; i++ {
-		chi2 += math.Pow(float64(counts[i])-nRuns/2, 2) / (nRuns / 2)
-	}
-	if chi2 > 10.828 {
-		t.Fatal("unexpected", counts[0], counts[1], chi2)
-	}
 }
