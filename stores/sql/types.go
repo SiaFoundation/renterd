@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"bytes"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -46,11 +47,16 @@ type (
 	UnixTimeMS      time.Time
 	DurationMS      time.Duration
 	Unsigned64      uint64
+	V2Contract      types.V2FileContract
 
-	StateElement struct {
-		ID          Hash256
-		LeafIndex   uint64
-		MerkleProof MerkleProof
+	FileContractStateElement struct {
+		ID int64 // db_contract_id
+		types.StateElement
+	}
+
+	SiacoinStateElement struct {
+		ID Hash256 // output_id
+		types.StateElement
 	}
 )
 
@@ -76,6 +82,7 @@ var (
 	_ scannerValuer = (*UnixTimeMS)(nil)
 	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
+	_ scannerValuer = (*V2Contract)(nil)
 )
 
 // Scan scan value into AutopilotConfig, implements sql.Scanner interface.
@@ -507,4 +514,27 @@ func (s NullableString) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return []byte(s), nil
+}
+
+// Scan scan value into V2Contract, implements sql.Scanner interface.
+func (s *V2Contract) Scan(value interface{}) error {
+	switch value := value.(type) {
+	case []byte:
+		dec := types.NewBufDecoder(value)
+		(*types.V2FileContract)(s).DecodeFrom(dec)
+		return dec.Err()
+	default:
+		return fmt.Errorf("failed to unmarshal V2Contract value: %v %T", value, value)
+	}
+}
+
+// Value returns a V2Contract value, implements driver.Valuer interface.
+func (c V2Contract) Value() (driver.Value, error) {
+	buf := new(bytes.Buffer)
+	enc := types.NewEncoder(buf)
+	types.V2FileContract(c).EncodeTo(enc)
+	if err := enc.Flush(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

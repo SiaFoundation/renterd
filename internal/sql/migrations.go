@@ -374,9 +374,15 @@ var (
 				},
 			},
 			{
-				ID: "00029_host_sectors",
+				ID: "00029_contract_elements",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_host_sectors", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_contract_elements", log)
+				},
+			},
+			{
+				ID: "00030_host_sectors",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_host_sectors", log)
 				},
 			},
 		}
