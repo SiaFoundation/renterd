@@ -37,7 +37,7 @@ func newTestHostPrices() rhpv4.HostPrices {
 
 	return rhpv4.HostPrices{
 		TipHeight:  100,
-		ValidUntil: time.Now().Add(time.Minute),
+		ValidUntil: time.Now().Add(70 * time.Second),
 		Signature:  sig,
 	}
 }

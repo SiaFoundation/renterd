@@ -414,7 +414,7 @@ func TestContractElements(t *testing.T) {
 		Filesize: 2,
 	}
 
-	assertContractElement := func(tx sql.ChainUpdateTx, leafIndex uint64, proof []types.Hash256) {
+	assertContractElement := func(tx sql.ChainUpdateTx, leafIndex uint64, proof []types.Hash256, c types.V2FileContract) {
 		t.Helper()
 		fce, err := tx.FileContractElement(fcid)
 		if err != nil {
@@ -425,7 +425,7 @@ func TestContractElements(t *testing.T) {
 			t.Fatalf("unexpected leaf index %v", fce.StateElement.LeafIndex)
 		} else if !reflect.DeepEqual(fce.StateElement.MerkleProof, proof) {
 			t.Fatalf("unexpected merkle proof %v", fce.StateElement.MerkleProof)
-		} else if !reflect.DeepEqual(fce.V2FileContract, contract) {
+		} else if !reflect.DeepEqual(fce.V2FileContract, c) {
 			t.Fatalf("unexpected contract %v", fce.V2FileContract)
 		}
 	}
@@ -446,7 +446,7 @@ func TestContractElements(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		assertContractElement(tx, 1, []types.Hash256{{1}})
+		assertContractElement(tx, 1, []types.Hash256{{1}}, contract)
 
 		// update the element's proof twice
 		if err := tx.UpdateFileContractElementProofs(&passthroughProofUpdater{
@@ -459,10 +459,10 @@ func TestContractElements(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		assertContractElement(tx, 2, []types.Hash256{{2}})
+		assertContractElement(tx, 2, []types.Hash256{{2}}, contract)
 
-		contractUpdated := contract
-		contractUpdated.ProofHeight += 1
+		updatedContract := contract
+		updatedContract.ProofHeight += 1
 		err = tx.UpdateFileContractElements([]types.V2FileContractElement{
 			{
 				ID: fcid,
@@ -470,14 +470,13 @@ func TestContractElements(t *testing.T) {
 					LeafIndex:   3,                    // ignored by upsert
 					MerkleProof: []types.Hash256{{3}}, // ignored by upsert
 				},
-				V2FileContract: contractUpdated,
+				V2FileContract: updatedContract,
 			},
 		})
 		if err != nil {
 			return err
 		}
-		contract = contractUpdated
-		assertContractElement(tx, 2, []types.Hash256{{2}})
+		assertContractElement(tx, 2, []types.Hash256{{2}}, updatedContract)
 		return nil
 	}); err != nil {
 		t.Fatal("unexpected error", err)
