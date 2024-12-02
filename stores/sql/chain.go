@@ -162,6 +162,9 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	var proof MerkleProof
 	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", FileContractID(fcid)).
 		Scan(&contract, &leafIndex, &proof)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return types.V2FileContractElement{}, api.ErrContractNotFound
+	}
 	if err != nil {
 		return types.V2FileContractElement{}, err
 	}
