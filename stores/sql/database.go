@@ -151,6 +151,10 @@ type (
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
+		// FileContractElement returns the up-to-date file contract element for
+		// a given contract id.
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
+
 		// Hosts returns a list of hosts that match the provided filters
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 

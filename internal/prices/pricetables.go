@@ -13,9 +13,9 @@ import (
 
 const (
 	// priceTableValidityLeeway is a leeway we apply when deeming a price table safe
-	// for use, we essentially add 30 seconds to the current time when checking
+	// for use, we essentially add 60 seconds to the current time when checking
 	// whether we are still before a pricetable's expiry time
-	priceTableValidityLeeway = 30 * time.Second
+	priceTableValidityLeeway = 60 * time.Second
 )
 
 var (
