@@ -4814,6 +4814,7 @@ func TestHostSectors(t *testing.T) {
 	if err := ss.DB().QueryRow(context.Background(), "SELECT updated_at FROM host_sectors WHERE db_host_id = ? AND db_sector_id = ?", 1, 1).Scan(&updatedAt); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(100 * time.Millisecond)
 
 	// add new contract with h1 and migrate sector
 	if c3, err := ss.addTestContract(types.FileContractID{3}, hks[0]); err != nil {
