@@ -55,8 +55,8 @@ github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsT
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 go.etcd.io/bbolt v1.3.11 h1:yGEzV1wPz2yVCLsD8ZAiGHhHVlczyC9d1rP43/VCRJ0=
 go.etcd.io/bbolt v1.3.11/go.mod h1:dksAq7YMXoljX0xu6VF5DMZGbhYYoLUalEiSySYAS4I=
-go.sia.tech/core v0.6.2 h1:8NEjxyD93A+EhZopsBy/LvuHH+zUSjRNKnf9rXgtIwU=
-go.sia.tech/core v0.6.2/go.mod h1:4v+aT/33857tMfqa5j5OYlAoLsoIrd4d7qMlgeP+VGk=
+go.sia.tech/core v0.6.3 h1:7VdCSF61td1iatjGc5xt8WwCZgyB91mTvKhuL35o234=
+go.sia.tech/core v0.6.3/go.mod h1:4v+aT/33857tMfqa5j5OYlAoLsoIrd4d7qMlgeP+VGk=
 go.sia.tech/coreutils v0.7.0 h1:YpgOUD4vrpDz0KC7FJz+UCOaKaqV5EkX3gMUUmJoz5s=
 go.sia.tech/coreutils v0.7.0/go.mod h1:eMoqzqO4opKQ6n9tTTxHQmccfNlj+8RFOYuDSL/Qd4g=
 go.sia.tech/gofakes3 v0.0.5 h1:vFhVBUFbKE9ZplvLE2w4TQxFMQyF8qvgxV4TaTph+Vw=
