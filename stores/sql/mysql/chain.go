@@ -204,12 +204,8 @@ func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2F
 	return ssql.FileContractElement(c.ctx, c.tx, fcid)
 }
 
-func (c chainUpdateTx) InsertFileContractElements(fces []types.V2FileContractElement) error {
-	return ssql.InsertFileContractElements(c.ctx, c.tx, fces)
-}
-
-func (c chainUpdateTx) RemoveFileContractElements(fcids []types.FileContractID) error {
-	return ssql.RemoveFileContractElements(c.ctx, c.tx, fcids)
+func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
+	return ssql.UpdateFileContractElements(c.ctx, c.tx, fces)
 }
 
 func (c chainUpdateTx) UpdateFileContractElementProofs(updater wallet.ProofUpdater) error {

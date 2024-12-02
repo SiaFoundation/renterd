@@ -178,13 +178,14 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	}, nil
 }
 
-func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
+func UpdateFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
 	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
 	if err != nil {
 		return err
 	}
 	defer contractIDStmt.Close()
 
+	// TODO: upsert
 	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof) VALUES (?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
@@ -202,34 +203,6 @@ func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2F
 		_, err = insertStmt.Exec(ctx, time.Now(), contractID, V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, MerkleProof{fce.StateElement.MerkleProof})
 		if err != nil {
 			return fmt.Errorf("failed to insert file contract element: %w", err)
-		}
-	}
-	return nil
-}
-
-func RemoveFileContractElements(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) error {
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
-	if err != nil {
-		return err
-	}
-	defer contractIDStmt.Close()
-
-	deleteStmt, err := tx.Prepare(ctx, "DELETE FROM contract_elements WHERE db_contract_id = ?")
-	if err != nil {
-		return err
-	}
-	defer deleteStmt.Close()
-
-	for _, fcid := range fcids {
-		var contractID int64
-		if err := contractIDStmt.QueryRow(ctx, FileContractID(fcid)).Scan(&contractID); errors.Is(err, dsql.ErrNoRows) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		_, err := deleteStmt.Exec(ctx, contractID)
-		if err != nil {
-			return fmt.Errorf("failed to remove contract element %v: %w", fcid, err)
 		}
 	}
 	return nil
