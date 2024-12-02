@@ -20,8 +20,7 @@ type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
-		InsertFileContractElements([]types.V2FileContractElement) error
-		RemoveFileContractElements([]types.FileContractID) error
+		UpdateFileContractElements([]types.V2FileContractElement) error
 		UpdateChainIndex(index types.ChainIndex) error
 		UpdateFileContractElementProofs(updater wallet.ProofUpdater) error
 		UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error

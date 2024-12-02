@@ -215,11 +215,9 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 
 	// v2 contracts
 	cus = make(map[types.FileContractID]contractUpdate)
-	var createdContracts []types.V2FileContractElement
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		if created {
-			createdContracts = append(createdContracts, fce)
-		}
+	var revisedContracts []types.V2FileContractElement
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		revisedContracts = append(revisedContracts, fce)
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
@@ -236,13 +234,13 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	}
 
 	// new contracts - only consider the ones we are interested in
-	filtered := createdContracts[:0]
-	for _, fce := range createdContracts {
+	filtered := revisedContracts[:0]
+	for _, fce := range revisedContracts {
 		if s.isKnownContract(fce.ID) {
 			filtered = append(filtered, fce)
 		}
 	}
-	if err := tx.InsertFileContractElements(filtered); err != nil {
+	if err := tx.UpdateFileContractElements(filtered); err != nil {
 		return fmt.Errorf("failed to insert v2 file contract elements: %w", err)
 	}
 
@@ -269,11 +267,9 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// v2 contracts
 	cus = cus[:0]
-	var revertedContracts []types.FileContractID
+	var revertedContracts []types.V2FileContractElement
 	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		if created {
-			revertedContracts = append(revertedContracts, fce.ID)
-		}
+		revertedContracts = append(revertedContracts, fce)
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
 
@@ -286,12 +282,12 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// reverted contracts - only consider the ones that we are interested in
 	filtered := revertedContracts[:0]
-	for _, fcid := range revertedContracts {
-		if s.isKnownContract(fcid) {
-			filtered = append(filtered, fcid)
+	for _, fce := range revertedContracts {
+		if s.isKnownContract(fce.ID) {
+			filtered = append(filtered, fce)
 		}
 	}
-	if err := tx.RemoveFileContractElements(filtered); err != nil {
+	if err := tx.UpdateFileContractElements(filtered); err != nil {
 		return fmt.Errorf("failed to remove v2 file contract elements: %w", err)
 	}
 

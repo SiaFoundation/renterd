@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	dsql "database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -434,7 +433,7 @@ func TestContractElements(t *testing.T) {
 	// check current contract state
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		// add a new contract element
-		err := tx.InsertFileContractElements([]types.V2FileContractElement{
+		err := tx.UpdateFileContractElements([]types.V2FileContractElement{
 			{
 				ID: fcid,
 				StateElement: types.StateElement{
@@ -461,13 +460,6 @@ func TestContractElements(t *testing.T) {
 			return err
 		}
 		assertContractElement(tx, 2, []types.Hash256{{2}})
-
-		// remove the contract element
-		if err := tx.RemoveFileContractElements([]types.FileContractID{fcid}); err != nil {
-			return err
-		} else if _, err := tx.FileContractElement(fcid); !errors.Is(err, dsql.ErrNoRows) {
-			return fmt.Errorf("expected ErrNoRows, got %v", err)
-		}
 
 		return nil
 	}); err != nil {
