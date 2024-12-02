@@ -1199,20 +1199,27 @@ func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSec
 	}
 
 	// insert contract <-> sector links
-	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id)
-											VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
+	insertContractSectorStmt, err := tx.Prepare(ctx, `INSERT INTO contract_sectors (db_sector_id, db_contract_id) VALUES (?, ?) ON CONFLICT(db_sector_id, db_contract_id) DO NOTHING`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract sector link: %w", err)
 	}
 	defer insertContractSectorStmt.Close()
 
+	// insert host <-> sector links
+	insertHostSectorStmt, err := tx.Prepare(ctx, `INSERT INTO host_sectors (updated_at, db_sector_id, db_host_id) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET updated_at = EXCLUDED.updated_at`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to insert host sector link: %w", err)
+	}
+	defer insertHostSectorStmt.Close()
+
 	for _, cs := range contractSectors {
-		_, err := insertContractSectorStmt.Exec(ctx,
-			cs.SectorID,
-			cs.ContractID,
-		)
+		_, err := insertContractSectorStmt.Exec(ctx, cs.SectorID, cs.ContractID)
 		if err != nil {
-			return fmt.Errorf("failed to insert contract sector link: %w", err)
+			return fmt.Errorf("failed to insert contract sector link %v: %w", cs, err)
+		}
+		_, err = insertHostSectorStmt.Exec(ctx, time.Now(), cs.SectorID, cs.HostID)
+		if err != nil {
+			return fmt.Errorf("failed to insert host sector link %v: %w", cs, err)
 		}
 	}
 	return nil
@@ -1338,6 +1345,7 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 				for _, fcid := range fcids {
 					if _, ok := usedContracts[fcid]; ok {
 						upsertContractSectors = append(upsertContractSectors, ssql.ContractSector{
+							HostID:     usedContracts[fcid].HostID,
 							ContractID: usedContracts[fcid].ID,
 							SectorID:   sectorIDs[sectorIdx],
 						})
