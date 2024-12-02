@@ -448,7 +448,7 @@ func TestContractElements(t *testing.T) {
 		}
 		assertContractElement(tx, 1, []types.Hash256{{1}})
 
-		// update the element's proof
+		// update the element's proof twice
 		if err := tx.UpdateFileContractElementProofs(&passthroughProofUpdater{
 			fn: func(se *types.StateElement) {
 				*se = types.StateElement{
@@ -461,6 +461,23 @@ func TestContractElements(t *testing.T) {
 		}
 		assertContractElement(tx, 2, []types.Hash256{{2}})
 
+		contractUpdated := contract
+		contractUpdated.ProofHeight += 1
+		err = tx.UpdateFileContractElements([]types.V2FileContractElement{
+			{
+				ID: fcid,
+				StateElement: types.StateElement{
+					LeafIndex:   3,                    // ignored by upsert
+					MerkleProof: []types.Hash256{{3}}, // ignored by upsert
+				},
+				V2FileContract: contractUpdated,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		contract = contractUpdated
+		assertContractElement(tx, 2, []types.Hash256{{2}})
 		return nil
 	}); err != nil {
 		t.Fatal("unexpected error", err)

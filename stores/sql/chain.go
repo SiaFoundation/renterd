@@ -5,7 +5,6 @@ import (
 	dsql "database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -176,36 +175,6 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 		},
 		V2FileContract: types.V2FileContract(contract),
 	}, nil
-}
-
-func UpdateFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
-	if err != nil {
-		return err
-	}
-	defer contractIDStmt.Close()
-
-	// TODO: upsert
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof) VALUES (?, ?, ?, ?, ?)")
-	if err != nil {
-		return err
-	}
-	defer insertStmt.Close()
-
-	for _, fce := range fces {
-		var contractID int64
-		err = contractIDStmt.QueryRow(ctx, Hash256(fce.ID)).Scan(&contractID)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return contractNotFoundErr(fce.ID)
-		} else if err != nil {
-			return err
-		}
-		_, err = insertStmt.Exec(ctx, time.Now(), contractID, V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, MerkleProof{fce.StateElement.MerkleProof})
-		if err != nil {
-			return fmt.Errorf("failed to insert file contract element: %w", err)
-		}
-	}
-	return nil
 }
 
 func UpdateFileContractElementProofs(ctx context.Context, tx sql.Tx, updater wallet.ProofUpdater) error {

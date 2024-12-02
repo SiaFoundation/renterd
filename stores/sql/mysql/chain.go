@@ -2,7 +2,9 @@ package mysql
 
 import (
 	"context"
+	dsql "database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -205,7 +207,37 @@ func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2F
 }
 
 func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
-	return ssql.UpdateFileContractElements(c.ctx, c.tx, fces)
+	contractIDStmt, err := c.tx.Prepare(c.ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer contractIDStmt.Close()
+
+	insertStmt, err := c.tx.Prepare(c.ctx, `
+INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof)
+VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	contract = VALUES(contract)
+`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, fce := range fces {
+		var contractID int64
+		err = contractIDStmt.QueryRow(c.ctx, ssql.Hash256(fce.ID)).Scan(&contractID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return fmt.Errorf("%w: %v", api.ErrContractNotFound, fce.ID)
+		} else if err != nil {
+			return err
+		}
+		_, err = insertStmt.Exec(c.ctx, time.Now(), contractID, ssql.V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, ssql.MerkleProof{Hashes: fce.StateElement.MerkleProof})
+		if err != nil {
+			return fmt.Errorf("failed to insert file contract element: %w", err)
+		}
+	}
+	return nil
 }
 
 func (c chainUpdateTx) UpdateFileContractElementProofs(updater wallet.ProofUpdater) error {
