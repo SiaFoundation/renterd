@@ -1202,7 +1202,7 @@ func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSec
 	}
 	defer insertContractSectorStmt.Close()
 
-	insertHostSectorStmt, err := tx.Prepare(ctx, `INSERT IGNORE INTO host_sectors (db_sector_id, db_host_id) VALUES (?, ?)`)
+	insertHostSectorStmt, err := tx.Prepare(ctx, `INSERT INTO host_sectors (updated_at, db_sector_id, db_host_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert host sector link: %w", err)
 	}
@@ -1214,7 +1214,7 @@ func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSec
 			return fmt.Errorf("failed to insert contract sector link: %w", err)
 		}
 
-		_, err = insertHostSectorStmt.Exec(ctx, cs.SectorID, cs.HostID)
+		_, err = insertHostSectorStmt.Exec(ctx, time.Now(), cs.SectorID, cs.HostID)
 		if err != nil {
 			return fmt.Errorf("failed to insert host sector link: %w", err)
 		}

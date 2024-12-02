@@ -4808,4 +4808,30 @@ func TestHostSectors(t *testing.T) {
 	} else if _, ok := hs[s2]; ok {
 		t.Fatal("unexpected host sector", hs)
 	}
+
+	// fetch updated at
+	var updatedAt time.Time
+	if err := ss.DB().QueryRow(context.Background(), "SELECT updated_at FROM host_sectors WHERE db_host_id = ? AND db_sector_id = ?", 1, 1).Scan(&updatedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	// add new contract with h1 and migrate sector
+	if c3, err := ss.addTestContract(types.FileContractID{3}, hks[0]); err != nil {
+		t.Fatal(err)
+	} else if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, []api.UploadedSector{
+		{
+			ContractID: c3.ID,
+			Root:       s1,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert updated at got updated
+	var updatedAtNew time.Time
+	if err := ss.DB().QueryRow(context.Background(), "SELECT updated_at FROM host_sectors WHERE db_host_id = ? AND db_sector_id = ?", 1, 1).Scan(&updatedAtNew); err != nil {
+		t.Fatal(err)
+	} else if updatedAt == updatedAtNew {
+		t.Fatal("expected updated at to change")
+	}
 }
