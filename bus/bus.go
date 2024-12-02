@@ -195,6 +195,7 @@ type (
 	// A ChainStore stores information about the chain.
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (fce types.V2FileContractElement, err error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
@@ -581,10 +582,21 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 		}
 
+		// fetch parent contract element
+		fce, err := b.store.FileContractElement(ctx, fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch file contract element; %w", err)
+		}
+
 		// create the transaction
 		txn := types.V2Transaction{
-			MinerFee:      fee,
-			FileContracts: []types.V2FileContract{rev},
+			MinerFee: fee,
+			FileContractRevisions: []types.V2FileContractRevision{
+				{
+					Parent:   fce,
+					Revision: rev,
+				},
+			},
 		}
 
 		// fund the transaction (only the fee)

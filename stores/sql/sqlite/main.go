@@ -355,6 +355,10 @@ func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
+func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error) {
+	return ssql.FileContractElement(ctx, tx, fcid)
+}
+
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
 	return ssql.DeleteBucket(ctx, tx, bucket)
 }
