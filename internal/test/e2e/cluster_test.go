@@ -1033,6 +1033,13 @@ func TestContractApplyChainUpdates(t *testing.T) {
 		t.Fatalf("expected revision height to be 0, got %v", contract.RevisionHeight)
 	}
 
+	// mine a block for the contract to be mined
+	cluster.MineBlocks(1)
+
+	// force a new revision by funding an account
+	_, err = b.FundAccount(context.Background(), rhpv3.Account{}, contract.ID, types.NewCurrency64(100))
+	tt.OK(err)
+
 	// broadcast the revision for each contract
 	tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
 	cluster.MineBlocks(1)
