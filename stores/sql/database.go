@@ -19,7 +19,11 @@ import (
 type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
+		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
+		InsertFileContractElements([]types.V2FileContractElement) error
+		RemoveFileContractElements([]types.FileContractID) error
 		UpdateChainIndex(index types.ChainIndex) error
+		UpdateFileContractElementProofs(updater wallet.ProofUpdater) error
 		UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error
 		UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
 		UpdateContractState(fcid types.FileContractID, state api.ContractState) error

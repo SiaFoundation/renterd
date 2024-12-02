@@ -1781,6 +1781,8 @@ func ResetChainState(ctx context.Context, tx sql.Tx) error {
 		return err
 	} else if _, err := tx.Exec(ctx, "DELETE FROM wallet_outputs"); err != nil {
 		return err
+	} else if _, err := tx.Exec(ctx, "DELETE FROM contract_elements"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -2349,8 +2351,17 @@ func scanSiacoinElement(s Scanner) (el types.SiacoinElement, err error) {
 	}, nil
 }
 
-func scanStateElement(s Scanner) (se StateElement, err error) {
-	err = s.Scan(&se.ID, &se.LeafIndex, &se.MerkleProof)
+func scanFileContractStateElement(s Scanner) (se FileContractStateElement, err error) {
+	var proof MerkleProof
+	err = s.Scan(&se.ID, &se.LeafIndex, &proof)
+	se.MerkleProof = proof.Hashes
+	return
+}
+
+func scanSiacoinStateElement(s Scanner) (se SiacoinStateElement, err error) {
+	var proof MerkleProof
+	err = s.Scan(&se.ID, &se.LeafIndex, &proof)
+	se.MerkleProof = proof.Hashes
 	return
 }
 

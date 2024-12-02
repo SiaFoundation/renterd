@@ -160,5 +160,16 @@ CREATE TABLE `wallet_outputs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_a
 CREATE UNIQUE INDEX `idx_wallet_outputs_output_id` ON `wallet_outputs`(`output_id`);
 CREATE INDEX `idx_wallet_outputs_maturity_height` ON `wallet_outputs`(`maturity_height`);
 
--- dbAutopilot
+-- contract elements
+CREATE TABLE `contract_elements` (
+    `id` integer PRIMARY KEY AUTOINCREMENT,
+    `created_at` datetime,
+    `db_contract_id` integer NOT NULL,
+    `contract` blob NOT NULL,
+    `leaf_index` integer,
+    `merkle_proof` longblob NOT NULL,
+    CONSTRAINT `fk_contract_elements_contracts` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts`(`id`) ON DELETE CASCADE);
+CREATE UNIQUE INDEX `idx_contract_elements_db_contract_id` ON `contract_elements`(`db_contract_id`);
+
+-- autopilot config
 CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, enabled integer NOT NULL DEFAULT 0, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);
