@@ -816,6 +816,7 @@ SELECT
 	h.price_table,
 	h.price_table_expiry,
 	h.settings,
+	h.v2_settings,
 
 	h.total_scans,
 	h.last_scan,
@@ -870,7 +871,7 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), (*V2HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
