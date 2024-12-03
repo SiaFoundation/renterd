@@ -514,42 +514,6 @@ your node's consensus state using the following endpoint:
 
 - `GET /api/bus/consensus/state`
 
-### Config
-
-The configuration can be updated through the UI or by using the following
-endpoints:
-
-- `GET /api/autopilot/config`
-- `PUT /api/autopilot/config`
-
-The autopilot will not perform any tasks until it is configured. An example
-configuration can be found below. Especially the `contracts` section is
-important, make sure the `amount` is set to the amount of hosts with which you
-want to form a contract. The `allowance` is the amount of money the autopilot
-can spend per period, make sure it is not set to zero or contracts won't get
-formed.
-
-```json
-{
-	"hosts": {
-		"allowRedundantIPs": false,
-		"maxDowntimeHours": 1440,
-		"maxConsecutiveScanFailures": 20,
-		"scoreOverrides": {}
-	},
-	"contracts": {
-		"set": "autopilot",
-		"amount": 50,
-		"allowance": "10000000000000000000000000000",
-		"period": 6048,
-		"renewWindow": 2016,
-		"download": 1099511627776, // 1TiB
-		"upload": 1099511627776, // 1TiB
-		"storage": 1099511627776 // 1TiB
-	}
-}
-```
-
 ### Blocklist
 
 Unfortunately the Sia blockchain is subject to hosts that announced themselves

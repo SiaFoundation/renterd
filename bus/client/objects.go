@@ -10,15 +10,14 @@ import (
 )
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error) {
+func (c *Client) AddObject(ctx context.Context, bucket, path string, o object.Object, opts api.AddObjectOptions) (err error) {
 	path = api.ObjectKeyEscape(path)
 	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/object/%s", path), api.AddObjectRequest{
-		Bucket:      bucket,
-		ContractSet: contractSet,
-		Object:      o,
-		ETag:        opts.ETag,
-		MimeType:    opts.MimeType,
-		Metadata:    opts.Metadata,
+		Bucket:   bucket,
+		Object:   o,
+		ETag:     opts.ETag,
+		MimeType: opts.MimeType,
+		Metadata: opts.Metadata,
 	})
 	return
 }

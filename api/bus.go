@@ -33,7 +33,6 @@ type (
 	// UploadParams contains the metadata needed by a worker to upload an object.
 	UploadParams struct {
 		CurrentHeight uint64
-		ContractSet   string
 		UploadPacking bool
 		GougingParams
 	}
@@ -81,11 +80,6 @@ type (
 		URL     string `json:"url,omitempty"`
 	}
 
-	ContractSetUpdateRequest struct {
-		ToAdd    []types.FileContractID `json:"toAdd"`
-		ToRemove []types.FileContractID `json:"toRemove"`
-	}
-
 	// HostScanRequest is the request type for the /host/scan endpoint.
 	HostScanRequest struct {
 		Timeout DurationMS `json:"timeout"`
@@ -98,5 +92,12 @@ type (
 		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 		V2Settings rhp4.HostSettings    `json:"v2Settings,omitempty"`
+	}
+
+	// UpdateAutopilotRequest is the request type for the /autopilot endpoint.
+	UpdateAutopilotRequest struct {
+		Enabled   *bool            `json:"enabled"`
+		Contracts *ContractsConfig `json:"contracts"`
+		Hosts     *HostsConfig     `json:"hosts"`
 	}
 )

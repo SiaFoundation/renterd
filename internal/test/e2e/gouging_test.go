@@ -3,7 +3,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -11,6 +10,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/internal/test"
 	"lukechampine.com/frand"
 )
@@ -20,13 +20,9 @@ func TestGouging(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 
-	cfg := test.AutopilotConfig.Contracts
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt
-
-	// mine enough blocks for the current period to become > period
-	cluster.MineBlocks(cfg.Period + 1)
 
 	// add hosts
 	n := int(test.AutopilotConfig.Contracts.Amount)
@@ -40,23 +36,15 @@ func TestGouging(t *testing.T) {
 		t.Fatal("unexpected number of hosts")
 	}
 
-	// assert that the current period is greater than the period
-	tt.Retry(10, time.Second, func() error {
-		if ap, _ := b.Autopilot(context.Background(), api.DefaultAutopilotID); ap.CurrentPeriod <= cfg.Period {
-			return errors.New("current period is not greater than period")
-		}
-		return nil
-	})
-
 	// build a hosts map
 	hostsMap := make(map[string]*Host)
 	for _, h := range cluster.hosts {
 		hostsMap[h.PublicKey().String()] = h
 	}
 
-	// upload and download some data, asserting we have a working contract set
+	// generate random data
 	data := make([]byte, rhpv2.SectorSize/12)
-	tt.OKAll(frand.Read(data))
+	frand.Read(data)
 
 	// upload the data
 	path := fmt.Sprintf("data_%v", len(data))
@@ -144,22 +132,19 @@ func TestGouging(t *testing.T) {
 
 func TestHostMinVersion(t *testing.T) {
 	// create a new test cluster
-	cluster := newTestCluster(t, testClusterOptions{
-		hosts: int(test.AutopilotConfig.Contracts.Amount),
-	})
+	n := int(test.AutopilotConfig.Contracts.Amount)
+	cluster := newTestCluster(t, testClusterOptions{hosts: n})
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
 	// set min version to a high value
-	cfg := test.AutopilotConfig
-	cfg.Hosts.MinProtocolVersion = "99.99.99"
-	cluster.UpdateAutopilotConfig(context.Background(), cfg)
+	hosts := test.AutopilotConfig.Hosts
+	hosts.MinProtocolVersion = "99.99.99"
+	tt.OK(cluster.Bus.UpdateAutopilotConfig(context.Background(), client.WithHostsConfig(hosts)))
 
 	// contracts in set should drop to 0
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{
-			ContractSet: test.AutopilotConfig.Contracts.Set,
-		})
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		tt.OK(err)
 		if len(contracts) != 0 {
 			return fmt.Errorf("expected 0 contracts, got %v", len(contracts))

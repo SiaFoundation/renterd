@@ -11,15 +11,27 @@ import (
 )
 
 type (
+	hostFilter interface {
+		Add(ctx context.Context, host api.Host)
+		HasRedundantIP(ctx context.Context, host api.Host) bool
+	}
+
 	hostSet struct {
 		resolvedAddresses map[types.PublicKey][]net.IPAddr
 		subnetToHostKey   map[string]string
 
 		logger *zap.SugaredLogger
 	}
+	noopFilter struct{}
 )
 
-func newHostSet(l *zap.SugaredLogger) *hostSet {
+func (n noopFilter) Add(context.Context, api.Host)                 {}
+func (n noopFilter) HasRedundantIP(context.Context, api.Host) bool { return false }
+
+func newHostFilter(allowRedundantHostIPs bool, l *zap.SugaredLogger) hostFilter {
+	if allowRedundantHostIPs {
+		return noopFilter{}
+	}
 	return &hostSet{
 		resolvedAddresses: make(map[types.PublicKey][]net.IPAddr),
 		subnetToHostKey:   make(map[string]string),

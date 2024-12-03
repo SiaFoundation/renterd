@@ -90,14 +90,14 @@ func (w *testWorker) BlockUploads() func() {
 func (w *testWorker) BlockAsyncPackedSlabUploads(up uploadParameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
-	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
+	key := fmt.Sprintf("%d-%d", up.rs.MinShards, up.rs.TotalShards)
 	w.uploadingPackedSlabs[key] = struct{}{}
 }
 
 func (w *testWorker) UnblockAsyncPackedSlabUploads(up uploadParameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
-	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
+	key := fmt.Sprintf("%d-%d", up.rs.MinShards, up.rs.TotalShards)
 	delete(w.uploadingPackedSlabs, key)
 }
 

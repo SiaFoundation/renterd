@@ -69,13 +69,12 @@ type (
 	}
 
 	MultipartAddPartRequest struct {
-		Bucket      string             `json:"bucket"`
-		ETag        string             `json:"eTag"`
-		Key         string             `json:"key"`
-		ContractSet string             `json:"contractSet"`
-		UploadID    string             `json:"uploadID"`
-		PartNumber  int                `json:"partNumber"`
-		Slices      []object.SlabSlice `json:"slices"`
+		Bucket     string             `json:"bucket"`
+		ETag       string             `json:"eTag"`
+		Key        string             `json:"key"`
+		UploadID   string             `json:"uploadID"`
+		PartNumber int                `json:"partNumber"`
+		Slices     []object.SlabSlice `json:"slices"`
 	}
 
 	MultipartCompleteResponse struct {

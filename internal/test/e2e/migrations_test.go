@@ -27,8 +27,8 @@ func TestMigrations(t *testing.T) {
 
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		autopilotSettings: &cfg,
-		hosts:             int(cfg.Contracts.Amount),
+		autopilotConfig: &cfg,
+		hosts:           int(cfg.Contracts.Amount),
 	})
 	defer cluster.Shutdown()
 

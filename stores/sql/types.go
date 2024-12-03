@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/object"
 )
@@ -33,26 +32,25 @@ var (
 )
 
 type (
-	AutopilotConfig api.AutopilotConfig
-	BCurrency       types.Currency
-	BigInt          big.Int
-	BusSetting      string
-	Currency        types.Currency
-	FileContractID  types.FileContractID
-	Hash256         types.Hash256
-	MerkleProof     struct{ Hashes []types.Hash256 }
-	NullableString  string
-	HostSettings    rhpv2.HostSettings
-	PriceTable      rhpv3.HostPriceTable
-	PublicKey       types.PublicKey
-	EncryptionKey   object.EncryptionKey
-	Uint64Str       uint64
-	UnixTimeMS      time.Time
-	DurationMS      time.Duration
-	Unsigned64      uint64
-	V2Contract      types.V2FileContract
-	ChainProtocol   chain.Protocol
-	V2HostSettings  rhp.HostSettings
+	BCurrency      types.Currency
+	BigInt         big.Int
+	BusSetting     string
+	Currency       types.Currency
+	FileContractID types.FileContractID
+	Hash256        types.Hash256
+	MerkleProof    struct{ Hashes []types.Hash256 }
+	NullableString string
+	HostSettings   rhpv2.HostSettings
+	PriceTable     rhpv3.HostPriceTable
+	PublicKey      types.PublicKey
+	EncryptionKey  object.EncryptionKey
+	Uint64Str      uint64
+	UnixTimeMS     time.Time
+	DurationMS     time.Duration
+	Unsigned64     uint64
+	V2Contract     types.V2FileContract
+	ChainProtocol  chain.Protocol
+	V2HostSettings rhp.HostSettings
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
@@ -71,7 +69,6 @@ type scannerValuer interface {
 }
 
 var (
-	_ scannerValuer = (*AutopilotConfig)(nil)
 	_ scannerValuer = (*BCurrency)(nil)
 	_ scannerValuer = (*BigInt)(nil)
 	_ scannerValuer = (*BusSetting)(nil)
@@ -91,25 +88,6 @@ var (
 	_ scannerValuer = (*ChainProtocol)(nil)
 	_ scannerValuer = (*V2HostSettings)(nil)
 )
-
-// Scan scan value into AutopilotConfig, implements sql.Scanner interface.
-func (cfg *AutopilotConfig) Scan(value interface{}) error {
-	var bytes []byte
-	switch value := value.(type) {
-	case string:
-		bytes = []byte(value)
-	case []byte:
-		bytes = value
-	default:
-		return fmt.Errorf("failed to unmarshal AutopilotConfig value: %v %T", value, value)
-	}
-	return json.Unmarshal(bytes, cfg)
-}
-
-// Value returns a AutopilotConfig value, implements driver.Valuer interface.
-func (cfg AutopilotConfig) Value() (driver.Value, error) {
-	return json.Marshal(cfg)
-}
 
 // Scan implements the sql.Scanner interface.
 func (sc *BCurrency) Scan(src any) error {

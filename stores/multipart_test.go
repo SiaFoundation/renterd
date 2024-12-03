@@ -53,12 +53,12 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 	}
 	var parts []api.MultipartCompletedPart
 	for i := 1; i <= nParts; i++ {
-		partialSlabs, _, err := ss.AddPartialSlab(ctx, frand.Bytes(partSize), minShards, totalShards, testContractSet)
+		partialSlabs, _, err := ss.AddPartialSlab(ctx, frand.Bytes(partSize), minShards, totalShards)
 		if err != nil {
 			t.Fatal(err)
 		}
 		etag := hex.EncodeToString(frand.Bytes(16))
-		err = ss.AddMultipartPart(ctx, testBucket, objName, testContractSet, etag, resp.UploadID, i, partialSlabs)
+		err = ss.AddMultipartPart(ctx, testBucket, objName, etag, resp.UploadID, i, partialSlabs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestMultipartUploadWithUploadPackingRegression(t *testing.T) {
 		}
 		return ups
 	}
-	packedSlabs, err := ss.PackedSlabsForUpload(ctx, time.Hour, minShards, totalShards, testContractSet, 2)
+	packedSlabs, err := ss.PackedSlabsForUpload(ctx, time.Hour, minShards, totalShards, 2)
 	if err != nil {
 		t.Fatal(err)
 	}

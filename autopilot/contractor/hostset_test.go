@@ -10,7 +10,7 @@ import (
 )
 
 func TestHostSet(t *testing.T) {
-	hs := newHostSet(zap.NewNop().Sugar())
+	hs := newHostFilter(false, zap.NewNop().Sugar())
 
 	// Host with no subnets
 	host1 := api.Host{

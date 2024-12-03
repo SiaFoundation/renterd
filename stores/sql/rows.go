@@ -41,9 +41,8 @@ type ContractRow struct {
 	UploadSpending      Currency
 
 	// decorated fields
-	ContractSet string
-	NetAddress  string
-	SiamuxPort  string
+	NetAddress string
+	SiamuxPort string
 }
 
 func (r *ContractRow) Scan(s Scanner) error {
@@ -52,16 +51,11 @@ func (r *ContractRow) Scan(s Scanner) error {
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.Usability, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
-		&r.ContractSet, &r.NetAddress, &r.SiamuxPort,
+		&r.NetAddress, &r.SiamuxPort,
 	)
 }
 
 func (r *ContractRow) ContractMetadata() api.ContractMetadata {
-	var sets []string
-	if r.ContractSet != "" {
-		sets = append(sets, r.ContractSet)
-	}
-
 	var siamuxAddr string
 	if r.NetAddress != "" && r.SiamuxPort != "" {
 		siamuxAddr = rhpv2.HostSettings{
@@ -87,7 +81,6 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
 
 		ArchivalReason: string(r.ArchivalReason),
-		ContractSets:   sets,
 		ProofHeight:    r.ProofHeight,
 		RenewedFrom:    types.FileContractID(r.RenewedFrom),
 		RenewedTo:      types.FileContractID(r.RenewedTo),

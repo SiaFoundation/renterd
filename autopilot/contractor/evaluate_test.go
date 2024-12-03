@@ -40,7 +40,6 @@ func TestOptimiseGougingSetting(t *testing.T) {
 			LastAnnouncement: time.Unix(0, 0),
 			Scanned:          true,
 			Blocked:          false,
-			Checks:           nil,
 		})
 	}
 

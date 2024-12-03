@@ -77,11 +77,10 @@ func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objec
 	}
 }
 
-func newUploadFailedAlert(bucket, path, contractSet, mimeType string, minShards, totalShards, contracts int, packing, multipart bool, err error) alerts.Alert {
+func newUploadFailedAlert(bucket, path, mimeType string, minShards, totalShards, contracts int, packing, multipart bool, err error) alerts.Alert {
 	data := map[string]any{
 		"bucket":      bucket,
 		"path":        path,
-		"contractSet": contractSet,
 		"minShards":   minShards,
 		"totalShards": totalShards,
 		"packing":     packing,

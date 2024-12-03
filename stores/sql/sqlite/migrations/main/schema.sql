@@ -44,14 +44,6 @@ CREATE INDEX `idx_contracts_usability` ON `contracts`(`usability`);
 CREATE INDEX `idx_contracts_window_end` ON `contracts`(`window_end`);
 CREATE INDEX `idx_contracts_window_start` ON `contracts`(`window_start`);
 
--- dbContractSet
-CREATE TABLE `contract_sets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`name` text UNIQUE);
-CREATE INDEX `idx_contract_sets_name` ON `contract_sets`(`name`);
-
--- dbContractSet <-> dbContract
-CREATE TABLE `contract_set_contracts` (`db_contract_set_id` integer,`db_contract_id` integer,PRIMARY KEY (`db_contract_set_id`,`db_contract_id`),CONSTRAINT `fk_contract_set_contracts_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_contract_set_contracts_db_contract` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts`(`id`) ON DELETE CASCADE);
-CREATE INDEX `idx_contract_set_contracts_db_contract_id` ON `contract_set_contracts`(`db_contract_id`);
-
 -- dbBucket
 CREATE TABLE `buckets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`policy` text,`name` text NOT NULL UNIQUE);
 CREATE INDEX `idx_buckets_name` ON `buckets`(`name`);
@@ -77,8 +69,7 @@ CREATE UNIQUE INDEX `idx_multipart_uploads_upload_id` ON `multipart_uploads`(`up
 CREATE TABLE `buffered_slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`filename` text);
 
 -- dbSlab
-CREATE TABLE `slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_contract_set_id` integer,`db_buffered_slab_id` integer DEFAULT NULL,`health` real NOT NULL DEFAULT 1,`health_valid_until` integer NOT NULL DEFAULT 0,`key` blob NOT NULL UNIQUE,`min_shards` integer,`total_shards` integer,CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs`(`id`),CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets`(`id`));
-CREATE INDEX `idx_slabs_db_contract_set_id` ON `slabs`(`db_contract_set_id`);
+CREATE TABLE `slabs` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`db_buffered_slab_id` integer DEFAULT NULL,`health` real NOT NULL DEFAULT 1,`health_valid_until` integer NOT NULL DEFAULT 0,`key` blob NOT NULL UNIQUE,`min_shards` integer,`total_shards` integer,CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs`(`id`));
 CREATE INDEX `idx_slabs_total_shards` ON `slabs`(`total_shards`);
 CREATE INDEX `idx_slabs_min_shards` ON `slabs`(`min_shards`);
 CREATE INDEX `idx_slabs_health_valid_until` ON `slabs`(`health_valid_until`);
@@ -155,9 +146,6 @@ CREATE TABLE `ephemeral_accounts` (`id` integer PRIMARY KEY AUTOINCREMENT,`creat
 CREATE INDEX `idx_ephemeral_accounts_requires_sync` ON `ephemeral_accounts`(`requires_sync`);
 CREATE INDEX `idx_ephemeral_accounts_owner` ON `ephemeral_accounts`(`owner`);
 
--- dbAutopilot
-CREATE TABLE `autopilots` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`identifier` text NOT NULL UNIQUE,`config` text,`current_period` integer DEFAULT 0);
-
 -- dbWebhook
 CREATE TABLE `webhooks` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`module` text NOT NULL,`event` text NOT NULL,`url` text NOT NULL,`headers` text DEFAULT ('{}'));
 CREATE UNIQUE INDEX `idx_module_event_url` ON `webhooks`(`module`,`event`,`url`);
@@ -170,7 +158,6 @@ CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db
 CREATE TABLE `host_checks` (
 `id` INTEGER PRIMARY KEY AUTOINCREMENT,
 `created_at` datetime,
-`db_autopilot_id` INTEGER NOT NULL,
 `db_host_id` INTEGER NOT NULL,
 `usability_blocked` INTEGER NOT NULL DEFAULT 0,
 `usability_offline` INTEGER NOT NULL DEFAULT 0,
@@ -192,8 +179,8 @@ CREATE TABLE `host_checks` (
 `gouging_gouging_err` TEXT,
 `gouging_prune_err` TEXT,
 `gouging_upload_err` TEXT,
-FOREIGN KEY (`db_autopilot_id`) REFERENCES `autopilots` (`id`) ON DELETE CASCADE, FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE);
-CREATE UNIQUE INDEX `idx_host_checks_id` ON `host_checks` (`db_autopilot_id`, `db_host_id`);
+FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE);
+CREATE UNIQUE INDEX `idx_host_checks_id` ON `host_checks` (`db_host_id`);
 CREATE INDEX `idx_host_checks_usability_blocked` ON `host_checks` (`usability_blocked`);
 CREATE INDEX `idx_host_checks_usability_offline` ON `host_checks` (`usability_offline`);
 CREATE INDEX `idx_host_checks_usability_low_score` ON `host_checks` (`usability_low_score`);
@@ -243,3 +230,6 @@ CREATE TABLE `contract_elements` (
     `merkle_proof` longblob NOT NULL,
     CONSTRAINT `fk_contract_elements_contracts` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts`(`id`) ON DELETE CASCADE);
 CREATE UNIQUE INDEX `idx_contract_elements_db_contract_id` ON `contract_elements`(`db_contract_id`);
+
+-- autopilot config
+CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, enabled integer NOT NULL DEFAULT 0, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);

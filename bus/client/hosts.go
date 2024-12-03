@@ -18,7 +18,6 @@ func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h api.Host,
 // Hosts returns all hosts that match certain search criteria.
 func (c *Client) Hosts(ctx context.Context, opts api.HostOptions) (hosts []api.Host, err error) {
 	err = c.c.WithContext(ctx).POST("/hosts", api.HostsRequest{
-		AutopilotID:     opts.AutopilotID,
 		Offset:          opts.Offset,
 		Limit:           opts.Limit,
 		FilterMode:      opts.FilterMode,
@@ -71,8 +70,8 @@ func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, 
 
 // UpdateHostCheck updates the host with the most recent check performed by the
 // autopilot with given id.
-func (c *Client) UpdateHostCheck(ctx context.Context, autopilotID string, hostKey types.PublicKey, hostCheck api.HostCheck) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/autopilot/%s/host/%s/check", autopilotID, hostKey), hostCheck)
+func (c *Client) UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/host/%s/check", hostKey), hostCheck)
 	return
 }
 

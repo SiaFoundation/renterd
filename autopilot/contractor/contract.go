@@ -1,8 +1,6 @@
 package contractor
 
 import (
-	"sort"
-
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -35,15 +33,4 @@ func (c contract) RemainingCollateral() types.Currency {
 		return types.ZeroCurrency
 	}
 	return c.Revision.MissedHostValue.Sub(c.ContractPrice)
-}
-
-func sortContractsForMaintenance(cfg api.ContractsConfig, contracts []contract) {
-	sort.SliceStable(contracts, func(i, j int) bool {
-		iInSet := contracts[i].InSet(cfg.Set)
-		jInSet := contracts[j].InSet(cfg.Set)
-		if iInSet != jInSet {
-			return iInSet
-		}
-		return contracts[i].FileSize() > contracts[j].FileSize()
-	})
 }

@@ -22,8 +22,6 @@ var cfg = api.AutopilotConfig{
 		Download: 1e12, // 1 TB
 		Upload:   1e12, // 1 TB
 		Storage:  4e12, // 4 TB
-
-		Set: api.DefaultAutopilotID,
 	},
 	Hosts: api.HostsConfig{
 		MaxDowntimeHours:           24 * 7 * 2,

@@ -13,7 +13,7 @@ import (
 type Worker interface {
 	Account(ctx context.Context, hostKey types.PublicKey) (api.Account, error)
 	ID(ctx context.Context) (string, error)
-	MigrateSlab(ctx context.Context, s object.Slab, set string) error
+	MigrateSlab(ctx context.Context, s object.Slab) error
 }
 
 // workerPool contains all workers known to the autopilot.  Users can call
