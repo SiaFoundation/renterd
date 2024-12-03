@@ -67,6 +67,12 @@ CREATE TABLE `contract_sectors` (`db_sector_id` integer,`db_contract_id` integer
 CREATE INDEX `idx_contract_sectors_db_contract_id` ON `contract_sectors`(`db_contract_id`);
 CREATE INDEX `idx_contract_sectors_db_sector_id` ON `contract_sectors`(`db_sector_id`);
 
+-- dbHost <-> dbSector
+CREATE TABLE `host_sectors` (`updated_at` datetime, `db_sector_id` integer,`db_host_id` integer,PRIMARY KEY (`db_sector_id`,`db_host_id`),CONSTRAINT `fk_host_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors`(`id`) ON DELETE CASCADE,CONSTRAINT `fk_contract_sectors_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts`(`id`) ON DELETE CASCADE);
+CREATE INDEX `idx_host_sectors_updated_at` ON `host_sectors`(`updated_at`);
+CREATE INDEX `idx_host_sectors_db_host_id` ON `host_sectors`(`db_host_id`);
+CREATE INDEX `idx_host_sectors_db_sector_id` ON `host_sectors`(`db_sector_id`);
+
 -- dbMultipartPart
 CREATE TABLE `multipart_parts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`etag` text,`part_number` integer,`size` integer,`db_multipart_upload_id` integer NOT NULL,CONSTRAINT `fk_multipart_uploads_parts` FOREIGN KEY (`db_multipart_upload_id`) REFERENCES `multipart_uploads`(`id`) ON DELETE CASCADE);
 CREATE INDEX `idx_multipart_parts_db_multipart_upload_id` ON `multipart_parts`(`db_multipart_upload_id`);

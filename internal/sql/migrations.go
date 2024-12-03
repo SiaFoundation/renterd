@@ -390,10 +390,16 @@ var (
 				},
 			},
 			{
-				ID: "00030_autopilot",
+				ID: "00030_host_sectors",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_host_sectors", log)
+				},
+			},
+			{
+				ID: "00031_autopilot",
 				Migrate: func(tx Tx) error {
 					// remove all references to the autopilots table, without dropping the table
-					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_autopilot_1", log); err != nil {
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00031_autopilot_1", log); err != nil {
 						return fmt.Errorf("failed to migrate: %v", err)
 					}
 
@@ -442,11 +448,11 @@ var (
 					}
 
 					// drop autopilots table
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_autopilot_2", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00031_autopilot_2", log)
 				},
 			},
 			{
-				ID: "00031_remove_contract_sets",
+				ID: "00032_remove_contract_sets",
 				Migrate: func(tx Tx) error {
 					// prepare statement to rename the buffer
 					stmt, err := tx.Prepare(ctx, "UPDATE buffered_slabs SET filename = ? WHERE filename = ?")
@@ -522,7 +528,7 @@ var (
 					}
 
 					// perform database migration
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00031_remove_contract_sets", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00032_remove_contract_sets", log)
 				},
 			},
 		}
