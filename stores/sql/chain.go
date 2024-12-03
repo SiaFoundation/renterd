@@ -181,10 +181,12 @@ func PruneFileContractElements(ctx context.Context, tx sql.Tx, threshold uint64)
 	_, err := tx.Exec(ctx, `
 DELETE FROM contract_elements
 WHERE contract_elements.db_contract_id IN (
-	SELECT c.id
-	FROM contracts c
-	INNER JOIN contract_elements ON c.id = contract_elements.db_contract_id
-	WHERE c.window_end < ?
+	SELECT * FROM (
+		SELECT c.id
+		FROM contracts c
+		INNER JOIN contract_elements ON c.id = contract_elements.db_contract_id
+		WHERE c.window_end < ?
+	) _
 )`, threshold)
 	return err
 }
