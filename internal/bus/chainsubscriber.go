@@ -209,7 +209,6 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	})
 
 	// v2 contracts
-	cus = make(map[types.FileContractID]contractUpdate)
 	var revisedContracts []types.V2FileContractElement
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if created {
