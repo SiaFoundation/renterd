@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -200,18 +201,8 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	// v1 contracts
 	cus := make(map[types.FileContractID]contractUpdate)
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
-		cu, ok := cus[types.FileContractID(fce.ID)]
-		if !ok {
-			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
-		} else if fce.FileContract.RevisionNumber > cu.curr.revisionNumber {
-			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
-		}
+		cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
 	})
-	for _, cu := range cus {
-		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
-			return fmt.Errorf("failed to apply v1 contract update: %w", err)
-		}
-	}
 
 	// v2 contracts
 	cus = make(map[types.FileContractID]contractUpdate)
@@ -222,18 +213,13 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 		} else if rev != nil {
 			revisedContracts = append(revisedContracts, *rev) // revised
 		}
-		cu, ok := cus[types.FileContractID(fce.ID)]
-		if !ok {
-			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
-		} else if fce.V2FileContract.RevisionNumber > cu.curr.revisionNumber {
-			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
-		}
+		cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
 	})
 
-	// updates - this updates the 'known' contracts too
+	// updates - this updates the 'known' contracts too so we do this first
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
-			return fmt.Errorf("failed to apply v2 contract update: %w", err)
+			return fmt.Errorf("failed to apply contract updates: %w", err)
 		}
 	}
 
@@ -271,11 +257,6 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	cru.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
 		cus = append(cus, v1ContractUpdate(fce, rev, resolved, valid))
 	})
-	for _, cu := range cus {
-		if err := s.updateContract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
-			return fmt.Errorf("failed to revert v1 contract update: %w", err)
-		}
-	}
 
 	// v2 contracts
 	cus = cus[:0]
@@ -289,7 +270,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
 
-	// updates - this updates the 'known' contracts too
+	// updates - this updates the 'known' contracts too so we do this first
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
 			return fmt.Errorf("failed to revert v2 contract update: %w", err)
@@ -593,12 +574,15 @@ func v2ContractUpdate(fce types.V2FileContractElement, rev *types.V2FileContract
 
 	var resolved, valid bool
 	if res != nil {
-		resolved = true
 		switch res.(type) {
 		case *types.V2FileContractRenewal:
 			valid = true
+			// hack to make sure v2 contracts also have the sentinel revision
+			// number
+			curr.revisionNumber = math.MaxUint64
 		case *types.V2StorageProof:
 			valid = true
+			resolved = true
 		case *types.V2FileContractExpiration:
 			valid = fce.V2FileContract.Filesize == 0
 		}
