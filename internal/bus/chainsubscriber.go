@@ -248,6 +248,14 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	if err := tx.UpdateFileContractElementProofs(cau); err != nil {
 		return fmt.Errorf("failed to update file contract element proofs: %w", err)
 	}
+
+	// prune contracts 144 blocks after window_end
+	const fce_prune_window = 144
+	if cau.State.Index.Height > fce_prune_window {
+		if err := tx.PruneFileContractElements(cau.State.Index.Height - fce_prune_window); err != nil {
+			return fmt.Errorf("failed to prune file contract elements: %w", err)
+		}
+	}
 	return nil
 }
 

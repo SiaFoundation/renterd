@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -467,8 +468,8 @@ func TestContractElements(t *testing.T) {
 			{
 				ID: fcid,
 				StateElement: types.StateElement{
-					LeafIndex:   3,                    // ignored by upsert
-					MerkleProof: []types.Hash256{{3}}, // ignored by upsert
+					LeafIndex:   3, // ignored by upsert
+					MerkleProof: []types.Hash256{{3}},
 				},
 				V2FileContract: updatedContract,
 			},
@@ -476,7 +477,14 @@ func TestContractElements(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		assertContractElement(tx, 2, []types.Hash256{{2}}, updatedContract)
+		assertContractElement(tx, 2, []types.Hash256{{3}}, updatedContract)
+
+		// prune elements
+		if err := tx.PruneFileContractElements(math.MaxUint32); err != nil {
+			return err
+		} else if _, err := tx.FileContractElement(fcid); !errors.Is(err, api.ErrContractNotFound) {
+			return err
+		}
 		return nil
 	}); err != nil {
 		t.Fatal("unexpected error", err)

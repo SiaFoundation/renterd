@@ -178,7 +178,14 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 }
 
 func PruneFileContractElements(ctx context.Context, tx sql.Tx, threshold uint64) error {
-	_, err := tx.Exec(ctx, "DELETE FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.window_end < ?", threshold)
+	_, err := tx.Exec(ctx, `
+DELETE FROM contract_elements
+WHERE contract_elements.db_contract_id IN (
+	SELECT c.id
+	FROM contracts c
+	INNER JOIN contract_elements ON c.id = contract_elements.db_contract_id
+	WHERE c.window_end < ?
+)`, threshold)
 	return err
 }
 
