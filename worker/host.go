@@ -221,7 +221,7 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 	return pt.HostPriceTable, cost, nil
 }
 
-func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
+func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
 	return d.acc.WithWithdrawal(func() (types.Currency, error) {
 		if d.hi.IsV2() {
 			prices, err := d.rhp4Prices.Fetch(ctx, d)

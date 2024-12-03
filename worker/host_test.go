@@ -106,7 +106,7 @@ func (h *testHost) PublicKey() types.PublicKey {
 	return h.Host.PublicKey()
 }
 
-func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sector, exist := h.Sector(root)
 	if !exist {
 		return rhp3.ErrSectorNotFound

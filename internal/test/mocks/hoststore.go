@@ -95,7 +95,7 @@ func (hm *HostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamu
 	return NewHost(hk)
 }
 
-func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	return errors.New("implement when needed")
 }
 

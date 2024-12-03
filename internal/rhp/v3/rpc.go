@@ -141,7 +141,7 @@ func rpcLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 }
 
 // rpcReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func rpcReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
+func rpcReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
 	defer utils.WrapErr(ctx, "ReadSector", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {

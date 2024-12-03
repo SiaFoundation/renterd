@@ -62,8 +62,8 @@ type (
 		mgr *downloadManager
 
 		minShards int
-		offset    uint32
-		length    uint32
+		offset    uint64
+		length    uint64
 
 		created time.Time
 
@@ -88,8 +88,8 @@ type (
 	sectorDownloadReq struct {
 		ctx context.Context
 
-		length uint32
-		offset uint32
+		length uint64
+		offset uint64
 		root   types.Hash256
 		host   *downloader
 

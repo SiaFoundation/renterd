@@ -61,9 +61,9 @@ func (c *Client) Settings(ctx context.Context, hk types.PublicKey, addr string) 
 }
 
 // ReadSector reads a sector from the host.
-func (c *Client) ReadSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, w io.Writer, root types.Hash256, offset, length uint32) (res rhp.RPCReadSectorResult, _ error) {
+func (c *Client) ReadSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (res rhp.RPCReadSectorResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
-		res, err = rhp.RPCReadSector(ctx, t, prices, token, w, root, uint64(offset), uint64(length))
+		res, err = rhp.RPCReadSector(ctx, t, prices, token, w, root, offset, length)
 		return
 	})
 	return res, err
