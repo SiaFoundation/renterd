@@ -206,6 +206,10 @@ func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2F
 	return ssql.FileContractElement(c.ctx, c.tx, fcid)
 }
 
+func (c chainUpdateTx) PruneFileContractElements(threshold uint64) error {
+	return ssql.PruneFileContractElements(c.ctx, c.tx, threshold)
+}
+
 func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
 	contractIDStmt, err := c.tx.Prepare(c.ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
 	if err != nil {
@@ -217,7 +221,8 @@ func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractEle
 INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof)
 VALUES (?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
-	contract = VALUES(contract)
+	contract = VALUES(contract),
+	merkle_proof = VALUES(merkle_proof)
 `)
 	if err != nil {
 		return err
