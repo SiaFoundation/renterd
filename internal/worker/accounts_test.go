@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -157,5 +158,51 @@ func TestAccounts(t *testing.T) {
 		Owner:         "test",
 	}); !cmp.Equal(acc, expected, comparer) {
 		t.Fatal("account doesn't match expectation", cmp.Diff(acc, expected, comparer))
+	}
+}
+
+func TestResetAccountDriftRate(t *testing.T) {
+	// create a manager with an account for a single host
+	hk := types.PublicKey{1}
+	b := &mockAccountMgrBackend{
+		contracts: []api.ContractMetadata{
+			{
+				ID:      types.FileContractID{1},
+				HostKey: hk,
+			},
+		},
+	}
+	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, time.Second, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create account
+	account := mgr.ForHost(hk)
+
+	// make sure drift exceeds the max
+	account.acc.Drift = new(big.Int).Neg(types.Siacoins(1000).Big())
+
+	// refilling should work once
+	refilled, err := mgr.refillAccount(context.Background(), b.contracts[0], 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if !refilled {
+		t.Fatalf("should be refilled")
+	} else if account.acc.Drift.Cmp(new(big.Int)) != 0 {
+		t.Fatalf("drift should be reset")
+	}
+
+	// update drift again
+	account.acc.Drift = new(big.Int).Neg(types.Siacoins(1000).Big())
+
+	// this time refilling should fail
+	refilled, err = mgr.refillAccount(context.Background(), b.contracts[0], 0, 0)
+	if !errors.Is(err, errMaxDriftExceeded) {
+		t.Error("should fail", err)
+	} else if refilled {
+		t.Fatalf("should not be refilled")
+	} else if account.acc.Drift.Cmp(new(big.Int).Neg(types.Siacoins(1000).Big())) != 0 {
+		t.Fatalf("drift should not be reset")
 	}
 }
