@@ -216,8 +216,12 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	// v2 contracts
 	cus = make(map[types.FileContractID]contractUpdate)
 	var revisedContracts []types.V2FileContractElement
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		revisedContracts = append(revisedContracts, fce)
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		if created {
+			revisedContracts = append(revisedContracts, fce) // created
+		} else if rev != nil {
+			revisedContracts = append(revisedContracts, *rev) // revised
+		}
 		cu, ok := cus[types.FileContractID(fce.ID)]
 		if !ok {
 			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
@@ -277,7 +281,11 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	cus = cus[:0]
 	var revertedContracts []types.V2FileContractElement
 	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		revertedContracts = append(revertedContracts, fce)
+		if created {
+			revertedContracts = append(revertedContracts, fce)
+		} else if rev != nil {
+			revertedContracts = append(revertedContracts, *rev)
+		}
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
 
