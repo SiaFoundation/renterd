@@ -40,10 +40,6 @@ func (hs *HostStore) RecordHostScans(ctx context.Context, scans []api.HostScan) 
 	return nil
 }
 
-func (hs *HostStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
-	return nil
-}
-
 func (hs *HostStore) RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error {
 	return nil
 }

@@ -816,6 +816,7 @@ SELECT
 	h.price_table,
 	h.price_table_expiry,
 	h.settings,
+	h.v2_settings,
 
 	h.total_scans,
 	h.last_scan,
@@ -870,7 +871,7 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), (*V2HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
@@ -1661,43 +1662,6 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		)
 		if err != nil {
 			return fmt.Errorf("failed to update host with scan: %w", err)
-		}
-	}
-	return nil
-}
-
-func RecordPriceTables(ctx context.Context, tx sql.Tx, priceTableUpdates []api.HostPriceTableUpdate) error {
-	if len(priceTableUpdates) == 0 {
-		return nil
-	}
-
-	stmt, err := tx.Prepare(ctx, `
-		UPDATE hosts SET
-		recent_downtime = CASE WHEN ? THEN recent_downtime = 0 ELSE recent_downtime END,
-		recent_scan_failures = CASE WHEN ? THEN recent_scan_failures = 0 ELSE recent_scan_failures END,
-		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry =  CASE WHEN ? THEN ? ELSE price_table_expiry END,
-		successful_interactions =  CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
-		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
-		WHERE public_key = ?
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to update host with price table: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, ptu := range priceTableUpdates {
-		_, err := stmt.Exec(ctx,
-			ptu.Success,                                            // recent_downtime
-			ptu.Success,                                            // recent_scan_failures
-			ptu.Success, PriceTable(ptu.PriceTable.HostPriceTable), // price_table
-			ptu.Success, ptu.PriceTable.Expiry, // price_table_expiry
-			ptu.Success,  // successful_interactions
-			!ptu.Success, // failed_interactions
-			PublicKey(ptu.HostKey),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update host with price table: %w", err)
 		}
 	}
 	return nil
