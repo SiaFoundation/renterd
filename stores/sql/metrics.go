@@ -99,50 +99,6 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 	})
 }
 
-func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetChurnMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			&m.Name,
-			(*FileContractID)(&m.ContractID),
-			&m.Direction,
-			&m.Reason,
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set churn metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
-func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			&m.Name,
-			&m.Contracts,
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
 func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Time) error {
 	if metric == "" {
 		return errors.New("metric must be set")
@@ -154,10 +110,6 @@ func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Tim
 	switch metric {
 	case api.MetricContractPrune:
 		table = "contract_prunes"
-	case api.MetricContractSet:
-		table = "contract_sets"
-	case api.MetricContractSetChurn:
-		table = "contract_sets_churn"
 	case api.MetricContract:
 		table = "contracts"
 	case api.MetricPerformance:
@@ -257,60 +209,6 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 	return nil
 }
 
-func RecordContractSetChurnMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractSetChurnMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sets_churn (created_at, timestamp, name, fc_id, direction, reason) VALUES (?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract set churn metric: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, metric := range metrics {
-		res, err := insertStmt.Exec(ctx,
-			time.Now().UTC(),
-			UnixTimeMS(metric.Timestamp),
-			metric.Name,
-			FileContractID(metric.ContractID),
-			metric.Direction,
-			metric.Reason,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract set churn metric: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert contract set churn metric: no rows affected")
-		}
-	}
-
-	return nil
-}
-
-func RecordContractSetMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractSetMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sets (created_at, timestamp, name, contracts) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract set metric: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, metric := range metrics {
-		res, err := insertStmt.Exec(ctx,
-			time.Now().UTC(),
-			UnixTimeMS(metric.Timestamp),
-			metric.Name,
-			metric.Contracts,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract set metric: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert contract set metric: no rows affected")
-		}
-	}
-
-	return nil
-}
-
 func RecordWalletMetric(ctx context.Context, tx sql.Tx, metrics ...api.WalletMetric) error {
 	insertStmt, err := tx.Prepare(ctx, "INSERT INTO wallets (created_at, timestamp, confirmed_lo, confirmed_hi, spendable_lo, spendable_hi, unconfirmed_lo, unconfirmed_hi, immature_hi, immature_lo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
@@ -358,7 +256,7 @@ func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, in
 			(*Unsigned64)(&m.Immature.Lo), (*Unsigned64)(&m.Immature.Hi),
 		)
 		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			err = fmt.Errorf("failed to scan wallet metric: %w", err)
 			return
 		}
 		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
@@ -404,26 +302,6 @@ func queryPeriods[T any](ctx context.Context, tx sql.Tx, start time.Time, n uint
 		if opts.HostVersion != "" {
 			query += " AND host_version = ?"
 			params = append(params, opts.HostVersion)
-		}
-	case api.ContractSetChurnMetricsQueryOpts:
-		table = "contract_sets_churn"
-		if opts.Name != "" {
-			query += " AND name = ?"
-			params = append(params, opts.Name)
-		}
-		if opts.Direction != "" {
-			query += " AND direction = ?"
-			params = append(params, opts.Direction)
-		}
-		if opts.Reason != "" {
-			query += " AND reason = ?"
-			params = append(params, opts.Reason)
-		}
-	case api.ContractSetMetricsQueryOpts:
-		table = "contract_sets"
-		if opts.Name != "" {
-			query += " AND name = ?"
-			params = append(params, opts.Name)
 		}
 	case api.PerformanceMetricsQueryOpts:
 		table = "performance"

@@ -24,9 +24,9 @@ func (s *SQLStore) CreateMultipartUpload(ctx context.Context, bucket, key string
 	}, err
 }
 
-func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (s *SQLStore) AddMultipartPart(ctx context.Context, bucket, key, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.AddMultipartPart(ctx, bucket, key, contractSet, eTag, uploadID, partNumber, slices)
+		return tx.AddMultipartPart(ctx, bucket, key, eTag, uploadID, partNumber, slices)
 	})
 }
 

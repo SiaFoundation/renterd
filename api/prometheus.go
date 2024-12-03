@@ -50,9 +50,9 @@ func (asr AutopilotStateResponse) PrometheusMetric() (metrics []prometheus.Metri
 			Value:  float64(asr.UptimeMS),
 		},
 		{
-			Name:   "renterd_autopilot_state_configured",
+			Name:   "renterd_autopilot_state_enabled",
 			Labels: labels,
-			Value:  boolToFloat(asr.Configured),
+			Value:  boolToFloat(asr.Enabled),
 		},
 		{
 			Name:   "renterd_autopilot_state_migrating",
@@ -511,7 +511,6 @@ func (up UploadParams) PrometheusMetric() (metrics []prometheus.Metric) {
 	metrics = append(metrics, prometheus.Metric{
 		Name: "renterd_upload_currentheight",
 		Labels: map[string]any{
-			"contract_set":   up.ContractSet,
 			"upload_packing": boolToFloat(up.UploadPacking),
 		},
 		Value: float64(up.CurrentHeight),

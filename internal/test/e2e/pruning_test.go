@@ -76,17 +76,6 @@ func TestHostPruning(t *testing.T) {
 		}
 		return nil
 	})
-
-	// assert validation on MaxDowntimeHours
-	ap, err := b.Autopilot(context.Background(), api.DefaultAutopilotID)
-	tt.OK(err)
-
-	ap.Config.Hosts.MaxDowntimeHours = 99*365*24 + 1 // exceed by one
-	if err = b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}); !strings.Contains(err.Error(), api.ErrMaxDowntimeHoursTooHigh.Error()) {
-		t.Fatal(err)
-	}
-	ap.Config.Hosts.MaxDowntimeHours = 99 * 365 * 24 // allowed max
-	tt.OK(b.UpdateAutopilot(context.Background(), api.Autopilot{ID: t.Name(), Config: ap.Config}))
 }
 
 func TestSectorPruning(t *testing.T) {
@@ -106,7 +95,6 @@ func TestSectorPruning(t *testing.T) {
 	}
 
 	// convenience variables
-	cfg := test.AutopilotConfig
 	rs := test.RedundancySettings
 	w := cluster.Worker
 	b := cluster.Bus
@@ -120,8 +108,8 @@ func TestSectorPruning(t *testing.T) {
 	// wait until we have accounts
 	cluster.WaitForAccounts()
 
-	// wait until we have a contract set
-	cluster.WaitForContractSetContracts(cfg.Contracts.Set, rs.TotalShards)
+	// wait until we have contracts
+	cluster.WaitForContracts()
 
 	// add several objects
 	for i := 0; i < numObjects; i++ {

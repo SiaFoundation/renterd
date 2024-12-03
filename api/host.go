@@ -17,6 +17,7 @@ const (
 	ContractFilterModeAll      = "all"
 	ContractFilterModeActive   = "active"
 	ContractFilterModeArchived = "archived"
+	ContractFilterModeGood     = "good"
 
 	HostFilterModeAll     = "all"
 	HostFilterModeAllowed = "allowed"
@@ -35,6 +36,7 @@ var (
 
 var (
 	ErrUsabilityHostBlocked               = errors.New("host is blocked")
+	ErrUsabilityHostCheckNotFound         = errors.New("host not checked")
 	ErrUsabilityHostNotFound              = errors.New("host not found")
 	ErrUsabilityHostOffline               = errors.New("host is offline")
 	ErrUsabilityHostLowScore              = errors.New("host's score is below minimum")
@@ -61,7 +63,6 @@ type (
 	HostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
-		AutopilotID     string            `json:"autopilotID"`
 		FilterMode      string            `json:"filterMode"`
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
@@ -89,7 +90,6 @@ type (
 // Option types.
 type (
 	HostOptions struct {
-		AutopilotID     string
 		AddressContains string
 		FilterMode      string
 		UsabilityMode   string
@@ -102,19 +102,19 @@ type (
 
 type (
 	Host struct {
-		KnownSince        time.Time            `json:"knownSince"`
-		LastAnnouncement  time.Time            `json:"lastAnnouncement"`
-		PublicKey         types.PublicKey      `json:"publicKey"`
-		NetAddress        string               `json:"netAddress"`
-		PriceTable        HostPriceTable       `json:"priceTable"`
-		Settings          rhpv2.HostSettings   `json:"settings,omitempty"`
-		V2Settings        rhp4.HostSettings    `json:"v2Settings,omitempty"`
-		Interactions      HostInteractions     `json:"interactions"`
-		Scanned           bool                 `json:"scanned"`
-		Blocked           bool                 `json:"blocked"`
-		Checks            map[string]HostCheck `json:"checks"`
-		StoredData        uint64               `json:"storedData"`
-		V2SiamuxAddresses []string             `json:"v2SiamuxAddresses"`
+		KnownSince        time.Time          `json:"knownSince"`
+		LastAnnouncement  time.Time          `json:"lastAnnouncement"`
+		PublicKey         types.PublicKey    `json:"publicKey"`
+		NetAddress        string             `json:"netAddress"`
+		PriceTable        HostPriceTable     `json:"priceTable"`
+		Settings          rhpv2.HostSettings `json:"settings,omitempty"`
+		V2Settings        rhp4.HostSettings  `json:"v2Settings,omitempty"`
+		Interactions      HostInteractions   `json:"interactions"`
+		Scanned           bool               `json:"scanned"`
+		Blocked           bool               `json:"blocked"`
+		Checks            HostChecks         `json:"checks,omitempty"`
+		StoredData        uint64             `json:"storedData"`
+		V2SiamuxAddresses []string           `json:"v2SiamuxAddresses"`
 	}
 
 	HostInfo struct {
@@ -157,7 +157,7 @@ type (
 		PriceTable HostPriceTable  `json:"priceTable"`
 	}
 
-	HostCheck struct {
+	HostChecks struct {
 		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
 		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
 		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
@@ -193,8 +193,8 @@ type (
 	}
 )
 
-func (hc HostCheck) MarshalJSON() ([]byte, error) {
-	type check HostCheck
+func (hc HostChecks) MarshalJSON() ([]byte, error) {
+	type check HostChecks
 	return json.Marshal(struct {
 		check
 		Score  float64 `json:"score"`
@@ -292,6 +292,10 @@ func (sb HostScoreBreakdown) Score() float64 {
 
 func (ub HostUsabilityBreakdown) IsUsable() bool {
 	return !ub.Blocked && !ub.Offline && !ub.LowScore && !ub.RedundantIP && !ub.Gouging && !ub.NotAcceptingContracts && !ub.NotAnnounced && !ub.NotCompletingScan
+}
+
+func (ub HostUsabilityBreakdown) String() string {
+	return strings.Join(ub.UnusableReasons(), ", ")
 }
 
 func (ub HostUsabilityBreakdown) UnusableReasons() []string {

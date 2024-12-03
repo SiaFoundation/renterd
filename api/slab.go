@@ -13,12 +13,11 @@ type (
 	}
 
 	SlabBuffer struct {
-		ContractSet string `json:"contractSet"` // contract set that be buffer will be uploaded to
-		Complete    bool   `json:"complete"`    // whether the slab buffer is complete and ready to upload
-		Filename    string `json:"filename"`    // name of the buffer on disk
-		Size        int64  `json:"size"`        // size of the buffer
-		MaxSize     int64  `json:"maxSize"`     // maximum size of the buffer
-		Locked      bool   `json:"locked"`      // whether the slab buffer is locked for uploading
+		Complete bool   `json:"complete"` // whether the slab buffer is complete and ready to upload
+		Filename string `json:"filename"` // name of the buffer on disk
+		Size     int64  `json:"size"`     // size of the buffer
+		MaxSize  int64  `json:"maxSize"`  // maximum size of the buffer
+		Locked   bool   `json:"locked"`   // whether the slab buffer is locked for uploading
 	}
 
 	UnhealthySlab struct {
@@ -45,7 +44,6 @@ type (
 
 	// MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
 	MigrationSlabsRequest struct {
-		ContractSet  string  `json:"contractSet"`
 		HealthCutoff float64 `json:"healthCutoff"`
 		Limit        int     `json:"limit"`
 	}
@@ -54,7 +52,6 @@ type (
 		LockingDuration DurationMS `json:"lockingDuration"`
 		MinShards       uint8      `json:"minShards"`
 		TotalShards     uint8      `json:"totalShards"`
-		ContractSet     string     `json:"contractSet"`
 		Limit           int        `json:"limit"`
 	}
 

@@ -41,7 +41,6 @@ type (
 		api.UnhealthySlab
 		slabIdx   int
 		batchSize int
-		set       string
 
 		b Bus
 	}
@@ -54,7 +53,7 @@ func (j *job) execute(ctx context.Context, w Worker) (time.Duration, error) {
 		return 0, fmt.Errorf("failed to fetch slab; %w", err)
 	}
 
-	err = w.MigrateSlab(ctx, slab, j.set)
+	err = w.MigrateSlab(ctx, slab)
 	return time.Since(start), err
 }
 
@@ -178,22 +177,10 @@ func (m *migrator) performMigrations(p *workerPool) {
 	default:
 	}
 
-	// fetch currently configured set
-	autopilot, err := m.ap.Config(m.ap.shutdownCtx)
-	if err != nil {
-		m.logger.Errorf("failed to fetch autopilot config: %w", err)
-		return
-	}
-	set := autopilot.Config.Contracts.Set
-	if set == "" {
-		m.logger.Error("could not perform migrations, no contract set configured")
-		return
-	}
-
 	// helper to update 'toMigrate'
 	updateToMigrate := func() {
 		// fetch slabs for migration
-		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, set, migratorBatchSize)
+		toMigrateNew, err := b.SlabsForMigration(m.ap.shutdownCtx, m.healthCutoff, migratorBatchSize)
 		if err != nil {
 			m.logger.Errorf("failed to fetch slabs for migration, err: %v", err)
 			return
@@ -273,7 +260,7 @@ OUTER:
 			case <-m.signalMaintenanceFinished:
 				m.logger.Info("migrations interrupted - updating slabs for migration")
 				continue OUTER
-			case jobs <- job{slab, i, len(toMigrate), set, b}:
+			case jobs <- job{slab, i, len(toMigrate), b}:
 			}
 		}
 

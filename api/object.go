@@ -174,12 +174,11 @@ type (
 
 	// AddObjectRequest is the request type for the /bus/object/*key endpoint.
 	AddObjectRequest struct {
-		Bucket      string             `json:"bucket"`
-		ContractSet string             `json:"contractSet"`
-		Object      object.Object      `json:"object"`
-		ETag        string             `json:"eTag"`
-		MimeType    string             `json:"mimeType"`
-		Metadata    ObjectUserMetadata `json:"metadata"`
+		Bucket   string             `json:"bucket"`
+		Object   object.Object      `json:"object"`
+		ETag     string             `json:"eTag"`
+		MimeType string             `json:"mimeType"`
+		Metadata ObjectUserMetadata `json:"metadata"`
 	}
 
 	// CopyObjectOptions is the options type for the bus client.
@@ -227,14 +226,12 @@ type (
 	UploadObjectOptions struct {
 		MinShards     int
 		TotalShards   int
-		ContractSet   string
 		ContentLength int64
 		MimeType      string
 		Metadata      ObjectUserMetadata
 	}
 
 	UploadMultipartUploadPartOptions struct {
-		ContractSet      string
 		MinShards        int
 		TotalShards      int
 		EncryptionOffset *int
@@ -248,9 +245,6 @@ func (opts UploadObjectOptions) ApplyValues(values url.Values) {
 	}
 	if opts.TotalShards != 0 {
 		values.Set("totalshards", fmt.Sprint(opts.TotalShards))
-	}
-	if opts.ContractSet != "" {
-		values.Set("contractset", opts.ContractSet)
 	}
 	if opts.MimeType != "" {
 		values.Set("mimetype", opts.MimeType)
@@ -272,9 +266,6 @@ func (opts UploadMultipartUploadPartOptions) Apply(values url.Values) {
 	}
 	if opts.TotalShards != 0 {
 		values.Set("totalshards", fmt.Sprint(opts.TotalShards))
-	}
-	if opts.ContractSet != "" {
-		values.Set("contractset", opts.ContractSet)
 	}
 }
 func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {

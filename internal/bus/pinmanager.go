@@ -26,9 +26,6 @@ type (
 	}
 
 	Store interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
-
 		GougingSettings(ctx context.Context) (api.GougingSettings, error)
 		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
 

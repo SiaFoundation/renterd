@@ -19,15 +19,14 @@ func (c *Client) AbortMultipartUpload(ctx context.Context, bucket, key string, u
 }
 
 // AddMultipartPart adds a part to a multipart upload.
-func (c *Client) AddMultipartPart(ctx context.Context, bucket, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
+func (c *Client) AddMultipartPart(ctx context.Context, bucket, key, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error) {
 	err = c.c.WithContext(ctx).PUT("/multipart/part", api.MultipartAddPartRequest{
-		Bucket:      bucket,
-		ETag:        eTag,
-		Key:         key,
-		ContractSet: contractSet,
-		UploadID:    uploadID,
-		PartNumber:  partNumber,
-		Slices:      slices,
+		Bucket:     bucket,
+		ETag:       eTag,
+		Key:        key,
+		UploadID:   uploadID,
+		PartNumber: partNumber,
+		Slices:     slices,
 	})
 	return
 }

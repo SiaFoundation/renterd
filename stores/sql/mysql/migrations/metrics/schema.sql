@@ -19,36 +19,6 @@ CREATE TABLE `contract_prunes` (
   KEY `idx_contract_prunes_duration` (`duration`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbContractSetMetric
-CREATE TABLE `contract_sets` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `timestamp` bigint NOT NULL,
-  `name` varchar(191) NOT NULL,
-  `contracts` bigint NOT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_contract_sets_timestamp` (`timestamp`),
-  KEY `idx_contract_sets_name` (`name`),
-  KEY `idx_contract_sets_contracts` (`contracts`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- dbContractSetChurnMetric
-CREATE TABLE `contract_sets_churn` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `timestamp` bigint NOT NULL,
-  `name` varchar(191) NOT NULL,
-  `fc_id` varbinary(32) NOT NULL,
-  `direction` varchar(191) NOT NULL,
-  `reason` varchar(191) NOT NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_contract_sets_churn_timestamp` (`timestamp`),
-  KEY `idx_contract_sets_churn_name` (`name`),
-  KEY `idx_contract_sets_churn_fc_id` (`fc_id`),
-  KEY `idx_contract_sets_churn_direction` (`direction`),
-  KEY `idx_contract_sets_churn_reason` (`reason`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbContractMetric
 CREATE TABLE `contracts` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

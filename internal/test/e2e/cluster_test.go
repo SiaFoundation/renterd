@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -183,35 +184,31 @@ func TestNewTestCluster(t *testing.T) {
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
-	// See if autopilot is running by triggering the loop.
-	_, err := cluster.Autopilot.Trigger(false)
+	// fetch consensus state
+	res, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
 
-	// Add a host.
+	// add a host & wait for contracts to form
 	cluster.AddHosts(1)
-
-	// Wait for contracts to form.
-	var contract api.ContractMetadata
 	contracts := cluster.WaitForContracts()
-	contract = contracts[0]
-	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
+	if len(contracts) != 1 {
+		t.Fatal("expected 1 contract, got", len(contracts))
+	}
+	contract := contracts[0]
+
+	// fetch autopilot
+	apCfg, err := cluster.Bus.AutopilotConfig(context.Background())
 	tt.OK(err)
 
-	// Verify startHeight and endHeight of the contract.
-	cfg, currentPeriod := cluster.AutopilotConfig(context.Background())
-	expectedEndHeight := currentPeriod + cfg.Contracts.Period + cfg.Contracts.RenewWindow
-	if contract.EndHeight() != expectedEndHeight {
-		t.Fatal("wrong endHeight", contract.EndHeight())
+	// verify startHeight and endHeight of the contract.
+	minEndHeight := res.BlockHeight + apCfg.Contracts.Period + apCfg.Contracts.RenewWindow
+	if contract.EndHeight() < minEndHeight {
+		t.Fatal("wrong endHeight")
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
 	} else if contract.Usability != api.ContractUsabilityGood {
 		t.Fatal("contract should be good")
-	} else if revision.ContractID != contract.ID {
-		t.Fatalf("wrong contract id %v != %v", revision.ContractID, contract.ID)
 	}
-
-	// Wait for contract set to form
-	cluster.WaitForContractSetContracts(cfg.Contracts.Set, int(cfg.Contracts.Amount))
 
 	// Mine blocks until contracts start renewing.
 	cluster.MineToRenewWindow()
@@ -287,14 +284,14 @@ func TestNewTestCluster(t *testing.T) {
 		hi, err := cluster.Bus.Host(context.Background(), host.PublicKey)
 		if err != nil {
 			t.Fatal(err)
-		} else if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+		} else if hi.Checks == (api.HostChecks{}) {
 			t.Fatal("host check not found")
-		} else if checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
+		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !checks.UsabilityBreakdown.IsUsable() {
+		} else if !hi.Checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
+		} else if len(hi.Checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
@@ -310,14 +307,14 @@ func TestNewTestCluster(t *testing.T) {
 
 	allHosts := make(map[types.PublicKey]struct{})
 	for _, hi := range hostInfos {
-		if checks := hi.Checks[testApCfg().ID]; checks == (api.HostCheck{}) {
+		if hi.Checks == (api.HostChecks{}) {
 			t.Fatal("host check not found")
-		} else if checks.ScoreBreakdown.Score() == 0 {
-			js, _ := json.MarshalIndent(checks.ScoreBreakdown, "", "  ")
+		} else if hi.Checks.ScoreBreakdown.Score() == 0 {
+			js, _ := json.MarshalIndent(hi.Checks.ScoreBreakdown, "", "  ")
 			t.Fatalf("score shouldn't be 0 because that means one of the fields was 0: %s", string(js))
-		} else if !checks.UsabilityBreakdown.IsUsable() {
+		} else if !hi.Checks.UsabilityBreakdown.IsUsable() {
 			t.Fatal("host should be usable")
-		} else if len(checks.UsabilityBreakdown.UnusableReasons()) != 0 {
+		} else if len(hi.Checks.UsabilityBreakdown.UnusableReasons()) != 0 {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
@@ -326,7 +323,6 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUnusable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
-		AutopilotID:   testApCfg().ID,
 		FilterMode:    api.UsabilityFilterModeAll,
 		UsabilityMode: api.UsabilityFilterModeUnusable,
 	})
@@ -336,7 +332,6 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	hostInfosUsable, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{
-		AutopilotID:   testApCfg().ID,
 		FilterMode:    api.UsabilityFilterModeAll,
 		UsabilityMode: api.UsabilityFilterModeUsable,
 	})
@@ -351,9 +346,7 @@ func TestNewTestCluster(t *testing.T) {
 	// Fetch the autopilot state
 	state, err := cluster.Autopilot.State()
 	tt.OK(err)
-	if state.ID != api.DefaultAutopilotID {
-		t.Fatal("autopilot should have default id", state.ID)
-	} else if time.Time(state.StartTime).IsZero() {
+	if time.Time(state.StartTime).IsZero() {
 		t.Fatal("autopilot should have start time")
 	} else if time.Time(state.MigratingLastStart).IsZero() {
 		t.Fatal("autopilot should have completed a migration")
@@ -361,8 +354,8 @@ func TestNewTestCluster(t *testing.T) {
 		t.Fatal("autopilot should have completed a scan")
 	} else if state.UptimeMS == 0 {
 		t.Fatal("uptime should be set")
-	} else if !state.Configured {
-		t.Fatal("autopilot should be configured")
+	} else if !state.Enabled {
+		t.Fatal("autopilot should be enabled")
 	}
 
 	// Fetch host
@@ -779,7 +772,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), testBucket, "fileś/file2", api.UploadObjectOptions{}))
 
 	// fetch all entries from the worker
-	resp, err := cluster.Bus.Objects(context.Background(), "fileś/", api.ListObjectOptions{
+	resp, err := b.Objects(context.Background(), "fileś/", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -795,7 +788,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "file"
-	res, err := cluster.Bus.Objects(context.Background(), "fileś/file", api.ListObjectOptions{
+	res, err := b.Objects(context.Background(), "fileś/file", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -805,7 +798,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// fetch entries in /fileś starting with "foo"
-	res, err = cluster.Bus.Objects(context.Background(), "fileś/foo", api.ListObjectOptions{
+	res, err = b.Objects(context.Background(), "fileś/foo", api.ListObjectOptions{
 		Bucket:    testBucket,
 		Delimiter: "/",
 	})
@@ -831,7 +824,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 			{},                   // any bucket
 			{Bucket: testBucket}, // specific bucket
 		} {
-			info, err := cluster.Bus.ObjectsStats(context.Background(), opts)
+			info, err := b.ObjectsStats(context.Background(), opts)
 			tt.OK(err)
 			objectsSize := uint64(len(file1) + len(file2) + len(small) + len(large))
 			if info.TotalObjectsSize != objectsSize {
@@ -864,35 +857,6 @@ func TestUploadDownloadExtended(t *testing.T) {
 		if !bytes.Equal(data, buffer.Bytes()) {
 			t.Fatal("unexpected")
 		}
-	}
-
-	// update the bus setting and specify a non-existing contract set
-	cfg, _ := cluster.AutopilotConfig(context.Background())
-	cfg.Contracts.Set = t.Name()
-	cluster.UpdateAutopilotConfig(context.Background(), cfg)
-	tt.OK(b.UpdateContractSet(context.Background(), t.Name(), nil, nil))
-
-	// assert there are no contracts in the set
-	csc, err := b.Contracts(context.Background(), api.ContractsOpts{ContractSet: t.Name()})
-	tt.OK(err)
-	if len(csc) != 0 {
-		t.Fatalf("expected no contracts, got %v", len(csc))
-	}
-
-	// download the data again
-	for _, data := range [][]byte{small, large} {
-		path := fmt.Sprintf("data_%v", len(data))
-
-		var buffer bytes.Buffer
-		tt.OK(w.DownloadObject(context.Background(), &buffer, testBucket, path, api.DownloadObjectOptions{}))
-
-		// assert it matches
-		if !bytes.Equal(data, buffer.Bytes()) {
-			t.Fatal("unexpected")
-		}
-
-		// delete the object
-		tt.OK(w.DeleteObject(context.Background(), testBucket, path))
 	}
 }
 
@@ -998,28 +962,17 @@ func TestUploadDownloadSpending(t *testing.T) {
 		// mine a block
 		cluster.MineBlocks(1)
 
-		// fetch contracts
-		cms, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		// fetch active contracts
+		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 		tt.OK(err)
-		if len(cms) == 0 {
+		if len(contracts) == 0 {
 			t.Fatal("no contracts found")
 		}
 
-		// fetch contract set contracts
-		contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
-		tt.OK(err)
-		currentSet := make(map[types.FileContractID]struct{})
+		// assert good contracts were renewed
 		for _, c := range contracts {
-			currentSet[c.ID] = struct{}{}
-		}
-
-		// assert all contracts are renewed and in the set
-		for _, cm := range cms {
-			if cm.RenewedFrom == (types.FileContractID{}) {
+			if c.IsGood() && c.RenewedFrom == (types.FileContractID{}) {
 				return errors.New("found contract that wasn't renewed")
-			}
-			if _, inset := currentSet[cm.ID]; !inset {
-				return errors.New("found renewed contract that wasn't part of the set")
 			}
 		}
 		return nil
@@ -1411,7 +1364,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 
 	// build a frankenstein object constructed with all sectors on the same host
 	res.Object.Slabs[0].Shards = shards[hk]
-	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", test.ContractSet, *res.Object, api.AddObjectOptions{}))
+	tt.OK(b.AddObject(context.Background(), testBucket, "frankenstein", *res.Object, api.AddObjectOptions{}))
 
 	// assert we can download this object
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "frankenstein", api.DownloadObjectOptions{}))
@@ -1688,7 +1641,7 @@ func TestUploadPacking(t *testing.T) {
 				return errors.New("buffer locked")
 			}
 		}
-		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), test.ContractSet, 1)
+		ps, err := b.PackedSlabsForUpload(context.Background(), time.Millisecond, uint8(rs.MinShards), uint8(rs.TotalShards), 1)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(ps) > 0 {
@@ -1893,9 +1846,6 @@ func TestSlabBufferStats(t *testing.T) {
 	tt.OK(err)
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 slab buffer, got", len(buffers))
-	}
-	if buffers[0].ContractSet != test.ContractSet {
-		t.Fatalf("expected slab buffer contract set of %v, got %v", test.ContractSet, buffers[0].ContractSet)
 	}
 	if buffers[0].Size != int64(len(data1)) {
 		t.Fatalf("expected slab buffer size of %v, got %v", len(data1), buffers[0].Size)
@@ -2297,99 +2247,19 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 
 	// enable the autopilot by configuring it
-	cluster.UpdateAutopilotConfig(context.Background(), test.AutopilotConfig)
+	tt.OK(
+		b.UpdateAutopilotConfig(
+			context.Background(),
+			client.WithContractsConfig(test.AutopilotConfig.Contracts),
+			client.WithHostsConfig(test.AutopilotConfig.Hosts),
+			client.WithAutopilotEnabled(true),
+		),
+	)
 
 	// wait for a contract to form
 	contractsFormed := cluster.WaitForContracts()
 	if len(contractsFormed) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
-	}
-}
-
-func TestBusRecordedMetrics(t *testing.T) {
-	startTime := time.Now().UTC().Round(time.Second)
-
-	cluster := newTestCluster(t, testClusterOptions{
-		hosts: 1,
-	})
-	defer cluster.Shutdown()
-
-	// fetch contract set metrics
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
-		csMetrics, err := cluster.Bus.ContractSetMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetMetricsQueryOpts{})
-		cluster.tt.OK(err)
-
-		// expect at least 1 metric with contracts
-		if len(csMetrics) < 1 {
-			return fmt.Errorf("expected at least 1 metric, got %v", len(csMetrics))
-		} else if m := csMetrics[len(csMetrics)-1]; m.Contracts != 1 {
-			return fmt.Errorf("expected 1 contract, got %v", m.Contracts)
-		} else if m.Name != test.ContractSet {
-			return fmt.Errorf("expected contract set %v, got %v", test.ContractSet, m.Name)
-		} else if m.Timestamp.Std().Before(startTime) {
-			return fmt.Errorf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-		}
-		return nil
-	})
-
-	// get churn metrics, should have 1 for the new contract
-	cscMetrics, err := cluster.Bus.ContractSetChurnMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractSetChurnMetricsQueryOpts{})
-	cluster.tt.OK(err)
-	if len(cscMetrics) != 1 {
-		t.Fatalf("expected 1 metric, got %v", len(cscMetrics))
-	} else if m := cscMetrics[0]; m.Direction != api.ChurnDirAdded {
-		t.Fatalf("expected added churn, got %v", m.Direction)
-	} else if m.ContractID == (types.FileContractID{}) {
-		t.Fatal("expected non-zero FCID")
-	} else if m.Name != test.ContractSet {
-		t.Fatalf("expected contract set %v, got %v", test.ContractSet, m.Name)
-	} else if m.Timestamp.Std().Before(startTime) {
-		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-	}
-
-	// get contract metrics
-	var cMetrics []api.ContractMetric
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
-		// Retry fetching metrics since they are buffered.
-		cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{})
-		cluster.tt.OK(err)
-		if len(cMetrics) != 1 {
-			return fmt.Errorf("expected 1 metric, got %v", len(cMetrics))
-		}
-		return nil
-	})
-
-	if len(cMetrics) != 1 {
-		t.Fatalf("expected 1 metric, got %v", len(cMetrics))
-	} else if m := cMetrics[0]; m.Timestamp.Std().Before(startTime) {
-		t.Fatalf("expected time to be after start time %v, got %v", startTime, m.Timestamp.Std())
-	} else if m.ContractID != (types.FileContractID{}) {
-		t.Fatal("expected zero FCID")
-	} else if m.HostKey != (types.PublicKey{}) {
-		t.Fatal("expected zero Host")
-	} else if m.RemainingCollateral == (types.Currency{}) {
-		t.Fatal("expected non-zero RemainingCollateral")
-	} else if m.RemainingFunds == (types.Currency{}) {
-		t.Fatal("expected non-zero RemainingFunds")
-	} else if m.RevisionNumber != 0 {
-		t.Fatal("expected zero RevisionNumber")
-	} else if !m.UploadSpending.IsZero() {
-		t.Fatal("expected zero UploadSpending")
-	} else if m.FundAccountSpending == (types.Currency{}) {
-		t.Fatal("expected non-zero FundAccountSpending")
-	} else if !m.DeleteSpending.IsZero() {
-		t.Fatal("expected zero DeleteSpending")
-	} else if !m.SectorRootsSpending.IsZero() {
-		t.Fatal("expected zero SectorRootsSpending")
-	}
-
-	// prune one of the metrics
-	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
-		t.Fatal(err)
-	} else if cMetrics, err = cluster.Bus.ContractMetrics(context.Background(), startTime, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
-		t.Fatal(err)
-	} else if len(cMetrics) > 0 {
-		t.Fatalf("expected 0 metrics, got %v", len(cscMetrics))
 	}
 }
 
@@ -2850,7 +2720,6 @@ func TestConsensusResync(t *testing.T) {
 	network, genesis := testNetwork()
 	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
 	tt.OK(err)
-
 	newCluster := newTestCluster(t, testClusterOptions{
 		cm:        chain.NewManager(store, state),
 		dir:       cluster.dir,

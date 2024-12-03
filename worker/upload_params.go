@@ -16,11 +16,10 @@ type uploadParameters struct {
 	ec               object.EncryptionKey
 	encryptionOffset uint64
 
-	rs          api.RedundancySettings
-	bh          uint64
-	contractSet string
-	packing     bool
-	mimeType    string
+	rs       api.RedundancySettings
+	bh       uint64
+	packing  bool
+	mimeType string
 
 	metadata api.ObjectUserMetadata
 }
@@ -42,12 +41,6 @@ type UploadOption func(*uploadParameters)
 func WithBlockHeight(bh uint64) UploadOption {
 	return func(up *uploadParameters) {
 		up.bh = bh
-	}
-}
-
-func WithContractSet(contractSet string) UploadOption {
-	return func(up *uploadParameters) {
-		up.contractSet = contractSet
 	}
 }
 
