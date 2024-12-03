@@ -71,12 +71,12 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	var version string
 	if h.IsV2() {
 		appendCost := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost()
-		uploadCost := h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize, 144*3).RenterCost()
+		uploadCost := h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize).RenterCost()
 		uploadSectorCost = appendCost.Add(uploadCost)
 		maxCollateral = h.V2Settings.MaxCollateral
 		collateral = h.V2Settings.Prices.Collateral
 		egressPrice = h.V2Settings.Prices.RPCReadSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
-		ingressPrice = h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize, 144*3).RenterCost().Div64(rhpv2.SectorSize)
+		ingressPrice = h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
 		storagePrice = h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost().Div64(rhpv2.SectorSize)
 		remainingStorage = h.V2Settings.RemainingStorage
 		version = fmt.Sprintf("%d.%d.%d", h.V2Settings.ProtocolVersion[0], h.V2Settings.ProtocolVersion[1], h.V2Settings.ProtocolVersion[2])

@@ -126,7 +126,7 @@ type (
 
 	Syncer interface {
 		Addr() string
-		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastHeader(h types.BlockHeader)
 		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 		BroadcastTransactionSet([]types.Transaction)
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
