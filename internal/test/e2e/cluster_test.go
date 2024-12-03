@@ -1052,6 +1052,8 @@ func TestContractApplyChainUpdates(t *testing.T) {
 			tt.OK(err)
 			if c.RevisionHeight < lastRevisionHeight {
 				return fmt.Errorf("contract %v should have been revised: %v < %v", c.ID, c.RevisionHeight, lastRevisionHeight)
+			} else if c.RevisionNumber != uint64(i+1) {
+				return fmt.Errorf("invalid revision number %v != %v", c.RevisionNumber, uint64(i+1))
 			}
 			lastRevisionHeight = c.RevisionHeight
 			return nil
