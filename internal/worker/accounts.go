@@ -80,7 +80,7 @@ type (
 	}
 
 	Account struct {
-		driftRate rate.Limiter
+		driftRate *rate.Limiter
 		key       types.PrivateKey
 		logger    *zap.SugaredLogger
 
@@ -194,7 +194,7 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 	if !exists {
 		acc = &Account{
 			key:       accKey,
-			driftRate: *rate.NewLimiter(rate.Every(driftResetInterval), 1),
+			driftRate: rate.NewLimiter(rate.Every(driftResetInterval), 1),
 			logger:    a.logger.Named(accID.String()),
 			acc: api.Account{
 				ID:            accID,
@@ -257,7 +257,7 @@ func (a *AccountMgr) run() {
 		acc.RequiresSync = true // force sync on reboot
 		account := &Account{
 			acc:              acc,
-			driftRate:        *rate.NewLimiter(rate.Every(driftResetInterval), 1),
+			driftRate:        rate.NewLimiter(rate.Every(driftResetInterval), 1),
 			key:              accKey,
 			logger:           a.logger.Named(acc.ID.String()),
 			requiresSyncTime: time.Now(),
@@ -382,16 +382,15 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	if account.Drift.Cmp(maxNegDrift) < 0 {
 		// check if we can reset the drift according to our ratelimit
 		acc := a.account(account.HostKey)
-		res := acc.driftRate.Reserve()
-		if res.OK() {
+		if acc.driftRate.Allow() {
 			// reset the drift
 			if err := a.ResetDrift(acc.ID()); err != nil {
 				return false, fmt.Errorf("failed to reset drift: %w", err)
 			}
+			_ = acc.driftRate.Reserve()
 			account = acc.convert() // update account
 		} else {
 			// register alert
-			res.Cancel()
 			alert := newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
 				"accountID", account.ID.String(),
 				"hostKey", contract.HostKey.String(),
