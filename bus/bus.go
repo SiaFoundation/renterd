@@ -195,7 +195,7 @@ type (
 	// A ChainStore stores information about the chain.
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
-		FileContractElement(ctx context.Context, fcid types.FileContractID) (fce types.V2FileContractElement, err error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 

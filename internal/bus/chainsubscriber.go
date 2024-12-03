@@ -20,6 +20,10 @@ import (
 )
 
 const (
+	// contractElementPruneWindow is the number of blocks beyond a contract's
+	// prune window when we start deleting its file contract elements.
+	contractElementPruneWindow = 144
+
 	// maxAddrsPerProtocol is the maximum number of announced addresses we will
 	// track per host, per protocol for a V2 announcement
 	maxAddrsPerProtocol = 2
@@ -240,9 +244,8 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	}
 
 	// prune contracts 144 blocks after window_end
-	const fce_prune_window = 144
-	if cau.State.Index.Height > fce_prune_window {
-		if err := tx.PruneFileContractElements(cau.State.Index.Height - fce_prune_window); err != nil {
+	if cau.State.Index.Height > contractElementPruneWindow {
+		if err := tx.PruneFileContractElements(cau.State.Index.Height - contractElementPruneWindow); err != nil {
 			return fmt.Errorf("failed to prune file contract elements: %w", err)
 		}
 	}
