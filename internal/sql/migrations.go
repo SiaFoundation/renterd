@@ -380,9 +380,15 @@ var (
 				},
 			},
 			{
-				ID: "00030_update_gouging_settings",
+				ID: "00030_host_sectors",
 				Migrate: func(tx Tx) error {
-					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_update_gouging_settings", log)
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_host_sectors", log)
+				},
+			},
+			{
+				ID: "00031_update_gouging_settings",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00031_update_gouging_settings", log)
 				},
 			},
 		}

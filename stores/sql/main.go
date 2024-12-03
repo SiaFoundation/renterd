@@ -191,6 +191,24 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	if err != nil {
 		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
+
+	// delete host sectors that are no longer associated with any contract
+	_, err = tx.Exec(ctx, `DELETE FROM host_sectors
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM contract_sectors
+    WHERE contract_sectors.db_sector_id = host_sectors.db_sector_id
+)
+OR NOT EXISTS (
+    SELECT 1
+    FROM contracts
+    INNER JOIN hosts ON contracts.host_id = hosts.id
+    WHERE contracts.archival_reason IS NULL
+    AND hosts.id = host_sectors.db_host_id
+)`)
+	if err != nil {
+		return fmt.Errorf("failed to delete host_sectors: %w", err)
+	}
 	return nil
 }
 
@@ -619,7 +637,7 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	}
 
 	// fetch all contracts, take into account renewals
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, fcid, renewed_from
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, fcid, renewed_from, host_id
 				   FROM contracts
 				   WHERE contracts.fcid IN (%s) OR renewed_from IN (%s)
 				   `, placeholdersStr, placeholdersStr), args...)
@@ -631,7 +649,7 @@ func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContra
 	var contracts []UsedContract
 	for rows.Next() {
 		var c UsedContract
-		if err := rows.Scan(&c.ID, &c.FCID, &c.RenewedFrom); err != nil {
+		if err := rows.Scan(&c.ID, &c.FCID, &c.RenewedFrom, &c.HostID); err != nil {
 			return nil, fmt.Errorf("failed to scan used contract: %w", err)
 		}
 		contracts = append(contracts, c)
@@ -2159,6 +2177,7 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 			panic("sector not found") // developer error (already asserted)
 		}
 		upsert = append(upsert, ContractSector{
+			HostID:     contract.HostID,
 			ContractID: contract.ID,
 			SectorID:   sectorID,
 		})
@@ -2480,6 +2499,13 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	}
 	defer contractSectorStmt.Close()
 
+	// stmt to insert host_sector
+	hostSectorStmt, err := tx.Prepare(ctx, "INSERT INTO host_sectors (db_host_id, db_sector_id) VALUES (?, ?)")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare statement to insert host sectors: %w", err)
+	}
+	defer hostSectorStmt.Close()
+
 	// insert shards
 	for i := range slab.Shards {
 		// insert shard
@@ -2501,6 +2527,10 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 
 			if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
 				return "", fmt.Errorf("failed to insert contract sector: %w", err)
+			}
+
+			if _, err := hostSectorStmt.Exec(ctx, uc.HostID, sectorID); err != nil {
+				return "", fmt.Errorf("failed to insert host sector: %w", err)
 			}
 		}
 	}
