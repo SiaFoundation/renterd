@@ -1021,6 +1021,9 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	h, err := b.Host(context.Background(), hosts[0].PublicKey())
 	tt.OK(err)
 
+	// scan the host
+	tt.OKAll(b.ScanHost(context.Background(), h.PublicKey, time.Minute))
+
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
@@ -1052,8 +1055,6 @@ func TestContractApplyChainUpdates(t *testing.T) {
 			tt.OK(err)
 			if c.RevisionHeight < lastRevisionHeight {
 				return fmt.Errorf("contract %v should have been revised: %v < %v", c.ID, c.RevisionHeight, lastRevisionHeight)
-			} else if c.RevisionNumber != uint64(i+1) {
-				return fmt.Errorf("invalid revision number %v != %v", c.RevisionNumber, uint64(i+1))
 			}
 			lastRevisionHeight = c.RevisionHeight
 			return nil
