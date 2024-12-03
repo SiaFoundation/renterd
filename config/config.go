@@ -135,7 +135,7 @@ type (
 	// Autopilot contains the configuration for an autopilot.
 	Autopilot struct {
 		Enabled                        bool          `yaml:"enabled,omitempty"`
-		ID                             string        `yaml:"id,omitempty"`
+		AllowRedundantHostIPs          bool          `yaml:"allowRedundantHostIPs,omitempty"`
 		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
 		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`
 		RevisionBroadcastInterval      time.Duration `yaml:"revisionBroadcastInterval,omitempty"`

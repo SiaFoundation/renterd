@@ -8,7 +8,7 @@ import (
 	"go.sia.tech/renterd/internal/gouging"
 )
 
-var ErrMissingRequiredFields = errors.New("missing required fields in configuration, both allowance and amount must be set")
+var ErrMissingRequiredFields = errors.New("missing required fields in configuration, amount must be set")
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
 	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
@@ -25,7 +25,7 @@ func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uin
 // are too strict for the number of contracts required by 'cfg', it will provide
 // a recommendation on how to loosen it.
 func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (resp api.ConfigEvaluationResponse, _ error) {
-	// we need an allowance and a target amount of contracts to evaluate
+	// we need an amount of contracts to evaluate
 	if cfg.Contracts.Amount == 0 {
 		return api.ConfigEvaluationResponse{}, ErrMissingRequiredFields
 	}
@@ -142,7 +142,7 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 
 // optimiseGougingSetting tries to optimise one field of the gouging settings to
 // try and hit the target number of contracts.
-func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, currentPeriod uint64, rs api.RedundancySettings, hosts []api.Host) bool {
+func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, hosts []api.Host) bool {
 	if cfg.Contracts.Amount == 0 {
 		return true // nothing to do
 	}
@@ -153,7 +153,7 @@ func optimiseGougingSetting(gs *api.GougingSettings, field *types.Currency, cfg 
 	nSteps := 0
 	prevVal := *field // to keep accurate value
 	for {
-		nUsable := countUsableHosts(cfg, cs, currentPeriod, rs, *gs, hosts)
+		nUsable := countUsableHosts(cfg, cs, period, rs, *gs, hosts)
 		targetHit := nUsable >= cfg.Contracts.Amount
 
 		if targetHit && nSteps == 0 {

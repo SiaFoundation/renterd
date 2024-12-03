@@ -21,17 +21,13 @@ var (
 			Upload:   rhpv2.SectorSize * 500,
 			Storage:  rhpv2.SectorSize * 5e3,
 
-			Set:   ContractSet,
 			Prune: false,
 		},
 		Hosts: api.HostsConfig{
 			MaxDowntimeHours:           10,
 			MaxConsecutiveScanFailures: 10,
-			AllowRedundantIPs:          true, // allow for integration tests by default
 		},
 	}
-
-	ContractSet = "testset"
 
 	GougingSettings = api.GougingSettings{
 		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
@@ -55,8 +51,7 @@ var (
 	}
 
 	UploadSettings = api.UploadSettings{
-		DefaultContractSet: ContractSet,
-		Redundancy:         RedundancySettings,
+		Redundancy: RedundancySettings,
 	}
 
 	S3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"

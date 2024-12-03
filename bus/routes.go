@@ -520,11 +520,6 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	if req.AutopilotID == "" && req.UsabilityMode != api.UsabilityFilterModeAll {
-		jc.Error(errors.New("need to specify autopilot id when usability mode isn't 'all'"), http.StatusBadRequest)
-		return
-	}
-
 	// validate the filter mode
 	switch req.FilterMode {
 	case api.HostFilterModeAllowed:
@@ -550,7 +545,6 @@ func (b *Bus) hostsHandlerPOST(jc jape.Context) {
 	}
 
 	hosts, err := b.store.Hosts(jc.Request.Context(), api.HostOptions{
-		AutopilotID:     req.AutopilotID,
 		FilterMode:      req.FilterMode,
 		UsabilityMode:   req.UsabilityMode,
 		AddressContains: req.AddressContains,
@@ -699,10 +693,6 @@ func (b *Bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) contractsHandlerGET(jc jape.Context) {
-	var cs string
-	if jc.DecodeForm("contractset", &cs) != nil {
-		return
-	}
 	filterMode := api.ContractFilterModeActive
 	if jc.DecodeForm("filtermode", &filterMode) != nil {
 		return
@@ -712,14 +702,14 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	case api.ContractFilterModeAll:
 	case api.ContractFilterModeActive:
 	case api.ContractFilterModeArchived:
+	case api.ContractFilterModeGood:
 	default:
 		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
 		return
 	}
 
 	contracts, err := b.store.Contracts(jc.Request.Context(), api.ContractsOpts{
-		ContractSet: cs,
-		FilterMode:  filterMode,
+		FilterMode: filterMode,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
 		api.WriteResponse(jc, prometheus.Slice(contracts))
@@ -745,31 +735,6 @@ func (b *Bus) contractsArchiveHandlerPOST(jc jape.Context) {
 	}
 
 	jc.Check("failed to archive contracts", b.store.ArchiveContracts(jc.Request.Context(), toArchive))
-}
-
-func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
-	sets, err := b.store.ContractSets(jc.Request.Context())
-	if jc.Check("couldn't fetch contract sets", err) == nil {
-		jc.Encode(sets)
-	}
-}
-
-func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
-	var req api.ContractSetUpdateRequest
-	if set := jc.PathParam("set"); set == "" {
-		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
-		return
-	} else if jc.Decode(&req) != nil {
-		return
-	} else if jc.Check("could not add contracts to set", b.store.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
-		return
-	}
-}
-
-func (b *Bus) contractsSetHandlerDELETE(jc jape.Context) {
-	if set := jc.PathParam("set"); set != "" {
-		jc.Check("could not remove contract set", b.store.RemoveContractSet(jc.Request.Context(), set))
-	}
 }
 
 func (b *Bus) contractAcquireHandlerPOST(jc jape.Context) {
@@ -1013,6 +978,29 @@ func (b *Bus) contractSizeHandlerGET(jc jape.Context) {
 	jc.Encode(size)
 }
 
+func (b *Bus) contractUsabilityHandlerPUT(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	var usability string
+	if jc.Decode(&usability) != nil {
+		return
+	}
+
+	err := b.store.UpdateContractUsability(jc.Request.Context(), id, usability)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, sql.ErrInvalidContractUsability) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update contract usability", err)
+}
+
 func (b *Bus) contractReleaseHandlerPOST(jc jape.Context) {
 	var id types.FileContractID
 	if jc.DecodeParam("id", &id) != nil {
@@ -1228,7 +1216,7 @@ func (b *Bus) objectHandlerPUT(jc jape.Context) {
 		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
-	jc.Check("couldn't store object", b.store.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
+	jc.Check("couldn't store object", b.store.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
 
 func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1343,11 +1331,7 @@ func (b *Bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
 		jc.Error(fmt.Errorf("locking_duration must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	if psrg.ContractSet == "" {
-		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
-		return
-	}
-	slabs, err := b.store.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
+	slabs, err := b.store.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.Limit)
 	if jc.Check("couldn't get packed slabs", err) != nil {
 		return
 	}
@@ -1542,7 +1526,7 @@ func (b *Bus) slabsRefreshHealthHandlerPOST(jc jape.Context) {
 func (b *Bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
 	if jc.Decode(&msr) == nil {
-		if slabs, err := b.store.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
+		if slabs, err := b.store.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
 			jc.Encode(api.UnhealthySlabsResponse{
 				Slabs: slabs,
 			})
@@ -1594,10 +1578,6 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
-	var contractSet string
-	if jc.DecodeForm("contractset", &contractSet) != nil {
-		return
-	}
 	if minShards <= 0 || totalShards <= minShards {
 		jc.Error(errors.New("minShards must be positive and totalShards must be greater than minShards"), http.StatusBadRequest)
 		return
@@ -1606,15 +1586,11 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 		jc.Error(fmt.Errorf("totalShards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
 		return
 	}
-	if contractSet == "" {
-		jc.Error(errors.New("parameter 'contractSet' is required"), http.StatusBadRequest)
-		return
-	}
 	data, err := io.ReadAll(jc.Request.Body)
 	if jc.Check("failed to read request body", err) != nil {
 		return
 	}
-	slabs, bufferSize, err := b.store.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards), contractSet)
+	slabs, bufferSize, err := b.store.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards))
 	if jc.Check("failed to add partial slab", err) != nil {
 		return
 	}
@@ -1627,6 +1603,56 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 		Slabs:                        slabs,
 		SlabBufferMaxSizeSoftReached: bufferSize >= us.Packing.SlabBufferMaxSizeSoft,
 	})
+}
+
+func (b *Bus) autopilotHandlerGET(jc jape.Context) {
+	ap, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot config", err) != nil {
+		return
+	}
+	jc.Encode(ap)
+}
+
+func (b *Bus) autopilotHandlerPUT(jc jape.Context) {
+	// decode request
+	var req api.UpdateAutopilotRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req == (api.UpdateAutopilotRequest{}) {
+		jc.Error(errors.New("request body is empty"), http.StatusBadRequest)
+		return
+	}
+
+	// fetch current config
+	cfg, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch current configuration", err) != nil {
+		return
+	}
+
+	// update the contracts config
+	if req.Contracts != nil {
+		if err := req.Contracts.Validate(); err != nil {
+			jc.Error(fmt.Errorf("failed to update autopilot, contracts config is invalid: %w", err), http.StatusBadRequest)
+			return
+		}
+		cfg.Contracts = *req.Contracts
+	}
+
+	// update the hosts config
+	if req.Hosts != nil {
+		if err := req.Hosts.Validate(); err != nil {
+			jc.Error(fmt.Errorf("failed to update autopilot, hosts config is invalid: %w", err), http.StatusBadRequest)
+			return
+		}
+		cfg.Hosts = *req.Hosts
+	}
+
+	// enable/disable the autopilot
+	if req.Enabled != nil {
+		cfg.Enabled = *req.Enabled
+	}
+
+	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
 }
 
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -1664,15 +1690,12 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 	}
 
 	var uploadPacking bool
-	var contractSet string
 	us, err := b.store.UploadSettings(jc.Request.Context())
 	if jc.Check("could not get upload settings", err) == nil {
-		contractSet = us.DefaultContractSet
 		uploadPacking = us.Packing.Enabled
 	}
 
 	api.WriteResponse(jc, api.UploadParams{
-		ContractSet:   contractSet,
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
 		UploadPacking: uploadPacking,
@@ -1811,69 +1834,18 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *Bus) autopilotsListHandlerGET(jc jape.Context) {
-	if autopilots, err := b.store.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
-		jc.Encode(autopilots)
-	}
-}
-
-func (b *Bus) autopilotsHandlerGET(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	ap, err := b.store.Autopilot(jc.Request.Context(), id)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("couldn't load object", err) != nil {
-		return
-	}
-
-	jc.Encode(ap)
-}
-
-func (b *Bus) autopilotsHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	var ap api.Autopilot
-	if jc.Decode(&ap) != nil {
-		return
-	}
-
-	if ap.ID != id {
-		jc.Error(errors.New("id in path and body don't match"), http.StatusBadRequest)
-		return
-	}
-
-	if jc.Check("failed to update autopilot", b.store.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
-		b.pinMgr.TriggerUpdate()
-	}
-}
-
-func (b *Bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
+func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
 	var hk types.PublicKey
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	var hc api.HostCheck
+	var hc api.HostChecks
 	if jc.Check("failed to decode host check", jc.Decode(&hc)) != nil {
 		return
 	}
 
-	err := b.store.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to update host", err) != nil {
+	err := b.store.UpdateHostCheck(jc.Request.Context(), hk, hc)
+	if jc.Check("failed to update host check", err) != nil {
 		return
 	}
 }
@@ -2013,29 +1985,19 @@ func (b *Bus) metricsHandlerPUT(jc jape.Context) {
 	jc.Custom((*interface{})(nil), nil)
 
 	key := jc.PathParam("key")
-	switch key {
-	case api.MetricContractPrune:
-		// TODO: jape hack - remove once jape can handle decoding multiple different request types
-		var req api.ContractPruneMetricRequestPUT
-		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
-			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
-			return
-		} else if jc.Check("failed to record contract prune metric", b.store.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
-	case api.MetricContractSetChurn:
-		// TODO: jape hack - remove once jape can handle decoding multiple different request types
-		var req api.ContractSetChurnMetricRequestPUT
-		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
-			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
-			return
-		} else if jc.Check("failed to record contract churn metric", b.store.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
-	default:
+	if key != api.MetricContractPrune {
 		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
 		return
 	}
+
+	// TODO: jape hack - remove once jape can handle decoding multiple different request types
+	var req api.ContractPruneMetricRequestPUT
+	if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to record contract prune metric", b.store.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...))
 }
 
 func (b *Bus) metricsHandlerGET(jc jape.Context) {
@@ -2091,22 +2053,6 @@ func (b *Bus) metricsHandlerGET(jc jape.Context) {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
-	case api.MetricContractSet:
-		var opts api.ContractSetMetricsQueryOpts
-		if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		}
-		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
-	case api.MetricContractSetChurn:
-		var opts api.ContractSetChurnMetricsQueryOpts
-		if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		} else if jc.DecodeForm("direction", &opts.Direction) != nil {
-			return
-		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
-			return
-		}
-		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricWallet:
 		var opts api.WalletMetricsQueryOpts
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
@@ -2129,10 +2075,6 @@ func (b *Bus) metrics(ctx context.Context, key string, start time.Time, n uint64
 		return b.store.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
 	case api.MetricContractPrune:
 		return b.store.ContractPruneMetrics(ctx, start, n, interval, opts.(api.ContractPruneMetricsQueryOpts))
-	case api.MetricContractSet:
-		return b.store.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
-	case api.MetricContractSetChurn:
-		return b.store.ContractSetChurnMetrics(ctx, start, n, interval, opts.(api.ContractSetChurnMetricsQueryOpts))
 	case api.MetricWallet:
 		return b.store.WalletMetrics(ctx, start, n, interval, opts.(api.WalletMetricsQueryOpts))
 	}
@@ -2192,9 +2134,6 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 	if req.Bucket == "" {
 		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
-	} else if req.ContractSet == "" {
-		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
-		return
 	} else if req.ETag == "" {
 		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
 		return
@@ -2205,7 +2144,7 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.store.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Key, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices)
+	err := b.store.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Key, req.ETag, req.UploadID, req.PartNumber, req.Slices)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}

@@ -61,12 +61,6 @@ func (c *Client) ContractRoots(ctx context.Context, contractID types.FileContrac
 	return
 }
 
-// ContractSets returns the contract sets of the bus.
-func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
-	err = c.c.WithContext(ctx).GET("/contracts/sets", &sets)
-	return
-}
-
 // ContractSize returns the contract's size.
 func (c *Client) ContractSize(ctx context.Context, contractID types.FileContractID) (size api.ContractSize, err error) {
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/size", contractID), &size)
@@ -77,9 +71,6 @@ func (c *Client) ContractSize(ctx context.Context, contractID types.FileContract
 // all contracts are returned.
 func (c *Client) Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
-	if opts.ContractSet != "" {
-		values.Set("contractset", opts.ContractSet)
-	}
 	if opts.FilterMode != "" {
 		values.Set("filtermode", opts.FilterMode)
 	}
@@ -107,12 +98,6 @@ func (c *Client) DeleteContracts(ctx context.Context, ids []types.FileContractID
 // DeleteAllContracts deletes all contracts from the bus.
 func (c *Client) DeleteAllContracts(ctx context.Context) (err error) {
 	err = c.c.WithContext(ctx).DELETE("/contracts/all")
-	return
-}
-
-// DeleteContractSet removes the contract set from the bus.
-func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/contracts/set/%s", set))
 	return
 }
 
@@ -191,11 +176,8 @@ func (c *Client) ReleaseContract(ctx context.Context, contractID types.FileContr
 	return
 }
 
-// UpdateContractSet adds/removes the given contracts to/from the given set.
-func (c *Client) UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contracts/set/%s", set), api.ContractSetUpdateRequest{
-		ToAdd:    toAdd,
-		ToRemove: toRemove,
-	}, nil)
+// UpdateContractUsability updates the usability of the given contract.
+func (c *Client) UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contract/%s/usability", contractID), usability)
 	return
 }

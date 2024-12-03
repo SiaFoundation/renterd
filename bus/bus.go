@@ -178,11 +178,11 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 	}
 
-	// An AutopilotStore stores autopilots.
+	// A AutopilotStore stores autopilot state.
 	AutopilotStore interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		InitAutopilotConfig(ctx context.Context) error
+		UpdateAutopilotConfig(ctx context.Context, ap api.AutopilotConfig) error
 	}
 
 	// BackupStore is the interface of a store that can be backed up.
@@ -208,7 +208,7 @@ type (
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
-		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, check api.HostChecks) error
 		UsableHosts(ctx context.Context) ([]sql.HostInfo, error)
 	}
 
@@ -221,12 +221,10 @@ type (
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-		RemoveContractSet(ctx context.Context, name string) error
 		PutContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
+		UpdateContractUsability(ctx context.Context, id types.FileContractID, usability string) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
@@ -250,10 +248,10 @@ type (
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
 		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
-		UpdateObject(ctx context.Context, bucketName, key, contractSet, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
+		UpdateObject(ctx context.Context, bucketName, key, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
 
 		AbortMultipartUpload(ctx context.Context, bucketName, key string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucketName, key, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		AddMultipartPart(ctx context.Context, bucketName, key, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
 		CompleteMultipartUpload(ctx context.Context, bucketName, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
 		CreateMultipartUpload(ctx context.Context, bucketName, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
@@ -261,33 +259,29 @@ type (
 		MultipartUploadParts(ctx context.Context, bucketName, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
-		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
-		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, bufferSize int64, err error)
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, bufferSize int64, err error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 	}
 
 	// A MetricsStore stores metrics.
 	MetricsStore interface {
-		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
-
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
 		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
-		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
-		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
-		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
+
+		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
 	}
 
 	// A SettingStore stores settings.
@@ -363,6 +357,12 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 		rhp4Client: rhp4.New(dialer),
 	}
 
+	// initialize autopilot config
+	err = store.InitAutopilotConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// create contract locker
 	b.contractLocker = ibus.NewContractLocker()
 
@@ -393,11 +393,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /autopilots":    b.autopilotsListHandlerGET,
-		"GET    /autopilot/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
-
-		"PUT    /autopilot/:id/host/:hostkey/check": b.autopilotHostCheckHandlerPUT,
+		"GET    /autopilot": b.autopilotHandlerGET,
+		"PUT    /autopilot": b.autopilotHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -417,9 +414,6 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contracts/form":         b.contractsFormHandler,
 		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
 		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
-		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"POST   /contracts/set/:set":     b.contractsSetHandlerPUT,
-		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
 		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
@@ -433,6 +427,7 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
+		"PUT    /contract/:id/usability": b.contractUsabilityHandlerPUT,
 
 		"GET    /hosts":                          b.hostsHandlerGET,
 		"POST   /hosts":                          b.hostsHandlerPOST,
@@ -442,6 +437,7 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
 		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"PUT    /host/:hostkey/check":            b.hostsCheckHandlerPUT,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
 		"POST   /host/:hostkey/scan":             b.hostsScanHandlerPOST,
 

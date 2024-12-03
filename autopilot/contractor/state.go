@@ -17,7 +17,7 @@ type (
 	MaintenanceState struct {
 		GS api.GougingSettings
 		RS api.RedundancySettings
-		AP api.Autopilot
+		AP api.AutopilotConfig
 
 		Address                types.Address
 		Fee                    types.Currency
@@ -37,20 +37,12 @@ func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
 	}
 }
 
-func (ctx *mCtx) ApID() string {
-	return ctx.state.AP.ID
-}
-
 func (ctx *mCtx) AutopilotConfig() api.AutopilotConfig {
-	return ctx.state.AP.Config
+	return ctx.state.AP
 }
 
 func (ctx *mCtx) ContractsConfig() api.ContractsConfig {
 	return ctx.state.ContractsConfig()
-}
-
-func (ctx *mCtx) ContractSet() string {
-	return ctx.state.AP.Config.Contracts.Set
 }
 
 func (ctx *mCtx) Deadline() (deadline time.Time, ok bool) {
@@ -61,8 +53,8 @@ func (ctx *mCtx) Done() <-chan struct{} {
 	return ctx.ctx.Done()
 }
 
-func (ctx *mCtx) EndHeight() uint64 {
-	return ctx.state.AP.EndHeight()
+func (ctx *mCtx) EndHeight(bh uint64) uint64 {
+	return bh + ctx.state.AP.Contracts.Period + ctx.state.AP.Contracts.RenewWindow
 }
 
 func (ctx *mCtx) Err() error {
@@ -81,19 +73,15 @@ func (ctx *mCtx) HostScore(h api.Host) (sb api.HostScoreBreakdown, err error) {
 			err = errors.New("panic while scoring host")
 		}
 	}()
-	return hostScore(ctx.state.AP.Config, ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
+	return hostScore(ctx.AutopilotConfig(), ctx.state.GS, h, ctx.state.RS.Redundancy()), nil
 }
 
 func (ctx *mCtx) Period() uint64 {
-	return ctx.state.Period()
+	return ctx.state.AP.Contracts.Period
 }
 
 func (ctx *mCtx) RenewWindow() uint64 {
-	return ctx.state.AP.Config.Contracts.RenewWindow
-}
-
-func (ctx *mCtx) ShouldFilterRedundantIPs() bool {
-	return !ctx.state.AP.Config.Hosts.AllowRedundantIPs
+	return ctx.state.AP.Contracts.RenewWindow
 }
 
 func (ctx *mCtx) Value(key interface{}) interface{} {
@@ -101,21 +89,9 @@ func (ctx *mCtx) Value(key interface{}) interface{} {
 }
 
 func (ctx *mCtx) WantedContracts() uint64 {
-	return ctx.state.AP.Config.Contracts.Amount
-}
-
-func (ctx *mCtx) Set() string {
-	return ctx.state.ContractsConfig().Set
-}
-
-func (ctx *mCtx) SortContractsForMaintenance(contracts []contract) {
-	sortContractsForMaintenance(ctx.state.ContractsConfig(), contracts)
+	return ctx.state.AP.Contracts.Amount
 }
 
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
-	return state.AP.Config.Contracts
-}
-
-func (state *MaintenanceState) Period() uint64 {
-	return state.AP.Config.Contracts.Period
+	return state.AP.Contracts
 }

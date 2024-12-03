@@ -16,12 +16,11 @@ import (
 )
 
 // AddPartialSlab adds a partial slab to the bus.
-func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
+func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error) {
 	c.c.Custom("POST", "/slabs/partial", nil, &api.AddPartialSlabResponse{})
 	values := url.Values{}
 	values.Set("minshards", fmt.Sprint(minShards))
 	values.Set("totalshards", fmt.Sprint(totalShards))
-	values.Set("contractset", contractSet)
 
 	u, err := url.Parse(fmt.Sprintf("%v/slabs/partial", c.c.BaseURL))
 	if err != nil {
@@ -80,12 +79,11 @@ func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Upload
 }
 
 // PackedSlabsForUpload returns packed slabs that are ready to upload.
-func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) (slabs []api.PackedSlab, err error) {
+func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) (slabs []api.PackedSlab, err error) {
 	err = c.c.WithContext(ctx).POST("/slabbuffer/fetch", api.PackedSlabsRequestGET{
 		LockingDuration: api.DurationMS(lockingDuration),
 		MinShards:       minShards,
 		TotalShards:     totalShards,
-		ContractSet:     set,
 		Limit:           limit,
 	}, &slabs)
 	return
@@ -111,9 +109,9 @@ func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
 // SlabsForMigration returns up to 'limit' slabs which require migration. A slab
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.
-func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, set string, limit int) (slabs []api.UnhealthySlab, err error) {
+func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) (slabs []api.UnhealthySlab, err error) {
 	var usr api.UnhealthySlabsResponse
-	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{ContractSet: set, HealthCutoff: healthCutoff, Limit: limit}, &usr)
+	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{HealthCutoff: healthCutoff, Limit: limit}, &usr)
 	if err != nil {
 		return
 	}

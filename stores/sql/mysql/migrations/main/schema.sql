@@ -1,14 +1,3 @@
--- dbAutopilot
-CREATE TABLE `autopilots` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `identifier` varchar(191) NOT NULL,
-  `config` longtext,
-  `current_period` bigint unsigned DEFAULT '0',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `identifier` (`identifier`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbBucket
 CREATE TABLE `buckets` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -117,21 +106,10 @@ CREATE TABLE `contracts` (
   CONSTRAINT `fk_contracts_host` FOREIGN KEY (`host_id`) REFERENCES `hosts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbContractSet
-CREATE TABLE `contract_sets` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `created_at` datetime(3) DEFAULT NULL,
-  `name` varchar(191) DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `name` (`name`),
-  KEY `idx_contract_sets_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 -- dbSlab
 CREATE TABLE `slabs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `db_contract_set_id` bigint unsigned DEFAULT NULL,
   `db_buffered_slab_id` bigint unsigned DEFAULT NULL,
   `health` double NOT NULL DEFAULT '1',
   `health_valid_until` bigint NOT NULL DEFAULT '0',
@@ -142,12 +120,10 @@ CREATE TABLE `slabs` (
   UNIQUE KEY `key` (`key`),
   KEY `idx_slabs_min_shards` (`min_shards`),
   KEY `idx_slabs_total_shards` (`total_shards`),
-  KEY `idx_slabs_db_contract_set_id` (`db_contract_set_id`),
   KEY `idx_slabs_db_buffered_slab_id` (`db_buffered_slab_id`),
   KEY `idx_slabs_health` (`health`),
   KEY `idx_slabs_health_valid_until` (`health_valid_until`),
-  CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs` (`id`),
-  CONSTRAINT `fk_slabs_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`)
+  CONSTRAINT `fk_buffered_slabs_db_slab` FOREIGN KEY (`db_buffered_slab_id`) REFERENCES `buffered_slabs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbSector
@@ -188,16 +164,6 @@ CREATE TABLE `host_sectors` (
   KEY `idx_host_sectors_db_host_id` (`db_host_id`),
   CONSTRAINT `fk_host_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_host_sectors_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- dbContractSet <-> dbContract
-CREATE TABLE `contract_set_contracts` (
-  `db_contract_set_id` bigint unsigned NOT NULL,
-  `db_contract_id` bigint unsigned NOT NULL,
-  PRIMARY KEY (`db_contract_set_id`,`db_contract_id`),
-  KEY `idx_contract_set_contracts_db_contract_id` (`db_contract_id`),
-  CONSTRAINT `fk_contract_set_contracts_db_contract` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_contract_set_contracts_db_contract_set` FOREIGN KEY (`db_contract_set_id`) REFERENCES `contract_sets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbAccount
@@ -384,7 +350,6 @@ CREATE TABLE `host_checks` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
 
-  `db_autopilot_id` bigint unsigned NOT NULL,
   `db_host_id` bigint unsigned NOT NULL,
 
   `usability_blocked` boolean NOT NULL DEFAULT false,
@@ -411,7 +376,7 @@ CREATE TABLE `host_checks` (
   `gouging_upload_err` text,
 
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_host_checks_id` (`db_autopilot_id`, `db_host_id`),
+  UNIQUE KEY `idx_host_checks_id` (`db_host_id`),
   INDEX `idx_host_checks_usability_blocked` (`usability_blocked`),
   INDEX `idx_host_checks_usability_offline` (`usability_offline`),
   INDEX `idx_host_checks_usability_low_score` (`usability_low_score`),
@@ -428,7 +393,6 @@ CREATE TABLE `host_checks` (
   INDEX `idx_host_checks_score_version` (`score_version`),
   INDEX `idx_host_checks_score_prices` (`score_prices`),
 
-  CONSTRAINT `fk_host_checks_autopilot` FOREIGN KEY (`db_autopilot_id`) REFERENCES `autopilots` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_host_checks_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -504,4 +468,26 @@ CREATE TABLE `contract_elements` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_contract_elements_db_contrat_id` (`db_contract_id`),
   CONSTRAINT `fk_contract_elements_contracts` FOREIGN KEY (`db_contract_id`) REFERENCES `contracts` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- autopilot config
+CREATE TABLE `autopilot_config` (
+  `id` bigint unsigned NOT NULL DEFAULT 1,
+  `created_at` datetime(3) DEFAULT NULL,
+  `enabled` boolean NOT NULL DEFAULT false,
+
+  `contracts_amount` bigint unsigned DEFAULT NULL,
+  `contracts_period` bigint unsigned DEFAULT NULL,
+  `contracts_renew_window` bigint unsigned DEFAULT NULL,
+  `contracts_download` bigint unsigned DEFAULT NULL,
+  `contracts_upload` bigint unsigned DEFAULT NULL,
+  `contracts_storage` bigint unsigned DEFAULT NULL,
+  `contracts_prune` boolean NOT NULL DEFAULT false,
+
+  `hosts_max_downtime_hours` bigint unsigned DEFAULT NULL,
+  `hosts_min_protocol_version` varchar(191) DEFAULT NULL,
+  `hosts_max_consecutive_scan_failures` bigint unsigned DEFAULT NULL,
+
+  PRIMARY KEY (`id`),
+  CHECK (`id` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

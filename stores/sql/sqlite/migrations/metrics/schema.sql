@@ -22,20 +22,6 @@ CREATE INDEX `idx_contract_prunes_host` ON `contract_prunes`(`host`);
 CREATE INDEX `idx_contract_prunes_fc_id` ON `contract_prunes`(`fcid`);
 CREATE INDEX `idx_contract_prunes_timestamp` ON `contract_prunes`(`timestamp`);
 
--- dbContractSetMetric
-CREATE TABLE `contract_sets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`name` text NOT NULL,`contracts` integer NOT NULL);
-CREATE INDEX `idx_contract_sets_timestamp` ON `contract_sets`(`timestamp`);
-CREATE INDEX `idx_contract_sets_contracts` ON `contract_sets`(`contracts`);
-CREATE INDEX `idx_contract_sets_name` ON `contract_sets`(`name`);
-
--- dbContractSetChurnMetric
-CREATE TABLE `contract_sets_churn` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`name` text NOT NULL,`fc_id` blob NOT NULL,`direction` text NOT NULL,`reason` text NOT NULL);
-CREATE INDEX `idx_contract_sets_churn_reason` ON `contract_sets_churn`(`reason`);
-CREATE INDEX `idx_contract_sets_churn_direction` ON `contract_sets_churn`(`direction`);
-CREATE INDEX `idx_contract_sets_churn_fc_id` ON `contract_sets_churn`(`fc_id`);
-CREATE INDEX `idx_contract_sets_churn_name` ON `contract_sets_churn`(`name`);
-CREATE INDEX `idx_contract_sets_churn_timestamp` ON `contract_sets_churn`(`timestamp`);
-
 -- dbWalletMetric
 CREATE TABLE `wallets` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`timestamp` BIGINT NOT NULL,`confirmed_lo` BIGINT NOT NULL,`confirmed_hi` BIGINT NOT NULL,`spendable_lo` BIGINT NOT NULL,`spendable_hi` BIGINT NOT NULL,`unconfirmed_lo` BIGINT NOT NULL,`unconfirmed_hi` BIGINT NOT NULL,`immature_lo` BIGINT NOT NULL,`immature_hi` BIGINT NOT NULL);
 CREATE INDEX `idx_unconfirmed` ON `wallets`(`unconfirmed_lo`,`unconfirmed_hi`);

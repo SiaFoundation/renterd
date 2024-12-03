@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -76,7 +77,6 @@ type TestCluster struct {
 	genesisBlock types.Block
 	bs           bus.Store
 	cm           *chain.Manager
-	apID         string
 	dbName       string
 	dir          string
 	logger       *zap.Logger
@@ -181,23 +181,6 @@ func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 	return newCluster
 }
 
-// AutopilotConfig returns the autopilot's config and current period.
-func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, uint64) {
-	c.tt.Helper()
-	ap, err := c.Bus.Autopilot(ctx, c.apID)
-	c.tt.OK(err)
-	return ap.Config, ap.CurrentPeriod
-}
-
-// UpdateAutopilotConfig updates the cluster's autopilot with given config.
-func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) {
-	c.tt.Helper()
-	c.tt.OK(c.Bus.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     c.apID,
-		Config: cfg,
-	}))
-}
-
 type testClusterOptions struct {
 	dbName               string
 	dir                  string
@@ -209,11 +192,11 @@ type testClusterOptions struct {
 	skipRunningAutopilot bool
 	walletKey            *types.PrivateKey
 
-	autopilotCfg      *config.Autopilot
-	autopilotSettings *api.AutopilotConfig
-	cm                *chain.Manager
-	busCfg            *config.Bus
-	workerCfg         *config.Worker
+	autopilotCfg    *config.Autopilot
+	autopilotConfig *api.AutopilotConfig
+	cm              *chain.Manager
+	busCfg          *config.Bus
+	workerCfg       *config.Worker
 }
 
 // newTestLogger creates a console logger used for testing.
@@ -236,6 +219,8 @@ func newTestLogger(enable bool) *zap.Logger {
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
+	t.Helper()
+
 	// Skip any test that requires a cluster when running short tests.
 	tt := test.NewTT(t)
 
@@ -279,9 +264,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.uploadPacking {
 		enableUploadPacking = opts.uploadPacking
 	}
-	apSettings := test.AutopilotConfig
-	if opts.autopilotSettings != nil {
-		apSettings = *opts.autopilotSettings
+	apConfig := test.AutopilotConfig
+	if opts.autopilotConfig != nil {
+		apConfig = *opts.autopilotConfig
 	}
 	if opts.dbName != "" {
 		dbCfg.Database.MySQL.Database = opts.dbName
@@ -406,7 +391,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
 	cluster := &TestCluster{
-		apID:         apCfg.ID,
 		dir:          dir,
 		dbName:       dbCfg.Database.MySQL.Database,
 		logger:       logger,
@@ -457,16 +441,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}()
 	}
 
-	// Set the test contract set to make sure we can add objects at the
-	// beginning of a test right away.
-	tt.OK(busClient.UpdateContractSet(ctx, test.ContractSet, nil, nil))
-
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
-		tt.OK(busClient.UpdateAutopilot(ctx, api.Autopilot{
-			ID:     apCfg.ID,
-			Config: apSettings,
-		}))
+		tt.OKAll(
+			busClient.UpdateAutopilotConfig(ctx,
+				client.WithContractsConfig(apConfig.Contracts),
+				client.WithHostsConfig(apConfig.Hosts),
+				client.WithAutopilotEnabled(true),
+			),
+		)
 	}
 
 	// Build upload settings.
@@ -518,7 +501,6 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForPeers()
 		cluster.WaitForContracts()
-		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
 	}
 
@@ -659,21 +641,37 @@ func announceHosts(hosts []*Host) error {
 	return nil
 }
 
-// MineToRenewWindow is a helper which mines enough blocks for the autopilot to
-// reach its renew window.
+// MineToRenewWindow is a helper which mines to the height where all existing
+// contracts entered their respective renew window.
 func (c *TestCluster) MineToRenewWindow() {
 	c.tt.Helper()
+
+	// fetch autopilot config
+	cfg, err := c.Bus.AutopilotConfig(context.Background())
+	c.tt.OK(err)
+
+	// fetch consensus state
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
+	// fetch all contracts
+	contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 	c.tt.OK(err)
 
-	renewWindowStart := ap.CurrentPeriod + ap.Config.Contracts.Period
-	if cs.BlockHeight >= renewWindowStart {
-		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
+	// find max window start
+	var maxEndHeight uint64
+	for _, contract := range contracts {
+		if contract.EndHeight() > maxEndHeight {
+			maxEndHeight = contract.EndHeight()
+		}
 	}
-	c.MineBlocks(renewWindowStart - cs.BlockHeight)
+	if maxEndHeight < cfg.Contracts.RenewWindow {
+		c.tt.Fatal("contract was already in renew window")
+	} else if targetBH := maxEndHeight - cfg.Contracts.RenewWindow; cs.BlockHeight >= targetBH {
+		return // already in renew window
+	} else {
+		c.MineBlocks(targetBH - cs.BlockHeight)
+	}
 }
 
 // MineBlocks mines n blocks
@@ -739,53 +737,9 @@ func (c *TestCluster) WaitForContracts() []api.ContractMetadata {
 	c.waitForHostContracts(hostsMap)
 
 	// fetch all contracts
-	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{
-		FilterMode: api.ContractFilterModeActive,
-	})
+	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	c.tt.OK(err)
 	return resp
-}
-
-func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
-	c.tt.Helper()
-
-	// limit n to number of hosts we have
-	if n > len(c.hosts) {
-		n = len(c.hosts)
-	}
-
-	c.tt.Retry(3000, time.Millisecond, func() error {
-		sets, err := c.Bus.ContractSets(context.Background())
-		if err != nil {
-			return err
-		}
-
-		// check if set exists
-		if len(sets) == 0 {
-			return errors.New("no contract sets found")
-		} else {
-			var found bool
-			for _, s := range sets {
-				if s == set {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("set '%v' not found, sets: %v", set, sets)
-			}
-		}
-
-		// check if it contains the desired number of contracts
-		csc, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: set})
-		if err != nil {
-			return err
-		}
-		if len(csc) != n {
-			return fmt.Errorf("contract set does not contain the desired number of contracts, %v!=%v", len(csc), n)
-		}
-		return nil
-	})
 }
 
 func (c *TestCluster) WaitForPeers() {
@@ -952,29 +906,12 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	})
 }
 
-func (c *TestCluster) WaitForContractSet(set string, n int) {
-	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
-		contracts, err := c.Bus.Contracts(ctx, api.ContractsOpts{ContractSet: set})
-		if err != nil {
-			return err
-		}
-		if len(contracts) != n {
-			return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), n)
-		}
-		return nil
-	})
-}
-
 // waitForHostContracts will fetch the contracts from the bus and wait until we
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
 	c.tt.Retry(3000, time.Millisecond, func() error {
-		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
+		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		if err != nil {
 			return err
 		}
@@ -1070,8 +1007,8 @@ func testWorkerCfg() config.Worker {
 
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
+		AllowRedundantHostIPs:          true,
 		Heartbeat:                      time.Second,
-		ID:                             api.DefaultAutopilotID,
 		MigrationHealthCutoff:          0.99,
 		MigratorParallelSlabsPerWorker: 1,
 		RevisionSubmissionBuffer:       0,
@@ -1082,6 +1019,8 @@ func testApCfg() config.Autopilot {
 }
 
 func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	partialSlabDir := filepath.Join(dir, "partial_slabs")
+
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -1105,7 +1044,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -1125,7 +1064,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1144,7 +1083,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		Alerts:                        alerts.WithOrigin(am, "bus"),
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
 		Logger:                        logger,

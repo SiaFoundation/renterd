@@ -28,17 +28,10 @@ func (ap *Autopilot) DismissAlert(ctx context.Context, ids ...types.Hash256) {
 	}
 }
 
-func newAccountLowBalanceAlert(address types.Address, balance, initialFunding types.Currency, bh, renewWindow, endHeight uint64) alerts.Alert {
-	severity := alerts.SeverityInfo
-	if bh+renewWindow/2 >= endHeight {
-		severity = alerts.SeverityCritical
-	} else if bh+renewWindow >= endHeight {
-		severity = alerts.SeverityWarning
-	}
-
+func newAccountLowBalanceAlert(address types.Address, balance, initialFunding types.Currency) alerts.Alert {
 	return alerts.Alert{
 		ID:       alertLowBalanceID,
-		Severity: severity,
+		Severity: alerts.SeverityWarning,
 		Message:  "Wallet is low on funds",
 		Data: map[string]any{
 			"address":        address,
