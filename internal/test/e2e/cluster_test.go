@@ -295,7 +295,9 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		} else if hi.Settings.Release == "" {
+		} else if !hi.IsV2() && hi.Settings.Release == "" {
+			t.Fatal("release should be set")
+		} else if hi.IsV2() && hi.V2Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
 	}
