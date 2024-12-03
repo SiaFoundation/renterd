@@ -56,7 +56,7 @@ func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err 
 	return
 }
 
-// Objects returns the object at given key.
+// Object returns the object at given key.
 func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (res api.Object, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
