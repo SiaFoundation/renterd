@@ -2,4 +2,4 @@
 default: minor
 ---
 
-# Remove hostBlockHeightLeeway from the gouging settings.
+# Remove migrationSurchargeMultiplier from the gouging settings.
