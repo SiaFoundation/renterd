@@ -130,7 +130,7 @@ func (d *downloader) estimate() float64 {
 func (d *downloader) execute(req *sectorDownloadReq) (err error) {
 	// download the sector
 	buf := bytes.NewBuffer(make([]byte, 0, req.length))
-	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length, req.overpay)
+	err = d.host.DownloadSector(req.ctx, buf, req.root, req.offset, req.length)
 	if err != nil {
 		req.fail(err)
 		return err

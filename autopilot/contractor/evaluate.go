@@ -87,7 +87,6 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 			MinPriceTableValidity:         gs.MinPriceTableValidity,
 			MinAccountExpiry:              gs.MinAccountExpiry,
 			MinMaxEphemeralAccountBalance: gs.MinMaxEphemeralAccountBalance,
-			MigrationSurchargeMultiplier:  gs.MigrationSurchargeMultiplier,
 		}
 	}
 

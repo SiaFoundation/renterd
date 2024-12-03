@@ -84,13 +84,12 @@ SHARDS:
 	defer mem.Release()
 
 	// download the slab
-	shards, surchargeApplied, err := w.downloadManager.DownloadSlab(ctx, s, dlHosts)
+	shards, err := w.downloadManager.DownloadSlab(ctx, s, dlHosts)
 	if err != nil {
 		w.logger.Debugw("slab migration failed",
 			zap.Error(err),
 			zap.Stringer("slab", s.EncryptionKey),
 			zap.Int("numShardsMigrated", len(shards)),
-			zap.Bool("surchargeApplied", surchargeApplied),
 		)
 		return fmt.Errorf("failed to download slab for migration: %w", err)
 	}
@@ -118,7 +117,6 @@ SHARDS:
 			zap.Error(err),
 			zap.Stringer("slab", s.EncryptionKey),
 			zap.Int("numShardsMigrated", len(shards)),
-			zap.Bool("surchargeApplied", surchargeApplied),
 		)
 		return fmt.Errorf("failed to upload slab for migration: %w", err)
 	}
@@ -127,7 +125,6 @@ SHARDS:
 	w.logger.Debugw("slab migration succeeded",
 		zap.Stringer("slab", s.EncryptionKey),
 		zap.Int("numShardsMigrated", len(shards)),
-		zap.Bool("surchargeApplied", surchargeApplied),
 	)
 
 	return nil
