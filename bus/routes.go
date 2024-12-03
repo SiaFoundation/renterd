@@ -179,12 +179,7 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 	}
 
 	if block.V2 == nil {
-		b.s.BroadcastHeader(gateway.BlockHeader{
-			ParentID:   block.ParentID,
-			Nonce:      block.Nonce,
-			Timestamp:  block.Timestamp,
-			MerkleRoot: block.MerkleRoot(),
-		})
+		b.s.BroadcastHeader(block.Header())
 	} else {
 		b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))
 	}

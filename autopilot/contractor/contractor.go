@@ -783,7 +783,7 @@ func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, p
 // renterFundsToExpectedStorageV2 returns how much storage a renter is expected to
 // be able to afford given the provided 'renterFunds'.
 func renterFundsToExpectedStorageV2(renterFunds types.Currency, duration uint64, hp rhpv4.HostPrices) uint64 {
-	sectorUploadCost := hp.RPCWriteSectorCost(rhpv4.SectorSize, 144*3).RenterCost()
+	sectorUploadCost := hp.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost()
 	sectorStorageCost := hp.RPCAppendSectorsCost(1, duration).RenterCost()
 	costPerSector := sectorUploadCost.Add(sectorStorageCost)
 	// handle free storage

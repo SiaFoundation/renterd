@@ -587,8 +587,6 @@ func v2ContractUpdate(fce types.V2FileContractElement, rev *types.V2FileContract
 	if res != nil {
 		resolved = true
 		switch res.(type) {
-		case *types.V2FileContractFinalization:
-			valid = true
 		case *types.V2FileContractRenewal:
 			valid = true
 		case *types.V2StorageProof:
