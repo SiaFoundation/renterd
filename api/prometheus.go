@@ -491,10 +491,6 @@ func formatSettingsMetricName(gp GougingParams, name string) (metrics []promethe
 		Value: gp.GougingSettings.MinMaxEphemeralAccountBalance.Siacoins(),
 	})
 	metrics = append(metrics, prometheus.Metric{
-		Name:  fmt.Sprintf("renterd_%s_settings_migrationsurchargemultiplier", name),
-		Value: float64(gp.GougingSettings.MigrationSurchargeMultiplier),
-	})
-	metrics = append(metrics, prometheus.Metric{
 		Name:  fmt.Sprintf("renterd_%s_redundancy_settings_minshards", name),
 		Value: float64(gp.RedundancySettings.MinShards),
 	})

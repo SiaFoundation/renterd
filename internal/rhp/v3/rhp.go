@@ -105,7 +105,6 @@ func IsClosedStream(err error) bool {
 }
 func IsInsufficientFunds(err error) bool  { return utils.IsErr(err, errInsufficientFunds) }
 func IsPriceTableExpired(err error) bool  { return utils.IsErr(err, errPriceTableExpired) }
-func IsPriceTableGouging(err error) bool  { return utils.IsErr(err, gouging.ErrPriceTableGouging) }
 func IsPriceTableNotFound(err error) bool { return utils.IsErr(err, errPriceTableNotFound) }
 func IsSectorNotFound(err error) bool {
 	return utils.IsErr(err, ErrSectorNotFound) || utils.IsErr(err, errSectorNotFoundOld)

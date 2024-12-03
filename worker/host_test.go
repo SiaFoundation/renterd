@@ -92,7 +92,7 @@ func (h *testHost) PublicKey() types.PublicKey {
 	return h.Host.PublicKey()
 }
 
-func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error {
+func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
 	sector, exist := h.Sector(root)
 	if !exist {
 		return rhp3.ErrSectorNotFound
@@ -152,7 +152,7 @@ func TestHost(t *testing.T) {
 
 	// download entire sector
 	var buf bytes.Buffer
-	err = h.DownloadSector(context.Background(), &buf, root, 0, rhpv2.SectorSize, false)
+	err = h.DownloadSector(context.Background(), &buf, root, 0, rhpv2.SectorSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), sector[:]) {
@@ -161,7 +161,7 @@ func TestHost(t *testing.T) {
 
 	// download part of the sector
 	buf.Reset()
-	err = h.DownloadSector(context.Background(), &buf, root, 64, 64, false)
+	err = h.DownloadSector(context.Background(), &buf, root, 64, 64)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), sector[64:128]) {
@@ -169,7 +169,7 @@ func TestHost(t *testing.T) {
 	}
 
 	// try downloading out of bounds
-	err = h.DownloadSector(context.Background(), &buf, root, rhpv2.SectorSize, 64, false)
+	err = h.DownloadSector(context.Background(), &buf, root, rhpv2.SectorSize, 64)
 	if !errors.Is(err, mocks.ErrSectorOutOfBounds) {
 		t.Fatal("expected out of bounds error", err)
 	}

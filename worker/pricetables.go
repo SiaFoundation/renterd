@@ -114,7 +114,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// get gouging checker to figure out how many blocks we have left before the
 	// current price table is considered to gouge on the block height
-	gc, err := GougingCheckerFromContext(ctx, false)
+	gc, err := GougingCheckerFromContext(ctx)
 	if err != nil {
 		return api.HostPriceTable{}, types.ZeroCurrency, err
 	}

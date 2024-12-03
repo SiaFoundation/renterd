@@ -12,7 +12,7 @@ import (
 
 type (
 	Downloader interface {
-		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32, overpay bool) error
+		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
 		PublicKey() types.PublicKey
 	}
 
