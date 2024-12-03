@@ -1004,7 +1004,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, bus Bus, cc contra
 	return filteredContracts, churnReasons, nil
 }
 
-// performContracdtFormations forms up to 'wanted' new contracts with hosts. The
+// performContractFormations forms up to 'wanted' new contracts with hosts. The
 // 'ipFilter' and 'remainingFunds' are updated with every new contract.
 func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, ipFilter *hostSet, logger *zap.SugaredLogger, wanted int) ([]api.ContractMetadata, error) {
 	var formedContracts []api.ContractMetadata
