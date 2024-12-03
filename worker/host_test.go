@@ -42,14 +42,14 @@ func newTestHostManager(t test.TestingCommon) *testHostManager {
 	return &testHostManager{tt: test.NewTT(t), hosts: make(map[types.PublicKey]*testHost)}
 }
 
-func (hm *testHostManager) Downloader(hk types.PublicKey, siamuxAddr string) host.Downloader {
+func (hm *testHostManager) Downloader(hi api.HostInfo) host.Downloader {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
-	if _, ok := hm.hosts[hk]; !ok {
+	if _, ok := hm.hosts[hi.PublicKey]; !ok {
 		hm.tt.Fatal("host not found")
 	}
-	return hm.hosts[hk]
+	return hm.hosts[hi.PublicKey]
 }
 
 func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {

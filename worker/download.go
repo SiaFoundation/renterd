@@ -487,9 +487,9 @@ func (mgr *downloadManager) refreshDownloaders(hosts []api.HostInfo) {
 	defer mgr.mu.Unlock()
 
 	// build map
-	want := make(map[types.PublicKey]string)
+	want := make(map[types.PublicKey]api.HostInfo)
 	for _, h := range hosts {
-		want[h.PublicKey] = h.SiamuxAddr
+		want[h.PublicKey] = h
 	}
 
 	// prune downloaders
@@ -505,9 +505,9 @@ func (mgr *downloadManager) refreshDownloaders(hosts []api.HostInfo) {
 	}
 
 	// update downloaders
-	for hk, siamuxAddr := range want {
-		mgr.downloaders[hk] = newDownloader(mgr.shutdownCtx, mgr.hm.Downloader(hk, siamuxAddr))
-		go mgr.downloaders[hk].processQueue()
+	for pk, hi := range want {
+		mgr.downloaders[pk] = newDownloader(mgr.shutdownCtx, mgr.hm.Downloader(hi))
+		go mgr.downloaders[pk].processQueue()
 	}
 }
 

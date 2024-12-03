@@ -8,12 +8,14 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/host"
 	"go.sia.tech/renterd/internal/prices"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/worker"
 	"go.uber.org/zap"
 )
@@ -33,12 +35,14 @@ type (
 	}
 
 	hostDownloadClient struct {
-		hk         types.PublicKey
-		siamuxAddr string
+		hi  api.HostInfo
+		acc *worker.Account
 
-		acc  *worker.Account
-		pts  *prices.PriceTables
+		rhp3Prices *prices.PriceTables
+		rhp4Prices *prices.PricesCache
+
 		rhp3 *rhp3.Client
+		rhp4 *rhp4.Client
 	}
 )
 
@@ -61,42 +65,17 @@ func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 	}
 }
 
-func (w *Worker) Downloader(hk types.PublicKey, siamuxAddr string) host.Downloader {
+func (w *Worker) Downloader(hi api.HostInfo) host.Downloader {
 	return &hostDownloadClient{
-		hk:         hk,
-		siamuxAddr: siamuxAddr,
+		hi: hi,
 
-		acc:  w.accounts.ForHost(hk),
-		pts:  w.priceTables,
-		rhp3: w.rhp3Client,
+		acc:        w.accounts.ForHost(hi.PublicKey),
+		rhp3Prices: w.priceTables,
+		rhp3:       w.rhp3Client,
+
+		rhp4Prices: w.pricesCache,
+		rhp4:       w.rhp4Client,
 	}
-}
-
-func (h *hostClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
-	var amount types.Currency
-	return h.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, uptc, err := h.priceTables.Fetch(ctx, h, nil)
-		if err != nil {
-			return types.ZeroCurrency, err
-		}
-		hpt := pt.HostPriceTable
-		amount = uptc
-
-		// check for download gouging specifically
-		gc, err := GougingCheckerFromContext(ctx)
-		if err != nil {
-			return amount, err
-		}
-		if breakdown := gc.CheckV1(nil, &hpt); breakdown.DownloadErr != "" {
-			return amount, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown.DownloadErr)
-		}
-
-		cost, err := h.client.ReadSector(ctx, offset, length, root, w, h.hk, h.siamuxAddr, h.acc.ID(), h.acc.Key(), hpt)
-		if err != nil {
-			return amount, err
-		}
-		return amount.Add(cost), nil
-	})
 }
 
 func (h *hostClient) PublicKey() types.PublicKey { return h.hk }
@@ -244,12 +223,25 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 
 func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) (err error) {
 	return d.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, ptc, err := d.pts.Fetch(ctx, d, nil)
+		if d.hi.IsV2() {
+			prices, err := d.rhp4Prices.Fetch(ctx, d)
+			if err != nil {
+				return types.ZeroCurrency, err
+			}
+
+			res, err := d.rhp4.ReadSector(ctx, d.hi.PublicKey, d.hi.V2SiamuxAddr(), prices, d.acc.Token(), w, root, offset, length)
+			if err != nil {
+				return types.ZeroCurrency, err
+			}
+			return res.Usage.RenterCost(), nil
+		}
+
+		pt, ptc, err := d.rhp3Prices.Fetch(ctx, d, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
 
-		cost, err := d.rhp3.ReadSector(ctx, offset, length, root, w, d.hk, d.siamuxAddr, d.acc.ID(), d.acc.Key(), pt.HostPriceTable)
+		cost, err := d.rhp3.ReadSector(ctx, offset, length, root, w, d.hi.PublicKey, d.hi.SiamuxAddr, d.acc.ID(), d.acc.Key(), pt.HostPriceTable)
 		if err != nil {
 			return ptc, err
 		}
@@ -257,12 +249,16 @@ func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, ro
 	})
 }
 
+func (h *hostDownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	return rhpv4.HostPrices{}, nil
+}
+
 func (h *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
-	hpt, err = h.rhp3.PriceTable(ctx, h.hk, h.siamuxAddr, rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
+	hpt, err = h.rhp3.PriceTable(ctx, h.hi.PublicKey, h.hi.SiamuxAddr, rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
 	if err == nil {
 		cost = hpt.UpdatePriceTableCost
 	}
 	return
 }
 
-func (d *hostDownloadClient) PublicKey() types.PublicKey { return d.hk }
+func (d *hostDownloadClient) PublicKey() types.PublicKey { return d.hi.PublicKey }

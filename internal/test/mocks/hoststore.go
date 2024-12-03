@@ -87,8 +87,8 @@ func NewHostManager() *HostManager {
 	}
 }
 
-func (hm *HostManager) Downloader(hk types.PublicKey, siamuxAddr string) host.Downloader {
-	return NewHost(hk)
+func (hm *HostManager) Downloader(hi api.HostInfo) host.Downloader {
+	return NewHost(hi.PublicKey)
 }
 
 func (hm *HostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {

@@ -29,7 +29,7 @@ type (
 	}
 
 	HostManager interface {
-		Downloader(hk types.PublicKey, siamuxAddr string) Downloader
+		Downloader(hi api.HostInfo) Downloader
 		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
 	}
 )
