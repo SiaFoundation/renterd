@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS `host_sectors`;
+
 CREATE TABLE `host_sectors` (
   `updated_at` datetime(3) DEFAULT NULL,
   `db_sector_id` bigint unsigned NOT NULL,
