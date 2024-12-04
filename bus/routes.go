@@ -107,7 +107,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 	} else {
 		// latest revision
-		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
+		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, host.Settings.SiamuxAddr())
 		if jc.Check("failed to fetch contract revision", err) != nil {
 			return
 		}
@@ -119,7 +119,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 
 		// price table
-		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, host.Settings.SiamuxAddr(), rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
 		if jc.Check("failed to fetch price table", err) != nil {
 			return
 		}
@@ -139,7 +139,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 
 		// fund the account
-		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
+		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, host.Settings.SiamuxAddr(), deposit, req.AccountID, pt.HostPriceTable, rk)
 		if jc.Check("failed to fund account", err) != nil {
 			return
 		}
@@ -859,7 +859,7 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 			Size:            revision.Filesize,
 		})
 	} else {
-		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, contract.SiamuxAddr)
+		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, host.Settings.SiamuxAddr())
 		if jc.Check("failed to fetch revision", err) != nil {
 			return
 		}
@@ -922,6 +922,11 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	} else if jc.Check("couldn't fetch contract", err) != nil {
 		return
 	}
+	// host
+	host, err := b.store.Host(jc.Request.Context(), c.HostKey)
+	if jc.Check("failed to fetch host for contract", err) != nil {
+		return
+	}
 
 	// build map of uploading sectors
 	pending := make(map[types.Hash256]struct{})
@@ -931,7 +936,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	rev, spending, pruned, remaining, err := b.rhp2Client.PruneContract(pruneCtx, rk, gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+	rev, spending, pruned, remaining, err := b.rhp2Client.PruneContract(pruneCtx, rk, gc, host.NetAddress, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
 		indices, err := b.store.PrunableContractRoots(ctx, fcid, roots)
 		if err != nil {
 			return nil, err
