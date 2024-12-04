@@ -25,12 +25,19 @@ var (
 )
 
 var (
-	minBalance         = types.Siacoins(1).Div64(2).Big()
-	maxBalance         = types.Siacoins(1)
-	maxNegDrift        = new(big.Int).Neg(types.Siacoins(10).Big())
-	driftResetInterval = time.Hour
+	minBalance = types.Siacoins(1).Div64(2).Big()
+	maxBalance = types.Siacoins(1)
 
 	alertAccountRefillID = alerts.RandomAlertID() // constant until restarted
+
+	// maxNegDrift and driftResetInterval determine the maximum rate at which an
+	// account can accumulate negative drift. Once per driftResetInterval, when
+	// maxNegDrift is reached, we reset the drift. This means that using the
+	// current settings, an account can drift by 4SC per hour.
+	// NOTE: Once we use RHP4, we can experiment with reducing this number
+	// significantly
+	maxNegDrift        = new(big.Int).Neg(types.Siacoins(4).Big())
+	driftResetInterval = time.Hour
 )
 
 type (
