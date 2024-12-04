@@ -81,7 +81,7 @@ func (b *MainDatabase) InitAutopilot(ctx context.Context, tx sql.Tx) error {
 
 func (b *MainDatabase) InsertDirectories(ctx context.Context, tx sql.Tx, bucket, path string) (int64, error) {
 	mtx := b.wrapTxn(tx)
-	return mtx.InsertDirectories(ctx, bucket, path)
+	return mtx.InsertDirectoriesDeprecated(ctx, bucket, path)
 }
 
 func (b *MainDatabase) SlabBuffers(ctx context.Context, tx sql.Tx) (filenames []string, err error) {
@@ -434,7 +434,7 @@ func (tx *MainDatabaseTx) InsertBufferedSlab(ctx context.Context, fileName strin
 	return ssql.InsertBufferedSlab(ctx, tx, fileName, ec, minShards, totalShards)
 }
 
-func (tx *MainDatabaseTx) InsertDirectories(ctx context.Context, bucket, path string) (int64, error) {
+func (tx *MainDatabaseTx) InsertDirectoriesDeprecated(ctx context.Context, bucket, path string) (int64, error) {
 	// sanity check input
 	if !strings.HasPrefix(path, "/") {
 		return 0, errors.New("path has to have a leading slash")
