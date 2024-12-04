@@ -155,6 +155,33 @@ func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []Siaco
 	return nil
 }
 
+func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fces []types.V2FileContractElement, _ error) {
+	rows, err := tx.Query(ctx, "SELECT c.fcid, contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.window_end < ? AND c.state != ?",
+		bh, contractStateFailed)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fcid FileContractID
+		var contract V2Contract
+		var leafIndex uint64
+		var proof MerkleProof
+		if err := rows.Scan(&fcid, &contract, &leafIndex, &proof); err != nil {
+			return nil, err
+		}
+		fces = append(fces, types.V2FileContractElement{
+			ID: types.FileContractID(fcid),
+			StateElement: types.StateElement{
+				LeafIndex:   leafIndex,
+				MerkleProof: proof.Hashes,
+			},
+			V2FileContract: types.V2FileContract(contract),
+		})
+	}
+	return fces, nil
+}
+
 func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (types.V2FileContractElement, error) {
 	var contract V2Contract
 	var leafIndex uint64
