@@ -219,10 +219,10 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 
 	// v2 contracts
 	var revisedContracts []types.V2FileContractElement
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
-		if created {
-			revisedContracts = append(revisedContracts, fce) // created
-		} else if rev != nil {
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+		if rev == nil {
+			revisedContracts = append(revisedContracts, fce)
+		} else {
 			revisedContracts = append(revisedContracts, *rev) // revised
 		}
 		cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
