@@ -126,7 +126,7 @@ type (
 
 	Syncer interface {
 		Addr() string
-		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastHeader(h types.BlockHeader)
 		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 		BroadcastTransactionSet([]types.Transaction)
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
@@ -195,6 +195,7 @@ type (
 	// A ChainStore stores information about the chain.
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
@@ -541,7 +542,7 @@ func (b *Bus) addRenewal(ctx context.Context, contract api.ContractMetadata) (ap
 	return b.store.Contract(ctx, contract.ID)
 }
 
-func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
+func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error) {
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
 	if err != nil {
@@ -559,27 +560,76 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
 
+	// fetch host
+	host, err := b.store.Host(ctx, c.HostKey)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch host; %w", err)
+	}
+	fee := b.cm.RecommendedFee().Mul64(10e3)
+
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
-	// fetch revision
-	rev, err := b.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
-	if err != nil {
-		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
-	}
-
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		// fetch revision
+		rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.V2SiamuxAddr(), fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		}
+
+		// fetch parent contract element
+		fce, err := b.store.FileContractElement(ctx, fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch file contract element; %w", err)
+		}
+
+		// create the transaction
+		txn := types.V2Transaction{
+			MinerFee: fee,
+			FileContractRevisions: []types.V2FileContractRevision{
+				{
+					Parent:   fce,
+					Revision: rev,
+				},
+			},
+		}
+
+		// fund the transaction (only the fee)
+		basis, toSign, err := b.w.FundV2Transaction(&txn, fee, true)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+		}
+		// sign the transaction
+		b.w.SignV2Inputs(&txn, toSign)
+
+		// verify the transaction and add it to the transaction pool
+		txnSet := []types.V2Transaction{txn}
+		_, err = b.cm.AddV2PoolTransactions(basis, txnSet)
+		if err != nil {
+			b.w.ReleaseInputs(nil, txnSet)
+			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
+		}
+
+		// broadcast the transaction
+		b.s.BroadcastV2TransactionSet(basis, txnSet)
+		return txn.ID(), nil
 	} else {
+		// fetch revision
+		rev, err := b.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		}
+
 		// create the transaction
 		txn := types.Transaction{
+			MinerFees:             []types.Currency{fee},
 			FileContractRevisions: []types.FileContractRevision{rev.Revision},
 			Signatures:            rev.Signatures[:],
 		}
 
 		// fund the transaction (only the fee)
-		toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
+		toSign, err := b.w.FundTransaction(&txn, fee, true)
 		if err != nil {
 			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
 		}
@@ -596,10 +646,8 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 		// broadcast the transaction
 		b.s.BroadcastTransactionSet(txnset)
-		txnID = txn.ID()
+		return txn.ID(), nil
 	}
-
-	return
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {

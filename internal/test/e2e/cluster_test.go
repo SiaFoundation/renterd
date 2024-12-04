@@ -295,7 +295,9 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		} else if hi.Settings.Release == "" {
+		} else if !hi.IsV2() && hi.Settings.Release == "" {
+			t.Fatal("release should be set")
+		} else if hi.IsV2() && hi.V2Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
 	}
@@ -1021,6 +1023,9 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	h, err := b.Host(context.Background(), hosts[0].PublicKey())
 	tt.OK(err)
 
+	// scan the host
+	tt.OKAll(b.ScanHost(context.Background(), h.PublicKey, time.Minute))
+
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
@@ -1033,19 +1038,30 @@ func TestContractApplyChainUpdates(t *testing.T) {
 		t.Fatalf("expected revision height to be 0, got %v", contract.RevisionHeight)
 	}
 
-	// broadcast the revision for each contract
-	tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
-	cluster.MineBlocks(1)
+	lastRevisionHeight := uint64(1)
+	for i := 0; i < 2; i++ {
+		// mine a block for the contract to be mined
+		cluster.MineBlocks(1)
 
-	// check the revision height was updated.
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		c, err := cluster.Bus.Contract(context.Background(), contract.ID)
+		// force a new revision by funding an account
+		_, err = b.FundAccount(context.Background(), rhpv3.Account{}, contract.ID, types.NewCurrency64(100))
 		tt.OK(err)
-		if c.RevisionHeight == 0 {
-			return fmt.Errorf("contract %v should have been revised", c.ID)
-		}
-		return nil
-	})
+
+		// broadcast the revision for each contract
+		tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
+		cluster.MineBlocks(1)
+
+		// check the revision height was updated.
+		tt.Retry(100, 100*time.Millisecond, func() error {
+			c, err := cluster.Bus.Contract(context.Background(), contract.ID)
+			tt.OK(err)
+			if c.RevisionHeight < lastRevisionHeight {
+				return fmt.Errorf("contract %v should have been revised: %v < %v", c.ID, c.RevisionHeight, lastRevisionHeight)
+			}
+			lastRevisionHeight = c.RevisionHeight
+			return nil
+		})
+	}
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.

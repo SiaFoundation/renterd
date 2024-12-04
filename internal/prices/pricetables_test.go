@@ -20,7 +20,7 @@ func newTestHostPriceTable() api.HostPriceTable {
 
 	return api.HostPriceTable{
 		HostPriceTable: rhpv3.HostPriceTable{UID: uid, HostBlockHeight: 100, Validity: time.Minute},
-		Expiry:         time.Now().Add(time.Minute),
+		Expiry:         time.Now().Add(70 * time.Second),
 	}
 }
 

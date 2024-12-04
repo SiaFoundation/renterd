@@ -207,12 +207,43 @@ func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2F
 	return ssql.FileContractElement(c.ctx, c.tx, fcid)
 }
 
-func (c chainUpdateTx) InsertFileContractElements(fces []types.V2FileContractElement) error {
-	return ssql.InsertFileContractElements(c.ctx, c.tx, fces)
+func (c chainUpdateTx) PruneFileContractElements(threshold uint64) error {
+	return ssql.PruneFileContractElements(c.ctx, c.tx, threshold)
 }
 
-func (c chainUpdateTx) RemoveFileContractElements(fcids []types.FileContractID) error {
-	return ssql.RemoveFileContractElements(c.ctx, c.tx, fcids)
+func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
+	contractIDStmt, err := c.tx.Prepare(c.ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer contractIDStmt.Close()
+
+	insertStmt, err := c.tx.Prepare(c.ctx, `
+INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(db_contract_id) DO UPDATE SET
+	contract = excluded.contract,
+	merkle_proof = excluded.merkle_proof
+`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, fce := range fces {
+		var contractID int64
+		err = contractIDStmt.QueryRow(c.ctx, ssql.Hash256(fce.ID)).Scan(&contractID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return fmt.Errorf("%w: %v", api.ErrContractNotFound, fce.ID)
+		} else if err != nil {
+			return err
+		}
+		_, err = insertStmt.Exec(c.ctx, time.Now(), contractID, ssql.V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, ssql.MerkleProof{Hashes: fce.StateElement.MerkleProof})
+		if err != nil {
+			return fmt.Errorf("failed to insert file contract element: %w", err)
+		}
+	}
+	return nil
 }
 
 func (c chainUpdateTx) UpdateFileContractElementProofs(updater wallet.ProofUpdater) error {

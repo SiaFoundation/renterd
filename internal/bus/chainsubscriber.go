@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 )
 
 const (
+	// contractElementPruneWindow is the number of blocks beyond a contract's
+	// prune window when we start deleting its file contract elements.
+	contractElementPruneWindow = 144
+
 	// maxAddrsPerProtocol is the maximum number of announced addresses we will
 	// track per host, per protocol for a V2 announcement
 	maxAddrsPerProtocol = 2
@@ -200,55 +205,48 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	// v1 contracts
 	cus := make(map[types.FileContractID]contractUpdate)
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
-		cu, ok := cus[types.FileContractID(fce.ID)]
-		if !ok {
-			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
-		} else if fce.FileContract.RevisionNumber > cu.curr.revisionNumber {
-			cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
-		}
+		cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
 	})
-	for _, cu := range cus {
-		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
-			return fmt.Errorf("failed to apply v1 contract update: %w", err)
-		}
-	}
 
 	// v2 contracts
-	cus = make(map[types.FileContractID]contractUpdate)
-	var createdContracts []types.V2FileContractElement
+	var revisedContracts []types.V2FileContractElement
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if created {
-			createdContracts = append(createdContracts, fce)
+			revisedContracts = append(revisedContracts, fce) // created
+		} else if rev != nil {
+			revisedContracts = append(revisedContracts, *rev) // revised
 		}
-		cu, ok := cus[types.FileContractID(fce.ID)]
-		if !ok {
-			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
-		} else if fce.V2FileContract.RevisionNumber > cu.curr.revisionNumber {
-			cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
-		}
+		cus[types.FileContractID(fce.ID)] = v2ContractUpdate(fce, rev, res)
 	})
 
-	// updates - this updates the 'known' contracts too
+	// updates - this updates the 'known' contracts too so we do this first
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
-			return fmt.Errorf("failed to apply v2 contract update: %w", err)
+			return fmt.Errorf("failed to apply contract updates: %w", err)
 		}
 	}
 
 	// new contracts - only consider the ones we are interested in
-	filtered := createdContracts[:0]
-	for _, fce := range createdContracts {
+	filtered := revisedContracts[:0]
+	for _, fce := range revisedContracts {
 		if s.isKnownContract(fce.ID) {
 			filtered = append(filtered, fce)
 		}
 	}
-	if err := tx.InsertFileContractElements(filtered); err != nil {
+	if err := tx.UpdateFileContractElements(filtered); err != nil {
 		return fmt.Errorf("failed to insert v2 file contract elements: %w", err)
 	}
 
 	// contract proofs
 	if err := tx.UpdateFileContractElementProofs(cau); err != nil {
 		return fmt.Errorf("failed to update file contract element proofs: %w", err)
+	}
+
+	// prune contracts 144 blocks after window_end
+	if cau.State.Index.Height > contractElementPruneWindow {
+		if err := tx.PruneFileContractElements(cau.State.Index.Height - contractElementPruneWindow); err != nil {
+			return fmt.Errorf("failed to prune file contract elements: %w", err)
+		}
 	}
 	return nil
 }
@@ -261,23 +259,20 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	cru.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
 		cus = append(cus, v1ContractUpdate(fce, rev, resolved, valid))
 	})
-	for _, cu := range cus {
-		if err := s.updateContract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
-			return fmt.Errorf("failed to revert v1 contract update: %w", err)
-		}
-	}
 
 	// v2 contracts
 	cus = cus[:0]
-	var revertedContracts []types.FileContractID
+	var revertedContracts []types.V2FileContractElement
 	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if created {
-			revertedContracts = append(revertedContracts, fce.ID)
+			revertedContracts = append(revertedContracts, fce)
+		} else if rev != nil {
+			revertedContracts = append(revertedContracts, *rev)
 		}
 		cus = append(cus, v2ContractUpdate(fce, rev, res))
 	})
 
-	// updates - this updates the 'known' contracts too
+	// updates - this updates the 'known' contracts too so we do this first
 	for _, cu := range cus {
 		if err := s.updateContract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
 			return fmt.Errorf("failed to revert v2 contract update: %w", err)
@@ -286,12 +281,12 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// reverted contracts - only consider the ones that we are interested in
 	filtered := revertedContracts[:0]
-	for _, fcid := range revertedContracts {
-		if s.isKnownContract(fcid) {
-			filtered = append(filtered, fcid)
+	for _, fce := range revertedContracts {
+		if s.isKnownContract(fce.ID) {
+			filtered = append(filtered, fce)
 		}
 	}
-	if err := tx.RemoveFileContractElements(filtered); err != nil {
+	if err := tx.UpdateFileContractElements(filtered); err != nil {
 		return fmt.Errorf("failed to remove v2 file contract elements: %w", err)
 	}
 
@@ -581,14 +576,15 @@ func v2ContractUpdate(fce types.V2FileContractElement, rev *types.V2FileContract
 
 	var resolved, valid bool
 	if res != nil {
-		resolved = true
 		switch res.(type) {
-		case *types.V2FileContractFinalization:
-			valid = true
 		case *types.V2FileContractRenewal:
 			valid = true
+			// hack to make sure v2 contracts also have the sentinel revision
+			// number
+			curr.revisionNumber = math.MaxUint64
 		case *types.V2StorageProof:
 			valid = true
+			resolved = true
 		case *types.V2FileContractExpiration:
 			valid = fce.V2FileContract.Filesize == 0
 		}

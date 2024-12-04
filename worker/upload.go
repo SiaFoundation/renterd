@@ -26,8 +26,6 @@ import (
 )
 
 const (
-	statsRecomputeMinInterval = 3 * time.Second
-
 	defaultPackedSlabsLockDuration  = 10 * time.Minute
 	defaultPackedSlabsUploadTimeout = 10 * time.Minute
 )

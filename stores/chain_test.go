@@ -2,9 +2,9 @@ package stores
 
 import (
 	"context"
-	dsql "database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -415,7 +415,7 @@ func TestContractElements(t *testing.T) {
 		Filesize: 2,
 	}
 
-	assertContractElement := func(tx sql.ChainUpdateTx, leafIndex uint64, proof []types.Hash256) {
+	assertContractElement := func(tx sql.ChainUpdateTx, leafIndex uint64, proof []types.Hash256, c types.V2FileContract) {
 		t.Helper()
 		fce, err := tx.FileContractElement(fcid)
 		if err != nil {
@@ -426,7 +426,7 @@ func TestContractElements(t *testing.T) {
 			t.Fatalf("unexpected leaf index %v", fce.StateElement.LeafIndex)
 		} else if !reflect.DeepEqual(fce.StateElement.MerkleProof, proof) {
 			t.Fatalf("unexpected merkle proof %v", fce.StateElement.MerkleProof)
-		} else if !reflect.DeepEqual(fce.V2FileContract, contract) {
+		} else if !reflect.DeepEqual(fce.V2FileContract, c) {
 			t.Fatalf("unexpected contract %v", fce.V2FileContract)
 		}
 	}
@@ -434,7 +434,7 @@ func TestContractElements(t *testing.T) {
 	// check current contract state
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 		// add a new contract element
-		err := tx.InsertFileContractElements([]types.V2FileContractElement{
+		err := tx.UpdateFileContractElements([]types.V2FileContractElement{
 			{
 				ID: fcid,
 				StateElement: types.StateElement{
@@ -447,9 +447,9 @@ func TestContractElements(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		assertContractElement(tx, 1, []types.Hash256{{1}})
+		assertContractElement(tx, 1, []types.Hash256{{1}}, contract)
 
-		// update the element's proof
+		// update the element's proof twice
 		if err := tx.UpdateFileContractElementProofs(&passthroughProofUpdater{
 			fn: func(se *types.StateElement) {
 				*se = types.StateElement{
@@ -460,15 +460,31 @@ func TestContractElements(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		assertContractElement(tx, 2, []types.Hash256{{2}})
+		assertContractElement(tx, 2, []types.Hash256{{2}}, contract)
 
-		// remove the contract element
-		if err := tx.RemoveFileContractElements([]types.FileContractID{fcid}); err != nil {
+		updatedContract := contract
+		updatedContract.ProofHeight += 1
+		err = tx.UpdateFileContractElements([]types.V2FileContractElement{
+			{
+				ID: fcid,
+				StateElement: types.StateElement{
+					LeafIndex:   3, // ignored by upsert
+					MerkleProof: []types.Hash256{{3}},
+				},
+				V2FileContract: updatedContract,
+			},
+		})
+		if err != nil {
 			return err
-		} else if _, err := tx.FileContractElement(fcid); !errors.Is(err, dsql.ErrNoRows) {
-			return fmt.Errorf("expected ErrNoRows, got %v", err)
 		}
+		assertContractElement(tx, 2, []types.Hash256{{3}}, updatedContract)
 
+		// prune elements
+		if err := tx.PruneFileContractElements(math.MaxUint32); err != nil {
+			return err
+		} else if _, err := tx.FileContractElement(fcid); !errors.Is(err, api.ErrContractNotFound) {
+			return err
+		}
 		return nil
 	}); err != nil {
 		t.Fatal("unexpected error", err)
