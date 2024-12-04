@@ -78,7 +78,6 @@ type (
 		logger *zap.SugaredLogger
 
 		hk              types.PublicKey
-		siamuxAddr      string
 		signalNewUpload chan struct{}
 		shutdownCtx     context.Context
 
@@ -107,7 +106,6 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 
 		// static
 		hk:              c.HostKey,
-		siamuxAddr:      c.SiamuxAddr,
 		shutdownCtx:     ctx,
 		signalNewUpload: make(chan struct{}, 1),
 
@@ -155,7 +153,6 @@ func (u *Uploader) Refresh(c api.ContractMetadata) {
 
 	u.host = u.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
 	u.fcid = c.ID
-	u.siamuxAddr = c.SiamuxAddr
 	u.endHeight = c.WindowEnd
 }
 
