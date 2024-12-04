@@ -12,16 +12,17 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/internal/memory"
 )
 
 var (
+	// ErrBucketMissing is returned by the worker API by endpoints that need a
+	// bucket when it wasn't specified.
+	ErrBucketMissing = errors.New("'bucket' parameter is required")
+
 	// ErrConsensusNotSynced is returned by the worker API by endpoints that rely on
 	// consensus and the consensus is not synced.
 	ErrConsensusNotSynced = errors.New("consensus is not synced")
-
-	// ErrContractSetNotSpecified is returned by the worker API by endpoints that
-	// need a contract set to be able to upload data.
-	ErrContractSetNotSpecified = errors.New("contract set is not specified")
 
 	// ErrHostOnPrivateNetwork is returned by the worker API when a host can't
 	// be scanned since it is on a private network.
@@ -54,30 +55,9 @@ type (
 		LockID uint64 `json:"lockID"`
 	}
 
-	// ContractsResponse is the response type for the /rhp/contracts endpoint.
-	ContractsResponse struct {
-		Contracts []Contract                 `json:"contracts"`
-		Errors    map[types.PublicKey]string `json:"errors,omitempty"`
-
-		// deprecated
-		Error string `json:"error,omitempty"`
-	}
-
 	MemoryResponse struct {
-		Download MemoryStatus `json:"download"`
-		Upload   MemoryStatus `json:"upload"`
-	}
-
-	MemoryStatus struct {
-		Available uint64 `json:"available"`
-		Total     uint64 `json:"total"`
-	}
-
-	// MigrateSlabResponse is the response type for the /slab/migrate endpoint.
-	MigrateSlabResponse struct {
-		NumShardsMigrated int    `json:"numShardsMigrated"`
-		SurchargeApplied  bool   `json:"surchargeApplied,omitempty"`
-		Error             string `json:"error,omitempty"`
+		Download memory.Status `json:"download"`
+		Upload   memory.Status `json:"upload"`
 	}
 
 	// RHPFormResponse is the response type for the /rhp/form endpoint.
@@ -93,28 +73,6 @@ type (
 		HostKey    types.PublicKey      `json:"hostKey"`
 		SiamuxAddr string               `json:"siamuxAddr"`
 		Balance    types.Currency       `json:"balance"`
-	}
-
-	// RHPPriceTableRequest is the request type for the /rhp/pricetable endpoint.
-	RHPPriceTableRequest struct {
-		HostKey    types.PublicKey `json:"hostKey"`
-		SiamuxAddr string          `json:"siamuxAddr"`
-		Timeout    DurationMS      `json:"timeout"`
-	}
-
-	// RHPScanRequest is the request type for the /rhp/scan endpoint.
-	RHPScanRequest struct {
-		HostKey types.PublicKey `json:"hostKey"`
-		HostIP  string          `json:"hostIP"`
-		Timeout DurationMS      `json:"timeout"`
-	}
-
-	// RHPScanResponse is the response type for the /rhp/scan endpoint.
-	RHPScanResponse struct {
-		Ping       DurationMS           `json:"ping"`
-		ScanError  string               `json:"scanError,omitempty"`
-		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
-		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
 	}
 
 	// RHPSyncRequest is the request type for the /rhp/sync endpoint.
@@ -250,7 +208,7 @@ func ParseDownloadRange(req *http.Request) (DownloadRange, error) {
 	return dr, nil
 }
 
-func (r RHPScanResponse) Error() error {
+func (r HostScanResponse) Error() error {
 	if r.ScanError != "" {
 		return errors.New(r.ScanError)
 	}

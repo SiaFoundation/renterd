@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -21,7 +20,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
@@ -69,9 +67,6 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	// validate config
 	if cfg.Bus.RemoteAddr != "" && !cfg.Worker.Enabled && !cfg.Autopilot.Enabled {
 		return nil, errors.New("remote bus, remote worker, and no autopilot -- nothing to do!")
-	}
-	if cfg.Worker.Enabled && cfg.Bus.RemoteAddr != "" && cfg.Worker.ExternalAddress == "" {
-		return nil, errors.New("can't enable the worker using a remote bus, without configuring the worker's external address")
 	}
 	if cfg.Autopilot.Enabled && !cfg.Worker.Enabled && len(cfg.Worker.Remotes) == 0 {
 		return nil, errors.New("can't enable autopilot without providing either workers to connect to or creating a worker")
@@ -164,32 +159,18 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	var workers []autopilot.Worker
 	if len(cfg.Worker.Remotes) == 0 {
 		if cfg.Worker.Enabled {
-			workerAddr := cfg.HTTP.Address + "/api/worker"
-			var workerExternAddr string
-			if cfg.Bus.RemoteAddr != "" {
-				workerExternAddr = cfg.Worker.ExternalAddress
-			} else {
-				workerExternAddr = workerAddr
-			}
-
 			workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
 			w, err := worker.New(cfg.Worker, workerKey, bc, logger)
 			if err != nil {
 				logger.Fatal("failed to create worker: " + err.Error())
 			}
-			setupFns = append(setupFns, fn{
-				name: "Worker",
-				fn: func(ctx context.Context) error {
-					return w.Setup(ctx, workerExternAddr, cfg.HTTP.Password)
-				},
-			})
 			shutdownFns = append(shutdownFns, fn{
 				name: "Worker",
 				fn:   w.Shutdown,
 			})
 
 			mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
-			wc := worker.NewClient(workerAddr, cfg.HTTP.Password)
+			wc := worker.NewClient(cfg.HTTP.Address+"/api/worker", cfg.HTTP.Password)
 			workers = append(workers, wc)
 
 			if cfg.S3.Enabled {
@@ -380,9 +361,14 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	// to ensure contracts formed by the bus can be renewed by the autopilot
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
+	// get explorer URL
+	var explorerURL string
+	if !cfg.Explorer.Disable {
+		explorerURL = cfg.Explorer.URL
+	}
+
 	// create bus
-	announcementMaxAgeHours := time.Duration(cfg.Bus.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, cfg.Bus, masterKey, alertsMgr, wh, cm, s, w, sqlStore, explorerURL, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}
@@ -408,35 +394,6 @@ func (n *node) Run() error {
 	for _, fn := range n.setupFns {
 		if err := fn.fn(context.Background()); err != nil {
 			return fmt.Errorf("failed to run %v: %w", fn.name, err)
-		}
-	}
-
-	// set initial S3 keys
-	if n.cfg.S3.Enabled && !n.cfg.S3.DisableAuth {
-		as, err := n.bus.S3AuthenticationSettings(context.Background())
-		if err != nil && !strings.Contains(err.Error(), api.ErrSettingNotFound.Error()) {
-			return fmt.Errorf("failed to fetch S3 authentication settings: %w", err)
-		} else if as.V4Keypairs == nil {
-			as.V4Keypairs = make(map[string]string)
-		}
-
-		// S3 key pair validation was broken at one point, we need to remove the
-		// invalid key pairs here to ensure we don't fail when we update the
-		// setting below.
-		for k, v := range as.V4Keypairs {
-			if err := (api.S3AuthenticationSettings{V4Keypairs: map[string]string{k: v}}).Validate(); err != nil {
-				n.logger.Infof("removing invalid S3 keypair for AccessKeyID %s, reason: %v", k, err)
-				delete(as.V4Keypairs, k)
-			}
-		}
-
-		// merge keys
-		for k, v := range n.cfg.S3.KeypairsV4 {
-			as.V4Keypairs[k] = v
-		}
-		// update settings
-		if err := n.bus.UpdateSetting(context.Background(), api.SettingS3Authentication, as); err != nil {
-			return fmt.Errorf("failed to update S3 authentication settings: %w", err)
 		}
 	}
 
@@ -494,6 +451,8 @@ func (n *node) Shutdown() error {
 
 // TODO: needs a better spot
 func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	partialSlabDir := filepath.Join(cfg.Directory, "partial_slabs")
+
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -522,7 +481,7 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -542,7 +501,7 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.Log.Database.SlowThreshold, cfg.Log.Database.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -561,21 +520,13 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		Alerts:                        alerts.WithOrigin(am, "bus"),
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                filepath.Join(cfg.Directory, "partial_slabs"),
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: cfg.Bus.SlabBufferCompletionThreshold,
 		Logger:                        logger,
-		RetryTransactionIntervals: []time.Duration{
-			200 * time.Millisecond,
-			500 * time.Millisecond,
-			time.Second,
-			3 * time.Second,
-			10 * time.Second,
-			10 * time.Second,
-		},
-		WalletAddress:     types.StandardUnlockHash(pk.PublicKey()),
-		LongQueryDuration: cfg.Log.Database.SlowThreshold,
-		LongTxDuration:    cfg.Log.Database.SlowThreshold,
+		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
+		LongQueryDuration:             cfg.Log.Database.SlowThreshold,
+		LongTxDuration:                cfg.Log.Database.SlowThreshold,
 	}, nil
 }
 

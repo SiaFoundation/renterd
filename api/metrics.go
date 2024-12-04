@@ -14,42 +14,13 @@ var (
 const (
 	MetricMaxIntervals = 1000
 
-	ChurnDirAdded   = "added"
-	ChurnDirRemoved = "removed"
-
-	MetricContractPrune    = "contractprune"
-	MetricContractSet      = "contractset"
-	MetricContractSetChurn = "churn"
-	MetricContract         = "contract"
-	MetricPerformance      = "performance"
-	MetricWallet           = "wallet"
+	MetricContract      = "contract"
+	MetricContractPrune = "contractprune"
+	MetricPerformance   = "performance"
+	MetricWallet        = "wallet"
 )
 
 type (
-	ContractSetMetric struct {
-		Contracts int         `json:"contracts"`
-		Name      string      `json:"name"`
-		Timestamp TimeRFC3339 `json:"timestamp"`
-	}
-
-	ContractSetMetricsQueryOpts struct {
-		Name string
-	}
-
-	ContractSetChurnMetric struct {
-		Direction  string               `json:"direction"`
-		ContractID types.FileContractID `json:"contractID"`
-		Name       string               `json:"name"`
-		Reason     string               `json:"reason,omitempty"`
-		Timestamp  TimeRFC3339          `json:"timestamp"`
-	}
-
-	ContractSetChurnMetricsQueryOpts struct {
-		Name      string
-		Direction string
-		Reason    string
-	}
-
 	PerformanceMetricsQueryOpts struct {
 		Action  string
 		HostKey types.PublicKey
@@ -66,11 +37,10 @@ type (
 		RemainingFunds      types.Currency `json:"remainingFunds"`
 		RevisionNumber      uint64         `json:"revisionNumber"`
 
-		UploadSpending      types.Currency `json:"uploadSpending"`
-		DownloadSpending    types.Currency `json:"downloadSpending"`
-		FundAccountSpending types.Currency `json:"fundAccountSpending"`
 		DeleteSpending      types.Currency `json:"deleteSpending"`
-		ListSpending        types.Currency `json:"listSpending"`
+		FundAccountSpending types.Currency `json:"fundAccountSpending"`
+		SectorRootsSpending types.Currency `json:"sectorRootsSpending"`
+		UploadSpending      types.Currency `json:"uploadSpending"`
 	}
 
 	ContractMetricsQueryOpts struct {
@@ -111,10 +81,6 @@ type (
 type (
 	ContractPruneMetricRequestPUT struct {
 		Metrics []ContractPruneMetric `json:"metrics"`
-	}
-
-	ContractSetChurnMetricRequestPUT struct {
-		Metrics []ContractSetChurnMetric `json:"metrics"`
 	}
 
 	ContractMetricRequestPUT struct {

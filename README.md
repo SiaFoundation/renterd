@@ -4,7 +4,7 @@
 
 `renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
 to cater to both casual users seeking straightforward data storage and
-developers requiring a robust API for building apps on Sia.
+developers requiring a robust API for building apps on Sia
 
 ## Overview
 
@@ -54,10 +54,6 @@ overview of all settings configurable through the CLI.
 | `Log.Database.Level`                 | Logger level for database queries (info\|warn\|error). Defaults to 'warn' | `warn`                            | `--log.database.level`          | `RENTERD_LOG_DATABASE_LEVEL`, `RENTERD_LOG_LEVEL` | `log.database.level`           |
 | `Log.Database.IgnoreRecordNotFoundError` | Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' | `true`                            | `--log.database.ignoreRecordNotFoundError` | `RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR` | `log.database.ignoreRecordNotFoundError` |
 | `Log.Database.SlowThreshold`         | Threshold for slow queries in logger. Defaults to 100ms | `100ms`                          | `--log.database.slowThreshold`  | `RENTERD_LOG_DATABASE_SLOW_THRESHOLD`         | `log.database.slowThreshold`        |
-| `Log.Database.Level (DEPRECATED)`    | Logger level                                        | `warn`                            | `--db.logger.logLevel`           | `RENTERD_DB_LOGGER_LOG_LEVEL`                  | `log.database.level`               |
-| `Log.Database.IgnoreRecordNotFoundError (DEPRECATED)` | Ignores 'not found' errors in logger    | `true`                            | `--db.logger.ignoreNotFoundError`| `RENTERD_DB_LOGGER_IGNORE_NOT_FOUND_ERROR`     | `log.ignoreRecordNotFoundError` |
-| `Log.Database.SlowThreshold (DEPRECATED)`    | Threshold for slow queries in logger    | `100ms`                          | `--db.logger.slowThreshold`      | `RENTERD_DB_LOGGER_SLOW_THRESHOLD`             | `log.slowThreshold`       |
-| `Log.Path (DEPRECATED)`              | Path to directory for logs                          | -                                 | `--log-path`                     | `RENTERD_LOG_PATH`                             | `log.path`                         |
 | `Database.MySQL.URI`                 | Database URI for the bus                             | -                                 | `--db.uri`                      | `RENTERD_DB_URI`                              | `database.mysql.uri`                |
 | `Database.MySQL.User`                | Database username for the bus                        | `renterd`                         | `--db.user`                     | `RENTERD_DB_USER`                             | `database.mysql.user`               |
 | `Database.MySQL.Password`            | Database password for the bus                        | -                                 | -                               | `RENTERD_DB_PASSWORD`                         | `database.mysql.password`           |
@@ -65,17 +61,15 @@ overview of all settings configurable through the CLI.
 | `Database.MySQL.MetricsDatabase`     | Database for metrics                                 | `renterd_metrics`                 | `--db.metricsName`              | `RENTERD_DB_METRICS_NAME`                     | `database.mysql.metricsDatabase`    |
 | `Database.SQLite.Database`           | SQLite database name                                 | -                                 | -                               | -                                              | `database.sqlite.database`          |
 | `Database.SQLite.MetricsDatabase`    | SQLite metrics database name                         | -                                 | -                               | -                                              | `database.sqlite.metricsDatabase`   |
+| `Bus.AllowPrivateIPs`                | Allows hosts with private IPs                        | -                                 | `--bus.allowPrivateIPs`         | -                                              | `bus.allowPrivateIPs`            |
 | `Bus.AnnouncementMaxAgeHours`        | Max age for announcements                            | `8760h` (1 year)                  | `--bus.announcementMaxAgeHours` | -                                              | `bus.announcementMaxAgeHours`       |
 | `Bus.Bootstrap`                      | Bootstraps gateway and consensus modules             | `true`                            | `--bus.bootstrap`               | -                                              | `bus.bootstrap`                     |
 | `Bus.GatewayAddr`                    | Address for Sia peer connections                     | `:9981`                          | `--bus.gatewayAddr`             | `RENTERD_BUS_GATEWAY_ADDR`                     | `bus.gatewayAddr`                   |
 | `Bus.RemoteAddr`                     | Remote address for the bus                           | -                                 | -                               | `RENTERD_BUS_REMOTE_ADDR`                      | `bus.remoteAddr`                    |
 | `Bus.RemotePassword`                 | Remote password for the bus                          | -                                 | -                               | `RENTERD_BUS_API_PASSWORD`                     | `bus.remotePassword`                |
-| `Bus.PersistInterval`                | Interval for persisting consensus updates            | `1m`                              | `--bus.persistInterval`         | -                                              | `bus.persistInterval`               |
 | `Bus.UsedUTXOExpiry`                 | Expiry for used UTXOs in transactions                | `24h`                             | `--bus.usedUTXOExpiry`          | -                                              | `bus.usedUtxoExpiry`                |
 | `Bus.SlabBufferCompletionThreshold`  | Threshold for slab buffer upload                     | `4096`                            | `--bus.slabBufferCompletionThreshold` | `RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD` | `bus.slabBufferCompletionThreshold` |
-| `Worker.AllowPrivateIPs`             | Allows hosts with private IPs                        | -                                 | `--worker.allowPrivateIPs`       | -                                              | `worker.allowPrivateIPs`            |
 | `Worker.BusFlushInterval`            | Interval for flushing data to bus                    | `5s`                              | `--worker.busFlushInterval`      | -                                              | `worker.busFlushInterval`           |
-| `Worker.ContractLockTimeout`         | Timeout for locking contracts                        | `30s`                             | -                               | -                                              | `worker.contractLockTimeout`        |
 | `Worker.DownloadMaxOverdrive`        | Max overdrive workers for downloads                  | `5`                               | `--worker.downloadMaxOverdrive`  | -                                              | `worker.downloadMaxOverdrive`       |
 | `Worker.DownloadMaxMemory`           | Max memory for downloads                             | `1GiB`                            | `--worker.downloadMaxMemory`     | `RENTERD_WORKER_DOWNLOAD_MAX_MEMORY`           | `worker.downloadMaxMemory`          |
 | `Worker.ID`                          | Unique ID for worker                                 | `worker`                          | `--worker.id`                    | `RENTERD_WORKER_ID`                            | `worker.id`                         |
@@ -85,7 +79,6 @@ overview of all settings configurable through the CLI.
 | `Worker.UploadOverdriveTimeout`      | Timeout for overdriving slab uploads                 | `3s`                              | `--worker.uploadOverdriveTimeout` | -                                              | `worker.uploadOverdriveTimeout`     |
 | `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
 | `Worker.AllowUnauthenticatedDownloads` | Allows unauthenticated downloads                    | -                                 | `--worker.unauthenticatedDownloads` | `RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS` | `worker.allowUnauthenticatedDownloads` |
-| `Worker.ExternalAddress`              | Address of the worker on the network, only necessary when the bus is remote | -                                 | -                                | `RENTERD_WORKER_EXTERNAL_ADDR`                     | `worker.externalAddress`                   |
 | `Worker.RemoteAddrs`                 | List of remote worker addresses (semicolon delimited) | -                                | -                                | `RENTERD_WORKER_REMOTE_ADDRS`                     | `worker.remotes`                    |
 | `Worker.RemotePassword`               | API password for the remote workers                 | -                                | -                                | `RENTERD_WORKER_API_PASSWORD`                     | `worker.remotes`              |
 | `Autopilot.Enabled`					| Enables/disables autopilot							| `true`							| `--autopilot.enabled`			| `RENTERD_AUTOPILOT_ENABLED`						| `autopilot.enabled`					|
@@ -102,7 +95,8 @@ overview of all settings configurable through the CLI.
 | `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
 | `S3.HostBucketBases`       | Enables bucket rewriting in the router for the provided bases  | -                                 | `--s3.hostBucketBases`           | `RENTERD_S3_HOST_BUCKET_BASES`               | `s3.hostBucketBases`              |
 | `S3.HostBucketEnabled`               | Enables bucket rewriting in the router               | -                                 | `--s3.hostBucketEnabled`           | `RENTERD_S3_HOST_BUCKET_ENABLED`               | `s3.hostBucketEnabled`              |
-| `S3.KeypairsV4 (DEPRECATED)`                      | V4 keypairs for S3                                   | -                                 | -                                  | -            | `s3.keypairsV4`                     |
+| `Explorer.Disable`                    | Disables explorer service                            | `false`                           | `--explorer.disable`               | `RENTERD_EXPLORER_DISABLE`                      | `explorer.disable`                  |
+| `Explorer.URL`                        | URL of service to retrieve data about the Sia network | `https://api.siascan.com`         | `--explorer.url`                   | `RENTERD_EXPLORER_URL`                          | `explorer.url`                      |
 
 ### Single-Node Setup
 
@@ -172,7 +166,6 @@ services:
       - RENTERD_API_PASSWORD=worker-pass
       - RENTERD_BUS_API_PASSWORD=bus-pass
       - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
-      - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-1:9980/api/worker
     ports:
       - "9982:9980"
       - "8082:8080"
@@ -187,7 +180,6 @@ services:
       - RENTERD_API_PASSWORD=worker-pass
       - RENTERD_BUS_API_PASSWORD=bus-pass
       - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
-      - RENTERD_WORKER_EXTERNAL_ADDR=http://worker-2:9980/api/worker
     ports:
       - "9983:9980"
       - "8083:8080"
@@ -521,101 +513,6 @@ blockchain. If you are not bootstrapping your node this can take a while. Verify
 your node's consensus state using the following endpoint:
 
 - `GET /api/bus/consensus/state`
-
-### Config
-
-The configuration can be updated through the UI or by using the following
-endpoints:
-
-- `GET /api/autopilot/config`
-- `PUT /api/autopilot/config`
-
-The autopilot will not perform any tasks until it is configured. An example
-configuration can be found below. Especially the `contracts` section is
-important, make sure the `amount` is set to the amount of hosts with which you
-want to form a contract. The `allowance` is the amount of money the autopilot
-can spend per period, make sure it is not set to zero or contracts won't get
-formed.
-
-```json
-{
-	"hosts": {
-		"allowRedundantIPs": false,
-		"maxDowntimeHours": 1440,
-		"maxConsecutiveScanFailures": 20,
-		"scoreOverrides": {}
-	},
-	"contracts": {
-		"set": "autopilot",
-		"amount": 50,
-		"allowance": "10000000000000000000000000000",
-		"period": 6048,
-		"renewWindow": 2016,
-		"download": 1099511627776, // 1TiB
-		"upload": 1099511627776, // 1TiB
-		"storage": 1099511627776 // 1TiB
-	}
-}
-```
-
-### Contract Set
-
-The contract set settings on the bus allow specifying a default contract set.
-This contract set will be returned by the `bus` through the upload parameters,
-and decides what contracts data is upload or migrated to by default. This
-setting does not have a default value, it can be updated using the settings API:
-
-- `GET /api/bus/setting/contractset`
-- `PUT /api/bus/setting/contractset`
-
-```json
-{
-        "default": "autopilot"
-}
-```
-
-In most cases the default set should match the set from your autopilot
-configuration in order for migrations to work properly. The contract set can be
-overridden by passing it as a query string parameter to the worker's upload and
-migrate endpoints.
-
-- `PUT /api/worker/objects/foo?contractset=foo`
-
-### Redundancy
-
-The default redundancy on mainnet is 30-10, on testnet it is 6-2. The redundancy
-can be updated using the settings API:
-
-- `GET /api/bus/setting/redundancy`
-- `PUT /api/bus/setting/redundancy`
-
-The redundancy can also be passed through query string parameters on the upload
-endpoint in the worker API:
-
-- `PUT /api/worker/objects/foo?minshards=2&totalshards=5`
-
-### Gouging
-
-The default gouging settings are listed below. The gouging settings can be
-updated using the settings API:
-
-- `GET /api/bus/setting/gouging`
-- `PUT /api/bus/setting/gouging`
-
-```json
-{
-	"hostBlockHeightLeeway": 6,                                   // 6 blocks
-	"maxContractPrice": "15000000000000000000000000",             // 15 SC per contract
-	"maxDownloadPrice": "3000000000000000000000000000",           // 3000 SC per 1 TB
-	"maxRPCPrice": "1000000000000000000000",                      // 1mS per RPC
-	"maxStoragePrice": "631593542824",                            // 3000 SC per TB per month
-	"maxUploadPrice": "3000000000000000000000000000",             // 3000 SC per 1 TB
-	"migrationSurchargeMultiplier": 10,                           // overpay up to 10x for sectors migrations on critical slabs
-	"minAccountExpiry": 86400000000000,                           // 1 day
-	"minMaxEphemeralAccountBalance": "1000000000000000000000000", // 1 SC
-	"minPriceTableValidity": 300000000000                         // 5 minutes
-}
-```
 
 ### Blocklist
 

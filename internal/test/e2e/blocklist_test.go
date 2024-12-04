@@ -8,14 +8,9 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/test"
 )
 
 func TestBlocklist(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	ctx := context.Background()
 
 	// create a new test cluster
@@ -27,8 +22,7 @@ func TestBlocklist(t *testing.T) {
 	tt := cluster.tt
 
 	// fetch contracts
-	opts := api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set}
-	contracts, err := b.Contracts(ctx, opts)
+	contracts, err := b.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	tt.OK(err)
 	if len(contracts) != 3 {
 		t.Fatalf("unexpected number of contracts, %v != 3", len(contracts))
@@ -41,17 +35,14 @@ func TestBlocklist(t *testing.T) {
 	err = b.UpdateHostAllowlist(ctx, []types.PublicKey{hk1, hk2}, nil, false)
 	tt.OK(err)
 
-	// assert h3 is no longer in the contract set
+	// assert h3 is no longer usable
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(ctx, opts)
+		hosts, err := b.UsableHosts(ctx)
 		tt.OK(err)
-		if len(contracts) != 2 {
-			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 2", opts.ContractSet, len(contracts))
-		}
-		for _, c := range contracts {
-			if c.HostKey == hk3 {
-				return fmt.Errorf("unexpected contract for host %v", hk3)
-			}
+		if len(hosts) != 2 {
+			return fmt.Errorf("unexpected number of usable hosts, %d != 2", len(hosts))
+		} else if hosts[0].PublicKey == hk3 || hosts[1].PublicKey == hk3 {
+			return fmt.Errorf("unexpected usable host %v", hk3)
 		}
 		return nil
 	})
@@ -61,29 +52,26 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(err)
 	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false))
 
-	// assert h1 is no longer in the contract set
+	// assert h1 is no longer usable
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(ctx, api.ContractsOpts{ContractSet: test.AutopilotConfig.Contracts.Set})
+		hosts, err := b.UsableHosts(ctx)
 		tt.OK(err)
-		if len(contracts) != 1 {
-			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 1", opts.ContractSet, len(contracts))
-		}
-		for _, c := range contracts {
-			if c.HostKey == hk1 {
-				return fmt.Errorf("unexpected contract for host %v", hk1)
-			}
+		if len(hosts) != 1 {
+			return fmt.Errorf("unexpected number of good hosts, %d != 1", len(hosts))
+		} else if hosts[0].PublicKey != hk2 {
+			return fmt.Errorf("unexpected host %v", hosts[0].PublicKey)
 		}
 		return nil
 	})
 
-	// clear the allowlist and blocklist and assert we have 3 contracts again
+	// clear the allowlist and blocklist and assert we have 3 usable hosts again
 	tt.OK(b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false))
 	tt.OK(b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false))
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		contracts, err := b.Contracts(ctx, opts)
+		hosts, err := b.UsableHosts(ctx)
 		tt.OK(err)
-		if len(contracts) != 3 {
-			return fmt.Errorf("unexpected number of contracts in set '%v', %v != 3", opts.ContractSet, len(contracts))
+		if len(hosts) != 3 {
+			return fmt.Errorf("unexpected number of usable hosts, %d != 3", len(hosts))
 		}
 		return nil
 	})
@@ -119,7 +107,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert we have 4 hosts
-	hosts, err := b.Hosts(context.Background(), api.GetHostsOptions{})
+	hosts, err := b.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	if len(hosts) != 4 {
 		t.Fatal("unexpected number of hosts", len(hosts))
@@ -144,7 +132,7 @@ func TestBlocklist(t *testing.T) {
 	}
 
 	// assert all others are blocked
-	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
+	hosts, err = b.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	if len(hosts) != 1 {
 		t.Fatal("unexpected number of hosts", len(hosts))
@@ -154,7 +142,7 @@ func TestBlocklist(t *testing.T) {
 	tt.OK(b.UpdateHostAllowlist(context.Background(), nil, nil, true))
 
 	// assert no hosts are blocked
-	hosts, err = b.Hosts(context.Background(), api.GetHostsOptions{})
+	hosts, err = b.Hosts(context.Background(), api.HostOptions{})
 	tt.OK(err)
 	if len(hosts) != 5 {
 		t.Fatal("unexpected number of hosts", len(hosts))

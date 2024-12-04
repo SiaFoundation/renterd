@@ -16,9 +16,11 @@ const (
 )
 
 var (
-	alertChurnID         = alerts.RandomAlertID() // constant until restarted
-	alertLostSectorsID   = alerts.RandomAlertID() // constant until restarted
-	alertRenewalFailedID = alerts.RandomAlertID() // constant until restarted
+	alertChurnID                      = alerts.RandomAlertID() // constant until restarted
+	alertContractMaintenanceSkippedID = alerts.RandomAlertID() // constant until restarted
+	alertContractUsabilityUpdated     = alerts.RandomAlertID() // constant until restarted
+	alertLostSectorsID                = alerts.RandomAlertID() // constant until restarted
+	alertRenewalFailedID              = alerts.RandomAlertID() // constant until restarted
 )
 
 func newContractRenewalFailedAlert(contract api.ContractMetadata, ourFault bool, err error) alerts.Alert {
@@ -52,6 +54,18 @@ func newLostSectorsAlert(hk types.PublicKey, version, release string, lostSector
 			"hostVersion": version,
 			"hostRelease": release,
 			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature. If you think this was a mistake and you want to ignore this warning for now you can reset the lost sector count",
+		},
+		Timestamp: time.Now(),
+	}
+}
+
+func newContractMaintenanceSkippedAlert(reason string) alerts.Alert {
+	return alerts.Alert{
+		ID:       alertContractMaintenanceSkippedID,
+		Severity: alerts.SeverityWarning,
+		Message:  "Contract maintenance is skipped",
+		Data: map[string]interface{}{
+			"reason": reason,
 		},
 		Timestamp: time.Now(),
 	}

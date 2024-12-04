@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"bytes"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/binary"
@@ -16,7 +17,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/object"
 )
 
@@ -29,22 +29,33 @@ var (
 )
 
 type (
-	AutopilotConfig api.AutopilotConfig
-	BCurrency       types.Currency
-	BigInt          big.Int
-	BusSetting      string
-	Currency        types.Currency
-	FileContractID  types.FileContractID
-	Hash256         types.Hash256
-	MerkleProof     struct{ Hashes []types.Hash256 }
-	HostSettings    rhpv2.HostSettings
-	PriceTable      rhpv3.HostPriceTable
-	PublicKey       types.PublicKey
-	EncryptionKey   object.EncryptionKey
-	Uint64Str       uint64
-	UnixTimeMS      time.Time
-	DurationMS      time.Duration
-	Unsigned64      uint64
+	BCurrency      types.Currency
+	BigInt         big.Int
+	BusSetting     string
+	Currency       types.Currency
+	FileContractID types.FileContractID
+	Hash256        types.Hash256
+	MerkleProof    struct{ Hashes []types.Hash256 }
+	NullableString string
+	HostSettings   rhpv2.HostSettings
+	PriceTable     rhpv3.HostPriceTable
+	PublicKey      types.PublicKey
+	EncryptionKey  object.EncryptionKey
+	Uint64Str      uint64
+	UnixTimeMS     time.Time
+	DurationMS     time.Duration
+	Unsigned64     uint64
+	V2Contract     types.V2FileContract
+
+	FileContractStateElement struct {
+		ID int64 // db_contract_id
+		types.StateElement
+	}
+
+	SiacoinStateElement struct {
+		ID Hash256 // output_id
+		types.StateElement
+	}
 )
 
 type scannerValuer interface {
@@ -53,7 +64,6 @@ type scannerValuer interface {
 }
 
 var (
-	_ scannerValuer = (*AutopilotConfig)(nil)
 	_ scannerValuer = (*BCurrency)(nil)
 	_ scannerValuer = (*BigInt)(nil)
 	_ scannerValuer = (*BusSetting)(nil)
@@ -61,6 +71,7 @@ var (
 	_ scannerValuer = (*FileContractID)(nil)
 	_ scannerValuer = (*Hash256)(nil)
 	_ scannerValuer = (*MerkleProof)(nil)
+	_ scannerValuer = (*NullableString)(nil)
 	_ scannerValuer = (*HostSettings)(nil)
 	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
@@ -68,26 +79,8 @@ var (
 	_ scannerValuer = (*UnixTimeMS)(nil)
 	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
+	_ scannerValuer = (*V2Contract)(nil)
 )
-
-// Scan scan value into AutopilotConfig, implements sql.Scanner interface.
-func (cfg *AutopilotConfig) Scan(value interface{}) error {
-	var bytes []byte
-	switch value := value.(type) {
-	case string:
-		bytes = []byte(value)
-	case []byte:
-		bytes = value
-	default:
-		return fmt.Errorf("failed to unmarshal AutopilotConfig value: %v %T", value, value)
-	}
-	return json.Unmarshal(bytes, cfg)
-}
-
-// Value returns a AutopilotConfig value, implements driver.Valuer interface.
-func (cfg AutopilotConfig) Value() (driver.Value, error) {
-	return json.Marshal(cfg)
-}
 
 // Scan implements the sql.Scanner interface.
 func (sc *BCurrency) Scan(src any) error {
@@ -159,6 +152,10 @@ func (c Currency) Value() (driver.Value, error) {
 
 // Scan scan value into fileContractID, implements sql.Scanner interface.
 func (fcid *FileContractID) Scan(value interface{}) error {
+	if value == nil {
+		*fcid = FileContractID{}
+		return nil
+	}
 	bytes, ok := value.([]byte)
 	if !ok {
 		return errors.New(fmt.Sprint("failed to unmarshal fcid value:", value))
@@ -288,9 +285,14 @@ func (k EncryptionKey) String() string {
 
 // Scan scans value into key, implements sql.Scanner interface.
 func (k *EncryptionKey) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
-	if !ok {
-		return errors.New(fmt.Sprint("failed to unmarshal EncryptionKey value:", value))
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return errors.New(fmt.Sprintf("failed to unmarshal EncryptionKey value from %t", value))
 	}
 	var ec object.EncryptionKey
 	if err := ec.UnmarshalBinary(bytes); err != nil {
@@ -464,4 +466,53 @@ func (u *Unsigned64) Scan(value interface{}) error {
 // Value returns an Unsigned64 value, implements driver.Valuer interface.
 func (u Unsigned64) Value() (driver.Value, error) {
 	return int64(u), nil
+}
+
+// Scan scan value into NullableString, implements sql.Scanner interface.
+func (s *NullableString) Scan(value interface{}) error {
+	if value == nil {
+		*s = ""
+		return nil
+	}
+
+	switch value := value.(type) {
+	case string:
+		*s = NullableString(value)
+	case []byte:
+		*s = NullableString(value)
+	default:
+		return fmt.Errorf("failed to unmarshal NullableString value: %v %T", value, value)
+	}
+	return nil
+}
+
+// Value returns a NullableString value, implements driver.Valuer interface.
+func (s NullableString) Value() (driver.Value, error) {
+	if s == "" {
+		return nil, nil
+	}
+	return []byte(s), nil
+}
+
+// Scan scan value into V2Contract, implements sql.Scanner interface.
+func (s *V2Contract) Scan(value interface{}) error {
+	switch value := value.(type) {
+	case []byte:
+		dec := types.NewBufDecoder(value)
+		(*types.V2FileContract)(s).DecodeFrom(dec)
+		return dec.Err()
+	default:
+		return fmt.Errorf("failed to unmarshal V2Contract value: %v %T", value, value)
+	}
+}
+
+// Value returns a V2Contract value, implements driver.Valuer interface.
+func (c V2Contract) Value() (driver.Value, error) {
+	buf := new(bytes.Buffer)
+	enc := types.NewEncoder(buf)
+	types.V2FileContract(c).EncodeTo(enc)
+	if err := enc.Flush(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

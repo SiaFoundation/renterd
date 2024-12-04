@@ -1,12 +1,21 @@
 package sql
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
+	dsql "database/sql"
+
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
@@ -22,14 +31,18 @@ type (
 	// required during migrations
 	Migrator interface {
 		ApplyMigration(ctx context.Context, fn func(tx Tx) (bool, error)) error
+		HasMigration(ctx context.Context, tx Tx, id string) (bool, error)
 		CreateMigrationTable(ctx context.Context) error
 		DB() *DB
 	}
 
 	MainMigrator interface {
 		Migrator
+		InitAutopilot(ctx context.Context, tx Tx) error
 		InsertDirectories(ctx context.Context, tx Tx, bucket, path string) (int64, error)
 		MakeDirsForPath(ctx context.Context, tx Tx, path string) (int64, error)
+		SlabBuffers(ctx context.Context, tx Tx) ([]string, error)
+		UpdateSetting(ctx context.Context, tx Tx, key, value string) error
 	}
 )
 
@@ -289,15 +302,239 @@ var (
 				},
 			},
 			{
+				ID: "00018_gouging_units", // NOTE: duplicate ID (00018) due to directories hotfix
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00018_gouging_units", log)
+				},
+			},
+			{
+				ID: "00019_settings",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_settings", log)
+				},
+			},
+			{
 				ID: "00019_scan_reset",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00019_scan_reset", log)
+				},
+			}, // NOTE: duplicate ID (00019) due to updating core deps directly on master
+			{
+				ID: "00020_idx_db_directory",
+				Migrate: func(tx Tx) error {
+					if applied, err := m.HasMigration(ctx, tx, "00027_remove_directories"); err != nil {
+						return fmt.Errorf("failed to check if migration '00027_remove_directories' was already applied: %w", err)
+					} else if applied {
+						return nil
+					}
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_idx_db_directory", log)
 				},
 			},
 			{
 				ID: "00020_remove_directories",
 				Migrate: func(tx Tx) error {
+					if applied, err := m.HasMigration(ctx, tx, "00027_remove_directories"); err != nil {
+						return fmt.Errorf("failed to check if migration '00027_remove_directories' was already applied: %w", err)
+					} else if applied {
+						return nil
+					}
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00020_remove_directories", log)
+				},
+			},
+			{
+				ID: "00021_archived_contracts",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00021_archived_contracts", log)
+				},
+			},
+			{
+				ID: "00022_remove_triggers",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00022_remove_triggers", log)
+				},
+			},
+			{
+				ID: "00023_key_prefix",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00023_key_prefix", log)
+				},
+			},
+			{
+				ID: "00024_contract_v2",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00024_contract_v2", log)
+				},
+			},
+			{
+				ID: "00025_latest_host",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00025_latest_host", log)
+				},
+			},
+			{
+				ID: "00026_key_prefix",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00026_key_prefix", log)
+				},
+			},
+			{
+				ID: "00028_contract_usability",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00028_contract_usability", log)
+				},
+			},
+			{
+				ID: "00029_contract_elements",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00029_contract_elements", log)
+				},
+			},
+			{
+				ID: "00030_host_sectors",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00030_host_sectors", log)
+				},
+			},
+			{
+				ID: "00031_update_gouging_settings",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00031_update_gouging_settings", log)
+				},
+			},
+			{
+				ID: "00032_autopilot",
+				Migrate: func(tx Tx) error {
+					// remove all references to the autopilots table, without dropping the table
+					if err := performMigration(ctx, tx, migrationsFs, dbIdentifier, "00032_autopilot_1", log); err != nil {
+						return fmt.Errorf("failed to migrate: %v", err)
+					}
+
+					// make sure the autopilot config is initialized
+					if err := m.InitAutopilot(ctx, tx); err != nil {
+						return fmt.Errorf("failed to initialize autopilot: %w", err)
+					}
+
+					// fetch existing autopilot and override the blank config
+					var cfgraw []byte
+					var cfg api.AutopilotConfig
+					err := tx.QueryRow(ctx, `SELECT config FROM autopilots WHERE identifier = "autopilot"`).Scan(&cfgraw)
+					if errors.Is(dsql.ErrNoRows, err) {
+						log.Warn("existing autopilot not found, the autopilot will be recreated with default values and the period will be reset")
+					} else if err := json.Unmarshal(cfgraw, &cfg); err != nil {
+						log.Warnf("existing autopilot config not valid JSON, err %v", err)
+					} else {
+						var enabled bool
+						if err := cfg.Contracts.Validate(); err != nil {
+							log.Warnf("existing contracts config is invalid, autopilot will be disabled, err: %v", err)
+						} else if err := cfg.Hosts.Validate(); err != nil {
+							log.Warnf("existing hosts config is invalid, autopilot will be disabled, err: %v", err)
+						} else {
+							enabled = true
+						}
+						res, err := tx.Exec(ctx, `UPDATE autopilot_config SET enabled = ?, contracts_amount = ?, contracts_period = ?, contracts_renew_window = ?, contracts_download = ?, contracts_upload = ?, contracts_storage = ?, contracts_prune = ?, hosts_max_downtime_hours = ?, hosts_min_protocol_version = ?, hosts_max_consecutive_scan_failures = ? WHERE id = ?`,
+							enabled,
+							cfg.Contracts.Amount,
+							cfg.Contracts.Period,
+							cfg.Contracts.RenewWindow,
+							cfg.Contracts.Download,
+							cfg.Contracts.Upload,
+							cfg.Contracts.Storage,
+							cfg.Contracts.Prune,
+							cfg.Hosts.MaxDowntimeHours,
+							cfg.Hosts.MinProtocolVersion,
+							cfg.Hosts.MaxConsecutiveScanFailures,
+							AutopilotID)
+						if err != nil {
+							return fmt.Errorf("failed to update autopilot config: %w", err)
+						} else if n, err := res.RowsAffected(); err != nil {
+							return fmt.Errorf("failed to fetch rows affected: %w", err)
+						} else if n == 0 {
+							return fmt.Errorf("failed to override blank autopilot config not found")
+						}
+					}
+
+					// drop autopilots table
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00032_autopilot_2", log)
+				},
+			},
+			{
+				ID: "00033_remove_contract_sets",
+				Migrate: func(tx Tx) error {
+					// prepare statement to rename the buffer
+					stmt, err := tx.Prepare(ctx, "UPDATE buffered_slabs SET filename = ? WHERE filename = ?")
+					if err != nil {
+						return fmt.Errorf("failed to prepare update statement: %w", err)
+					}
+					defer stmt.Close()
+
+					// prepare a helper to safely copy and sync the file
+					copyBuffer := func(path string) (string, error) {
+						parts := strings.Split(filepath.Base(path), "-")
+						if len(parts) != 4 {
+							return "", fmt.Errorf("invalid path '%s'", path)
+						}
+
+						src, err := os.Open(path)
+						if err != nil {
+							return "", fmt.Errorf("failed to open buffer: %w", err)
+						}
+						defer src.Close()
+
+						dstFilename := strings.Join(parts[1:], "-")
+						dstPath := filepath.Join(filepath.Dir(path), dstFilename)
+						err = os.Remove(dstPath)
+						if err != nil && !os.IsNotExist(err) {
+							return "", fmt.Errorf("failed to remove existing file at '%s': %w", dstPath, err)
+						}
+
+						dstFile, err := os.Create(dstPath)
+						if err != nil {
+							return "", fmt.Errorf("failed to create destination buffer at '%s': %w", dstPath, err)
+						}
+						defer dstFile.Close()
+
+						_, err = io.Copy(dstFile, src)
+						if err != nil {
+							return "", fmt.Errorf("failed to copy buffer: %w", err)
+						}
+
+						err = dstFile.Sync()
+						if err != nil {
+							return "", fmt.Errorf("failed to sync buffer: %w", err)
+						}
+
+						return dstFilename, nil
+					}
+
+					// fetch all buffers
+					buffers, err := m.SlabBuffers(ctx, tx)
+					if err != nil {
+						return err
+					}
+
+					// copy all buffers
+					for _, path := range buffers {
+						filename := filepath.Base(path)
+						if updated, err := copyBuffer(path); err != nil {
+							return fmt.Errorf("failed to copy buffer '%s': %w", path, err)
+						} else if res, err := stmt.Exec(ctx, updated, filename); err != nil {
+							return fmt.Errorf("failed to update buffer '%s': %w", filepath.Base(path), err)
+						} else if n, err := res.RowsAffected(); err != nil {
+							return fmt.Errorf("failed to fetch rows affected: %w", err)
+						} else if n != 1 {
+							return fmt.Errorf("failed to update buffer, no rows affected when updating '%s' -> %s", filename, updated)
+						}
+					}
+
+					// remove original buffers
+					for _, path := range buffers {
+						if err := os.Remove(path); err != nil {
+							return fmt.Errorf("failed to remove buffer '%s': %w", path, err)
+						}
+					}
+
+					// perform database migration
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00033_remove_contract_sets", log)
 				},
 			},
 		}
@@ -325,6 +562,18 @@ var (
 				ID: "00003_unix_ms",
 				Migrate: func(tx Tx) error {
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00003_unix_ms", log)
+				},
+			},
+			{
+				ID: "00004_contract_spending",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00004_contract_spending", log)
+				},
+			},
+			{
+				ID: "00005_remove_contract_sets",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00005_remove_contract_sets", log)
 				},
 			},
 		}
@@ -380,6 +629,8 @@ func execSQLFile(ctx context.Context, tx Tx, fs embed.FS, folder, filename strin
 	file, err := fs.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", path, err)
+	} else if len(bytes.TrimSpace(file)) == 0 {
+		return nil
 	}
 
 	// execute it

@@ -6,40 +6,20 @@ import (
 	"net/url"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
 
-// AddContract adds the provided contract to the metadata store.
-func (c *Client) AddContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (added api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s", contract.ID()), api.ContractAddRequest{
-		Contract:      contract,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &added)
-	return
-}
-
-// AddRenewedContract adds the provided contract to the metadata store.
-func (c *Client) AddRenewedContract(ctx context.Context, contract rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (renewed api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contract/%s/renewed", contract.ID()), api.ContractRenewedRequest{
-		Contract:      contract,
-		RenewedFrom:   renewedFrom,
-		StartHeight:   startHeight,
-		ContractPrice: contractPrice,
-		State:         state,
-		TotalCost:     totalCost,
-	}, &renewed)
-	return
+// AddContract adds the provided contract to the metadata store, if the contract
+// already exists it will be replaced.
+func (c *Client) AddContract(ctx context.Context, contract api.ContractMetadata) error {
+	return c.c.WithContext(ctx).PUT("/contracts", contract)
 }
 
 // AncestorContracts returns any ancestors of a given contract.
-func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ArchivedContract, err error) {
+func (c *Client) AncestorContracts(ctx context.Context, contractID types.FileContractID, minStartHeight uint64) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
-	values.Set("minStartHeight", fmt.Sprint(minStartHeight))
+	values.Set("minstartheight", fmt.Sprint(minStartHeight))
 	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/ancestors?"+values.Encode(), contractID), &contracts)
 	return
 }
@@ -76,17 +56,8 @@ func (c *Client) Contract(ctx context.Context, id types.FileContractID) (contrac
 
 // ContractRoots returns the sector roots, as well as the ones that are still
 // uploading, for the contract with given id.
-func (c *Client) ContractRoots(ctx context.Context, contractID types.FileContractID) (roots, uploading []types.Hash256, err error) {
-	var resp api.ContractRootsResponse
-	if err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", contractID), &resp); err != nil {
-		return
-	}
-	return resp.Roots, resp.Uploading, nil
-}
-
-// ContractSets returns the contract sets of the bus.
-func (c *Client) ContractSets(ctx context.Context) (sets []string, err error) {
-	err = c.c.WithContext(ctx).GET("/contracts/sets", &sets)
+func (c *Client) ContractRoots(ctx context.Context, contractID types.FileContractID) (roots []types.Hash256, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/roots", contractID), &roots)
 	return
 }
 
@@ -100,8 +71,8 @@ func (c *Client) ContractSize(ctx context.Context, contractID types.FileContract
 // all contracts are returned.
 func (c *Client) Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error) {
 	values := url.Values{}
-	if opts.ContractSet != "" {
-		values.Set("contractset", opts.ContractSet)
+	if opts.FilterMode != "" {
+		values.Set("filtermode", opts.FilterMode)
 	}
 	err = c.c.WithContext(ctx).GET("/contracts?"+values.Encode(), &contracts)
 	return
@@ -130,15 +101,9 @@ func (c *Client) DeleteAllContracts(ctx context.Context) (err error) {
 	return
 }
 
-// DeleteContractSet removes the contract set from the bus.
-func (c *Client) DeleteContractSet(ctx context.Context, set string) (err error) {
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/contracts/set/%s", set))
-	return
-}
-
 // FormContract forms a contract with a host and adds it to the bus.
 func (c *Client) FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostIP string, hostCollateral types.Currency, endHeight uint64) (contract api.ContractMetadata, err error) {
-	err = c.c.WithContext(ctx).POST("/contracts", api.ContractFormRequest{
+	err = c.c.WithContext(ctx).POST("/contracts/form", api.ContractFormRequest{
 		EndHeight:      endHeight,
 		HostCollateral: hostCollateral,
 		HostKey:        hostKey,
@@ -159,6 +124,13 @@ func (c *Client) KeepaliveContract(ctx context.Context, contractID types.FileCon
 	return
 }
 
+// ContractRevision fetches the latest revision of a contract directly from the
+// host.
+func (c *Client) ContractRevision(ctx context.Context, contractID types.FileContractID) (resp api.Revision, err error) {
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/contract/%s/revision", contractID), &resp)
+	return
+}
+
 // PrunableData returns an overview of all contract sizes, the total size and
 // the amount of data that can be pruned.
 func (c *Client) PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error) {
@@ -173,11 +145,10 @@ func (c *Client) PruneContract(ctx context.Context, contractID types.FileContrac
 }
 
 // RenewContract renews an existing contract with a host and adds it to the bus.
-func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral, maxFundAmount types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
+func (c *Client) RenewContract(ctx context.Context, contractID types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedStorage uint64) (renewal api.ContractMetadata, err error) {
 	req := api.ContractRenewRequest{
 		EndHeight:          endHeight,
 		ExpectedNewStorage: expectedStorage,
-		MaxFundAmount:      maxFundAmount,
 		MinNewCollateral:   minNewCollateral,
 		RenterFunds:        renterFunds,
 	}
@@ -205,11 +176,8 @@ func (c *Client) ReleaseContract(ctx context.Context, contractID types.FileContr
 	return
 }
 
-// UpdateContractSet adds/removes the given contracts to/from the given set.
-func (c *Client) UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/contracts/set/%s", set), api.ContractSetUpdateRequest{
-		ToAdd:    toAdd,
-		ToRemove: toRemove,
-	}, nil)
+// UpdateContractUsability updates the usability of the given contract.
+func (c *Client) UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error) {
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/contract/%s/usability", contractID), usability)
 	return
 }

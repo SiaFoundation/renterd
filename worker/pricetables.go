@@ -11,7 +11,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/internal/host"
 	"lukechampine.com/frand"
 )
 
@@ -35,7 +35,7 @@ var (
 
 type (
 	priceTables struct {
-		hm HostManager
+		hm host.HostManager
 		hs HostStore
 
 		mu          sync.Mutex
@@ -43,7 +43,7 @@ type (
 	}
 
 	priceTable struct {
-		hm HostManager
+		hm host.HostManager
 		hs HostStore
 		hk types.PublicKey
 
@@ -66,7 +66,7 @@ func (w *Worker) initPriceTables() {
 	w.priceTables = newPriceTables(w, w.bus)
 }
 
-func newPriceTables(hm HostManager, hs HostStore) *priceTables {
+func newPriceTables(hm host.HostManager, hs HostStore) *priceTables {
 	return &priceTables{
 		hm: hm,
 		hs: hs,
@@ -114,7 +114,7 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 
 	// get gouging checker to figure out how many blocks we have left before the
 	// current price table is considered to gouge on the block height
-	gc, err := GougingCheckerFromContext(ctx, false)
+	gc, err := GougingCheckerFromContext(ctx)
 	if err != nil {
 		return api.HostPriceTable{}, types.ZeroCurrency, err
 	}
@@ -174,36 +174,9 @@ func (p *priceTable) fetch(ctx context.Context, rev *types.FileContractRevision)
 	h := p.hm.Host(p.hk, types.FileContractID{}, host.Settings.SiamuxAddr())
 	hpt, cost, err = h.PriceTable(ctx, rev)
 
-	// record it in the background
-	if shouldRecordPriceTable(err) {
-		go func(hpt api.HostPriceTable, success bool) {
-			p.hs.RecordPriceTables(context.Background(), []api.HostPriceTableUpdate{
-				{
-					HostKey:    p.hk,
-					Success:    success,
-					Timestamp:  time.Now(),
-					PriceTable: hpt,
-				},
-			})
-		}(hpt, err == nil)
-	}
-
 	// handle error after recording
 	if err != nil {
 		return api.HostPriceTable{}, types.ZeroCurrency, fmt.Errorf("failed to update pricetable, err %v", err)
 	}
 	return
-}
-
-func shouldRecordPriceTable(err error) bool {
-	// List of errors that are considered 'successful' failures. Meaning that
-	// the host was reachable but we were unable to obtain a price table due to
-	// reasons out of the host's control.
-	if rhp3.IsInsufficientFunds(err) {
-		return false
-	}
-	if rhp3.IsBalanceInsufficient(err) {
-		return false
-	}
-	return true
 }

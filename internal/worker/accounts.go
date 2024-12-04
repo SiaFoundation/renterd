@@ -45,12 +45,12 @@ type (
 		UpdateAccounts(context.Context, []api.Account) error
 	}
 
-	ConsensusState interface {
+	ConsensusStateStore interface {
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
 	}
 
-	DownloadContracts interface {
-		DownloadContracts(ctx context.Context) ([]api.ContractMetadata, error)
+	ContractStore interface {
+		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
 	}
 )
 
@@ -59,8 +59,8 @@ type (
 		alerts                   alerts.Alerter
 		funder                   AccountFunder
 		syncer                   AccountSyncer
-		dc                       DownloadContracts
-		cs                       ConsensusState
+		cs                       ContractStore
+		css                      ConsensusStateStore
 		s                        AccountStore
 		key                      utils.AccountsKey
 		logger                   *zap.SugaredLogger
@@ -92,7 +92,7 @@ type (
 // NewAccountManager creates a new account manager. It will load all accounts
 // from the given store and mark the shutdown as unclean. When Shutdown is
 // called it will save all accounts.
-func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, cs ConsensusState, dc DownloadContracts, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, css ConsensusStateStore, cs ContractStore, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
 	logger := l.Named("accounts").Sugar()
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -101,7 +101,7 @@ func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alert
 		funder: funder,
 		syncer: syncer,
 		cs:     cs,
-		dc:     dc,
+		css:    css,
 		s:      s,
 		key:    key,
 		logger: logger,
@@ -310,14 +310,14 @@ func (a *AccountMgr) markRefillDone(hk types.PublicKey) {
 // until the previously launched goroutine returns.
 func (a *AccountMgr) refillAccounts() {
 	// fetch config
-	cs, err := a.cs.ConsensusState(a.shutdownCtx)
+	cs, err := a.css.ConsensusState(a.shutdownCtx)
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch consensus state for refill: %v", err))
 		return
 	}
 
 	// fetch all contracts
-	contracts, err := a.dc.DownloadContracts(a.shutdownCtx)
+	contracts, err := a.cs.Contracts(a.shutdownCtx, api.ContractsOpts{})
 	if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch contracts for refill: %v", err))
 		return
@@ -336,7 +336,7 @@ func (a *AccountMgr) refillAccounts() {
 				defer cancel()
 
 				// refill
-				err := a.refillAccount(rCtx, c, cs.BlockHeight, a.revisionSubmissionBuffer)
+				refilled, err := a.refillAccount(rCtx, c, cs.BlockHeight, a.revisionSubmissionBuffer)
 
 				// determine whether to log something
 				shouldLog := true
@@ -351,13 +351,15 @@ func (a *AccountMgr) refillAccounts() {
 
 				if err != nil && shouldLog {
 					a.logger.Error("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
+				} else if refilled {
+					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				}
 			}(c)
 		}
 	}
 }
 
-func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMetadata, bh, revisionSubmissionBuffer uint64) error {
+func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMetadata, bh, revisionSubmissionBuffer uint64) (bool, error) {
 	// fetch the account
 	account := a.Account(contract.HostKey)
 
@@ -365,7 +367,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	// trying to refill the account would result in the host not returning the
 	// revision and returning an obfuscated error
 	if (bh + revisionSubmissionBuffer) > contract.WindowStart {
-		return fmt.Errorf("contract %v is too close to the proof window to be revised", contract.ID)
+		return false, fmt.Errorf("contract %v is too close to the proof window to be revised", contract.ID)
 	}
 
 	// check if a host is potentially cheating before refilling.
@@ -380,7 +382,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 			"drift", account.Drift.String(),
 		)
 		_ = a.alerts.RegisterAlert(a.shutdownCtx, alert)
-		return fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
+		return false, fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
 	} else {
 		_ = a.alerts.DismissAlerts(a.shutdownCtx, alerts.IDForAccount(alertAccountRefillID, account.ID))
 	}
@@ -390,7 +392,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 		// sync the account
 		err := a.syncer.SyncAccount(ctx, contract.ID, contract.HostKey, contract.SiamuxAddr)
 		if err != nil {
-			return fmt.Errorf("failed to sync account's balance: %w", err)
+			return false, fmt.Errorf("failed to sync account's balance: %w", err)
 		}
 
 		// refetch the account after syncing
@@ -399,16 +401,15 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 
 	// check if refill is needed
 	if account.Balance.Cmp(minBalance) >= 0 {
-		return nil
+		return false, nil
 	}
 
 	// fund the account
 	err := a.funder.FundAccount(ctx, contract.ID, contract.HostKey, maxBalance)
 	if err != nil {
-		return fmt.Errorf("failed to fund account: %w", err)
+		return false, fmt.Errorf("failed to fund account: %w", err)
 	}
-	a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
-	return nil
+	return true, nil
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is

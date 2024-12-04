@@ -13,7 +13,6 @@ var (
 	// one is explicitly set.
 	AutopilotConfig = api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance:   types.Siacoins(1).Mul64(1e3),
 			Amount:      3,
 			Period:      144,
 			RenewWindow: 72,
@@ -22,19 +21,12 @@ var (
 			Upload:   rhpv2.SectorSize * 500,
 			Storage:  rhpv2.SectorSize * 5e3,
 
-			Set:   ContractSet,
 			Prune: false,
 		},
 		Hosts: api.HostsConfig{
 			MaxDowntimeHours:           10,
 			MaxConsecutiveScanFailures: 10,
-			AllowRedundantIPs:          true, // allow for integration tests by default
 		},
-	}
-
-	ContractSet         = "testset"
-	ContractSetSettings = api.ContractSetSetting{
-		Default: ContractSet,
 	}
 
 	GougingSettings = api.GougingSettings{
@@ -51,11 +43,15 @@ var (
 		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
 	}
 
-	PricePinSettings = api.DefaultPricePinSettings
+	PricePinSettings = api.DefaultPinnedSettings
 
 	RedundancySettings = api.RedundancySettings{
 		MinShards:   2,
 		TotalShards: 3,
+	}
+
+	UploadSettings = api.UploadSettings{
+		Redundancy: RedundancySettings,
 	}
 
 	S3AccessKeyID     = "TESTINGYNHUWCPKOPSYQ"

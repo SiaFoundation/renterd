@@ -7,7 +7,7 @@ import (
 
 type uploadParameters struct {
 	bucket string
-	path   string
+	key    string
 
 	multipart  bool
 	uploadID   string
@@ -16,22 +16,21 @@ type uploadParameters struct {
 	ec               object.EncryptionKey
 	encryptionOffset uint64
 
-	rs          api.RedundancySettings
-	bh          uint64
-	contractSet string
-	packing     bool
-	mimeType    string
+	rs       api.RedundancySettings
+	bh       uint64
+	packing  bool
+	mimeType string
 
 	metadata api.ObjectUserMetadata
 }
 
-func defaultParameters(bucket, path string, rs api.RedundancySettings) uploadParameters {
+func defaultParameters(bucket, key string, rs api.RedundancySettings) uploadParameters {
 	return uploadParameters{
 		bucket: bucket,
-		path:   path,
+		key:    key,
 
-		ec:               object.GenerateEncryptionKey(), // random key
-		encryptionOffset: 0,                              // from the beginning
+		ec:               object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted), // random key
+		encryptionOffset: 0,                                                            // from the beginning
 
 		rs: rs,
 	}
@@ -42,12 +41,6 @@ type UploadOption func(*uploadParameters)
 func WithBlockHeight(bh uint64) UploadOption {
 	return func(up *uploadParameters) {
 		up.bh = bh
-	}
-}
-
-func WithContractSet(contractSet string) UploadOption {
-	return func(up *uploadParameters) {
-		up.contractSet = contractSet
 	}
 }
 

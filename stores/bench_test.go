@@ -24,8 +24,8 @@ import (
 // database operations.
 //
 // cpu: Apple M1 Max
-// BenchmarkObjects/ObjectEntries-10   	   11618	     102732 ns/op	     7074 B/op	     99 allocs/op
-// BenchmarkObjects/RenameObjects-10   	   12705         94236 ns/op         3506 B/op       81 allocs/op
+// BenchmarkObjects/Objects-10         	    9920	    113301 ns/op	    6758 B/op	      97 allocs/op
+// BenchmarkObjects/RenameObjects-10   	   19507	     62000 ns/op	    3521 B/op	      81 allocs/op
 func BenchmarkObjects(b *testing.B) {
 	db, err := newTestDB(context.Background(), b.TempDir())
 	if err != nil {
@@ -42,11 +42,11 @@ func BenchmarkObjects(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	b.Run("ObjectEntries", func(b *testing.B) {
+	b.Run("Objects", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-				_, _, err := tx.ObjectEntries(context.Background(), bucket, dirs[i%len(dirs)], "", "", "", "", 0, -1)
+				_, err := tx.Objects(context.Background(), bucket, dirs[i%len(dirs)], "", "/", "", "", "", -1, object.EncryptionKey{})
 				return err
 			}); err != nil {
 				b.Fatal(err)
@@ -173,7 +173,7 @@ INSERT INTO contracts (fcid, host_key, start_height, v2) VALUES (?, ?, ?, ?)`, s
 	}
 
 	// insert slab
-	key := object.GenerateEncryptionKey()
+	key := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	res, err = db.Exec(context.Background(), `
 INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
 	if err != nil {
@@ -248,7 +248,7 @@ func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {
 		return nil, err
 	}
 
-	dbMain, err := sqlite.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+	dbMain, err := sqlite.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, "")
 	if err != nil {
 		return nil, err
 	}

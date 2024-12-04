@@ -1,15 +1,26 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/stores/sql/sqlite"
 	"gopkg.in/yaml.v3"
 )
+
+func cmdBackup() {
+	err := sqlite.Backup(context.Background(), flag.Arg(2), flag.Arg(3))
+	if err != nil {
+		log.Fatal("failed to create backup", err)
+	}
+}
 
 func cmdBuildConfig(cfg *config.Config) {
 	if _, err := os.Stat("renterd.yml"); err == nil {
@@ -54,26 +65,17 @@ func cmdBuildConfig(cfg *config.Config) {
 	}
 
 	f, err := os.Create(configPath)
-	if err != nil {
-		stdoutFatalError("Failed to create config file: " + err.Error())
-		return
-	}
+	checkFatalError("Failed to create config file", err)
 	defer f.Close()
 
 	enc := yaml.NewEncoder(f)
-	if err := enc.Encode(cfg); err != nil {
-		stdoutFatalError("Failed to encode config file: " + err.Error())
-		return
-	}
+	checkFatalError("Failed to encode config file", enc.Encode(cfg))
 }
 
 func cmdSeed() {
 	var seed [32]byte
 	phrase := wallet.NewSeedPhrase()
-	if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
-		println(err.Error())
-		os.Exit(1)
-	}
+	checkFatalError("failed to derive seed from phrase", wallet.SeedFromPhrase(&seed, phrase))
 	key := wallet.KeyFromSeed(&seed, 0)
 	fmt.Println("Recovery Phrase:", phrase)
 	fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))

@@ -55,6 +55,10 @@ func (b *MetricsDatabase) CreateMigrationTable(ctx context.Context) error {
 	return createMigrationTable(ctx, b.db)
 }
 
+func (b *MetricsDatabase) HasMigration(ctx context.Context, tx sql.Tx, id string) (bool, error) {
+	return ssql.HasMigration(ctx, tx, id)
+}
+
 func (b *MetricsDatabase) Migrate(ctx context.Context) error {
 	return sql.PerformMigrations(ctx, b, migrationsFs, "metrics", sql.MetricsMigrations(ctx, migrationsFs, b.log))
 }
@@ -81,14 +85,6 @@ func (tx *MetricsDatabaseTx) ContractPruneMetrics(ctx context.Context, start tim
 	return ssql.ContractPruneMetrics(ctx, tx, start, n, interval, opts)
 }
 
-func (tx *MetricsDatabaseTx) ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	return ssql.ContractSetChurnMetrics(ctx, tx, start, n, interval, opts)
-}
-
-func (tx *MetricsDatabaseTx) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) (metrics []api.ContractSetMetric, _ error) {
-	return ssql.ContractSetMetrics(ctx, tx, start, n, interval, opts)
-}
-
 func (tx *MetricsDatabaseTx) PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error {
 	return ssql.PruneMetrics(ctx, tx, metric, cutoff)
 }
@@ -99,14 +95,6 @@ func (tx *MetricsDatabaseTx) RecordContractMetric(ctx context.Context, metrics .
 
 func (tx *MetricsDatabaseTx) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {
 	return ssql.RecordContractPruneMetric(ctx, tx, metrics...)
-}
-
-func (tx *MetricsDatabaseTx) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
-	return ssql.RecordContractSetChurnMetric(ctx, tx, metrics...)
-}
-
-func (tx *MetricsDatabaseTx) RecordContractSetMetric(ctx context.Context, metrics ...api.ContractSetMetric) error {
-	return ssql.RecordContractSetMetric(ctx, tx, metrics...)
 }
 
 func (tx *MetricsDatabaseTx) RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error {

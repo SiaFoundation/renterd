@@ -23,10 +23,13 @@ Usage:
 `
 	// usageFooter is the footer for the CLI usage text.
 	usageFooter = `
-There are 3 commands:
+There are 4 commands:
   - version: prints the network as well as build information
   - config: builds a YAML config file through a series of prompts
   - seed: generates a new seed and prints the recovery phrase
+  - sqlite backup <src> <dest>: backs up the sqlite database at a
+    specified source path to the specified destination path
+    (safe to use while renterd is running)
 
 See the documentation (https://docs.sia.tech/) for more information and examples
 on how to configure and use renterd.
@@ -38,9 +41,7 @@ func main() {
 
 	// load the config
 	cfg, network, genesis, err := loadConfig()
-	if err != nil {
-		stdoutFatalError("failed to load config: " + err.Error())
-	}
+	checkFatalError("failed to load config", err)
 
 	// NOTE: update the usage header when adding new commands
 	if flag.Arg(0) == "version" {
@@ -52,27 +53,24 @@ func main() {
 	} else if flag.Arg(0) == "config" {
 		cmdBuildConfig(&cfg)
 		return
+	} else if flag.Arg(0) == "sqlite" && flag.Arg(1) == "backup" &&
+		flag.Arg(2) != "" && flag.Arg(3) != "" {
+		cmdBackup()
+		return
 	} else if flag.Arg(0) != "" {
 		flag.Usage()
 		return
 	}
 
 	// sanitize the config
-	if err := sanitizeConfig(&cfg); err != nil {
-		stdoutFatalError("failed to sanitize config: " + err.Error())
-	}
+	checkFatalError("failed to sanitize config", sanitizeConfig(&cfg))
 
 	// create node
 	node, err := newNode(cfg, network, genesis)
-	if err != nil {
-		stdoutFatalError("failed to create node: " + err.Error())
-	}
+	checkFatalError("failed to create node", err)
 
 	// start node
-	err = node.Run()
-	if err != nil {
-		stdoutFatalError("failed to run node: " + err.Error())
-	}
+	checkFatalError("failed to run node", node.Run())
 
 	// wait for interrupt signal
 	signalCh := make(chan os.Signal, 1)
@@ -80,11 +78,7 @@ func main() {
 	<-signalCh
 
 	// shut down the node
-	err = node.Shutdown()
-	if err != nil {
-		os.Exit(1)
-		return
-	}
+	checkFatalError("failed to shut down", node.Shutdown())
 
 	os.Exit(0)
 }

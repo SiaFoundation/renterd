@@ -24,7 +24,14 @@ type (
 		Worker    Worker    `yaml:"worker,omitempty"`
 		S3        S3        `yaml:"s3,omitempty"`
 
-		Database Database `yaml:"database,omitempty"`
+		Database Database     `yaml:"database,omitempty"`
+		Explorer ExplorerData `yaml:"explorer,omitempty"`
+	}
+
+	// ExplorerData contains the configuration for using an external explorer.
+	ExplorerData struct {
+		Disable bool   `yaml:"disable,omitempty"`
+		URL     string `yaml:"url,omitempty"`
 	}
 
 	// HTTP contains the configuration for the HTTP server.
@@ -41,13 +48,13 @@ type (
 	}
 
 	Database struct {
-		Log DatabaseLog `yaml:"log,omitempty"` // deprecated. included for compatibility.
 		// optional fields depending on backend
 		MySQL MySQL `yaml:"mysql,omitempty"`
 	}
 
 	// Bus contains the configuration for a bus.
 	Bus struct {
+		AllowPrivateIPs               bool          `yaml:"allowPrivateIPs,omitempty"`
 		AnnouncementMaxAgeHours       uint64        `yaml:"announcementMaxAgeHours,omitempty"`
 		Bootstrap                     bool          `yaml:"bootstrap,omitempty"`
 		GatewayAddr                   string        `yaml:"gatewayAddr,omitempty"`
@@ -55,7 +62,6 @@ type (
 		RemotePassword                string        `yaml:"remotePassword,omitempty"`
 		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry,omitempty"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
-		PersistInterval               time.Duration `yaml:"persistInterval,omitempty"` // deprecated
 	}
 
 	// LogFile configures the file output of the logger.
@@ -76,7 +82,6 @@ type (
 	}
 
 	Log struct {
-		Path     string      `yaml:"path,omitempty"`  // deprecated. included for compatibility.
 		Level    string      `yaml:"level,omitempty"` // global log level
 		StdOut   StdOut      `yaml:"stdout,omitempty"`
 		File     LogFile     `yaml:"file,omitempty"`
@@ -104,12 +109,11 @@ type (
 	}
 
 	S3 struct {
-		Address           string            `yaml:"address,omitempty"`
-		DisableAuth       bool              `yaml:"disableAuth,omitempty"`
-		Enabled           bool              `yaml:"enabled,omitempty"`
-		KeypairsV4        map[string]string `yaml:"keypairsV4,omitempty"` // deprecated. included for compatibility.
-		HostBucketEnabled bool              `yaml:"hostBucketEnabled,omitempty"`
-		HostBucketBases   []string          `yaml:"hostBucketBases,omitempty"`
+		Address           string   `yaml:"address,omitempty"`
+		DisableAuth       bool     `yaml:"disableAuth,omitempty"`
+		Enabled           bool     `yaml:"enabled,omitempty"`
+		HostBucketEnabled bool     `yaml:"hostBucketEnabled,omitempty"`
+		HostBucketBases   []string `yaml:"hostBucketBases,omitempty"`
 	}
 
 	// Worker contains the configuration for a worker.
@@ -118,9 +122,7 @@ type (
 		ID                            string         `yaml:"id,omitempty"`
 		Remotes                       []RemoteWorker `yaml:"remotes,omitempty"`
 		AccountsRefillInterval        time.Duration  `yaml:"accountsRefillInterval,omitempty"`
-		AllowPrivateIPs               bool           `yaml:"allowPrivateIPs,omitempty"`
 		BusFlushInterval              time.Duration  `yaml:"busFlushInterval,omitempty"`
-		ContractLockTimeout           time.Duration  `yaml:"contractLockTimeout,omitempty"`
 		DownloadOverdriveTimeout      time.Duration  `yaml:"downloadOverdriveTimeout,omitempty"`
 		UploadOverdriveTimeout        time.Duration  `yaml:"uploadOverdriveTimeout,omitempty"`
 		DownloadMaxOverdrive          uint64         `yaml:"downloadMaxOverdrive,omitempty"`
@@ -128,13 +130,12 @@ type (
 		UploadMaxMemory               uint64         `yaml:"uploadMaxMemory,omitempty"`
 		UploadMaxOverdrive            uint64         `yaml:"uploadMaxOverdrive,omitempty"`
 		AllowUnauthenticatedDownloads bool           `yaml:"allowUnauthenticatedDownloads,omitempty"`
-		ExternalAddress               string         `yaml:"externalAddress,omitempty"`
 	}
 
 	// Autopilot contains the configuration for an autopilot.
 	Autopilot struct {
 		Enabled                        bool          `yaml:"enabled,omitempty"`
-		ID                             string        `yaml:"id,omitempty"`
+		AllowRedundantHostIPs          bool          `yaml:"allowRedundantHostIPs,omitempty"`
 		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
 		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`
 		RevisionBroadcastInterval      time.Duration `yaml:"revisionBroadcastInterval,omitempty"`

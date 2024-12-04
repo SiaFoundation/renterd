@@ -1,9 +1,7 @@
 package contractor
 
 import (
-	"context"
 	"errors"
-	"time"
 
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
@@ -15,22 +13,33 @@ var (
 )
 
 type (
+	hostFilter interface {
+		Add(host api.Host)
+		HasRedundantIP(host api.Host) bool
+	}
+
 	hostSet struct {
 		subnetToHostKey map[string]string
-
-		logger *zap.SugaredLogger
+		logger          *zap.SugaredLogger
 	}
+	noopFilter struct{}
 )
 
-func (hs *hostSet) HasRedundantIP(host api.Host) bool {
-	// compat code for hosts that have been scanned before ResolvedAddresses
-	// were introduced
-	if len(host.ResolvedAddresses) == 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		host.ResolvedAddresses, _, _ = utils.ResolveHostIP(ctx, host.NetAddress)
+func (n noopFilter) Add(api.Host)                 {}
+func (n noopFilter) HasRedundantIP(api.Host) bool { return false }
+
+func newHostFilter(allowRedundantHostIPs bool, logger *zap.SugaredLogger) hostFilter {
+	if allowRedundantHostIPs {
+		return noopFilter{}
 	}
 
+	return &hostSet{
+		subnetToHostKey: make(map[string]string),
+		logger:          logger.Named("ipFilter"),
+	}
+}
+
+func (hs *hostSet) HasRedundantIP(host api.Host) bool {
 	subnets, err := utils.AddressesToSubnets(host.ResolvedAddresses)
 	if err != nil {
 		hs.logger.Errorf("failed to parse host %v subnets: %v", host.PublicKey, err)

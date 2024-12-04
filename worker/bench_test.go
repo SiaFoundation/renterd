@@ -33,19 +33,19 @@ func BenchmarkDownloaderSingleObject(b *testing.B) {
 	w.AddHosts(up.rs.TotalShards)
 
 	data := bytes.NewReader(frand.Bytes(int(up.rs.SlabSizeNoRedundancy())))
-	_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up, lockingPriorityUpload)
+	_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up)
 	if err != nil {
 		b.Fatal(err)
 	}
-	o, err := w.os.Object(context.Background(), testBucket, up.path, api.GetObjectOptions{})
+	o, err := w.os.Object(context.Background(), testBucket, up.key, api.GetObjectOptions{})
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	b.SetBytes(o.Object.Size)
+	b.SetBytes(o.Size)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err = w.downloadManager.DownloadObject(context.Background(), io.Discard, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
+		err = w.downloadManager.DownloadObject(context.Background(), io.Discard, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func BenchmarkUploaderSingleObject(b *testing.B) {
 	b.SetBytes(int64(rhpv2.SectorSize * up.rs.MinShards))
 	b.ResetTimer()
 
-	_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up, lockingPriorityUpload)
+	_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func BenchmarkUploaderMultiObject(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		data := io.LimitReader(&zeroReader{}, int64(rhpv2.SectorSize*up.rs.MinShards))
-		_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up, lockingPriorityUpload)
+		_, _, err := w.uploadManager.Upload(context.Background(), data, w.Contracts(), up)
 		if err != nil {
 			b.Fatal(err)
 		}
