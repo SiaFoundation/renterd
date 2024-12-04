@@ -2800,10 +2800,13 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	tt.OK(err)
 
 	// mine a block to confirm the contract but burn the block reward
-	cluster.mineBlocks(types.Address{}, 1)
+	cluster.mineBlocks(types.VoidAddress, 1)
 	time.Sleep(time.Second)
 
 	wallet, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	fee, err := b.RecommendedFee(context.Background())
 	tt.OK(err)
 
 	// contract should be confirmed
@@ -2817,7 +2820,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	tt.OK(hosts[0].Close())
 
 	// mine until the contract is expired
-	cluster.mineBlocks(types.Address{}, contract.EndHeight()-cs.BlockHeight+10)
+	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
 	time.Sleep(time.Second)
 
 	// contract state should be 'failed'
@@ -2828,10 +2831,10 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	}
 
 	// confirmed balance should be the same as before
-	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds)
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(1000))
 	wallet, err = b.Wallet(context.Background())
 	tt.OK(err)
 	if !expectedBalance.Equals(wallet.Confirmed) {
-		t.Errorf("expected balance to be %v, got %v", expectedBalance, wallet.Confirmed)
+		t.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, expectedBalance.Sub(wallet.Confirmed))
 	}
 }

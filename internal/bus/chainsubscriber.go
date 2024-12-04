@@ -42,6 +42,7 @@ var (
 
 type (
 	ChainManager interface {
+		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		RecommendedFee() types.Currency
 		Tip() types.ChainIndex
@@ -53,6 +54,10 @@ type (
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
+	Syncer interface {
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
+	}
+
 	WebhookManager interface {
 		webhooks.Broadcaster
 		Delete(context.Context, webhooks.Webhook) error
@@ -62,12 +67,15 @@ type (
 	}
 
 	Wallet interface {
+		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
+		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}
 
 	chainSubscriber struct {
 		cm     ChainManager
 		cs     ChainStore
+		s      Syncer
 		wm     WebhookManager
 		logger *zap.SugaredLogger
 
@@ -103,12 +111,13 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be stopped by calling Shutdown.
-func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
+func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	logger = logger.Named("chainsubscriber")
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &chainSubscriber{
 		cm:     cm,
 		cs:     cs,
+		s:      s,
 		wm:     whm,
 		logger: logger.Sugar(),
 
@@ -241,6 +250,9 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	if err := tx.UpdateFileContractElementProofs(cau); err != nil {
 		return fmt.Errorf("failed to update file contract element proofs: %w", err)
 	}
+
+	// broadcast expired file contracts
+	s.broadcastExpiredFileContractResolutions(tx, cau)
 
 	// prune contracts 144 blocks after window_end
 	if cau.State.Index.Height > contractElementPruneWindow {
@@ -394,6 +406,39 @@ func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 		return nil
 	})
 	return
+}
+
+func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUpdateTx, cau chain.ApplyUpdate) {
+	expiredFCEs, err := tx.ExpiredFileContractElements(cau.State.Index.Height)
+	if err != nil {
+		s.logger.Errorf("failed to get expired file contract elements: %v", err)
+	}
+	for _, fce := range expiredFCEs {
+		txn := types.V2Transaction{
+			MinerFee: s.cm.RecommendedFee().Mul64(1000),
+			FileContractResolutions: []types.V2FileContractResolution{
+				{
+					Parent:     fce,
+					Resolution: &types.V2FileContractExpiration{},
+				},
+			},
+		}
+		// fund and sign txn
+		basis, toSign, err := s.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
+		if err != nil {
+			s.logger.Errorf("failed to fund contract expiration txn: %v", err)
+			continue
+		}
+		s.wallet.SignV2Inputs(&txn, toSign)
+
+		// verify txn and broadcast it
+		_, err = s.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
+		if err != nil {
+			s.logger.Errorf("failed to broadcast contract expiration txn: %v", err)
+			continue
+		}
+		s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
+	}
 }
 
 func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {

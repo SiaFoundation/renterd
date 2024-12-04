@@ -376,7 +376,7 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 
 	// create chain subscriber
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(wm, cm, store, b.s, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
