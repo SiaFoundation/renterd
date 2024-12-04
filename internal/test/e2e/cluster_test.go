@@ -2813,7 +2813,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	fee, err := b.RecommendedFee(context.Background())
 	tt.OK(err)
 
-	// contract should be confirmed
+	// contract should be active
 	contract, err = b.Contract(context.Background(), contract.ID)
 	tt.OK(err)
 	if contract.State != api.ContractStateActive {
@@ -2825,14 +2825,16 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 
 	// mine until the contract is expired
 	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
-	time.Sleep(time.Second)
 
-	// contract state should be 'failed'
-	contract, err = b.Contract(context.Background(), contract.ID)
-	tt.OK(err)
-	if contract.State != api.ContractStateFailed {
-		t.Errorf("expected contract to be failed, got %v", contract.State)
-	}
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		// contract state should be 'failed'
+		contract, err = b.Contract(context.Background(), contract.ID)
+		tt.OK(err)
+		if contract.State != api.ContractStateFailed {
+			return fmt.Errorf("expected contract to be failed, got %v", contract.State)
+		}
+		return nil
+	})
 
 	// confirmed balance should be the same as before
 	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(1000))
