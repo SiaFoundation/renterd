@@ -156,8 +156,8 @@ func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []Siaco
 }
 
 func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fces []types.V2FileContractElement, _ error) {
-	rows, err := tx.Query(ctx, "SELECT c.fcid, contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.window_end < ? AND c.state != ?",
-		bh, contractStateFailed)
+	rows, err := tx.Query(ctx, "SELECT c.fcid, contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.window_end < ? AND c.state = ?",
+		bh, contractStateActive)
 	if err != nil {
 		return nil, err
 	}

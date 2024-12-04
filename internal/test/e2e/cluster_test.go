@@ -262,11 +262,11 @@ func TestNewTestCluster(t *testing.T) {
 			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
 		}
 		ac = archivedContracts[0]
-		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
+		if ac.RevisionHeight == 0 || (!ac.V2 && ac.RevisionNumber != math.MaxUint64) {
 			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
-		if ac.ProofHeight != 0 {
-			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
+		if ac.ProofHeight == 0 {
+			t.Fatal("proof height should be >0 since it is set to the renewal height")
 		}
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
@@ -2772,6 +2772,10 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
 	defer cluster.Shutdown()
 
+	if cluster.cm.Tip().Height <= cluster.network.HardforkV2.AllowHeight {
+		t.Skip("only runs against v2 network")
+	}
+
 	// convenience variables
 	b := cluster.Bus
 	tt := cluster.tt
@@ -2827,7 +2831,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	contract, err = b.Contract(context.Background(), contract.ID)
 	tt.OK(err)
 	if contract.State != api.ContractStateFailed {
-		t.Errorf("expected contract to be active, got %v", contract.State)
+		t.Errorf("expected contract to be failed, got %v", contract.State)
 	}
 
 	// confirmed balance should be the same as before
