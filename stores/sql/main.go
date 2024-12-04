@@ -1621,8 +1621,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
-		price_table = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table END,
-		price_table_expiry = CASE WHEN ? AND (price_table_expiry IS NULL OR ? > price_table_expiry) THEN ? ELSE price_table_expiry END,
+		price_table = CASE WHEN ? THEN ? ELSE price_table END,
+		price_table_expiry = CASE WHEN ? THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
 		resolved_addresses = CASE WHEN ? THEN ? ELSE resolved_addresses END
@@ -1645,8 +1645,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, scanTime, scanTime, // uptime
 			scanTime,                                  // last_scan
 			scan.Success, HostSettings(scan.Settings), // settings
-			scan.Success, now, PriceTable(scan.PriceTable), // price_table
-			scan.Success, now, now, // price_table_expiry
+			scan.Success, PriceTable(scan.PriceTable), // price_table
+			scan.Success, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
 			len(scan.ResolvedAddresses) > 0, strings.Join(scan.ResolvedAddresses, ","),
