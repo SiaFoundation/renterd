@@ -254,10 +254,14 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	// broadcast expired file contracts
 	s.broadcastExpiredFileContractResolutions(tx, cau)
 
-	// prune contracts 144 blocks after window_end
 	if cau.State.Index.Height > contractElementPruneWindow {
+		// prune contracts 144 blocks after window_end
 		if err := tx.PruneFileContractElements(cau.State.Index.Height - contractElementPruneWindow); err != nil {
 			return fmt.Errorf("failed to prune file contract elements: %w", err)
+		}
+		// mark contracts as failed a prune window after the window end
+		if err := tx.UpdateFailedContracts(cau.State.Index.Height - contractElementPruneWindow); err != nil {
+			return fmt.Errorf("failed to update failed contracts: %w", err)
 		}
 	}
 	return nil
@@ -397,12 +401,6 @@ func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 		if err := tx.UpdateChainIndex(index); err != nil {
 			return fmt.Errorf("failed to update chain index: %w", err)
 		}
-
-		// update failed contracts
-		if err := tx.UpdateFailedContracts(index.Height); err != nil {
-			return fmt.Errorf("failed to update failed contracts: %w", err)
-		}
-
 		return nil
 	})
 	return
@@ -412,6 +410,7 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 	expiredFCEs, err := tx.ExpiredFileContractElements(cau.State.Index.Height)
 	if err != nil {
 		s.logger.Errorf("failed to get expired file contract elements: %v", err)
+		return
 	}
 	for _, fce := range expiredFCEs {
 		txn := types.V2Transaction{
@@ -532,16 +531,6 @@ func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.Chain
 			"reason", "contract confirmed")
 	}
 
-	// renewed: 'active' -> 'complete'
-	if curr.revisionNumber == types.MaxRevisionNumber && curr.fileSize == 0 {
-		if err := updateState(api.ContractStateComplete); err != nil {
-			return fmt.Errorf("failed to update contract state: %w", err)
-		}
-		s.logger.Infow("contract state changed: active -> complete",
-			"fcid", fcid,
-			"reason", "final revision confirmed")
-	}
-
 	// storage proof: 'active' -> 'complete/failed'
 	if resolved {
 		if err := tx.UpdateContractProofHeight(fcid, index.Height); err != nil {
@@ -600,6 +589,10 @@ func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElem
 		curr.revisionNumber = rev.FileContract.RevisionNumber
 		curr.fileSize = rev.FileContract.Filesize
 	}
+	if curr.revisionNumber == math.MaxUint64 && curr.fileSize == 0 {
+		resolved = true
+		valid = true
+	}
 	return contractUpdate{
 		fcid:     types.FileContractID(fce.ID),
 		prev:     nil,
@@ -621,17 +614,17 @@ func v2ContractUpdate(fce types.V2FileContractElement, rev *types.V2FileContract
 
 	var resolved, valid bool
 	if res != nil {
+		resolved = true
 		switch res.(type) {
 		case *types.V2FileContractRenewal:
-			valid = true
-			// hack to make sure v2 contracts also have the sentinel revision
-			// number
+			// hack to make sure v2 contracts also appear with a max revision
+			// number after being renewed
 			curr.revisionNumber = math.MaxUint64
+			valid = true
 		case *types.V2StorageProof:
 			valid = true
-			resolved = true
 		case *types.V2FileContractExpiration:
-			valid = fce.V2FileContract.Filesize == 0
+			valid = false
 		}
 	}
 
