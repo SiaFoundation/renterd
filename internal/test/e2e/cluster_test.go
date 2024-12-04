@@ -2766,3 +2766,72 @@ func TestConsensusResync(t *testing.T) {
 		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
 	}
 }
+
+func TestContractFundsReturnWhenHostOffline(t *testing.T) {
+	// create a test cluster without autopilot
+	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
+	defer cluster.Shutdown()
+
+	// convenience variables
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// scan the host
+	tt.OKAll(b.ScanHost(context.Background(), h.PublicKey, time.Minute))
+
+	// fetch balance
+	wallet, err := b.Wallet(context.Background())
+	tt.OK(err)
+	if !wallet.Unconfirmed.IsZero() {
+		t.Fatal("wallet should not have unconfirmed balance")
+	}
+
+	// manually form a contract with the host that uses up almost all of the
+	// confirmed balance of the wallet
+	cs, _ := b.ConsensusState(context.Background())
+	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
+	fundAmt := wallet.Confirmed.Mul64(96).Div64(100)
+	contract, err := b.FormContract(context.Background(), wallet.Address, fundAmt, h.PublicKey, types.Siacoins(1), endHeight)
+	tt.OK(err)
+
+	// mine a block to confirm the contract but burn the block reward
+	cluster.mineBlocks(types.Address{}, 1)
+	time.Sleep(time.Second)
+
+	wallet, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	// contract should be confirmed
+	contract, err = b.Contract(context.Background(), contract.ID)
+	tt.OK(err)
+	if contract.State != api.ContractStateActive {
+		t.Fatalf("expected contract to be active, got %v", contract.State)
+	}
+
+	// stop the host
+	tt.OK(hosts[0].Close())
+
+	// mine until the contract is expired
+	cluster.mineBlocks(types.Address{}, contract.EndHeight()-cs.BlockHeight+10)
+	time.Sleep(time.Second)
+
+	// contract state should be 'failed'
+	contract, err = b.Contract(context.Background(), contract.ID)
+	tt.OK(err)
+	if contract.State != api.ContractStateFailed {
+		t.Errorf("expected contract to be active, got %v", contract.State)
+	}
+
+	// confirmed balance should be the same as before
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds)
+	wallet, err = b.Wallet(context.Background())
+	tt.OK(err)
+	if !expectedBalance.Equals(wallet.Confirmed) {
+		t.Errorf("expected balance to be %v, got %v", expectedBalance, wallet.Confirmed)
+	}
+}
