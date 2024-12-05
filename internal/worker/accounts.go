@@ -16,6 +16,7 @@ import (
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -25,11 +26,19 @@ var (
 )
 
 var (
-	minBalance  = types.Siacoins(1).Div64(2).Big()
-	maxBalance  = types.Siacoins(1)
-	maxNegDrift = new(big.Int).Neg(types.Siacoins(10).Big())
+	minBalance = types.Siacoins(1).Div64(2).Big()
+	maxBalance = types.Siacoins(1)
 
 	alertAccountRefillID = alerts.RandomAlertID() // constant until restarted
+
+	// maxNegDrift and driftResetInterval determine the maximum rate at which an
+	// account can accumulate negative drift. Once per driftResetInterval, when
+	// maxNegDrift is reached, we reset the drift. This means that using the
+	// current settings, an account can drift by 4SC per hour.
+	// NOTE: Once we use RHP4, we can experiment with reducing this number
+	// significantly
+	maxNegDrift        = new(big.Int).Neg(types.Siacoins(4).Big())
+	driftResetInterval = time.Hour
 )
 
 type (
@@ -83,8 +92,9 @@ type (
 	}
 
 	Account struct {
-		key    types.PrivateKey
-		logger *zap.SugaredLogger
+		driftRate *rate.Limiter
+		key       types.PrivateKey
+		logger    *zap.SugaredLogger
 
 		rwmu sync.RWMutex
 
@@ -196,8 +206,9 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 	acc, exists := a.byID[accID]
 	if !exists {
 		acc = &Account{
-			key:    accKey,
-			logger: a.logger.Named(accID.String()),
+			key:       accKey,
+			driftRate: rate.NewLimiter(rate.Every(driftResetInterval), 1),
+			logger:    a.logger.Named(accID.String()),
 			acc: api.Account{
 				ID:            accID,
 				CleanShutdown: false,
@@ -259,6 +270,7 @@ func (a *AccountMgr) run() {
 		acc.RequiresSync = true // force sync on reboot
 		account := &Account{
 			acc:              acc,
+			driftRate:        rate.NewLimiter(rate.Every(driftResetInterval), 1),
 			key:              accKey,
 			logger:           a.logger.Named(acc.ID.String()),
 			requiresSyncTime: time.Now(),
@@ -383,14 +395,26 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 	// negative because we don't care if we have more money than
 	// expected.
 	if account.Drift.Cmp(maxNegDrift) < 0 {
-		alert := newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
-			"accountID", account.ID.String(),
-			"hostKey", contract.HostKey.String(),
-			"balance", account.Balance.String(),
-			"drift", account.Drift.String(),
-		)
-		_ = a.alerts.RegisterAlert(a.shutdownCtx, alert)
-		return false, fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
+		// check if we can reset the drift according to our ratelimit
+		acc := a.account(account.HostKey)
+		if acc.driftRate.Allow() {
+			// reset the drift
+			if err := a.ResetDrift(acc.ID()); err != nil {
+				return false, fmt.Errorf("failed to reset drift: %w", err)
+			}
+			_ = acc.driftRate.Reserve()
+			account = acc.convert() // update account
+		} else {
+			// register alert
+			alert := newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
+				"accountID", account.ID.String(),
+				"hostKey", contract.HostKey.String(),
+				"balance", account.Balance.String(),
+				"drift", account.Drift.String(),
+			)
+			_ = a.alerts.RegisterAlert(a.shutdownCtx, alert)
+			return false, fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
+		}
 	} else {
 		_ = a.alerts.DismissAlerts(a.shutdownCtx, alerts.IDForAccount(alertAccountRefillID, account.ID))
 	}
