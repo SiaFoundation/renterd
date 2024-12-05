@@ -30,6 +30,7 @@ import (
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -2837,7 +2838,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	})
 
 	// confirmed balance should be the same as before
-	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(1000))
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
 	wallet, err = b.Wallet(context.Background())
 	tt.OK(err)
 	if !expectedBalance.Equals(wallet.Confirmed) {
