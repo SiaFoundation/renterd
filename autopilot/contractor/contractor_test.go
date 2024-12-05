@@ -126,7 +126,7 @@ func TestShouldArchive(t *testing.T) {
 	// max revision number
 	c1.Revision.RevisionNumber = math.MaxUint64
 	err = c.shouldArchive(c1, 2, n)
-	if err != errContractMaxRevisionNumber {
+	if err != errContractRenewed {
 		t.Fatal("unexpected error", err)
 	}
 	c1.Revision.RevisionNumber = 1
@@ -134,10 +134,18 @@ func TestShouldArchive(t *testing.T) {
 	// max revision number
 	c1.RevisionNumber = math.MaxUint64
 	err = c.shouldArchive(c1, 2, n)
-	if err != errContractMaxRevisionNumber {
+	if err != errContractRenewed {
 		t.Fatal("unexpected error", err)
 	}
 	c1.RevisionNumber = 1
+
+	// renewed
+	c1.RenewedTo = types.FileContractID{1}
+	err = c.shouldArchive(c1, 2, n)
+	if err != errContractRenewed {
+		t.Fatal("unexpected error", err)
+	}
+	c1.RenewedTo = types.FileContractID{}
 
 	// not confirmed
 	c1.State = api.ContractStatePending

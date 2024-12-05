@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 )
@@ -20,7 +21,7 @@ var (
 	errContractOutOfCollateral       = errors.New("contract is out of collateral")
 	errContractOutOfFunds            = errors.New("contract is out of funds")
 	errContractUpForRenewal          = errors.New("contract is up for renewal")
-	errContractMaxRevisionNumber     = errors.New("contract has reached max revision number")
+	errContractRenewed               = errors.New(api.ContractArchivalReasonRenewed)
 	errContractExpired               = errors.New("contract has expired")
 	errContractNotConfirmed          = errors.New("contract hasn't been confirmed on chain in time")
 )
@@ -95,8 +96,8 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, contract contract
 		usable = false
 		refresh = false
 		renew = false
-	} else if contract.Revision.RevisionNumber == math.MaxUint64 {
-		reasons = append(reasons, errContractMaxRevisionNumber.Error())
+	} else if contract.Revision.RevisionNumber == math.MaxUint64 || contract.RenewedTo != (types.FileContractID{}) {
+		reasons = append(reasons, errContractRenewed.Error())
 		usable = false
 		refresh = false
 		renew = false
