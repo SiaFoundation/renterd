@@ -35,13 +35,16 @@ type (
 	}
 
 	hostDownloadClient struct {
-		hi  api.HostInfo
-		acc *worker.Account
-
-		rhp3Prices *prices.PriceTables
-		rhp4Prices *prices.PricesCache
-
+		hi   api.HostInfo
+		acc  *worker.Account
+		pts  *prices.PriceTables
 		rhp3 *rhp3.Client
+	}
+
+	hostV2DownloadClient struct {
+		hi   api.HostInfo
+		acc  *worker.Account
+		pts  *prices.PricesCache
 		rhp4 *rhp4.Client
 	}
 )
@@ -66,15 +69,21 @@ func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr 
 }
 
 func (w *Worker) Downloader(hi api.HostInfo) host.Downloader {
+	if hi.IsV2() {
+		return &hostV2DownloadClient{
+			hi:   hi,
+			acc:  w.accounts.ForHost(hi.PublicKey),
+			pts:  w.pricesCache,
+			rhp4: w.rhp4Client,
+		}
+	}
+
 	return &hostDownloadClient{
 		hi: hi,
 
-		acc:        w.accounts.ForHost(hi.PublicKey),
-		rhp3Prices: w.priceTables,
-		rhp3:       w.rhp3Client,
-
-		rhp4Prices: w.pricesCache,
-		rhp4:       w.rhp4Client,
+		acc:  w.accounts.ForHost(hi.PublicKey),
+		pts:  w.priceTables,
+		rhp3: w.rhp3Client,
 	}
 }
 
@@ -223,20 +232,7 @@ func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevi
 
 func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
 	return d.acc.WithWithdrawal(func() (types.Currency, error) {
-		if d.hi.IsV2() {
-			prices, err := d.rhp4Prices.Fetch(ctx, d)
-			if err != nil {
-				return types.ZeroCurrency, err
-			}
-
-			res, err := d.rhp4.ReadSector(ctx, d.hi.PublicKey, d.hi.V2SiamuxAddr(), prices, d.acc.Token(), w, root, offset, length)
-			if err != nil {
-				return types.ZeroCurrency, err
-			}
-			return res.Usage.RenterCost(), nil
-		}
-
-		pt, ptc, err := d.rhp3Prices.Fetch(ctx, d, nil)
+		pt, ptc, err := d.pts.Fetch(ctx, d, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -249,14 +245,6 @@ func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, ro
 	})
 }
 
-func (h *hostDownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	settings, err := h.rhp4.Settings(ctx, h.hi.PublicKey, h.hi.V2SiamuxAddr())
-	if err != nil {
-		return rhpv4.HostPrices{}, err
-	}
-	return settings.Prices, nil
-}
-
 func (h *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
 	hpt, err = h.rhp3.PriceTable(ctx, h.hi.PublicKey, h.hi.SiamuxAddr, rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
 	if err == nil {
@@ -266,3 +254,28 @@ func (h *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileCont
 }
 
 func (d *hostDownloadClient) PublicKey() types.PublicKey { return d.hi.PublicKey }
+
+func (d *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+	return d.acc.WithWithdrawal(func() (types.Currency, error) {
+		prices, err := d.pts.Fetch(ctx, d)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+
+		res, err := d.rhp4.ReadSector(ctx, d.hi.PublicKey, d.hi.V2SiamuxAddr(), prices, d.acc.Token(), w, root, offset, length)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+		return res.Usage.RenterCost(), nil
+	})
+}
+
+func (d *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	settings, err := d.rhp4.Settings(ctx, d.hi.PublicKey, d.hi.V2SiamuxAddr())
+	if err != nil {
+		return rhpv4.HostPrices{}, err
+	}
+	return settings.Prices, nil
+}
+
+func (d *hostV2DownloadClient) PublicKey() types.PublicKey { return d.hi.PublicKey }

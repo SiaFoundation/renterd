@@ -423,7 +423,7 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 func (a *Account) Token() rhpv4.AccountToken {
 	t := rhpv4.AccountToken{
 		Account:    rhpv4.Account(a.key.PublicKey()),
-		ValidUntil: time.Now().Add(time.Hour),
+		ValidUntil: time.Now().Add(5 * time.Minute),
 	}
 	t.Signature = a.key.SignHash(t.SigHash())
 	return t
