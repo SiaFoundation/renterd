@@ -20,6 +20,10 @@ import (
 )
 
 const (
+	ContractResolutionTxnWeight = 1000
+)
+
+const (
 	// contractElementPruneWindow is the number of blocks beyond a contract's
 	// prune window when we start deleting its file contract elements.
 	contractElementPruneWindow = 144
@@ -414,7 +418,7 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 	}
 	for _, fce := range expiredFCEs {
 		txn := types.V2Transaction{
-			MinerFee: s.cm.RecommendedFee().Mul64(1000),
+			MinerFee: s.cm.RecommendedFee().Mul64(ContractResolutionTxnWeight),
 			FileContractResolutions: []types.V2FileContractResolution{
 				{
 					Parent:     fce,

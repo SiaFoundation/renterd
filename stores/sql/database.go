@@ -19,7 +19,7 @@ import (
 type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
-		ExpiredFileContractElements(bh uint64) (fces []types.V2FileContractElement, _ error)
+		ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error)
 		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
 		PruneFileContractElements(threshold uint64) error
 		UpdateFileContractElements([]types.V2FileContractElement) error

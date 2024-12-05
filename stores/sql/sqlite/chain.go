@@ -203,7 +203,7 @@ func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.
 	return ssql.UpdateContractState(c.ctx, c.tx, fcid, state, c.l)
 }
 
-func (c chainUpdateTx) ExpiredFileContractElements(bh uint64) (fces []types.V2FileContractElement, _ error) {
+func (c chainUpdateTx) ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error) {
 	return ssql.ExpiredFileContractElements(c.ctx, c.tx, bh)
 }
 
