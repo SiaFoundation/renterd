@@ -116,6 +116,7 @@ func (w *Worker) Uploader(hi api.HostInfo, cm api.ContractMetadata) host.Uploade
 			cm: cm,
 			rk: w.deriveRenterKey(hi.PublicKey),
 
+			acc:  w.accounts.ForHost(hi.PublicKey),
 			csr:  w.contractSpendingRecorder,
 			pts:  w.pricesCache,
 			rhp4: w.rhp4Client,
@@ -126,6 +127,7 @@ func (w *Worker) Uploader(hi api.HostInfo, cm api.ContractMetadata) host.Uploade
 		cm: cm,
 		rk: w.deriveRenterKey(hi.PublicKey),
 
+		acc:  w.accounts.ForHost(hi.PublicKey),
 		csr:  w.contractSpendingRecorder,
 		pts:  w.priceTables,
 		rhp3: w.rhp3Client,
