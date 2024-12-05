@@ -384,7 +384,7 @@ func TestObjectsBucket(t *testing.T) {
 	tt := cluster.tt
 
 	// create a test bucket
-	bucket := "hello world"
+	bucket := "hello-world"
 	tt.OK(b.CreateBucket(context.Background(), bucket, api.CreateBucketOptions{}))
 
 	// upload an object to this bucket
