@@ -13,7 +13,7 @@ import (
 
 type (
 	ContractSpendingRecorder interface {
-		Record(rev types.FileContractRevision, cs api.ContractSpending)
+		Record(fcid types.FileContractID, recordSpendFn func(*api.ContractSpendingRecord))
 		Stop(context.Context)
 	}
 
@@ -51,25 +51,46 @@ func (w *Worker) initContractSpendingRecorder(flushInterval time.Duration) {
 }
 
 // Record stores the given contract spending record until it gets flushed to the bus.
-func (r *contractSpendingRecorder) Record(rev types.FileContractRevision, cs api.ContractSpending) {
+// func (r *contractSpendingRecorder) Record(rev types.FileContractRevision, cs api.ContractSpending) {
+// 	r.mu.Lock()
+// 	defer r.mu.Unlock()
+
+// 	// record the spending
+// 	csr, found := r.contractSpendings[rev.ParentID]
+// 	if !found {
+// 		csr = api.ContractSpendingRecord{
+// 			ContractID: rev.ParentID,
+// 		}
+// 	}
+// 	csr.ContractSpending = csr.ContractSpending.Add(cs)
+// 	if rev.RevisionNumber > csr.RevisionNumber {
+// 		csr.RevisionNumber = rev.RevisionNumber
+// 		csr.Size = rev.Filesize
+// 		csr.ValidRenterPayout = rev.ValidRenterPayout()
+// 		csr.MissedHostPayout = rev.MissedHostPayout()
+// 	}
+// 	r.contractSpendings[rev.ParentID] = csr
+
+// 	// schedule flush
+// 	if r.flushTimer == nil {
+// 		r.flushTimer = time.AfterFunc(r.flushInterval, r.flush)
+// 	}
+// }
+
+// Record stores the given contract spending record until it gets flushed to the bus.
+func (r *contractSpendingRecorder) Record(fcid types.FileContractID, recordSpendFn func(csr *api.ContractSpendingRecord)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// record the spending
-	csr, found := r.contractSpendings[rev.ParentID]
+	// grab the spending record
+	csr, found := r.contractSpendings[fcid]
 	if !found {
-		csr = api.ContractSpendingRecord{
-			ContractID: rev.ParentID,
-		}
+		csr = api.ContractSpendingRecord{ContractID: fcid}
 	}
-	csr.ContractSpending = csr.ContractSpending.Add(cs)
-	if rev.RevisionNumber > csr.RevisionNumber {
-		csr.RevisionNumber = rev.RevisionNumber
-		csr.Size = rev.Filesize
-		csr.ValidRenterPayout = rev.ValidRenterPayout()
-		csr.MissedHostPayout = rev.MissedHostPayout()
-	}
-	r.contractSpendings[rev.ParentID] = csr
+
+	// record the spending
+	recordSpendFn(&csr)
+	r.contractSpendings[fcid] = csr
 
 	// schedule flush
 	if r.flushTimer == nil {

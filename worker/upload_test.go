@@ -336,7 +336,7 @@ func TestMigrateLostSector(t *testing.T) {
 	shards = shards[:1]
 
 	// recreate upload contracts
-	contracts := make([]api.ContractMetadata, 0)
+	contracts := make([]hostContract, 0)
 	for _, c := range w.Contracts() {
 		_, used := usedHosts[c.HostKey]
 		if !used && c.HostKey != badHost {
@@ -455,7 +455,7 @@ func TestUploadShards(t *testing.T) {
 	shards = shards[:len(badIndices)]
 
 	// recreate upload contracts
-	contracts := make([]api.ContractMetadata, 0)
+	contracts := make([]hostContract, 0)
 	for _, c := range w.Contracts() {
 		_, used := usedHosts[c.HostKey]
 		_, bad := badHosts[c.HostKey]

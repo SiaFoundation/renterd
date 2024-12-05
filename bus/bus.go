@@ -616,7 +616,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		return txn.ID(), nil
 	} else {
 		// fetch revision
-		rev, err := b.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
+		rev, err := b.rhp2Client.SignedRevision(ctx, host.NetAddress, c.HostKey, renterKey, fcid, time.Minute)
 		if err != nil {
 			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 		}
@@ -792,12 +792,12 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 	}
 }
 
-func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
+func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, siamuxAddr string, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
 	// fetch the revision
-	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, siamuxAddr)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -805,7 +805,7 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, siamuxAddr, prepareRenew, b.w.SignTransaction)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}

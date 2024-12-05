@@ -201,7 +201,13 @@ func (w *Worker) isStopped() bool {
 
 func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
-		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fetchTimeout)
+		if fetchTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, fetchTimeout)
+			defer cancel()
+		}
+
+		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx)
 		if err != nil {
 			return err
 		}
@@ -248,8 +254,8 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// fetch contracts
-	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// fetch host & contract info
+	ulContracts, err := w.hostContracts(ctx)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -933,8 +939,8 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// fetch host & contract info
+	contracts, err := w.hostContracts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -992,8 +998,8 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		uploadOpts = append(uploadOpts, WithCustomEncryptionOffset(uint64(*opts.EncryptionOffset)))
 	}
 
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// fetch host & contract info
+	contracts, err := w.hostContracts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}

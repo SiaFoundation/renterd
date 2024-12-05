@@ -65,10 +65,6 @@ type (
 		InitialRenterFunds types.Currency   `json:"initialRenterFunds"`
 		Spending           ContractSpending `json:"spending"`
 
-		// following fields are decorated
-		HostIP     string `json:"hostIP"`
-		SiamuxAddr string `json:"siamuxAddr,omitempty"`
-
 		// following fields are only set on archived contracts
 		ArchivalReason string               `json:"archivalReason,omitempty"`
 		RenewedTo      types.FileContractID `json:"renewedTo,omitempty"`

@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
+	"math"
 
+	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	rhp "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/host"
@@ -47,6 +49,28 @@ type (
 		pts  *prices.PricesCache
 		rhp4 *rhp4.Client
 	}
+
+	hostUploadClient struct {
+		hi api.HostInfo
+		cm api.ContractMetadata
+		rk types.PrivateKey
+
+		acc  *worker.Account
+		csr  ContractSpendingRecorder
+		pts  *prices.PriceTables
+		rhp3 *rhp3.Client
+	}
+
+	hostV2UploadClient struct {
+		hi api.HostInfo
+		cm api.ContractMetadata
+		rk types.PrivateKey
+
+		acc  *worker.Account
+		csr  ContractSpendingRecorder
+		pts  *prices.PricesCache
+		rhp4 *rhp4.Client
+	}
 )
 
 var (
@@ -77,37 +101,42 @@ func (w *Worker) Downloader(hi api.HostInfo) host.Downloader {
 			rhp4: w.rhp4Client,
 		}
 	}
-
 	return &hostDownloadClient{
-		hi: hi,
-
+		hi:   hi,
 		acc:  w.accounts.ForHost(hi.PublicKey),
 		pts:  w.priceTables,
 		rhp3: w.rhp3Client,
 	}
 }
 
-func (h *hostClient) PublicKey() types.PublicKey { return h.hk }
+func (w *Worker) Uploader(hi api.HostInfo, cm api.ContractMetadata) host.Uploader {
+	if hi.IsV2() {
+		return &hostV2UploadClient{
+			hi: hi,
+			cm: cm,
+			rk: w.deriveRenterKey(hi.PublicKey),
 
-func (h *hostClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
-	// fetch price table
-	var pt rhpv3.HostPriceTable
-	if err := h.acc.WithWithdrawal(func() (amount types.Currency, err error) {
-		pt, amount, err = h.priceTable(ctx, nil)
-		return
-	}); err != nil {
-		return err
+			csr:  w.contractSpendingRecorder,
+			pts:  w.pricesCache,
+			rhp4: w.rhp4Client,
+		}
 	}
+	return &hostUploadClient{
+		hi: hi,
+		cm: cm,
+		rk: w.deriveRenterKey(hi.PublicKey),
 
-	// upload
-	cost, err := h.client.AppendSector(ctx, sectorRoot, sector, &rev, h.hk, h.siamuxAddr, h.acc.ID(), pt, h.renterKey)
-	if err != nil {
-		return fmt.Errorf("failed to upload sector: %w", err)
+		csr:  w.contractSpendingRecorder,
+		pts:  w.priceTables,
+		rhp3: w.rhp3Client,
 	}
-	// record spending
-	h.contractSpendingRecorder.Record(rev, api.ContractSpending{Uploads: cost})
-	return nil
 }
+
+func (c *hostClient) PublicKey() types.PublicKey           { return c.hk }
+func (c *hostDownloadClient) PublicKey() types.PublicKey   { return c.hi.PublicKey }
+func (c *hostV2DownloadClient) PublicKey() types.PublicKey { return c.hi.PublicKey }
+func (c *hostUploadClient) PublicKey() types.PublicKey     { return c.hi.PublicKey }
+func (c *hostV2UploadClient) PublicKey() types.PublicKey   { return c.hi.PublicKey }
 
 func (h *hostClient) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {
 	return h.client.PriceTableUnpaid(ctx, h.hk, h.siamuxAddr)
@@ -134,13 +163,7 @@ func (h *hostClient) PriceTable(ctx context.Context, rev *types.FileContractRevi
 }
 
 // FetchRevision tries to fetch a contract revision from the host.
-func (h *hostClient) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
-	if fetchTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, fetchTimeout)
-		defer cancel()
-	}
-	// Try to fetch the revision with an account first.
+func (h *hostClient) FetchRevision(ctx context.Context) (types.FileContractRevision, error) {
 	return h.client.Revision(ctx, h.fcid, h.hk, h.siamuxAddr)
 }
 
@@ -185,7 +208,15 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		}
 
 		// record the spend
-		h.contractSpendingRecorder.Record(*rev, api.ContractSpending{FundAccount: deposit.Add(cost)})
+		h.contractSpendingRecorder.Record(rev.ParentID, func(csr *api.ContractSpendingRecord) {
+			csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{FundAccount: deposit.Add(cost)})
+			if rev.RevisionNumber > csr.RevisionNumber {
+				csr.RevisionNumber = rev.RevisionNumber
+				csr.Size = rev.Filesize
+				csr.ValidRenterPayout = rev.ValidRenterPayout()
+				csr.MissedHostPayout = rev.MissedHostPayout()
+			}
+		})
 
 		// log the account balance after funding
 		log.Debugw("fund account succeeded",
@@ -213,31 +244,14 @@ func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRev
 	})
 }
 
-// priceTable fetches a price table from the host. If a revision is provided, it
-// will be used to pay for the price table.
-func (h *hostClient) priceTable(ctx context.Context, rev *types.FileContractRevision) (rhpv3.HostPriceTable, types.Currency, error) {
-	pt, cost, err := h.priceTables.Fetch(ctx, h, rev)
-	if err != nil {
-		return rhpv3.HostPriceTable{}, types.ZeroCurrency, err
-	}
-	gc, err := GougingCheckerFromContext(ctx)
-	if err != nil {
-		return rhpv3.HostPriceTable{}, cost, err
-	}
-	if breakdown := gc.CheckV1(nil, &pt.HostPriceTable); breakdown.Gouging() {
-		return rhpv3.HostPriceTable{}, cost, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
-	}
-	return pt.HostPriceTable, cost, nil
-}
-
-func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
-	return d.acc.WithWithdrawal(func() (types.Currency, error) {
-		pt, ptc, err := d.pts.Fetch(ctx, d, nil)
+func (c *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+	return c.acc.WithWithdrawal(func() (types.Currency, error) {
+		pt, ptc, err := c.pts.Fetch(ctx, c, nil)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
 
-		cost, err := d.rhp3.ReadSector(ctx, offset, length, root, w, d.hi.PublicKey, d.hi.SiamuxAddr, d.acc.ID(), d.acc.Key(), pt.HostPriceTable)
+		cost, err := c.rhp3.ReadSector(ctx, offset, length, root, w, c.hi.PublicKey, c.hi.SiamuxAddr, c.acc.ID(), c.acc.Key(), pt.HostPriceTable)
 		if err != nil {
 			return ptc, err
 		}
@@ -245,24 +259,22 @@ func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, ro
 	})
 }
 
-func (h *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
-	hpt, err = h.rhp3.PriceTable(ctx, h.hi.PublicKey, h.hi.SiamuxAddr, rhp3.PreparePriceTableAccountPayment(h.acc.Key()))
+func (c *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
+	hpt, err = c.rhp3.PriceTable(ctx, c.hi.PublicKey, c.hi.SiamuxAddr, rhp3.PreparePriceTableAccountPayment(c.acc.Key()))
 	if err == nil {
 		cost = hpt.UpdatePriceTableCost
 	}
 	return
 }
 
-func (d *hostDownloadClient) PublicKey() types.PublicKey { return d.hi.PublicKey }
-
-func (d *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
-	return d.acc.WithWithdrawal(func() (types.Currency, error) {
-		prices, err := d.pts.Fetch(ctx, d)
+func (c *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) (err error) {
+	return c.acc.WithWithdrawal(func() (types.Currency, error) {
+		prices, err := c.pts.Fetch(ctx, c)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
 
-		res, err := d.rhp4.ReadSector(ctx, d.hi.PublicKey, d.hi.V2SiamuxAddr(), prices, d.acc.Token(), w, root, offset, length)
+		res, err := c.rhp4.ReadSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.acc.Token(), w, root, offset, length)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -270,12 +282,106 @@ func (d *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, 
 	})
 }
 
-func (d *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	settings, err := d.rhp4.Settings(ctx, d.hi.PublicKey, d.hi.V2SiamuxAddr())
+func (c *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr())
 	if err != nil {
 		return rhpv4.HostPrices{}, err
 	}
 	return settings.Prices, nil
 }
 
-func (d *hostV2DownloadClient) PublicKey() types.PublicKey { return d.hi.PublicKey }
+func (c *hostUploadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
+	hpt, err = c.rhp3.PriceTable(ctx, c.hi.PublicKey, c.hi.SiamuxAddr, rhp3.PreparePriceTableAccountPayment(c.acc.Key()))
+	if err == nil {
+		cost = hpt.UpdatePriceTableCost
+	}
+	return
+}
+
+func (c *hostUploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
+	rev, err := c.rhp3.Revision(ctx, c.cm.ID, c.hi.PublicKey, c.hi.SiamuxAddr)
+	if err != nil {
+		return fmt.Errorf("%w; %w", rhp3.ErrFailedToFetchRevision, err)
+	} else if rev.RevisionNumber == math.MaxUint64 {
+		return rhp3.ErrMaxRevisionReached
+	}
+
+	var hpt rhpv3.HostPriceTable
+	if err := c.acc.WithWithdrawal(func() (amount types.Currency, err error) {
+		pt, cost, err := c.pts.Fetch(ctx, c, nil)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+		hpt = pt.HostPriceTable
+
+		gc, err := GougingCheckerFromContext(ctx)
+		if err != nil {
+			return cost, err
+		}
+		if breakdown := gc.CheckV1(nil, &pt.HostPriceTable); breakdown.Gouging() {
+			return cost, fmt.Errorf("%w: %v", gouging.ErrPriceTableGouging, breakdown)
+		}
+		return cost, nil
+	}); err != nil {
+		return err
+	}
+
+	cost, err := c.rhp3.AppendSector(ctx, sectorRoot, sector, &rev, c.hi.PublicKey, c.hi.SiamuxAddr, c.acc.ID(), hpt, c.rk)
+	if err != nil {
+		return fmt.Errorf("failed to upload sector: %w", err)
+	}
+
+	c.csr.Record(rev.ParentID, func(csr *api.ContractSpendingRecord) {
+		csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{Uploads: cost})
+		if rev.RevisionNumber > csr.RevisionNumber {
+			csr.RevisionNumber = rev.RevisionNumber
+			csr.Size = rev.Filesize
+			csr.ValidRenterPayout = rev.ValidRenterPayout()
+			csr.MissedHostPayout = rev.MissedHostPayout()
+		}
+	})
+	return nil
+}
+
+func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
+	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), c.cm.ID)
+	if err != nil {
+		return err
+	}
+
+	rev := rhp.ContractRevision{
+		ID:       c.cm.ID,
+		Revision: fc,
+	}
+
+	return c.acc.WithWithdrawal(func() (types.Currency, error) {
+		prices, err := c.pts.Fetch(ctx, c)
+		if err != nil {
+			return types.ZeroCurrency, err
+		}
+
+		wRes, aRes, err := c.rhp4.WriteSector(ctx, consensus.State{}, c.hi.PublicKey, c.hi.V2SiamuxAddr(), rev, prices, c.rk, c.acc.Token(), NewReaderLen(sector[:]), rhpv2.SectorSize, 144)
+		if err != nil {
+			return types.ZeroCurrency, fmt.Errorf("failed to upload sector: %w", err)
+		}
+
+		c.csr.Record(c.cm.ID, func(csr *api.ContractSpendingRecord) {
+			csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{Uploads: aRes.Usage.RenterCost()})
+			if rev.Revision.RevisionNumber > csr.RevisionNumber {
+				csr.RevisionNumber = rev.Revision.RevisionNumber
+				csr.Size = rev.Revision.Filesize
+				csr.ValidRenterPayout = rev.Revision.RenterOutput.Value
+				csr.MissedHostPayout = rev.Revision.HostOutput.Value
+			}
+		})
+		return wRes.Usage.RenterCost(), nil
+	})
+}
+
+func (c *hostV2UploadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr())
+	if err != nil {
+		return rhpv4.HostPrices{}, err
+	}
+	return settings.Prices, nil
+}

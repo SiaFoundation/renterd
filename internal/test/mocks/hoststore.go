@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv4 "go.sia.tech/core/rhp/v4"
@@ -87,6 +86,10 @@ func (hm *HostManager) Downloader(hi api.HostInfo) host.Downloader {
 	return NewHost(hi.PublicKey)
 }
 
+func (hm *HostManager) Uploader(hi api.HostInfo, _ api.ContractMetadata) host.Uploader {
+	return NewHost(hi.PublicKey)
+}
+
 func (hm *HostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
 	return NewHost(hk)
 }
@@ -95,7 +98,7 @@ func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	return errors.New("implement when needed")
 }
 
-func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
+func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
 	return errors.New("implement when needed")
 }
 
@@ -107,7 +110,7 @@ func (h *Host) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
 	return h.hi.V2Settings.Prices, nil
 }
 
-func (h *Host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {
+func (h *Host) FetchRevision(ctx context.Context) (types.FileContractRevision, error) {
 	return types.FileContractRevision{}, errors.New("implement when needed")
 }
 

@@ -41,6 +41,9 @@ var (
 	// ErrFailedToCreatePayment is returned when the client failed to pay using a contract.
 	ErrFailedToCreatePayment = errors.New("failed to create contract payment")
 
+	// ErrFailedToFetchRevision is returned when the client failed to fetch the revision.
+	ErrFailedToFetchRevision = errors.New("failed to fetch revision")
+
 	// errDialTransport is returned when the worker could not dial the host.
 	ErrDialTransport = errors.New("could not dial transport")
 
