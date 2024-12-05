@@ -221,13 +221,13 @@ func (b *Bus) bucketsHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
-	var bucket api.BucketCreateRequest
-	if jc.Decode(&bucket) != nil {
+	var req api.BucketCreateRequest
+	if jc.Decode(&req) != nil {
 		return
-	} else if bucket.Name == "" {
-		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
+	} else if err := req.Validate(); err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.store.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)) != nil {
+	} else if jc.Check("failed to create bucket", b.store.CreateBucket(jc.Request.Context(), req.Name, req.Policy)) != nil {
 		return
 	}
 }
