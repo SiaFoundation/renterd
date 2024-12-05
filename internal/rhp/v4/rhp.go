@@ -70,12 +70,16 @@ func (c *Client) ReadSector(ctx context.Context, hk types.PublicKey, hostIP stri
 }
 
 // WriteSector writes a sector to the host.
-func (c *Client) WriteSector(ctx context.Context, cs consensus.State, hk types.PublicKey, hostIP string, contract rhp.ContractRevision, prices rhp4.HostPrices, sk types.PrivateKey, token rhp4.AccountToken, rl rhp.ReaderLen, length, duration uint64) (res1 rhp.RPCWriteSectorResult, res2 rhp.RPCAppendSectorsResult, _ error) {
+func (c *Client) WriteSector(ctx context.Context, hk types.PublicKey, hostIP string, contract rhp.ContractRevision, prices rhp4.HostPrices, sk types.PrivateKey, token rhp4.AccountToken, rl rhp.ReaderLen, length, duration uint64) (res1 rhp.RPCWriteSectorResult, res2 rhp.RPCAppendSectorsResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
 		res1, err = rhp.RPCWriteSector(ctx, t, prices, token, rl, length, duration)
 		if err != nil {
 			return
 		}
+
+		// NOTE: construct an empty state object here to pass to
+		// RPCAppendSectors since it only uses it for hashing
+		cs := consensus.State{}
 
 		// NOTE: immediately append the sector for the time being, eventually
 		// this will be a 2-step process where uploads are unblocked as soon as

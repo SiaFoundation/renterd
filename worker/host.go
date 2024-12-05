@@ -6,7 +6,6 @@ import (
 	"io"
 	"math"
 
-	"go.sia.tech/core/consensus"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
@@ -362,7 +361,7 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 			return types.ZeroCurrency, err
 		}
 
-		wRes, aRes, err := c.rhp4.WriteSector(ctx, consensus.State{}, c.hi.PublicKey, c.hi.V2SiamuxAddr(), rev, prices, c.rk, c.acc.Token(), NewReaderLen(sector[:]), rhpv2.SectorSize, 144)
+		wRes, aRes, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), rev, prices, c.rk, c.acc.Token(), NewReaderLen(sector[:]), rhpv2.SectorSize, 144)
 		if err != nil {
 			return types.ZeroCurrency, fmt.Errorf("failed to upload sector: %w", err)
 		}
