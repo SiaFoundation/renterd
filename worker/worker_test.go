@@ -128,9 +128,13 @@ func (w *testWorker) UsableHosts() (hosts []api.HostInfo) {
 		w.tt.Fatal(err)
 	}
 	for _, md := range metadatas {
+		host, err := w.bus.Host(context.Background(), md.HostKey)
+		if err != nil {
+			w.tt.Fatal(err)
+		}
 		hosts = append(hosts, api.HostInfo{
 			PublicKey:  md.HostKey,
-			SiamuxAddr: md.SiamuxAddr,
+			SiamuxAddr: host.Settings.SiamuxAddr(),
 		})
 	}
 	return

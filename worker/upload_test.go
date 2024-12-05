@@ -73,10 +73,14 @@ func TestUpload(t *testing.T) {
 	var filtered []api.HostInfo
 	for _, md := range w.Contracts() {
 		// add unused contracts
+		host, err := w.bus.Host(context.Background(), md.HostKey)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, used := used[md.HostKey]; !used {
 			filtered = append(filtered, api.HostInfo{
 				PublicKey:  md.HostKey,
-				SiamuxAddr: md.SiamuxAddr,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
 			})
 			continue
 		}
@@ -85,7 +89,7 @@ func TestUpload(t *testing.T) {
 		if n < int(params.rs.MinShards) {
 			filtered = append(filtered, api.HostInfo{
 				PublicKey:  md.HostKey,
-				SiamuxAddr: md.SiamuxAddr,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
 			})
 			n++
 		}
@@ -506,9 +510,13 @@ func TestUploadShards(t *testing.T) {
 	var hosts []api.HostInfo
 	for _, c := range w.Contracts() {
 		if _, bad := badHosts[c.HostKey]; !bad {
+			host, err := w.bus.Host(context.Background(), c.HostKey)
+			if err != nil {
+				t.Fatal(err)
+			}
 			hosts = append(hosts, api.HostInfo{
 				PublicKey:  c.HostKey,
-				SiamuxAddr: c.SiamuxAddr,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
 			})
 		}
 	}
