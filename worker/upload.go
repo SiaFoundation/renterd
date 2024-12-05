@@ -41,6 +41,7 @@ var (
 type (
 	uploadManager struct {
 		hm        host.HostManager
+		hs        HostStore
 		mm        memory.MemoryManager
 		os        ObjectStore
 		cl        ContractLocker
@@ -143,7 +144,7 @@ func (w *Worker) initUploadManager(uploadKey *utils.UploadKey, maxMemory, maxOve
 		panic("upload manager already initialized") // developer error
 	}
 
-	w.uploadManager = newUploadManager(w.shutdownCtx, uploadKey, w, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
+	w.uploadManager = newUploadManager(w.shutdownCtx, uploadKey, w, w.bus, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
 }
 
 func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.RedundancySettings, r io.Reader, contracts []hostContract, opts ...UploadOption) (_ string, err error) {
@@ -318,10 +319,11 @@ func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api
 	return nil
 }
 
-func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *uploadManager {
+func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, hs HostStore, os ObjectStore, cl ContractLocker, cs ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *uploadManager {
 	logger = logger.Named("uploadmanager")
 	return &uploadManager{
 		hm:        hm,
+		hs:        hs,
 		mm:        memory.NewManager(maxMemory, logger),
 		os:        os,
 		cl:        cl,
@@ -738,6 +740,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []hostContract, bh uint64) 
 	}
 
 	mgr.uploaders = refreshed
+	return
 }
 
 func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan uploader.SectorUploadResp) {

@@ -30,6 +30,7 @@ import (
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -262,11 +263,11 @@ func TestNewTestCluster(t *testing.T) {
 			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
 		}
 		ac = archivedContracts[0]
-		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
+		if ac.RevisionHeight == 0 || (!ac.V2 && ac.RevisionNumber != math.MaxUint64) {
 			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
-		if ac.ProofHeight != 0 {
-			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
+		if ac.ProofHeight == 0 {
+			t.Fatal("proof height should be >0 since it is set to the renewal height")
 		}
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
@@ -2764,5 +2765,83 @@ func TestConsensusResync(t *testing.T) {
 		t.Fatal("not synced")
 	} else if newCS.BlockHeight != cs.BlockHeight {
 		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
+	}
+}
+
+func TestContractFundsReturnWhenHostOffline(t *testing.T) {
+	// create a test cluster without autopilot
+	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
+	defer cluster.Shutdown()
+
+	if cluster.cm.Tip().Height <= cluster.network.HardforkV2.AllowHeight {
+		t.Skip("only runs against v2 network")
+	}
+
+	// convenience variables
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// scan the host
+	tt.OKAll(b.ScanHost(context.Background(), h.PublicKey, time.Minute))
+
+	// fetch balance
+	wallet, err := b.Wallet(context.Background())
+	tt.OK(err)
+	if !wallet.Unconfirmed.IsZero() {
+		t.Fatal("wallet should not have unconfirmed balance")
+	}
+
+	// manually form a contract with the host that uses up almost all of the
+	// confirmed balance of the wallet
+	cs, _ := b.ConsensusState(context.Background())
+	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
+	fundAmt := wallet.Confirmed.Mul64(96).Div64(100)
+	contract, err := b.FormContract(context.Background(), wallet.Address, fundAmt, h.PublicKey, types.Siacoins(1), endHeight)
+	tt.OK(err)
+
+	// mine a block to confirm the contract but burn the block reward
+	cluster.mineBlocks(types.VoidAddress, 1)
+	time.Sleep(time.Second)
+
+	wallet, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	fee, err := b.RecommendedFee(context.Background())
+	tt.OK(err)
+
+	// contract should be active
+	contract, err = b.Contract(context.Background(), contract.ID)
+	tt.OK(err)
+	if contract.State != api.ContractStateActive {
+		t.Fatalf("expected contract to be active, got %v", contract.State)
+	}
+
+	// stop the host
+	tt.OK(hosts[0].Close())
+
+	// mine until the contract is expired
+	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
+
+	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+		// contract state should be 'failed'
+		contract, err = b.Contract(context.Background(), contract.ID)
+		tt.OK(err)
+		if contract.State != api.ContractStateFailed {
+			return fmt.Errorf("expected contract to be failed, got %v", contract.State)
+		}
+		return nil
+	})
+
+	// confirmed balance should be the same as before
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
+	wallet, err = b.Wallet(context.Background())
+	tt.OK(err)
+	if !expectedBalance.Equals(wallet.Confirmed) {
+		t.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, expectedBalance.Sub(wallet.Confirmed))
 	}
 }

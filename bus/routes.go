@@ -108,7 +108,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 	} else {
 		// latest revision
-		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, host.NetAddress)
+		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, host.Settings.SiamuxAddr())
 		if jc.Check("failed to fetch contract revision", err) != nil {
 			return
 		}
@@ -120,7 +120,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 
 		// price table
-		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, host.NetAddress, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, host.Settings.SiamuxAddr(), rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
 		if jc.Check("failed to fetch price table", err) != nil {
 			return
 		}
@@ -140,7 +140,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		}
 
 		// fund the account
-		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, host.NetAddress, deposit, req.AccountID, pt.HostPriceTable, rk)
+		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, host.Settings.SiamuxAddr(), deposit, req.AccountID, pt.HostPriceTable, rk)
 		if jc.Check("failed to fund account", err) != nil {
 			return
 		}
@@ -860,7 +860,7 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 			Size:            revision.Filesize,
 		})
 	} else {
-		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, host.NetAddress)
+		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, host.Settings.SiamuxAddr())
 		if jc.Check("failed to fetch revision", err) != nil {
 			return
 		}
@@ -1171,7 +1171,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	if b.isPassedV2AllowHeight() {
 		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 	} else {
-		contract, err = b.renewContractV1(ctx, cs, gp, h.NetAddress, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
+		contract, err = b.renewContractV1(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
 			jc.Error(err, http.StatusBadRequest)
 			return

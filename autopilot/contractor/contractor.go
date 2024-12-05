@@ -375,7 +375,7 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, contracts []api.Con
 		// check whether broadcasting is necessary
 		timeSinceRevisionHeight := targetBlockTime * time.Duration(bh-contract.RevisionHeight)
 		timeSinceLastTry := time.Since(c.revisionLastBroadcast[contract.ID])
-		if contract.RevisionHeight == math.MaxUint64 || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval/broadcastRevisionRetriesPerInterval {
+		if contract.RenewedTo != (types.FileContractID{}) || timeSinceRevisionHeight < c.revisionBroadcastInterval || timeSinceLastTry < c.revisionBroadcastInterval/broadcastRevisionRetriesPerInterval {
 			continue // nothing to do
 		}
 
@@ -436,11 +436,13 @@ func (c *Contractor) shouldArchive(contract contract, bh uint64, n consensus.Net
 	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
 		return errContractExpired
 	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
-		return errContractMaxRevisionNumber
+		return errContractRenewed
 	} else if contract.RevisionNumber == math.MaxUint64 {
-		return errContractMaxRevisionNumber
+		return errContractRenewed
 	} else if contract.State == api.ContractStatePending && bh-contract.StartHeight > ContractConfirmationDeadline {
 		return errContractNotConfirmed
+	} else if contract.RenewedTo != (types.FileContractID{}) {
+		return errContractRenewed
 	} else if !contract.V2 && bh >= n.HardforkV2.RequireHeight {
 		return errContractBeyondV2RequireHeight
 	}

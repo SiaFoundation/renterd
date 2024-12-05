@@ -376,7 +376,7 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 
 	// create chain subscriber
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(wm, cm, store, b.s, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
@@ -792,12 +792,12 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 	}
 }
 
-func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, siamuxAddr string, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
+func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
 	// fetch the revision
-	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, siamuxAddr)
+	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, hs.SiamuxAddr())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -805,7 +805,7 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, siamuxAddr, prepareRenew, b.w.SignTransaction)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, hs.SiamuxAddr(), prepareRenew, b.w.SignTransaction)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
