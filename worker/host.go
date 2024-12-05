@@ -250,7 +250,11 @@ func (d *hostDownloadClient) DownloadSector(ctx context.Context, w io.Writer, ro
 }
 
 func (h *hostDownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	return rhpv4.HostPrices{}, nil
+	settings, err := h.rhp4.Settings(ctx, h.hi.PublicKey, h.hi.V2SiamuxAddr())
+	if err != nil {
+		return rhpv4.HostPrices{}, err
+	}
+	return settings.Prices, nil
 }
 
 func (h *hostDownloadClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
