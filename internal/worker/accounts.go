@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -417,6 +418,15 @@ func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMet
 		return false, fmt.Errorf("failed to fund account: %w", err)
 	}
 	return true, nil
+}
+
+func (a *Account) Token() rhpv4.AccountToken {
+	t := rhpv4.AccountToken{
+		Account:    rhpv4.Account(a.key.PublicKey()),
+		ValidUntil: time.Now().Add(5 * time.Minute),
+	}
+	t.Signature = a.key.SignHash(t.SigHash())
+	return t
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is

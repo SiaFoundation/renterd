@@ -12,7 +12,7 @@ import (
 
 type (
 	Downloader interface {
-		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error
+		DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error
 		PublicKey() types.PublicKey
 	}
 
@@ -29,7 +29,7 @@ type (
 	}
 
 	HostManager interface {
-		Downloader(hk types.PublicKey, siamuxAddr string) Downloader
+		Downloader(hi api.HostInfo) Downloader
 		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
 	}
 )

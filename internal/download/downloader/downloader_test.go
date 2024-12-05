@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/test/mocks"
 )
 
@@ -24,7 +24,7 @@ func TestDownloaderStopped(t *testing.T) {
 
 	t.Run("stop before enqueue", func(t *testing.T) {
 		hm := mocks.NewHostManager()
-		dl := New(context.Background(), hm.Downloader(types.PublicKey{1}, "localhost:1234"))
+		dl := New(context.Background(), hm.Downloader(api.HostInfo{}))
 		req := SectorDownloadReq{
 			Ctx:   context.Background(),
 			Resps: NewSectorResponses(),
@@ -38,7 +38,7 @@ func TestDownloaderStopped(t *testing.T) {
 
 	t.Run("stop after enqueue", func(t *testing.T) {
 		hm := mocks.NewHostManager()
-		dl := New(context.Background(), hm.Downloader(types.PublicKey{1}, "localhost:1234"))
+		dl := New(context.Background(), hm.Downloader(api.HostInfo{}))
 		req := SectorDownloadReq{
 			Ctx:   context.Background(),
 			Resps: NewSectorResponses(),

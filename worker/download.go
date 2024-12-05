@@ -57,8 +57,8 @@ type (
 		mgr *downloadManager
 
 		minShards int
-		offset    uint32
-		length    uint32
+		offset    uint64
+		length    uint64
 
 		created time.Time
 
@@ -470,7 +470,7 @@ func (mgr *downloadManager) refreshDownloaders(hosts []api.HostInfo) {
 
 	// update downloaders
 	for hk, hi := range want {
-		mgr.downloaders[hk] = downloader.New(mgr.shutdownCtx, mgr.hm.Downloader(hk, hi.SiamuxAddr))
+		mgr.downloaders[hk] = downloader.New(mgr.shutdownCtx, mgr.hm.Downloader(hi))
 		go mgr.downloaders[hk].Start()
 	}
 }

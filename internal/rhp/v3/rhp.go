@@ -187,7 +187,7 @@ func (c *Client) PriceTableUnpaid(ctx context.Context, hk types.PublicKey, siamu
 	return
 }
 
-func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root types.Hash256, w io.Writer, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, accKey types.PrivateKey, pt rhpv3.HostPriceTable) (types.Currency, error) {
+func (c *Client) ReadSector(ctx context.Context, offset, length uint64, root types.Hash256, w io.Writer, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, accKey types.PrivateKey, pt rhpv3.HostPriceTable) (types.Currency, error) {
 	var amount types.Currency
 	err := c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		cost, err := readSectorCost(pt, uint64(length))

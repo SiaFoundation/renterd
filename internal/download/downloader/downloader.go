@@ -29,8 +29,8 @@ type (
 	SectorDownloadReq struct {
 		Ctx context.Context
 
-		Length uint32
-		Offset uint32
+		Length uint64
+		Offset uint64
 		Root   types.Hash256
 		Host   *Downloader
 
