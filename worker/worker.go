@@ -207,7 +207,7 @@ func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk
 			defer cancel()
 		}
 
-		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx)
+		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
 		if err != nil {
 			return err
 		}

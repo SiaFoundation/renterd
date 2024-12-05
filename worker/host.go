@@ -25,14 +25,13 @@ type (
 	hostClient struct {
 		hk         types.PublicKey
 		renterKey  types.PrivateKey
-		fcid       types.FileContractID
 		siamuxAddr string
 
-		acc                      *worker.Account
-		client                   *rhp3.Client
-		contractSpendingRecorder ContractSpendingRecorder
-		logger                   *zap.SugaredLogger
-		priceTables              *prices.PriceTables
+		acc    *worker.Account
+		csr    ContractSpendingRecorder
+		pts    *prices.PriceTables
+		rhp3   *rhp3.Client
+		logger *zap.SugaredLogger
 	}
 
 	hostDownloadClient struct {
@@ -79,15 +78,14 @@ var (
 
 func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
 	return &hostClient{
-		client:                   w.rhp3Client,
-		hk:                       hk,
-		acc:                      w.accounts.ForHost(hk),
-		contractSpendingRecorder: w.contractSpendingRecorder,
-		logger:                   w.logger.Named(hk.String()[:4]),
-		fcid:                     fcid,
-		siamuxAddr:               siamuxAddr,
-		renterKey:                w.deriveRenterKey(hk),
-		priceTables:              w.priceTables,
+		rhp3:       w.rhp3Client,
+		hk:         hk,
+		acc:        w.accounts.ForHost(hk),
+		csr:        w.contractSpendingRecorder,
+		logger:     w.logger.Named(hk.String()[:4]),
+		siamuxAddr: siamuxAddr,
+		renterKey:  w.deriveRenterKey(hk),
+		pts:        w.priceTables,
 	}
 }
 
@@ -140,13 +138,13 @@ func (c *hostUploadClient) PublicKey() types.PublicKey     { return c.hi.PublicK
 func (c *hostV2UploadClient) PublicKey() types.PublicKey   { return c.hi.PublicKey }
 
 func (h *hostClient) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {
-	return h.client.PriceTableUnpaid(ctx, h.hk, h.siamuxAddr)
+	return h.rhp3.PriceTableUnpaid(ctx, h.hk, h.siamuxAddr)
 }
 
 func (h *hostClient) PriceTable(ctx context.Context, rev *types.FileContractRevision) (hpt api.HostPriceTable, cost types.Currency, err error) {
 	// fetchPT is a helper function that performs the RPC given a payment function
 	fetchPT := func(paymentFn rhp3.PriceTablePaymentFunc) (api.HostPriceTable, error) {
-		return h.client.PriceTable(ctx, h.hk, h.siamuxAddr, paymentFn)
+		return h.rhp3.PriceTable(ctx, h.hk, h.siamuxAddr, paymentFn)
 	}
 
 	// fetch the price table
@@ -164,8 +162,8 @@ func (h *hostClient) PriceTable(ctx context.Context, rev *types.FileContractRevi
 }
 
 // FetchRevision tries to fetch a contract revision from the host.
-func (h *hostClient) FetchRevision(ctx context.Context) (types.FileContractRevision, error) {
-	return h.client.Revision(ctx, h.fcid, h.hk, h.siamuxAddr)
+func (h *hostClient) FetchRevision(ctx context.Context, fcid types.FileContractID) (types.FileContractRevision, error) {
+	return h.rhp3.Revision(ctx, fcid, h.hk, h.siamuxAddr)
 }
 
 func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, rev *types.FileContractRevision) error {
@@ -188,7 +186,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		deposit := desired.Sub(balance)
 
 		// fetch pricetable directly to bypass the gouging check
-		pt, _, err := h.priceTables.Fetch(ctx, h, rev)
+		pt, _, err := h.pts.Fetch(ctx, h, rev)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -201,7 +199,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		}
 
 		// fund the account
-		if err := h.client.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.ID(), pt.HostPriceTable, h.renterKey); err != nil {
+		if err := h.rhp3.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.ID(), pt.HostPriceTable, h.renterKey); err != nil {
 			if rhp3.IsBalanceMaxExceeded(err) {
 				h.acc.ScheduleSync()
 			}
@@ -209,7 +207,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		}
 
 		// record the spend
-		h.contractSpendingRecorder.Record(rev.ParentID, func(csr *api.ContractSpendingRecord) {
+		h.csr.Record(rev.ParentID, func(csr *api.ContractSpendingRecord) {
 			csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{FundAccount: deposit.Add(cost)})
 			if rev.RevisionNumber > csr.RevisionNumber {
 				csr.RevisionNumber = rev.RevisionNumber
@@ -230,7 +228,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 
 func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
-	pt, _, err := h.priceTables.Fetch(ctx, h, rev)
+	pt, _, err := h.pts.Fetch(ctx, h, rev)
 	if err != nil {
 		return err
 	}
@@ -241,7 +239,7 @@ func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRev
 	}
 
 	return h.acc.WithSync(func() (types.Currency, error) {
-		return h.client.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.ID(), pt.HostPriceTable, h.renterKey)
+		return h.rhp3.SyncAccount(ctx, rev, h.hk, h.siamuxAddr, h.acc.ID(), pt.HostPriceTable, h.renterKey)
 	})
 }
 

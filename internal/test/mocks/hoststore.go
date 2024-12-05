@@ -110,7 +110,7 @@ func (h *Host) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
 	return h.hi.V2Settings.Prices, nil
 }
 
-func (h *Host) FetchRevision(ctx context.Context) (types.FileContractRevision, error) {
+func (h *Host) FetchRevision(ctx context.Context, fcid types.FileContractID) (types.FileContractRevision, error) {
 	return types.FileContractRevision{}, errors.New("implement when needed")
 }
 

@@ -140,7 +140,7 @@ func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, s
 	return nil
 }
 
-func (h *testHost) FetchRevision(ctx context.Context) (rev types.FileContractRevision, _ error) {
+func (h *testHost) FetchRevision(ctx context.Context, fcid types.FileContractID) (rev types.FileContractRevision, _ error) {
 	return h.Contract.Revision(), nil
 }
 
