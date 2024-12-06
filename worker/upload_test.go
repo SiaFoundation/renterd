@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
@@ -115,7 +116,7 @@ func TestUpload(t *testing.T) {
 	// download the data again and assert it fails
 	buf.Reset()
 	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), filtered)
-	if !errors.Is(err, errDownloadNotEnoughHosts) {
+	if !errors.Is(err, download.ErrDownloadNotEnoughHosts) {
 		t.Fatal("expected not enough hosts error", err)
 	}
 
