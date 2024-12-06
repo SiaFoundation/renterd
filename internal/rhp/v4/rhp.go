@@ -105,15 +105,12 @@ func (c *Client) AppendSectors(ctx context.Context, hk types.PublicKey, hostIP s
 }
 
 // FundAccounts funds accounts on the host.
-func (c *Client) FundAccounts(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, signer rhp.ContractSigner, contract rhp.ContractRevision, deposits []rhp4.AccountDeposit) error {
+func (c *Client) FundAccounts(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, signer rhp.ContractSigner, contract rhp.ContractRevision, deposits []rhp4.AccountDeposit) (res rhp.RPCFundAccountResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
-		_, err = rhp.RPCFundAccounts(ctx, c, cs, signer, contract, deposits)
-		if err != nil {
-			return err
-		}
-		return nil
+		res, err = rhp.RPCFundAccounts(ctx, c, cs, signer, contract, deposits)
+		return
 	})
-	return err
+	return res, err
 }
 
 // LatestRevision returns the latest revision of a contract.
