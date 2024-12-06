@@ -1,0 +1,104 @@
+openapi: "3.0.0"
+info:
+  title: Autopilot API
+  version: 2.0.0
+  description: API for managing Autopilot configuration and related operations.
+
+paths:
+  #############################
+  #
+  # Autopilot routes
+  #
+  #############################
+  /autopilot/state:
+    get:
+      summary: Get the autopilot state
+      description: Returns the current state of the autopilot, including migration, pruning, and scanning status.
+      responses:
+        "200":
+          description: The current state of the autopilot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutopilotStateResponse"
+
+components:
+  schemas:
+    #############################
+    #
+    # Requests and responses
+    #
+    #############################
+
+    # GET /autopilot/state response
+    AutopilotStateResponse:
+      type: object
+      allOf:
+        - $ref: "#/components/schemas/BuildState"
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the autopilot is enabled
+        migrating:
+          type: boolean
+          description: Indicates if the autopilot is currently migrating
+        migratingLastStart:
+          type: string
+          format: date-time
+          description: When migration last started
+        pruning:
+          type: boolean
+          description: Indicates if the autopilot is currently pruning
+        pruningLastStart:
+          type: string
+          format: date-time
+          description: When pruning last started
+        scanning:
+          type: boolean
+          description: Indicates if the autopilot is currently scanning
+        scanningLastStart:
+          type: string
+          format: date-time
+          description: When scanning last started
+        uptimeMs:
+          type: integer
+          format: int64
+          description: The autopilot uptime in milliseconds
+        startTime:
+          type: string
+          format: date-time
+          description: When the autopilot was started
+      required:
+        - enabled
+        - migrating
+        - migratingLastStart
+        - pruning
+        - pruningLastStart
+        - scanning
+        - scanningLastStart
+        - uptimeMs
+        - startTime
+        - buildState
+
+    #############################
+    #
+    # Helper types
+    #
+    #############################
+
+    BuildState:
+      type: object
+      properties:
+        buildTime:
+          type: string
+          format: date-time
+          description: The build time of the build
+        commit:
+          type: string
+          description: The commit hash of the build
+        version:
+          type: string
+          description: The version of the build
+        os:
+          type: string
+          description: The operating system of the build
