@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate OpenAPI spec
+        uses: swaggerexpert/swagger-editor-validate@v1
+        with:
+          definition-file: openapi.yaml
       - name: Lint
         uses: golangci/golangci-lint-action@v3
         with:
