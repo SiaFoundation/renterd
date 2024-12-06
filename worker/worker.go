@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
@@ -170,7 +171,7 @@ type Worker struct {
 	masterKey utils.MasterKey
 	startTime time.Time
 
-	downloadManager *downloadManager
+	downloadManager *download.Manager
 	uploadManager   *uploadManager
 
 	accounts    *iworker.AccountMgr
@@ -282,7 +283,7 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 
 	// prepare downloaders stats
 	var dss []api.DownloaderStats
-	for hk, mbps := range stats.downloadSpeedsMBPS {
+	for hk, mbps := range stats.DownloadSpeedsMBPS {
 		dss = append(dss, api.DownloaderStats{
 			HostKey:                    hk,
 			AvgSectorDownloadSpeedMBPS: mbps,
@@ -294,10 +295,10 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 
 	// encode response
 	api.WriteResponse(jc, api.DownloadStatsResponse{
-		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
-		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
-		HealthyDownloaders:   stats.healthyDownloaders,
-		NumDownloaders:       stats.numDownloaders,
+		AvgDownloadSpeedMBPS: math.Ceil(stats.AvgDownloadSpeedMBPS*100) / 100,
+		AvgOverdrivePct:      math.Floor(stats.AvgOverdrivePct*100*100) / 100,
+		HealthyDownloaders:   stats.HealthyDownloaders,
+		NumDownloaders:       stats.NumDownloaders,
 		DownloadersStats:     dss,
 	})
 }
@@ -623,7 +624,7 @@ func (w *Worker) idHandlerGET(jc jape.Context) {
 
 func (w *Worker) memoryGET(jc jape.Context) {
 	api.WriteResponse(jc, api.MemoryResponse{
-		Download: w.downloadManager.mm.Status(),
+		Download: w.downloadManager.MemoryStatus(),
 		Upload:   w.uploadManager.mm.Status(),
 	})
 }
@@ -720,7 +721,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	}
 
 	uploadKey := w.masterKey.DeriveUploadKey()
-	w.initDownloadManager(&uploadKey, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
+	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, w.bus, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 	w.initUploadManager(&uploadKey, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	w.initContractSpendingRecorder(cfg.BusFlushInterval)
@@ -874,8 +875,8 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), hosts)
 			if err != nil {
 				w.logger.Error(err)
-				if !errors.Is(err, ErrShuttingDown) &&
-					!errors.Is(err, errDownloadCancelled) &&
+				if !errors.Is(err, download.ErrShuttingDown) &&
+					!errors.Is(err, download.ErrDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
 					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(hosts)), err))
 				}
