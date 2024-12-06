@@ -9,8 +9,10 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -44,15 +46,17 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	ulmm := mocks.NewMemoryManager()
 
 	// create worker
-	w, err := New(newTestWorkerCfg(), blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
+	cfg := newTestWorkerCfg()
+	mk := utils.MasterKey(blake2b.Sum256([]byte("testwork")))
+	w, err := New(cfg, mk, b, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// override managers
 	hm := newTestHostManager(t)
-	w.downloadManager.hm = hm
-	w.downloadManager.mm = dlmm
+	uploadKey := mk.DeriveUploadKey()
+	w.downloadManager = download.NewManager(context.Background(), &uploadKey, hm, b, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, zap.NewNop())
 	w.uploadManager.hm = hm
 	w.uploadManager.mm = ulmm
 
