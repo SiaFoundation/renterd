@@ -478,11 +478,11 @@ func formatSettingsMetricName(gp GougingParams, name string) (metrics []promethe
 	})
 	metrics = append(metrics, prometheus.Metric{
 		Name:  fmt.Sprintf("renterd_%s_settings_minpricetablevalidity", name),
-		Value: float64(gp.GougingSettings.MinPriceTableValidity.Milliseconds()),
+		Value: float64(time.Duration(gp.GougingSettings.MinPriceTableValidity).Milliseconds()),
 	})
 	metrics = append(metrics, prometheus.Metric{
 		Name:  fmt.Sprintf("renterd_%s_settings_minaccountexpiry", name),
-		Value: float64(gp.GougingSettings.MinAccountExpiry.Milliseconds()),
+		Value: float64(time.Duration(gp.GougingSettings.MinAccountExpiry).Milliseconds()),
 	})
 	metrics = append(metrics, prometheus.Metric{
 		Name:  fmt.Sprintf("renterd_%s_settings_minmaxephemeralaccountbalance", name),
