@@ -122,6 +122,7 @@ type (
 				Pruning  uint64 `json:"pruning"`
 				Upload   uint64 `json:"upload"`
 			} `json:"gouging"`
+			LowMaxDuration        uint64 `json:"lowMaxDuration"`
 			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
 			NotScanned            uint64 `json:"notScanned"`
 		} `json:"unusable"`

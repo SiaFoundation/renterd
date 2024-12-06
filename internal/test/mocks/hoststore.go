@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/host"
@@ -36,10 +37,6 @@ func (hs *HostStore) Host(ctx context.Context, hostKey types.PublicKey) (api.Hos
 }
 
 func (hs *HostStore) RecordHostScans(ctx context.Context, scans []api.HostScan) error {
-	return nil
-}
-
-func (hs *HostStore) RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error {
 	return nil
 }
 
@@ -86,15 +83,15 @@ func NewHostManager() *HostManager {
 	}
 }
 
-func (hm *HostManager) Downloader(hk types.PublicKey, siamuxAddr string) host.Downloader {
-	return NewHost(hk)
+func (hm *HostManager) Downloader(hi api.HostInfo) host.Downloader {
+	return NewHost(hi.PublicKey)
 }
 
 func (hm *HostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
 	return NewHost(hk)
 }
 
-func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint32) error {
+func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	return errors.New("implement when needed")
 }
 
@@ -104,6 +101,10 @@ func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, secto
 
 func (h *Host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
 	return h.HostPriceTable(), types.NewCurrency64(1), nil
+}
+
+func (h *Host) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
+	return h.hi.V2Settings.Prices, nil
 }
 
 func (h *Host) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (types.FileContractRevision, error) {

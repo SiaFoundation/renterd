@@ -102,7 +102,6 @@ type (
 	DownloaderStats struct {
 		AvgSectorDownloadSpeedMBPS float64         `json:"avgSectorDownloadSpeedMbps"`
 		HostKey                    types.PublicKey `json:"hostKey"`
-		NumDownloads               uint64          `json:"numDownloads"`
 	}
 
 	// UploadStatsResponse is the response type for the /stats/uploads endpoint.

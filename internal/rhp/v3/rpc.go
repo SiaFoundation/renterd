@@ -141,7 +141,7 @@ func rpcLatestRevision(ctx context.Context, t *transportV3, contractID types.Fil
 }
 
 // rpcReadSector calls the ExecuteProgram RPC with a ReadSector instruction.
-func rpcReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint32, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
+func rpcReadSector(ctx context.Context, t *transportV3, w io.Writer, pt rhpv3.HostPriceTable, payment rhpv3.PaymentMethod, offset, length uint64, merkleRoot types.Hash256) (cost, refund types.Currency, err error) {
 	defer utils.WrapErr(ctx, "ReadSector", &err)
 	s, err := t.DialStream(ctx)
 	if err != nil {
@@ -368,7 +368,7 @@ func rpcRenew(ctx context.Context, t *transportV3, gc gouging.Checker, rev types
 	}
 
 	// Perform gouging checks.
-	if breakdown := gc.Check(nil, &pt); breakdown.Gouging() {
+	if breakdown := gc.CheckV1(nil, &pt); breakdown.Gouging() {
 		return rhpv2.ContractRevision{}, nil, types.Currency{}, types.Currency{}, fmt.Errorf("host gouging during renew: %v", breakdown)
 	}
 
@@ -489,7 +489,7 @@ func wrapRPCErr(err *error, fnName string) {
 		innerErr = errors.Unwrap(innerErr)
 	}
 	if errors.As(*err, new(*rhpv3.RPCError)) {
-		*err = fmt.Errorf("%w: '%w'", errHost, innerErr)
+		*err = fmt.Errorf("%w: '%w'", utils.ErrHost, innerErr)
 	} else {
 		*err = fmt.Errorf("%w: '%w'", errTransport, innerErr)
 	}

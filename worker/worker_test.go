@@ -51,7 +51,6 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 
 	// override managers
 	hm := newTestHostManager(t)
-	w.priceTables.hm = hm
 	w.downloadManager.hm = hm
 	w.downloadManager.mm = dlmm
 	w.uploadManager.hm = hm
@@ -129,9 +128,13 @@ func (w *testWorker) UsableHosts() (hosts []api.HostInfo) {
 		w.tt.Fatal(err)
 	}
 	for _, md := range metadatas {
+		host, err := w.bus.Host(context.Background(), md.HostKey)
+		if err != nil {
+			w.tt.Fatal(err)
+		}
 		hosts = append(hosts, api.HostInfo{
 			PublicKey:  md.HostKey,
-			SiamuxAddr: md.SiamuxAddr,
+			SiamuxAddr: host.Settings.SiamuxAddr(),
 		})
 	}
 	return

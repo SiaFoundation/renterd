@@ -36,6 +36,10 @@ var (
 )
 
 type (
+	HostStore interface {
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+	}
+
 	ContractStore interface {
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	}
@@ -75,10 +79,10 @@ type (
 		cs     ContractStore
 		cl     locking.ContractLocker
 		hm     host.HostManager
+		hs     HostStore
 		logger *zap.SugaredLogger
 
 		hk              types.PublicKey
-		siamuxAddr      string
 		signalNewUpload chan struct{}
 		shutdownCtx     context.Context
 
@@ -98,16 +102,21 @@ type (
 	}
 )
 
-func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, c api.ContractMetadata, l *zap.SugaredLogger) *Uploader {
+func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, hs HostStore, c api.ContractMetadata, l *zap.SugaredLogger) (*Uploader, error) {
+	host, err := hs.Host(ctx, c.HostKey)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Uploader{
 		cl:     cl,
 		cs:     cs,
 		hm:     hm,
+		hs:     hs,
 		logger: l,
 
 		// static
 		hk:              c.HostKey,
-		siamuxAddr:      c.SiamuxAddr,
 		shutdownCtx:     ctx,
 		signalNewUpload: make(chan struct{}, 1),
 
@@ -116,11 +125,11 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
-		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
+		host:      hm.Host(c.HostKey, c.ID, host.Settings.SiamuxAddr()),
 		fcid:      c.ID,
 		endHeight: c.WindowEnd,
 		queue:     make([]*SectorUploadReq, 0),
-	}
+	}, nil
 }
 
 func (u *Uploader) AvgUploadSpeedBytesPerMS() float64 {
@@ -149,14 +158,19 @@ func (u *Uploader) PublicKey() types.PublicKey {
 	return u.hk
 }
 
-func (u *Uploader) Refresh(c api.ContractMetadata) {
+func (u *Uploader) Refresh(c api.ContractMetadata) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	u.host = u.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
+	host, err := u.hs.Host(u.shutdownCtx, c.HostKey)
+	if err != nil {
+		return err
+	}
+
+	u.host = u.hm.Host(c.HostKey, c.ID, host.Settings.SiamuxAddr())
 	u.fcid = c.ID
-	u.siamuxAddr = c.SiamuxAddr
 	u.endHeight = c.WindowEnd
+	return nil
 }
 
 func (u *Uploader) Start() {

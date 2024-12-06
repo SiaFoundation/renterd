@@ -418,10 +418,8 @@ func (c ContractMetadata) PrometheusMetric() (metrics []prometheus.Metric) {
 		{
 			Name: "renterd_contract",
 			Labels: map[string]any{
-				"host_ip":        c.HostIP,
 				"state":          c.State,
 				"host_key":       c.HostKey.String(),
-				"siamux_addr":    c.SiamuxAddr,
 				"contract_price": c.ContractPrice.Siacoins(),
 			},
 			Value: c.InitialRenterFunds.Siacoins(),

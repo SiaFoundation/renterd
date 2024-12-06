@@ -17,6 +17,7 @@ import (
 
 	"github.com/gotd/contrib/http_range"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -24,6 +25,7 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -174,7 +176,8 @@ type Worker struct {
 	accounts    *iworker.AccountMgr
 	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
-	priceTables *priceTables
+	priceTables *prices.PriceTables
+	pricesCache *prices.PricesCache
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
@@ -272,16 +275,11 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 	stats := w.downloadManager.Stats()
 
 	// prepare downloaders stats
-	var healthy uint64
 	var dss []api.DownloaderStats
-	for hk, stat := range stats.downloaders {
-		if stat.healthy {
-			healthy++
-		}
+	for hk, mbps := range stats.downloadSpeedsMBPS {
 		dss = append(dss, api.DownloaderStats{
 			HostKey:                    hk,
-			AvgSectorDownloadSpeedMBPS: stat.avgSpeedMBPS,
-			NumDownloads:               stat.numDownloads,
+			AvgSectorDownloadSpeedMBPS: mbps,
 		})
 	}
 	sort.SliceStable(dss, func(i, j int) bool {
@@ -292,8 +290,8 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 	api.WriteResponse(jc, api.DownloadStatsResponse{
 		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
 		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
-		HealthyDownloaders:   healthy,
-		NumDownloaders:       uint64(len(stats.downloaders)),
+		HealthyDownloaders:   stats.healthyDownloaders,
+		NumDownloaders:       stats.numDownloaders,
 		DownloadersStats:     dss,
 	})
 }
@@ -700,6 +698,8 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
+		priceTables:          prices.NewPriceTables(),
+		pricesCache:          prices.NewPricesCache(),
 		rhp2Client:           rhp2.New(dialer, l),
 		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
@@ -712,7 +712,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
 		return nil, fmt.Errorf("failed to initialize accounts; %w", err)
 	}
-	w.initPriceTables()
 
 	uploadKey := w.masterKey.DeriveUploadKey()
 	w.initDownloadManager(&uploadKey, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
@@ -897,7 +896,15 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	return res, err
 }
 
-func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
+func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
+	// handle v2 host
+	if host.IsV2() {
+		account := w.accounts.ForHost(host.PublicKey)
+		return account.WithSync(func() (types.Currency, error) {
+			return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
+		})
+	}
+
 	// attach gouging checker
 	gp, err := w.bus.GougingParams(ctx)
 	if err != nil {
@@ -906,8 +913,8 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// sync the account
-	h := w.Host(hk, fcid, siamuxAddr)
-	err = w.withRevision(ctx, fcid, hk, siamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+	h := w.Host(host.PublicKey, fcid, host.SiamuxAddr)
+	err = w.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})
 	if err != nil {
@@ -1009,7 +1016,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

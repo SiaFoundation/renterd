@@ -1,5 +1,26 @@
 -- dbHost
-CREATE TABLE `hosts` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`public_key` blob NOT NULL UNIQUE,`settings` text,`price_table` text,`price_table_expiry` datetime,`total_scans` integer,`last_scan` integer,`last_scan_success` numeric,`second_to_last_scan_success` numeric,`scanned` numeric,`uptime` integer,`downtime` integer,`recent_downtime` integer,`recent_scan_failures` integer,`successful_interactions` real,`failed_interactions` real,`lost_sectors` integer,`last_announcement` datetime,`net_address` text,`resolved_addresses` text NOT NULL DEFAULT '');
+CREATE TABLE `hosts` (
+`id` integer PRIMARY KEY AUTOINCREMENT,
+`created_at` datetime,
+`public_key` blob NOT NULL UNIQUE,
+`settings` text,
+`v2_settings` text,
+`price_table` text,
+`price_table_expiry` datetime,
+`total_scans` integer,
+`last_scan` integer,
+`last_scan_success` numeric,
+`second_to_last_scan_success` numeric,
+`scanned` numeric,
+`uptime` integer,
+`downtime` integer,
+`recent_downtime` integer,
+`recent_scan_failures` integer,
+`successful_interactions` real,
+`failed_interactions` real,
+`lost_sectors` integer,
+`last_announcement` datetime,
+`net_address` text);
 CREATE INDEX `idx_hosts_recent_scan_failures` ON `hosts`(`recent_scan_failures`);
 CREATE INDEX `idx_hosts_recent_downtime` ON `hosts`(`recent_downtime`);
 CREATE INDEX `idx_hosts_scanned` ON `hosts`(`scanned`);
@@ -86,8 +107,16 @@ CREATE INDEX `idx_slices_db_object_id` ON `slices`(`db_object_id`);
 CREATE INDEX `idx_slices_db_slab_id` ON `slices`(`db_slab_id`);
 CREATE INDEX `idx_slices_db_multipart_part_id` ON `slices`(`db_multipart_part_id`);
 
--- dbHostAnnouncement
-CREATE TABLE `host_announcements` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`host_key` blob NOT NULL,`block_height` integer,`block_id` text,`net_address` text);
+-- host_addresses contains addresses that the host announced itself with
+CREATE TABLE `host_addresses` (
+    `id` integer PRIMARY KEY AUTOINCREMENT,
+    `created_at` datetime NOT NULL,
+    `db_host_id` integer NOT NULL,
+    `net_address` text NOT NULL,
+    `protocol` integer NOT NULL,
+    CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts`(`id`) ON DELETE CASCADE
+);
+CREATE INDEX `idx_host_addresses_db_host_id` ON `host_addresses`(`db_host_id`);
 
 -- dbConsensusInfo
 CREATE TABLE `consensus_infos` (`id` integer PRIMARY KEY AUTOINCREMENT,`created_at` datetime,`height` integer,`block_id` blob);
@@ -126,13 +155,38 @@ CREATE TABLE `object_user_metadata` (`id` integer PRIMARY KEY AUTOINCREMENT,`cre
 CREATE UNIQUE INDEX `idx_object_user_metadata_key` ON `object_user_metadata`(`db_object_id`,`db_multipart_upload_id`,`key`);
 
 -- dbHostCheck
-CREATE TABLE `host_checks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `created_at` datetime, `db_host_id` INTEGER NOT NULL, `usability_blocked` INTEGER NOT NULL DEFAULT 0, `usability_offline` INTEGER NOT NULL DEFAULT 0, `usability_low_score` INTEGER NOT NULL DEFAULT 0, `usability_redundant_ip` INTEGER NOT NULL DEFAULT 0, `usability_gouging` INTEGER NOT NULL DEFAULT 0, `usability_not_accepting_contracts` INTEGER NOT NULL DEFAULT 0, `usability_not_announced` INTEGER NOT NULL DEFAULT 0, `usability_not_completing_scan` INTEGER NOT NULL DEFAULT 0, `score_age` REAL NOT NULL, `score_collateral` REAL NOT NULL, `score_interactions` REAL NOT NULL, `score_storage_remaining` REAL NOT NULL, `score_uptime` REAL NOT NULL, `score_version` REAL NOT NULL, `score_prices` REAL NOT NULL, `gouging_contract_err` TEXT, `gouging_download_err` TEXT, `gouging_gouging_err` TEXT, `gouging_prune_err` TEXT, `gouging_upload_err` TEXT, FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE);
+CREATE TABLE `host_checks` (
+`id` INTEGER PRIMARY KEY AUTOINCREMENT,
+`created_at` datetime,
+`db_host_id` INTEGER NOT NULL,
+`usability_blocked` INTEGER NOT NULL DEFAULT 0,
+`usability_offline` INTEGER NOT NULL DEFAULT 0,
+`usability_low_score` INTEGER NOT NULL DEFAULT 0,
+`usability_redundant_ip` INTEGER NOT NULL DEFAULT 0,
+`usability_gouging` INTEGER NOT NULL DEFAULT 0,
+`usability_low_max_duration` INTEGER NOT NULL DEFAULT 0,
+`usability_not_accepting_contracts` INTEGER NOT NULL DEFAULT 0,
+`usability_not_announced` INTEGER NOT NULL DEFAULT 0,
+`usability_not_completing_scan` INTEGER NOT NULL DEFAULT 0,
+`score_age` REAL NOT NULL,
+`score_collateral` REAL NOT NULL,
+`score_interactions` REAL NOT NULL,
+`score_storage_remaining` REAL NOT NULL,
+`score_uptime` REAL NOT NULL,
+`score_version` REAL NOT NULL,
+`score_prices` REAL NOT NULL,
+`gouging_download_err` TEXT,
+`gouging_gouging_err` TEXT,
+`gouging_prune_err` TEXT,
+`gouging_upload_err` TEXT,
+FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE);
 CREATE UNIQUE INDEX `idx_host_checks_id` ON `host_checks` (`db_host_id`);
 CREATE INDEX `idx_host_checks_usability_blocked` ON `host_checks` (`usability_blocked`);
 CREATE INDEX `idx_host_checks_usability_offline` ON `host_checks` (`usability_offline`);
 CREATE INDEX `idx_host_checks_usability_low_score` ON `host_checks` (`usability_low_score`);
 CREATE INDEX `idx_host_checks_usability_redundant_ip` ON `host_checks` (`usability_redundant_ip`);
 CREATE INDEX `idx_host_checks_usability_gouging` ON `host_checks` (`usability_gouging`);
+CREATE INDEX `idx_host_checks_usability_low_max_duration` ON `host_checks` (`usability_low_max_duration`);
 CREATE INDEX `idx_host_checks_usability_not_accepting_contracts` ON `host_checks` (`usability_not_accepting_contracts`);
 CREATE INDEX `idx_host_checks_usability_not_announced` ON `host_checks` (`usability_not_announced`);
 CREATE INDEX `idx_host_checks_usability_not_completing_scan` ON `host_checks` (`usability_not_completing_scan`);
