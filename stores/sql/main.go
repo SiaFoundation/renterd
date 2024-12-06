@@ -1651,6 +1651,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, scanTime, scanTime, // uptime
 			scanTime,                                  // last_scan
 			scan.Success, HostSettings(scan.Settings), // settings
+			scan.Success, V2HostSettings(scan.V2Settings), // settings
 			scan.Success, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, // price_table_expiry
 			scan.Success,  // successful_interactions
