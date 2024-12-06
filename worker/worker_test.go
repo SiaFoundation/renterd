@@ -101,12 +101,27 @@ func (w *testWorker) UnblockAsyncPackedSlabUploads(up uploadParameters) {
 	delete(w.uploadingPackedSlabs, key)
 }
 
-func (w *testWorker) Contracts() []api.ContractMetadata {
-	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+func (w *testWorker) Contracts() (hcs []hostContract) {
+	hosts, err := w.hs.UsableHosts(context.Background())
 	if err != nil {
 		w.tt.Fatal(err)
 	}
-	return metadatas
+	hmap := make(map[types.PublicKey]api.HostInfo)
+	for _, h := range hosts {
+		hmap[h.PublicKey] = h
+	}
+
+	contracts, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		w.tt.Fatal(err)
+	}
+	for _, c := range contracts {
+		if h, ok := hmap[c.HostKey]; ok {
+			hcs = append(hcs, hostContract{c, h})
+		}
+	}
+
+	return
 }
 
 func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
@@ -122,22 +137,12 @@ func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
 	return renewal
 }
 
-func (w *testWorker) UsableHosts() (hosts []api.HostInfo) {
-	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+func (w *testWorker) UsableHosts() []api.HostInfo {
+	hosts, err := w.hs.UsableHosts(context.Background())
 	if err != nil {
 		w.tt.Fatal(err)
 	}
-	for _, md := range metadatas {
-		host, err := w.bus.Host(context.Background(), md.HostKey)
-		if err != nil {
-			w.tt.Fatal(err)
-		}
-		hosts = append(hosts, api.HostInfo{
-			PublicKey:  md.HostKey,
-			SiamuxAddr: host.Settings.SiamuxAddr(),
-		})
-	}
-	return
+	return hosts
 }
 
 func newTestWorkerCfg() config.Worker {

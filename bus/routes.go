@@ -51,6 +51,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	if jc.Check("failed to fetch contract metadata", err) != nil {
 		return
 	}
+
 	// host
 	host, err := b.store.Host(jc.Request.Context(), cm.HostKey)
 	if jc.Check("failed to fetch host for contract", err) != nil {
@@ -85,7 +86,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		deposit = req.Amount
 		// fund the account
 		signer := ibus.NewFormContractSigner(b.w, rk)
-		err = b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
+		res, err := b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
 			{
 				Account: rhpv4.Account(req.AccountID),
 				Amount:  deposit,
@@ -94,6 +95,8 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		if jc.Check("failed to fund v2 account", err) != nil {
 			return
 		}
+
+		rev = res.Revision
 		spending = api.ContractSpendingRecord{
 			ContractSpending: api.ContractSpending{
 				FundAccount: deposit,
@@ -922,7 +925,8 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	} else if jc.Check("couldn't fetch contract", err) != nil {
 		return
 	}
-	// host
+
+	// fetch the host from the bus
 	host, err := b.store.Host(jc.Request.Context(), c.HostKey)
 	if jc.Check("failed to fetch host for contract", err) != nil {
 		return

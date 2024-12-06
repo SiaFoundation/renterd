@@ -153,10 +153,8 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			c.fcid, c.host_id, c.host_key, c.v2,
 			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 			c.contract_price, c.initial_renter_funds,
-			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
-			COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
+			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending
 		FROM contracts AS c
-		LEFT JOIN hosts h ON h.public_key = c.host_key
 		WHERE start_height >= ? AND archival_reason IS NOT NULL
 		ORDER BY start_height DESC
 	`, FileContractID(fcid), startHeight)
@@ -1714,10 +1712,8 @@ SELECT
 	c.fcid, c.host_id, c.host_key, c.v2,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
-	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
-	COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending
 FROM contracts AS c
-LEFT JOIN hosts h ON h.public_key = c.host_key
 %s
 ORDER BY c.id ASC`, whereExpr), whereArgs...)
 	if err != nil {

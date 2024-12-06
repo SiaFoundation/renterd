@@ -70,8 +70,12 @@ func (c *Client) ReadSector(ctx context.Context, hk types.PublicKey, hostIP stri
 }
 
 // WriteSector writes a sector to the host.
-func (c *Client) WriteSector(ctx context.Context, prices rhp4.HostPrices, token rhp4.AccountToken, rl rhp.ReaderLen, duration uint64) (rhp.RPCWriteSectorResult, error) {
-	panic("not implemented")
+func (c *Client) WriteSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, rl rhp.ReaderLen, length, duration uint64) (res rhp.RPCWriteSectorResult, _ error) {
+	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
+		res, err = rhp.RPCWriteSector(ctx, t, prices, token, rl, length, duration)
+		return
+	})
+	return res, err
 }
 
 // VerifySector verifies that the host is properly storing a sector
@@ -85,20 +89,28 @@ func (c *Client) FreeSectors(ctx context.Context, cs consensus.State, prices rhp
 }
 
 // AppendSectors appends sectors a host is storing to a contract.
-func (c *Client) AppendSectors(ctx context.Context, cs consensus.State, prices rhp4.HostPrices, sk types.PrivateKey, contract rhp.ContractRevision, roots []types.Hash256) (rhp.RPCAppendSectorsResult, error) {
-	panic("not implemented")
+func (c *Client) AppendSectors(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, sk types.PrivateKey, contract rhp.ContractRevision, roots []types.Hash256) (res rhp.RPCAppendSectorsResult, _ error) {
+	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
+		// NOTE: construct an empty state object here to pass to
+		// RPCAppendSectors since it only uses it for hashing
+		cs := consensus.State{}
+
+		// NOTE: immediately append the sector for the time being, eventually
+		// this will be a 2-step process where uploads are unblocked as soon as
+		// the sector is on the host, but not yet added to the contract
+		res, err = rhp.RPCAppendSectors(ctx, t, cs, prices, sk, contract, roots)
+		return
+	})
+	return res, err
 }
 
 // FundAccounts funds accounts on the host.
-func (c *Client) FundAccounts(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, signer rhp.ContractSigner, contract rhp.ContractRevision, deposits []rhp4.AccountDeposit) error {
+func (c *Client) FundAccounts(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, signer rhp.ContractSigner, contract rhp.ContractRevision, deposits []rhp4.AccountDeposit) (res rhp.RPCFundAccountResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
-		_, err = rhp.RPCFundAccounts(ctx, c, cs, signer, contract, deposits)
-		if err != nil {
-			return err
-		}
-		return nil
+		res, err = rhp.RPCFundAccounts(ctx, c, cs, signer, contract, deposits)
+		return
 	})
-	return err
+	return res, err
 }
 
 // LatestRevision returns the latest revision of a contract.

@@ -38,10 +38,6 @@ type ContractRow struct {
 	FundAccountSpending Currency
 	SectorRootsSpending Currency
 	UploadSpending      Currency
-
-	// decorated fields
-	NetAddress string
-	SiamuxPort string
 }
 
 func (r *ContractRow) Scan(s Scanner) error {
@@ -50,7 +46,6 @@ func (r *ContractRow) Scan(s Scanner) error {
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.Usability, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
-		&r.NetAddress, &r.SiamuxPort,
 	)
 }
 
