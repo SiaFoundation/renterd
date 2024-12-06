@@ -104,11 +104,11 @@ type (
 
 		// MinPriceTableValidity is the minimum accepted value for `Validity` in the
 		// host's price settings.
-		MinPriceTableValidity time.Duration `json:"minPriceTableValidity"`
+		MinPriceTableValidity DurationMS `json:"minPriceTableValidity"`
 
 		// MinAccountExpiry is the minimum accepted value for `AccountExpiry` in the
 		// host's price settings.
-		MinAccountExpiry time.Duration `json:"minAccountExpiry"`
+		MinAccountExpiry DurationMS `json:"minAccountExpiry"`
 
 		// MinMaxEphemeralAccountBalance is the minimum accepted value for
 		// `MaxEphemeralAccountBalance` in the host's price settings.

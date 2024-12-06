@@ -10,6 +10,95 @@ paths:
   # Autopilot routes
   #
   #############################
+  /autopilot/config/evaluate:
+    post:
+      summary: Evaluate autopilot configuration
+      description: Evaluates the provided autopilot configuration and returns some information about the hosts that would be considered usable using that configuration. If possible, it also returns a recommendation for a better configuration that would allow for forming contracts with more hosts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autopilotConfig:
+                  $ref: "#/components/schemas/AutopilotConfig"
+                gougingSettings:
+                  $ref: "#/components/schemas/GougingSettings"
+                redundancySettings:
+                  $ref: "#/components/schemas/RedundancySettings"
+      responses:
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+        "200":
+          description: The evaluated autopilot configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hosts:
+                    type: integer
+                    format: uin64
+                    description: Number of hosts available
+                  usable:
+                    type: integer
+                    format: uint64
+                    description: Number of hosts that the autopilot could form contracts with using the provided config
+                  unusable:
+                    type: object
+                    properties:
+                      blocked:
+                        type: integer
+                        format: uint64
+                        description: Number of hosts unavailable due to being blocklisted
+                      gouging:
+                        type: object
+                        properties:
+                          contract:
+                            type: integer
+                            format: uint64
+                            description: Number of hosts that fail the contract gouging checks
+                          download:
+                            type: integer
+                            format: uint64
+                            description: Number of hosts that fail the download gouging checks
+                          gouging:
+                            type: integer
+                            format: uint64
+                            description: Number of hosts that fail the general gouging checks
+                          pruning:
+                            type: integer
+                            format: uint64
+                            description: Number of hosts that fail the pruning gouging checks
+                          upload:
+                            type: integer
+                            format: uint64
+                            description: Number of hosts that fail the upload gouging checks
+                      lowMaxDuration:
+                        type: integer
+                        format: uint64
+                        description: Number of hosts that have a max contract duration that is too low
+                      notAcceptingContracts:
+                        type: integer
+                        format: uint64
+                        description: Number of hosts that are not accepting contracts
+                      notScanned:
+                        type: integer
+                        format: uint64
+                        description: Number of hosts that haven't been successfully scanned yet
+                  recommendation:
+                    $ref: "#/components/schemas/ConfigRecommendation"
+
   /autopilot/state:
     get:
       summary: Get the autopilot state
@@ -20,71 +109,93 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AutopilotStateResponse"
+                type: object
+                allOf:
+                  - $ref: "#/components/schemas/BuildState"
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Whether the autopilot is enabled
+                  migrating:
+                    type: boolean
+                    description: Indicates if the autopilot is currently migrating
+                  migratingLastStart:
+                    type: string
+                    format: date-time
+                    description: When migration last started
+                  pruning:
+                    type: boolean
+                    description: Indicates if the autopilot is currently pruning
+                  pruningLastStart:
+                    type: string
+                    format: date-time
+                    description: When pruning last started
+                  scanning:
+                    type: boolean
+                    description: Indicates if the autopilot is currently scanning
+                  scanningLastStart:
+                    type: string
+                    format: date-time
+                    description: When scanning last started
+                  uptimeMs:
+                    type: integer
+                    format: int64
+                    description: The autopilot uptime in milliseconds
+                  startTime:
+                    type: string
+                    format: date-time
+                    description: When the autopilot was started
+
+  /autopilot/trigger:
+    post:
+      summary: Wake up autopilot
+      description: Triggers the autopilot to start an iteration of contract maintenance and host scanning.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                forceScan:
+                  type: boolean
+                  description: If true, the autopilot force a new batch of host scans even if it recently scanned the hosts.
+                  default: false
+      responses:
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "200":
+          description: Successfully attempted to trigger the autopilot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  triggered:
+                    type: boolean
+                    description: Indicates whether the request triggered a new iteration of the maintenance loop. If maintenance was already ongoing, this will be false.
 
 components:
   schemas:
     #############################
     #
-    # Requests and responses
+    # Helper types
     #
     #############################
 
-    # GET /autopilot/state response
-    AutopilotStateResponse:
+    AutopilotConfig:
       type: object
-      allOf:
-        - $ref: "#/components/schemas/BuildState"
       properties:
         enabled:
           type: boolean
           description: Whether the autopilot is enabled
-        migrating:
-          type: boolean
-          description: Indicates if the autopilot is currently migrating
-        migratingLastStart:
-          type: string
-          format: date-time
-          description: When migration last started
-        pruning:
-          type: boolean
-          description: Indicates if the autopilot is currently pruning
-        pruningLastStart:
-          type: string
-          format: date-time
-          description: When pruning last started
-        scanning:
-          type: boolean
-          description: Indicates if the autopilot is currently scanning
-        scanningLastStart:
-          type: string
-          format: date-time
-          description: When scanning last started
-        uptimeMs:
-          type: integer
-          format: int64
-          description: The autopilot uptime in milliseconds
-        startTime:
-          type: string
-          format: date-time
-          description: When the autopilot was started
-      required:
-        - enabled
-        - migrating
-        - migratingLastStart
-        - pruning
-        - pruningLastStart
-        - scanning
-        - scanningLastStart
-        - uptimeMs
-        - startTime
-        - buildState
-
-    #############################
-    #
-    # Helper types
-    #
-    #############################
+        contracts:
+          $ref: "#/components/schemas/ContractsConfig"
+        hosts:
+          $ref: "#/components/schemas/HostsConfig"
 
     BuildState:
       type: object
@@ -102,3 +213,114 @@ components:
         os:
           type: string
           description: The operating system of the build
+
+    ConfigRecommendation:
+      type: object
+      properties:
+        gougingSettings:
+          $ref: "#/components/schemas/GougingSettings"
+
+    ContractsConfig:
+      type: object
+      properties:
+        amount:
+          type: integer
+          format: uint64
+          description: The minimum number of contracts to form
+          default: 0
+        period:
+          type: integer
+          format: uint64
+          description: The length of a contract's period in blocks (1 block being 10 minutes on average)
+          default: 0
+        renewWindow:
+          type: integer
+          format: uint64
+          description: The number of blocks before the end of a contract that a contract should be renewed
+          default: 0
+        download:
+          type: integer
+          format: uint64
+          description: Expected download bandwidth used per period in bytes
+          default: 0
+        upload:
+          type: integer
+          format: uint64
+          description: Expected upload bandwidth used per period in bytes
+          default: 0
+        storage:
+          type: integer
+          format: uint64
+          description: Expected amount of data stored in bytes
+          default: 0
+        prune:
+          type: boolean
+          description: Whether to automatically prune deleted data from contracts
+          default: false
+
+    GougingSettings:
+      type: object
+      properties:
+        maxRPCPrice:
+          type: string
+          description: The maximum base price a host can charge per RPC
+        maxContractPrice:
+          type: string
+          description: The maximum price a host can charge for a contract formation
+        maxDownloadPrice:
+          type: string
+          description: The maximum price a host can charge for downloading in hastings / byte
+        maxUploadPrice:
+          type: string
+          description: The maximum price a host can charge for uploading in hastings / byte
+        maxStoragePrice:
+          type: string
+          description: The maximum price a host can charge for storage in hastings / byte / block
+        hostBlockHeightLeeway:
+          type: integer
+          format: uint32
+          description: The number of blocks a host's chain's height can diverge from our own before we stop using it
+        minPriceTableValidity:
+          type: integer
+          format: uint64
+          description: The time a host's price table should be valid after acquiring it in milliseconds
+        minAccountExpiry:
+          type: integer
+          format: uint64
+          description: The minimum amount of time an account on a host can be idle for before expiring
+        minMaxEphemeralAccountBalance:
+          type: string
+          description: The minimum max balance a host should allow us to fund an account with
+
+    HostsConfig:
+      type: object
+      properties:
+        maxConsecutiveScanFailures:
+          type: integer
+          format: uint64
+          description: The maximum number of consecutive scan failures before a host is removed from the database
+          default: 0
+        maxDowntimeHours:
+          type: integer
+          format: uint64
+          description: The maximum number of hours a host can be offline before it is removed from the database
+          default: 0
+        minProtocolVersion:
+          type: string
+          description: The minimum supported protocol version of a host to be considered good
+
+    RedundancySettings:
+      type: object
+      properties:
+        minShards:
+          type: integer
+          minimum: 1
+          format: int32
+          description: The number of data shards a piece of an object gets erasure-coded intoo
+          default: 0
+        totalShards:
+          type: integer
+          minimum: 2
+          format: int32
+          description: The number of total data shards a piece of an object gets erasure-coded into
+          default: 0
