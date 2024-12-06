@@ -31,8 +31,8 @@ var (
 		MaxUploadPrice:                types.Siacoins(3000).Div64(1e12),                 // 3000 SC per 1 TB
 		MaxStoragePrice:               types.Siacoins(3000).Div64(1e12).Div64(144 * 30), // 3000 SC per TB per month
 		HostBlockHeightLeeway:         6,                                                // 6 blocks
-		MinPriceTableValidity:         5 * time.Minute,                                  // 5 minutes
-		MinAccountExpiry:              24 * time.Hour,                                   // 1 day
+		MinPriceTableValidity:         DurationMS(5 * time.Minute),                      // 5 minutes
+		MinAccountExpiry:              DurationMS(24 * time.Hour),                       // 1 day
 		MinMaxEphemeralAccountBalance: types.Siacoins(1),                                // 1 SC
 	}
 
@@ -207,13 +207,13 @@ func (gs GougingSettings) Validate() error {
 	if gs.HostBlockHeightLeeway < 3 {
 		return errors.New("HostBlockHeightLeeway must be at least 3 blocks")
 	}
-	if gs.MinAccountExpiry < time.Hour {
+	if time.Duration(gs.MinAccountExpiry) < time.Hour {
 		return errors.New("MinAccountExpiry must be at least 1 hour")
 	}
 	if gs.MinMaxEphemeralAccountBalance.Cmp(types.Siacoins(1)) < 0 {
 		return errors.New("MinMaxEphemeralAccountBalance must be at least 1 SC")
 	}
-	if gs.MinPriceTableValidity < 10*time.Second {
+	if time.Duration(gs.MinPriceTableValidity) < 10*time.Second {
 		return errors.New("MinPriceTableValidity must be at least 10 seconds")
 	}
 	return nil

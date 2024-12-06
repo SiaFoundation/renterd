@@ -35,7 +35,7 @@ func TestCheckV2(t *testing.T) {
 		MaxUploadPrice:        types.Siacoins(1),
 		MaxStoragePrice:       types.Siacoins(1),
 		HostBlockHeightLeeway: 1,
-		MinPriceTableValidity: time.Minute,
+		MinPriceTableValidity: api.DurationMS(time.Minute),
 	}, api.ConsensusState{
 		BlockHeight:   10,
 		Synced:        true,
