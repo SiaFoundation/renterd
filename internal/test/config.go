@@ -38,9 +38,9 @@ var (
 
 		HostBlockHeightLeeway: 240, // amount of leeway given to host block height
 
-		MinPriceTableValidity:         10 * time.Second,  // minimum value for price table validity
-		MinAccountExpiry:              time.Hour,         // minimum value for account expiry
-		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
+		MinPriceTableValidity:         api.DurationMS(10 * time.Second), // minimum value for price table validity
+		MinAccountExpiry:              api.DurationMS(time.Hour),        // minimum value for account expiry
+		MinMaxEphemeralAccountBalance: types.Siacoins(1),                // 1SC
 	}
 
 	PricePinSettings = api.DefaultPinnedSettings

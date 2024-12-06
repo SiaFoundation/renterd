@@ -142,16 +142,16 @@ func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	if hs.MaxCollateral.IsZero() {
 		errs = append(errs, errors.New("max collateral is zero"))
 	}
-	if hs.Validity < gs.MinPriceTableValidity {
+	if hs.Validity < time.Duration(gs.MinPriceTableValidity) {
 		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
 	}
 	if err := checkBlockHeight(gc.consensusState, hs.Prices.TipHeight, uint64(gs.HostBlockHeightLeeway)); err != nil {
 		errs = append(errs, err)
 	}
-	if hs.Validity < gs.MinPriceTableValidity {
+	if hs.Validity < time.Duration(gs.MinPriceTableValidity) {
 		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
 	}
-	if hs.Validity < gs.MinPriceTableValidity {
+	if hs.Validity < time.Duration(gs.MinPriceTableValidity) {
 		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
 	}
 	if gougingErr := errsToStr(errs...); gougingErr != "" {
@@ -209,7 +209,7 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 	}
 
 	// check EA expiry
-	if hs.EphemeralAccountExpiry < gs.MinAccountExpiry {
+	if hs.EphemeralAccountExpiry < time.Duration(gs.MinAccountExpiry) {
 		return fmt.Errorf("'EphemeralAccountExpiry' is less than the allowed minimum value, %v < %v", hs.EphemeralAccountExpiry, gs.MinAccountExpiry)
 	}
 
@@ -279,7 +279,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv
 	}
 
 	// check Validity
-	if pt.Validity < gs.MinPriceTableValidity {
+	if pt.Validity < time.Duration(gs.MinPriceTableValidity) {
 		return fmt.Errorf("'Validity' is less than the allowed minimum value, %v < %v", pt.Validity, gs.MinPriceTableValidity)
 	}
 
