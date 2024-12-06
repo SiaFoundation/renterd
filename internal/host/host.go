@@ -32,7 +32,7 @@ type (
 
 	HostManager interface {
 		Downloader(hi api.HostInfo) Downloader
-		Uploader(hi api.HostInfo, cm api.ContractMetadata) Uploader
+		Uploader(hi api.HostInfo, fcid types.FileContractID) Uploader
 		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) Host
 	}
 )

@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	rhp "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/renterd/api"
 	"go.uber.org/zap"
 )
 
 type (
 	ContractSpendingRecorder interface {
-		Record(fcid types.FileContractID, recordSpendFn func(*api.ContractSpendingRecord))
+		RecordV1(types.FileContractRevision, api.ContractSpending)
+		RecordV2(rhp.ContractRevision, api.ContractSpending)
 		Stop(context.Context)
 	}
 
@@ -50,52 +52,14 @@ func (w *Worker) initContractSpendingRecorder(flushInterval time.Duration) {
 	}
 }
 
-// Record stores the given contract spending record until it gets flushed to the bus.
-// func (r *contractSpendingRecorder) Record(rev types.FileContractRevision, cs api.ContractSpending) {
-// 	r.mu.Lock()
-// 	defer r.mu.Unlock()
+// RecordV1 stores the given contract spending record until it gets flushed to the bus.
+func (r *contractSpendingRecorder) RecordV1(rev types.FileContractRevision, cs api.ContractSpending) {
+	r.record(rev.ParentID, rev.RevisionNumber, rev.Filesize, rev.ValidRenterPayout(), rev.MissedHostPayout(), cs)
+}
 
-// 	// record the spending
-// 	csr, found := r.contractSpendings[rev.ParentID]
-// 	if !found {
-// 		csr = api.ContractSpendingRecord{
-// 			ContractID: rev.ParentID,
-// 		}
-// 	}
-// 	csr.ContractSpending = csr.ContractSpending.Add(cs)
-// 	if rev.RevisionNumber > csr.RevisionNumber {
-// 		csr.RevisionNumber = rev.RevisionNumber
-// 		csr.Size = rev.Filesize
-// 		csr.ValidRenterPayout = rev.ValidRenterPayout()
-// 		csr.MissedHostPayout = rev.MissedHostPayout()
-// 	}
-// 	r.contractSpendings[rev.ParentID] = csr
-
-// 	// schedule flush
-// 	if r.flushTimer == nil {
-// 		r.flushTimer = time.AfterFunc(r.flushInterval, r.flush)
-// 	}
-// }
-
-// Record stores the given contract spending record until it gets flushed to the bus.
-func (r *contractSpendingRecorder) Record(fcid types.FileContractID, recordSpendFn func(csr *api.ContractSpendingRecord)) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// grab the spending record
-	csr, found := r.contractSpendings[fcid]
-	if !found {
-		csr = api.ContractSpendingRecord{ContractID: fcid}
-	}
-
-	// record the spending
-	recordSpendFn(&csr)
-	r.contractSpendings[fcid] = csr
-
-	// schedule flush
-	if r.flushTimer == nil {
-		r.flushTimer = time.AfterFunc(r.flushInterval, r.flush)
-	}
+// RecordV2 stores the given contract spending record until it gets flushed to the bus.
+func (r *contractSpendingRecorder) RecordV2(rev rhp.ContractRevision, cs api.ContractSpending) {
+	r.record(rev.ID, rev.Revision.RevisionNumber, rev.Revision.Filesize, rev.Revision.RenterOutput.Value, rev.Revision.HostOutput.Value, cs)
 }
 
 // Stop stops the flush timer and flushes one last time.
@@ -145,4 +109,28 @@ func (r *contractSpendingRecorder) flush() {
 		}
 	}
 	r.flushTimer = nil
+}
+
+func (r *contractSpendingRecorder) record(fcid types.FileContractID, revisionNumber, size uint64, validRenterPayout, missedHostPayout types.Currency, cs api.ContractSpending) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// record the spending
+	csr, found := r.contractSpendings[fcid]
+	if !found {
+		csr = api.ContractSpendingRecord{ContractID: fcid}
+	}
+	csr.ContractSpending = csr.ContractSpending.Add(cs)
+	if revisionNumber > csr.RevisionNumber {
+		csr.RevisionNumber = revisionNumber
+		csr.Size = size
+		csr.ValidRenterPayout = validRenterPayout
+		csr.MissedHostPayout = missedHostPayout
+	}
+	r.contractSpendings[fcid] = csr
+
+	// schedule flush
+	if r.flushTimer == nil {
+		r.flushTimer = time.AfterFunc(r.flushInterval, r.flush)
+	}
 }

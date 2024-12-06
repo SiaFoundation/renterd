@@ -112,7 +112,7 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
-		host:      hm.Uploader(hi, cm),
+		host:      hm.Uploader(hi, cm.ID),
 		fcid:      cm.ID,
 		endHeight: cm.WindowEnd,
 		queue:     make([]*SectorUploadReq, 0),
@@ -150,7 +150,7 @@ func (u *Uploader) Refresh(hi *api.HostInfo, cm api.ContractMetadata) {
 	defer u.mu.Unlock()
 
 	if hi != nil {
-		u.host = u.hm.Uploader(*hi, cm)
+		u.host = u.hm.Uploader(*hi, cm.ID)
 	}
 
 	u.fcid = cm.ID

@@ -86,7 +86,7 @@ func (hm *HostManager) Downloader(hi api.HostInfo) host.Downloader {
 	return NewHost(hi.PublicKey)
 }
 
-func (hm *HostManager) Uploader(hi api.HostInfo, _ api.ContractMetadata) host.Uploader {
+func (hm *HostManager) Uploader(hi api.HostInfo, _ types.FileContractID) host.Uploader {
 	return NewHost(hi.PublicKey)
 }
 

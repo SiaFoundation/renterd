@@ -49,9 +49,9 @@ type (
 	}
 
 	hostUploadClient struct {
-		hi api.HostInfo
-		cm api.ContractMetadata
-		rk types.PrivateKey
+		fcid types.FileContractID
+		hi   api.HostInfo
+		rk   types.PrivateKey
 
 		acc  *worker.Account
 		csr  ContractSpendingRecorder
@@ -60,9 +60,9 @@ type (
 	}
 
 	hostV2UploadClient struct {
-		hi api.HostInfo
-		cm api.ContractMetadata
-		rk types.PrivateKey
+		fcid types.FileContractID
+		hi   api.HostInfo
+		rk   types.PrivateKey
 
 		acc  *worker.Account
 		csr  ContractSpendingRecorder
@@ -106,12 +106,12 @@ func (w *Worker) Downloader(hi api.HostInfo) host.Downloader {
 	}
 }
 
-func (w *Worker) Uploader(hi api.HostInfo, cm api.ContractMetadata) host.Uploader {
+func (w *Worker) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader {
 	if hi.IsV2() {
 		return &hostV2UploadClient{
-			hi: hi,
-			cm: cm,
-			rk: w.deriveRenterKey(hi.PublicKey),
+			fcid: fcid,
+			hi:   hi,
+			rk:   w.deriveRenterKey(hi.PublicKey),
 
 			acc:  w.accounts.ForHost(hi.PublicKey),
 			csr:  w.contractSpendingRecorder,
@@ -120,9 +120,9 @@ func (w *Worker) Uploader(hi api.HostInfo, cm api.ContractMetadata) host.Uploade
 		}
 	}
 	return &hostUploadClient{
-		hi: hi,
-		cm: cm,
-		rk: w.deriveRenterKey(hi.PublicKey),
+		fcid: fcid,
+		hi:   hi,
+		rk:   w.deriveRenterKey(hi.PublicKey),
 
 		acc:  w.accounts.ForHost(hi.PublicKey),
 		csr:  w.contractSpendingRecorder,
@@ -207,15 +207,7 @@ func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, re
 		}
 
 		// record the spend
-		h.csr.Record(rev.ParentID, func(csr *api.ContractSpendingRecord) {
-			csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{FundAccount: deposit.Add(cost)})
-			if rev.RevisionNumber > csr.RevisionNumber {
-				csr.RevisionNumber = rev.RevisionNumber
-				csr.Size = rev.Filesize
-				csr.ValidRenterPayout = rev.ValidRenterPayout()
-				csr.MissedHostPayout = rev.MissedHostPayout()
-			}
-		})
+		h.csr.RecordV1(*rev, api.ContractSpending{FundAccount: deposit.Add(cost)})
 
 		// log the account balance after funding
 		log.Debugw("fund account succeeded",
@@ -298,7 +290,7 @@ func (c *hostUploadClient) PriceTable(ctx context.Context, rev *types.FileContra
 }
 
 func (c *hostUploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
-	rev, err := c.rhp3.Revision(ctx, c.cm.ID, c.hi.PublicKey, c.hi.SiamuxAddr)
+	rev, err := c.rhp3.Revision(ctx, c.fcid, c.hi.PublicKey, c.hi.SiamuxAddr)
 	if err != nil {
 		return fmt.Errorf("%w; %w", rhp3.ErrFailedToFetchRevision, err)
 	} else if rev.RevisionNumber == math.MaxUint64 {
@@ -330,26 +322,18 @@ func (c *hostUploadClient) UploadSector(ctx context.Context, sectorRoot types.Ha
 		return fmt.Errorf("failed to upload sector: %w", err)
 	}
 
-	c.csr.Record(rev.ParentID, func(csr *api.ContractSpendingRecord) {
-		csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{Uploads: cost})
-		if rev.RevisionNumber > csr.RevisionNumber {
-			csr.RevisionNumber = rev.RevisionNumber
-			csr.Size = rev.Filesize
-			csr.ValidRenterPayout = rev.ValidRenterPayout()
-			csr.MissedHostPayout = rev.MissedHostPayout()
-		}
-	})
+	c.csr.RecordV1(rev, api.ContractSpending{Uploads: cost})
 	return nil
 }
 
 func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
-	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), c.cm.ID)
+	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), c.fcid)
 	if err != nil {
 		return err
 	}
 
 	rev := rhp.ContractRevision{
-		ID:       c.cm.ID,
+		ID:       c.fcid,
 		Revision: fc,
 	}
 
@@ -359,21 +343,19 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 			return types.ZeroCurrency, err
 		}
 
-		wRes, aRes, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), rev, prices, c.rk, c.acc.Token(), NewReaderLen(sector[:]), rhpv2.SectorSize, 144)
+		res, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.acc.Token(), NewReaderLen(sector[:]), rhpv2.SectorSize, api.BlocksPerDay*3)
 		if err != nil {
-			return types.ZeroCurrency, fmt.Errorf("failed to upload sector: %w", err)
+			return types.ZeroCurrency, fmt.Errorf("failed to write sector: %w", err)
+		}
+		cost := res.Usage.RenterCost()
+
+		res2, err := c.rhp4.AppendSectors(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.rk, rev, []types.Hash256{res.Root})
+		if err != nil {
+			return types.ZeroCurrency, fmt.Errorf("failed to write sector: %w", err)
 		}
 
-		c.csr.Record(c.cm.ID, func(csr *api.ContractSpendingRecord) {
-			csr.ContractSpending = csr.ContractSpending.Add(api.ContractSpending{Uploads: aRes.Usage.RenterCost()})
-			if rev.Revision.RevisionNumber > csr.RevisionNumber {
-				csr.RevisionNumber = rev.Revision.RevisionNumber
-				csr.Size = rev.Revision.Filesize
-				csr.ValidRenterPayout = rev.Revision.RenterOutput.Value
-				csr.MissedHostPayout = rev.Revision.HostOutput.Value
-			}
-		})
-		return wRes.Usage.RenterCost(), nil
+		c.csr.RecordV2(rev, api.ContractSpending{Uploads: res2.Usage.RenterCost()})
+		return cost, nil
 	})
 }
 

@@ -62,7 +62,7 @@ func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, s
 	return hm.hosts[hk]
 }
 
-func (hm *testHostManager) Uploader(hi api.HostInfo, cm api.ContractMetadata) host.Uploader {
+func (hm *testHostManager) Uploader(hi api.HostInfo, _ types.FileContractID) host.Uploader {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 
