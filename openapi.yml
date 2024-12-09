@@ -632,6 +632,89 @@ paths:
                     format: date-time
                     description: When the worker was started
 
+  /worker/stats/downloads:
+    get:
+      summary: Get download stats
+      description: Returns the download stats of the worker.
+      responses:
+        "200":
+          description: Successfully retrieved download stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  avgDownloadSpeedMbps:
+                    type: number
+                    format: float
+                    description: The average download speed in Mbps
+                  avgOverdrivePct:
+                    type: number
+                    format: float
+                    description: The average overdrive percentage
+                  healthyDownloaders:
+                    type: integer
+                    format: uint64
+                    description: The number of healthy downloaders
+                  numDownloaders:
+                    type: integer
+                    format: uint64
+                    description: The number of total downloaders
+                  downloadersStats:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        avgSectorDownloadSpeedMbps:
+                          type: number
+                          format: float
+                          description: The average sector download speed in Mbps
+                        hostKey:
+                          allOf:
+                            - $ref: "#/components/schemas/PublicKey"
+                            - description: The host's public key
+
+  /worker/stats/uploads:
+    get:
+      summary: Get upload stats
+      description: Returns the upload stats of the worker.
+      responses:
+        "200":
+          description: Successfully retrieved upload stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  avgUploadSpeedMbps:
+                    type: number
+                    format: float
+                    description: The average upload speed in Mbps
+                  avgOverdrivePct:
+                    type: number
+                    format: float
+                    description: The average overdrive percentage
+                  healthyUploaders:
+                    type: integer
+                    format: uint64
+                    description: The number of healthy uploaders
+                  numUploaders:
+                    type: integer
+                    format: uint64
+                    description: The number of total uploaders
+                  uploadersStats:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        avgSectorUploadSpeedMbps:
+                          type: number
+                          format: float
+                          description: The average sector upload speed in Mbps
+                        hostKey:
+                          allOf:
+                            - $ref: "#/components/schemas/PublicKey"
+                            - description: The host's public key
 components:
   schemas:
     #############################
