@@ -386,27 +386,6 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var prefix string
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
-	var sortBy string
-	if jc.DecodeForm("sortby", &sortBy) != nil {
-		return
-	}
-	var sortDir string
-	if jc.DecodeForm("sortdir", &sortDir) != nil {
-		return
-	}
-	var marker string
-	if jc.DecodeForm("marker", &marker) != nil {
-		return
-	}
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoredelim", &ignoreDelim) != nil {
-		return
-	}
-
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("no path provided"), http.StatusBadRequest)

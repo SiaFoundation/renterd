@@ -330,7 +330,7 @@ paths:
             ETag:
               description: The ETag of the uploaded part
               schema:
-                - $ref: "#/components/schemas/ETag"
+                $ref: "#/components/schemas/ETag"
         "400":
           description: Invalid combination of request parameters
           content:
@@ -349,6 +349,85 @@ paths:
             text/plain:
               schema:
                 type: string
+  /worker/object/{key}:
+    get:
+      summary: Download an object
+      description: Downloads an object from the Sia network.
+      parameters:
+        - name: key
+          description: The key of the file to download
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the object belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+        - name: Range
+          in: header
+          description: The range of bytes to download. If not provided, the entire object will be downloaded.
+          schema:
+            type: string
+            example: "bytes=0-100"
+      responses:
+        "200":
+          description: Successfully downloaded object
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            "Accept-Ranges":
+              description: The range units the server supports
+              schema:
+                type: string
+            "Content-Range":
+              description: The range of bytes that were downloaded
+              schema:
+                type: string
+            "Content-Type":
+              description: The content type of the object
+              schema:
+                type: string
+            "ETag":
+              description: The ETag of the downloaded object
+              schema:
+                $ref: "#/components/schemas/ETag"
+        "400":
+          description: Invalid range or missing parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid range
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: object not found
+        "416":
+          description: No overlap between 'Range' and object's content
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "invalid range: failed to overlap"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "failed to fetch object metadata"
 
 components:
   schemas:
