@@ -56,8 +56,8 @@ func newTestWorker(t test.TestingCommon, cfg config.Worker) *testWorker {
 	// override managers
 	hm := newTestHostManager(t)
 	uploadKey := mk.DeriveUploadKey()
-	w.downloadManager = download.NewManager(context.Background(), &uploadKey, hm, dlmm, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, zap.NewNop())
-	w.uploadManager = upload.NewManager(context.Background(), &uploadKey, hm, ulmm, b, b, b, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, zap.NewNop())
+	w.downloadManager = download.NewManager(context.Background(), &uploadKey, hm, dlmm, b, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, zap.NewNop())
+	w.uploadManager = upload.NewManager(context.Background(), &uploadKey, hm, ulmm, b, b, b, cfg.UploadMaxMemory, cfg.UploadOverdriveTimeout, zap.NewNop())
 
 	return &testWorker{
 		test.NewTT(t),
