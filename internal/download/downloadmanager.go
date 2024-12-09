@@ -115,11 +115,11 @@ func (s *sectorInfo) selectHost(h types.PublicKey) {
 	}
 }
 
-func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
+func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, mm memory.MemoryManager, os ObjectStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
 	logger = logger.Named("downloadmanager")
 	return &Manager{
 		hm:        hm,
-		mm:        memory.NewManager(maxMemory, logger),
+		mm:        mm,
 		os:        os,
 		uploadKey: uploadKey,
 		logger:    logger.Sugar(),

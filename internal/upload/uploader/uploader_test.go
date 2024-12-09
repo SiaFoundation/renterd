@@ -18,10 +18,12 @@ import (
 func TestUploaderStopped(t *testing.T) {
 	cs := mocks.NewContractStore()
 	hm := mocks.NewHostManager()
-	c := mocks.NewContract(types.PublicKey{1}, types.FileContractID{1})
 	cl := mocks.NewContractLocker()
 
-	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, c.Metadata(), zap.NewNop().Sugar())
+	c := mocks.NewContract(types.PublicKey{1}, types.FileContractID{1})
+	md := c.Metadata()
+
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, md.ID, md.WindowEnd, zap.NewNop().Sugar())
 	ul.Stop(errors.New("test"))
 
 	req := SectorUploadReq{
@@ -111,11 +113,10 @@ func TestRefreshUploader(t *testing.T) {
 
 	// create uploader
 	hk := types.PublicKey{1}
-	c1 := cs.AddContract(hk)
-	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, c1.Metadata(), zap.NewNop().Sugar())
+	c1 := cs.AddContract(hk).Metadata()
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, c1.ID, c1.WindowEnd, zap.NewNop().Sugar())
 
 	// renew the first contract
-	fmt.Println(c1.ID())
 	c1Renewed, err := cs.RenewContract(hk)
 	if err != nil {
 		t.Fatal(err)
