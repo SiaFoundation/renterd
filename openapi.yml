@@ -349,6 +349,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /worker/object/{key}:
     get:
       summary: Download an object
@@ -428,6 +429,156 @@ paths:
               schema:
                 type: string
                 example: "failed to fetch object metadata"
+    put:
+      summary: Upload an object
+      description: Uploads an object to the Sia network.
+      parameters:
+        - name: key
+          description: The key of the file to upload
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the object belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+        - name: minshards
+          description: Used to override the minimum number of shards the object should be split into.
+          example: 10
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: totalshards
+          description: Used to override the total number of shards the object should be split into.
+          example: 30
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: mimetype
+          description: The MIME type of the object
+          example: "text/plain"
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Successfully uploaded object
+          headers:
+            ETag:
+              description: The ETag of the uploaded object
+              schema:
+                $ref: "#/components/schemas/ETag"
+        "400":
+          description: Invalid combination of request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Consensus isn't synced
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      summary: Deletes an object
+      description: Deletes an object from the local database. The object is not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
+      parameters:
+        - name: key
+          description: The key of the file to delete
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the object belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+      responses:
+        "200":
+          description: Successfully deleted object
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /worker/objects/remove:
+    post:
+      summary: Delete a batch of objects with a given prefix
+      description: Deletes all objects with the provided prefix from the local database. The objects are not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/Bucket"
+                  description: The bucket the objects belong to
+                prefix:
+                  type: string
+                  example: "myDir/"
+                  minLength: 1
+                  description: The prefix of the objects to delete
+      responses:
+        "200":
+          description: Successfully removed objects
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Missing prefix or bucket
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
 
 components:
   schemas:
