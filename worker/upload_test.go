@@ -11,6 +11,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
@@ -73,10 +74,14 @@ func TestUpload(t *testing.T) {
 	var filtered []api.HostInfo
 	for _, md := range w.Contracts() {
 		// add unused contracts
+		host, err := w.bus.Host(context.Background(), md.HostKey)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, used := used[md.HostKey]; !used {
 			filtered = append(filtered, api.HostInfo{
 				PublicKey:  md.HostKey,
-				SiamuxAddr: md.SiamuxAddr,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
 			})
 			continue
 		}
@@ -85,7 +90,7 @@ func TestUpload(t *testing.T) {
 		if n < int(params.rs.MinShards) {
 			filtered = append(filtered, api.HostInfo{
 				PublicKey:  md.HostKey,
-				SiamuxAddr: md.SiamuxAddr,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
 			})
 			n++
 		}
@@ -111,7 +116,7 @@ func TestUpload(t *testing.T) {
 	// download the data again and assert it fails
 	buf.Reset()
 	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), filtered)
-	if !errors.Is(err, errDownloadNotEnoughHosts) {
+	if !errors.Is(err, download.ErrDownloadNotEnoughHosts) {
 		t.Fatal("expected not enough hosts error", err)
 	}
 
@@ -336,7 +341,7 @@ func TestMigrateLostSector(t *testing.T) {
 	shards = shards[:1]
 
 	// recreate upload contracts
-	contracts := make([]api.ContractMetadata, 0)
+	contracts := make([]hostContract, 0)
 	for _, c := range w.Contracts() {
 		_, used := usedHosts[c.HostKey]
 		if !used && c.HostKey != badHost {
@@ -455,7 +460,7 @@ func TestUploadShards(t *testing.T) {
 	shards = shards[:len(badIndices)]
 
 	// recreate upload contracts
-	contracts := make([]api.ContractMetadata, 0)
+	contracts := make([]hostContract, 0)
 	for _, c := range w.Contracts() {
 		_, used := usedHosts[c.HostKey]
 		_, bad := badHosts[c.HostKey]
@@ -506,9 +511,13 @@ func TestUploadShards(t *testing.T) {
 	var hosts []api.HostInfo
 	for _, c := range w.Contracts() {
 		if _, bad := badHosts[c.HostKey]; !bad {
+			host, err := w.bus.Host(context.Background(), c.HostKey)
+			if err != nil {
+				t.Fatal(err)
+			}
 			hosts = append(hosts, api.HostInfo{
 				PublicKey:  c.HostKey,
-				SiamuxAddr: c.SiamuxAddr,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
 			})
 		}
 	}

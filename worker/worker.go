@@ -17,13 +17,16 @@ import (
 
 	"github.com/gotd/contrib/http_range"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -168,13 +171,14 @@ type Worker struct {
 	masterKey utils.MasterKey
 	startTime time.Time
 
-	downloadManager *downloadManager
+	downloadManager *download.Manager
 	uploadManager   *uploadManager
 
 	accounts    *iworker.AccountMgr
 	dialer      *rhp.FallbackDialer
 	cache       iworker.WorkerCache
-	priceTables *priceTables
+	priceTables *prices.PriceTables
+	pricesCache *prices.PricesCache
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
@@ -198,7 +202,13 @@ func (w *Worker) isStopped() bool {
 
 func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
 	return w.withContractLock(ctx, fcid, lockPriority, func() error {
-		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fetchTimeout)
+		if fetchTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, fetchTimeout)
+			defer cancel()
+		}
+
+		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
 		if err != nil {
 			return err
 		}
@@ -245,8 +255,8 @@ func (w *Worker) slabMigrateHandler(jc jape.Context) {
 		return
 	}
 
-	// fetch contracts
-	ulContracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// fetch host & contract info
+	ulContracts, err := w.hostContracts(ctx)
 	if jc.Check("couldn't fetch contracts from bus", err) != nil {
 		return
 	}
@@ -272,16 +282,11 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 	stats := w.downloadManager.Stats()
 
 	// prepare downloaders stats
-	var healthy uint64
 	var dss []api.DownloaderStats
-	for hk, stat := range stats.downloaders {
-		if stat.healthy {
-			healthy++
-		}
+	for hk, mbps := range stats.DownloadSpeedsMBPS {
 		dss = append(dss, api.DownloaderStats{
 			HostKey:                    hk,
-			AvgSectorDownloadSpeedMBPS: stat.avgSpeedMBPS,
-			NumDownloads:               stat.numDownloads,
+			AvgSectorDownloadSpeedMBPS: mbps,
 		})
 	}
 	sort.SliceStable(dss, func(i, j int) bool {
@@ -290,10 +295,10 @@ func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
 
 	// encode response
 	api.WriteResponse(jc, api.DownloadStatsResponse{
-		AvgDownloadSpeedMBPS: math.Ceil(stats.avgDownloadSpeedMBPS*100) / 100,
-		AvgOverdrivePct:      math.Floor(stats.avgOverdrivePct*100*100) / 100,
-		HealthyDownloaders:   healthy,
-		NumDownloaders:       uint64(len(stats.downloaders)),
+		AvgDownloadSpeedMBPS: math.Ceil(stats.AvgDownloadSpeedMBPS*100) / 100,
+		AvgOverdrivePct:      math.Floor(stats.AvgOverdrivePct*100*100) / 100,
+		HealthyDownloaders:   stats.HealthyDownloaders,
+		NumDownloaders:       stats.NumDownloaders,
 		DownloadersStats:     dss,
 	})
 }
@@ -619,7 +624,7 @@ func (w *Worker) idHandlerGET(jc jape.Context) {
 
 func (w *Worker) memoryGET(jc jape.Context) {
 	api.WriteResponse(jc, api.MemoryResponse{
-		Download: w.downloadManager.mm.Status(),
+		Download: w.downloadManager.MemoryStatus(),
 		Upload:   w.uploadManager.mm.Status(),
 	})
 }
@@ -700,6 +705,8 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
+		priceTables:          prices.NewPriceTables(),
+		pricesCache:          prices.NewPricesCache(),
 		rhp2Client:           rhp2.New(dialer, l),
 		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
@@ -712,10 +719,9 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
 		return nil, fmt.Errorf("failed to initialize accounts; %w", err)
 	}
-	w.initPriceTables()
 
 	uploadKey := w.masterKey.DeriveUploadKey()
-	w.initDownloadManager(&uploadKey, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
+	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, w.bus, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 	w.initUploadManager(&uploadKey, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	w.initContractSpendingRecorder(cfg.BusFlushInterval)
@@ -869,8 +875,8 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), hosts)
 			if err != nil {
 				w.logger.Error(err)
-				if !errors.Is(err, ErrShuttingDown) &&
-					!errors.Is(err, errDownloadCancelled) &&
+				if !errors.Is(err, download.ErrShuttingDown) &&
+					!errors.Is(err, download.ErrDownloadCancelled) &&
 					!errors.Is(err, io.ErrClosedPipe) {
 					w.registerAlert(newDownloadFailedAlert(bucket, key, offset, length, int64(len(hosts)), err))
 				}
@@ -897,7 +903,15 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	return res, err
 }
 
-func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
+func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
+	// handle v2 host
+	if host.IsV2() {
+		account := w.accounts.ForHost(host.PublicKey)
+		return account.WithSync(func() (types.Currency, error) {
+			return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
+		})
+	}
+
 	// attach gouging checker
 	gp, err := w.bus.GougingParams(ctx)
 	if err != nil {
@@ -906,8 +920,8 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hk 
 	ctx = WithGougingChecker(ctx, w.bus, gp)
 
 	// sync the account
-	h := w.Host(hk, fcid, siamuxAddr)
-	err = w.withRevision(ctx, fcid, hk, siamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
+	h := w.Host(host.PublicKey, fcid, host.SiamuxAddr)
+	err = w.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})
 	if err != nil {
@@ -926,8 +940,8 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	// attach gouging checker to the context
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// fetch host & contract info
+	contracts, err := w.hostContracts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -985,8 +999,8 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 		uploadOpts = append(uploadOpts, WithCustomEncryptionOffset(uint64(*opts.EncryptionOffset)))
 	}
 
-	// fetch contracts
-	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	// fetch host & contract info
+	contracts, err := w.hostContracts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch contracts from bus: %w", err)
 	}
@@ -1009,7 +1023,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

@@ -1,7 +1,6 @@
 package sql
 
 import (
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -39,10 +38,6 @@ type ContractRow struct {
 	FundAccountSpending Currency
 	SectorRootsSpending Currency
 	UploadSpending      Currency
-
-	// decorated fields
-	NetAddress string
-	SiamuxPort string
 }
 
 func (r *ContractRow) Scan(s Scanner) error {
@@ -51,19 +46,10 @@ func (r *ContractRow) Scan(s Scanner) error {
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.Usability, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,
-		&r.NetAddress, &r.SiamuxPort,
 	)
 }
 
 func (r *ContractRow) ContractMetadata() api.ContractMetadata {
-	var siamuxAddr string
-	if r.NetAddress != "" && r.SiamuxPort != "" {
-		siamuxAddr = rhpv2.HostSettings{
-			NetAddress: r.NetAddress,
-			SiaMuxPort: r.SiamuxPort,
-		}.SiamuxAddr()
-	}
-
 	spending := api.ContractSpending{
 		Uploads:     types.Currency(r.UploadSpending),
 		FundAccount: types.Currency(r.FundAccountSpending),
@@ -73,7 +59,6 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 
 	return api.ContractMetadata{
 		ID:      types.FileContractID(r.FCID),
-		HostIP:  r.NetAddress,
 		HostKey: types.PublicKey(r.HostKey),
 		V2:      r.V2,
 
@@ -86,7 +71,6 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 		RenewedTo:      types.FileContractID(r.RenewedTo),
 		RevisionHeight: r.RevisionHeight,
 		RevisionNumber: r.RevisionNumber,
-		SiamuxAddr:     siamuxAddr,
 		Size:           r.Size,
 		Spending:       spending,
 		StartHeight:    r.StartHeight,

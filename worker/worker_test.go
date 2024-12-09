@@ -9,8 +9,10 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -44,16 +46,17 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	ulmm := mocks.NewMemoryManager()
 
 	// create worker
-	w, err := New(newTestWorkerCfg(), blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
+	cfg := newTestWorkerCfg()
+	mk := utils.MasterKey(blake2b.Sum256([]byte("testwork")))
+	w, err := New(cfg, mk, b, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// override managers
 	hm := newTestHostManager(t)
-	w.priceTables.hm = hm
-	w.downloadManager.hm = hm
-	w.downloadManager.mm = dlmm
+	uploadKey := mk.DeriveUploadKey()
+	w.downloadManager = download.NewManager(context.Background(), &uploadKey, hm, b, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, zap.NewNop())
 	w.uploadManager.hm = hm
 	w.uploadManager.mm = ulmm
 
@@ -102,12 +105,27 @@ func (w *testWorker) UnblockAsyncPackedSlabUploads(up uploadParameters) {
 	delete(w.uploadingPackedSlabs, key)
 }
 
-func (w *testWorker) Contracts() []api.ContractMetadata {
-	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+func (w *testWorker) Contracts() (hcs []hostContract) {
+	hosts, err := w.hs.UsableHosts(context.Background())
 	if err != nil {
 		w.tt.Fatal(err)
 	}
-	return metadatas
+	hmap := make(map[types.PublicKey]api.HostInfo)
+	for _, h := range hosts {
+		hmap[h.PublicKey] = h
+	}
+
+	contracts, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		w.tt.Fatal(err)
+	}
+	for _, c := range contracts {
+		if h, ok := hmap[c.HostKey]; ok {
+			hcs = append(hcs, hostContract{c, h})
+		}
+	}
+
+	return
 }
 
 func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
@@ -123,18 +141,12 @@ func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
 	return renewal
 }
 
-func (w *testWorker) UsableHosts() (hosts []api.HostInfo) {
-	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+func (w *testWorker) UsableHosts() []api.HostInfo {
+	hosts, err := w.hs.UsableHosts(context.Background())
 	if err != nil {
 		w.tt.Fatal(err)
 	}
-	for _, md := range metadatas {
-		hosts = append(hosts, api.HostInfo{
-			PublicKey:  md.HostKey,
-			SiamuxAddr: md.SiamuxAddr,
-		})
-	}
-	return
+	return hosts
 }
 
 func newTestWorkerCfg() config.Worker {

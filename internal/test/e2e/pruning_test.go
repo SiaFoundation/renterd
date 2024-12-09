@@ -133,7 +133,7 @@ func TestSectorPruning(t *testing.T) {
 		cRoots, err := cluster.ContractRoots(context.Background(), c.ID)
 		tt.OK(err)
 		if len(dbRoots) != len(cRoots) {
-			t.Fatal("unexpected number of roots", dbRoots, cRoots)
+			t.Fatal("unexpected number of roots", len(dbRoots), len(cRoots))
 		}
 		for _, root := range dbRoots {
 			if !hasRoot(cRoots, root) {
@@ -187,7 +187,7 @@ func TestSectorPruning(t *testing.T) {
 	res, err = b.PrunableData(context.Background())
 	tt.OK(err)
 	if res.TotalPrunable != 0 {
-		t.Fatalf("unexpected prunable data: %d", n)
+		t.Fatalf("unexpected no prunable data: %d", n)
 	}
 
 	// assert spending was updated

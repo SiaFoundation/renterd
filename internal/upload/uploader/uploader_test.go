@@ -9,6 +9,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/test/mocks"
 	"go.uber.org/zap"
@@ -20,7 +21,7 @@ func TestUploaderStopped(t *testing.T) {
 	c := mocks.NewContract(types.PublicKey{1}, types.FileContractID{1})
 	cl := mocks.NewContractLocker()
 
-	ul := New(context.Background(), cl, cs, hm, c.Metadata(), zap.NewNop().Sugar())
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, c.Metadata(), zap.NewNop().Sugar())
 	ul.Stop(errors.New("test"))
 
 	req := SectorUploadReq{
@@ -111,7 +112,7 @@ func TestRefreshUploader(t *testing.T) {
 	// create uploader
 	hk := types.PublicKey{1}
 	c1 := cs.AddContract(hk)
-	ul := New(context.Background(), cl, cs, hm, c1.Metadata(), zap.NewNop().Sugar())
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, c1.Metadata(), zap.NewNop().Sugar())
 
 	// renew the first contract
 	fmt.Println(c1.ID())
