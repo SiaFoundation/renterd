@@ -115,12 +115,7 @@ func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContrac
 	if h == nil {
 		return nil, fmt.Errorf("no host found for contract %v", c)
 	}
-
-	roots, err := h.store.SectorRoots()
-	if err != nil {
-		return nil, err
-	}
-	return roots[c.ID], nil
+	return h.contracts.SectorRoots(fcid), nil
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {

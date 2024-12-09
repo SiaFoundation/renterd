@@ -147,7 +147,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 	toPrune = toPrune[:batchSize]
 
 	// prune the batch
-	res, err := b.rhp4Client.FreeSectors(ctx, b.cm.TipState(), prices, rk, cRHP4.ContractRevision{
+	res, err := b.rhp4Client.FreeSectors(ctx, cm.HostKey, hostIP, b.cm.TipState(), prices, rk, cRHP4.ContractRevision{
 		ID:       cm.ID,
 		Revision: rev,
 	}, toPrune)
