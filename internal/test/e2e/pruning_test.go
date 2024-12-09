@@ -187,7 +187,7 @@ func TestSectorPruning(t *testing.T) {
 	res, err = b.PrunableData(context.Background())
 	tt.OK(err)
 	if res.TotalPrunable != 0 {
-		t.Fatalf("unexpected prunable data: %d", n)
+		t.Fatalf("unexpected no prunable data: %d", n)
 	}
 
 	// assert spending was updated
