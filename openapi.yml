@@ -316,7 +316,7 @@ components:
           type: integer
           minimum: 1
           format: int32
-          description: The number of data shards a piece of an object gets erasure-coded intoo
+          description: The number of data shards a piece of an object gets erasure-coded into
         totalShards:
           type: integer
           minimum: 2
