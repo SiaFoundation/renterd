@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
@@ -722,8 +723,12 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	}
 
 	uploadKey := w.masterKey.DeriveUploadKey()
-	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, w.bus, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
-	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, w, w.bus, w.bus, w.bus, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+
+	dlmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
+	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+
+	ulmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
+	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, w, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil

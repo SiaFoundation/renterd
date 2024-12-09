@@ -152,7 +152,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// create upload params
 	params := testParameters(t.Name())
-	opts := []upload.Option{upload.WithPacking(true)}
+	params.Packing = true
 
 	// create test data
 	data := frand.Bytes(128)
@@ -231,7 +231,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	uploadBytes := func(n int) {
 		t.Helper()
 		params.Key = fmt.Sprintf("%s_%d", t.Name(), c)
-		_, err := w.upload(context.Background(), params.Bucket, params.Key, testRedundancySettings, bytes.NewReader(frand.Bytes(n)), w.UploadHosts(), opts...)
+		_, err := w.upload(context.Background(), params.Bucket, params.Key, testRedundancySettings, bytes.NewReader(frand.Bytes(n)), w.UploadHosts(), upload.WithPacking(true))
 		if err != nil {
 			t.Fatal(err)
 		}

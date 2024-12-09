@@ -150,11 +150,11 @@ type (
 	}
 )
 
-func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
+func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
 	logger = logger.Named("uploadmanager")
 	return &Manager{
 		hm:        hm,
-		mm:        memory.NewManager(maxMemory, logger),
+		mm:        mm,
 		os:        os,
 		cl:        cl,
 		cs:        cs,
