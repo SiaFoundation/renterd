@@ -98,7 +98,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 	var rootsUsage rhpv4.Usage
 	for offset := uint64(0); offset < numsectors; {
 		// calculate the batch size
-		length := uint64(100) // TODO: rhpv4.MaxSectorBatchSize
+		length := uint64(rhpv4.MaxSectorBatchSize)
 		if offset+length > numsectors {
 			length = numsectors - offset
 		}
@@ -140,9 +140,9 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 	totalToPrune := uint64(len(toPrune))
 
 	// cap at max batch size
-	batchSize := uint64(100) // TODO: rhpv4.MaxSectorBatchSize
-	if batchSize > uint64(len(toPrune)) {
-		batchSize = uint64(len(toPrune))
+	batchSize := rhpv4.MaxSectorBatchSize
+	if batchSize > len(toPrune) {
+		batchSize = len(toPrune)
 	}
 	toPrune = toPrune[:batchSize]
 
@@ -155,6 +155,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 		return api.ContractPruneResponse{}, err
 	}
 	deleteUsage := res.Usage
+	rev = res.Revision // update rev
 
 	// record spending
 	if !rootsUsage.Add(deleteUsage).RenterCost().IsZero() {
