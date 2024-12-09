@@ -183,6 +183,25 @@ paths:
   # Autopilot routes
   #
   #############################
+  /worker/account/{hostkey}:
+    get:
+      summary: Get a worker account
+      description: Returns the account the worker maintains with the specified host for payment.
+      parameters:
+        - name: hostkey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+          description: The host's public key
+      responses:
+        "200":
+          description: Successfully retrieved worker account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
   /worker/accounts:
     get:
       summary: Get all worker accounts
@@ -196,6 +215,140 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Account"
+
+  /worker/{id}/resetdrift:
+    post:
+      summary: Reset drift for a worker's account
+      description: Resets the drift for the specified account to 0.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/PublicKey"
+              - description: The account's ID
+      responses:
+        "200":
+          description: Successfully reset drift for worker account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /worker/memory:
+    get:
+      summary: Get overview of worker's memory usage.
+      description: Returns the memory usage of the worker for both uploads and downloads.
+      responses:
+        "200":
+          description: Successfully retrieved memory usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download:
+                    allOf:
+                      - $ref: "#/components/schemas/MemoryStatus"
+                      - description: The memory status for for downloads
+                  upload:
+                    allOf:
+                      - $ref: "#/components/schemas/MemoryStatus"
+                      - description: The memory status for for uploads
+
+  /worker/multipart/{key}:
+    put:
+      summary: Upload a part of an ongoing multipart upload
+      description: Upload a single part of an ongoing multipart upload. Parts can be uploaded in parallel and then combined afterwards.
+      parameters:
+        - name: key
+          description: The key of the file to upload
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the multipart upload belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+        - name: uploadid
+          description: The ID of the ongoing multipart upload
+          in: query
+          required: true
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/MultipartUploadID"
+              - example: 7aaac83c6d553865755286c326e852a68300bebf7feea1b435d61bd3610bf82b
+        - name: partnumber
+          description: The part number of the part being uploaded
+          example: 0
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: uint32
+        - name: minshards
+          description: Used to override the minimum number of shards the part should be split into.
+          example: 10
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: totalshards
+          description: Used to override the total number of shards the part should be split into.
+          example: 30
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: encryptionoffset
+          description: The offset of the part within the final object. This is required unless the upload was explicitly created to not be encrypted before erasure coding.
+          example: 0
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint64
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Successfully uploaded part
+          headers:
+            ETag:
+              description: The ETag of the uploaded part
+              schema:
+                - $ref: "#/components/schemas/ETag"
+        "400":
+          description: Invalid combination of request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Bucket or upload weren't found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Consensus isn't synced
+          content:
+            text/plain:
+              schema:
+                type: string
 
 components:
   schemas:
@@ -267,6 +420,11 @@ components:
         hosts:
           $ref: "#/components/schemas/HostsConfig"
 
+    Bucket:
+      type: string
+      pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+      description: A bucket logically groups together objects.
+
     BuildState:
       type: object
       properties:
@@ -328,6 +486,11 @@ components:
           description: Whether to automatically prune deleted data from contracts
           default: false
 
+    ETag:
+      type: string
+      pattern: '^(W/)?".*?"$'
+      description: An ETag representing a resource
+
     GougingSettings:
       type: object
       properties:
@@ -385,6 +548,19 @@ components:
           type: string
           description: The minimum supported protocol version of a host to be considered good
 
+    MemoryStatus:
+      type: object
+      properties:
+        available:
+          type: integer
+          format: uint64
+          description: The amount of remaining memory currently available in bytes
+        total:
+          type: integer
+          format: uint64
+          description: The total amount of memory available in bytes
+          minimum: 1
+
     RedundancySettings:
       type: object
       properties:
@@ -398,3 +574,8 @@ components:
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+
+    MultipartUploadID:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A unique identifier for a multipart upload
