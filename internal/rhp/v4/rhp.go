@@ -84,8 +84,12 @@ func (c *Client) VerifySector(ctx context.Context, prices rhp4.HostPrices, token
 }
 
 // FreeSectors removes sectors from a contract.
-func (c *Client) FreeSectors(ctx context.Context, cs consensus.State, prices rhp4.HostPrices, sk types.PrivateKey, contract rhp.ContractRevision, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
-	panic("not implemented")
+func (c *Client) FreeSectors(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, prices rhp4.HostPrices, sk types.PrivateKey, contract rhp.ContractRevision, indices []uint64) (res rhp.RPCFreeSectorsResult, _ error) {
+	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
+		res, err = rhp.RPCFreeSectors(ctx, t, cs, prices, sk, contract, indices)
+		return
+	})
+	return res, err
 }
 
 // AppendSectors appends sectors a host is storing to a contract.
@@ -123,8 +127,12 @@ func (c *Client) LatestRevision(ctx context.Context, hk types.PublicKey, addr st
 }
 
 // SectorRoots returns the sector roots for a contract.
-func (c *Client) SectorRoots(ctx context.Context, cs consensus.State, prices rhp4.HostPrices, signer rhp.ContractSigner, contract rhp.ContractRevision, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
-	panic("not implemented")
+func (c *Client) SectorRoots(ctx context.Context, hk types.PublicKey, addr string, cs consensus.State, prices rhp4.HostPrices, signer rhp.ContractSigner, contract rhp.ContractRevision, offset, length uint64) (res rhp.RPCSectorRootsResult, _ error) {
+	err := c.tpool.withTransport(ctx, hk, addr, func(c rhp.TransportClient) (err error) {
+		res, err = rhp.RPCSectorRoots(ctx, c, cs, prices, signer, contract, offset, length)
+		return err
+	})
+	return res, err
 }
 
 // AccountBalance returns the balance of an account.
