@@ -610,6 +610,28 @@ paths:
               schema:
                 type: string
 
+  /worker/state:
+    get:
+      summary: Get the worker's state.
+      description: Returns general information about the work.
+      responses:
+        "200":
+          description: Successfully retrieved worker state
+          content:
+            application/json:
+              schema:
+                type: object
+                allOf:
+                  - $ref: "#/components/schemas/BuildState"
+                properties:
+                  id:
+                    type: string
+                    description: The worker's ID
+                  startTime:
+                    type: string
+                    format: date-time
+                    description: When the worker was started
+
 components:
   schemas:
     #############################
