@@ -142,12 +142,6 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 	}, nil
 }
 
-// ID returns the id of the worker.
-func (c *Client) ID(ctx context.Context) (id string, err error) {
-	err = c.c.WithContext(ctx).GET("/id", &id)
-	return
-}
-
 // Memory requests the /memory endpoint.
 func (c *Client) Memory(ctx context.Context) (resp api.MemoryResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/memory", &resp)
