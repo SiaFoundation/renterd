@@ -178,14 +178,84 @@ paths:
                     type: boolean
                     description: Indicates whether the request triggered a new iteration of the maintenance loop. If maintenance was already ongoing, this will be false.
 
+  #############################
+  #
+  # Autopilot routes
+  #
+  #############################
+  /worker/accounts:
+    get:
+      summary: Get all worker accounts
+      description: Returns all accounts the worker maintains with hosts for payment.
+      responses:
+        "200":
+          description: Successfully retrieved worker accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+
 components:
   schemas:
+    #############################
+    #
+    # Core types
+    #
+    #############################
+    Account:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The account's ID
+        cleanShutdown:
+          type: boolean
+          description: Whether the account has been cleanly shutdown. If not, the account will require a sync with the host.
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The host's public key
+        balance:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The account's balance as expected by the worker
+        drift:
+          allOf:
+            - $ref: "#/components/schemas/SignedCurrency"
+            - description: The accumulated drift between the worker's expected balance and the host's actual balance. Used to track if a host is trying to cheat the renter over time.
+        owner:
+          type: string
+          description: The owner of the account that manages it. This is the id of the worker that maintains the account.
+          minLength: 1
+        requiresSync:
+          type: boolean
+          description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
+
+    Currency:
+      type: string
+      pattern: "^\\d+$"
+      maxLength: 39 # fits 2^128 - 1
+      description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
+    PublicKey:
+      type: string
+      pattern: "^ed25519:[0-9a-fA-F]{64}$"
+      description: A ed25519 public key
+
+    SignedCurrency:
+      type: string
+      pattern: "^-?\\d+$"
+      maxLength: 39 # fits 2^128 - 1
+      description: A signed amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
     #############################
     #
     # Helper types
     #
     #############################
-
     AutopilotConfig:
       type: object
       properties:
@@ -262,20 +332,25 @@ components:
       type: object
       properties:
         maxRPCPrice:
-          type: string
-          description: The maximum base price a host can charge per RPC
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum base price a host can charge per RPC
         maxContractPrice:
-          type: string
-          description: The maximum price a host can charge for a contract formation
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for a contract formation
         maxDownloadPrice:
-          type: string
-          description: The maximum price a host can charge for downloading in hastings / byte
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for downloading in hastings / byte
         maxUploadPrice:
-          type: string
-          description: The maximum price a host can charge for uploading in hastings / byte
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for uploading in hastings / byte
         maxStoragePrice:
-          type: string
-          description: The maximum price a host can charge for storage in hastings / byte / block
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for storage in hastings / byte / block
         hostBlockHeightLeeway:
           type: integer
           format: uint32
@@ -289,8 +364,9 @@ components:
           format: uint64
           description: The minimum amount of time an account on a host can be idle for before expiring
         minMaxEphemeralAccountBalance:
-          type: string
-          description: The minimum max balance a host should allow us to fund an account with
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The minimum max balance a host should allow us to fund an account with
 
     HostsConfig:
       type: object
