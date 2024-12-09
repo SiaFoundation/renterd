@@ -268,14 +268,6 @@ func (ap *Autopilot) Run() {
 			// update the scanner with the hosts config
 			ap.s.UpdateHostsConfig(apCfg.Hosts)
 
-			// Log worker id chosen for this maintenance iteration.
-			workerID, err := w.ID(ap.shutdownCtx)
-			if err != nil {
-				ap.logger.Errorf("aborting maintenance, failed to fetch worker id, err: %v", err)
-				return
-			}
-			ap.logger.Infof("using worker %s for iteration", workerID)
-
 			// perform wallet maintenance
 			err = ap.performWalletMaintenance(ap.shutdownCtx)
 			if err != nil {
