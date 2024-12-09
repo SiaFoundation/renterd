@@ -62,6 +62,16 @@ func (hm *testHostManager) Host(hk types.PublicKey, fcid types.FileContractID, s
 	return hm.hosts[hk]
 }
 
+func (hm *testHostManager) Uploader(hi api.HostInfo, _ types.FileContractID) host.Uploader {
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+
+	if _, ok := hm.hosts[hi.PublicKey]; !ok {
+		hm.tt.Fatal("host not found")
+	}
+	return hm.hosts[hi.PublicKey]
+}
+
 func (hm *testHostManager) addHost(h *testHost) {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
@@ -118,7 +128,7 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 	return err
 }
 
-func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte, rev types.FileContractRevision) error {
+func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
 	h.AddSector(sectorRoot, sector)
 	if h.uploadDelay > 0 {
 		select {
@@ -130,7 +140,7 @@ func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, s
 	return nil
 }
 
-func (h *testHost) FetchRevision(ctx context.Context, fetchTimeout time.Duration) (rev types.FileContractRevision, _ error) {
+func (h *testHost) FetchRevision(ctx context.Context, fcid types.FileContractID) (rev types.FileContractRevision, _ error) {
 	return h.Contract.Revision(), nil
 }
 
@@ -163,7 +173,7 @@ func TestHost(t *testing.T) {
 
 	// upload the sector
 	sector, root := newTestSector()
-	err := h.UploadSector(context.Background(), root, sector, types.FileContractRevision{})
+	err := h.UploadSector(context.Background(), root, sector)
 	if err != nil {
 		t.Fatal(err)
 	}

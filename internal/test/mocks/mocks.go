@@ -98,8 +98,9 @@ func NewHost(hk types.PublicKey) *Host {
 	return &Host{
 		hk: hk,
 		hi: api.Host{
-			PublicKey: hk,
-			Scanned:   true,
+			NetAddress: "localhost:1234",
+			PublicKey:  hk,
+			Scanned:    true,
 		},
 	}
 }

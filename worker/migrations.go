@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulContracts []api.ContractMetadata, bh uint64) error {
+func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulContracts []hostContract, bh uint64) error {
 	// map usable hosts
 	usableHosts := make(map[types.PublicKey]struct{})
 	for _, h := range dlHosts {
@@ -102,7 +102,7 @@ SHARDS:
 	shards = shards[:len(shardIndices)]
 
 	// filter upload contracts to the ones we haven't used yet
-	var allowed []api.ContractMetadata
+	var allowed []hostContract
 	for _, c := range ulContracts {
 		if _, used := seen[c.HostKey]; !used {
 			allowed = append(allowed, c)

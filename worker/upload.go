@@ -125,6 +125,11 @@ type (
 		uploaded uploadedSector
 		data     *[rhpv2.SectorSize]byte
 	}
+
+	hostContract struct {
+		api.ContractMetadata
+		api.HostInfo
+	}
 )
 
 func (us uploadedSector) toObjectSector() object.Sector {
@@ -142,7 +147,7 @@ func (w *Worker) initUploadManager(uploadKey *utils.UploadKey, maxMemory, maxOve
 	w.uploadManager = newUploadManager(w.shutdownCtx, uploadKey, w, w.bus, w.bus, w.bus, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
 }
 
-func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.RedundancySettings, r io.Reader, contracts []api.ContractMetadata, opts ...UploadOption) (_ string, err error) {
+func (w *Worker) upload(ctx context.Context, bucket, key string, rs api.RedundancySettings, r io.Reader, contracts []hostContract, opts ...UploadOption) (_ string, err error) {
 	// apply the options
 	up := defaultParameters(bucket, key, rs)
 	for _, opt := range opts {
@@ -265,9 +270,33 @@ func (w *Worker) threadedUploadPackedSlabs(rs api.RedundancySettings) {
 	wg.Wait()
 }
 
-func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api.PackedSlab, rs api.RedundancySettings) error {
-	// fetch contracts
+func (w *Worker) hostContracts(ctx context.Context) (hcs []hostContract, _ error) {
+	hosts, err := w.bus.UsableHosts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch usable hosts from bus: %v", err)
+	}
+
+	hmap := make(map[types.PublicKey]api.HostInfo)
+	for _, h := range hosts {
+		hmap[h.PublicKey] = h
+	}
+
 	contracts, err := w.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch contracts from bus: %v", err)
+	}
+
+	for _, c := range contracts {
+		if h, ok := hmap[c.HostKey]; ok {
+			hcs = append(hcs, hostContract{c, h})
+		}
+	}
+	return
+}
+
+func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api.PackedSlab, rs api.RedundancySettings) error {
+	// fetch host & contract info
+	contracts, err := w.hostContracts(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't fetch contracts from bus: %v", err)
 	}
@@ -314,10 +343,6 @@ func newUploadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.H
 	}
 }
 
-func (mgr *uploadManager) newUploader(cl ContractLocker, cs ContractStore, hm host.HostManager, hs HostStore, c api.ContractMetadata) (*uploader.Uploader, error) {
-	return uploader.New(mgr.shutdownCtx, cl, cs, hm, hs, c, mgr.logger)
-}
-
 func (mgr *uploadManager) Stats() uploadManagerStats {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -349,7 +374,7 @@ func (mgr *uploadManager) Stop() {
 	}
 }
 
-func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []api.ContractMetadata, up uploadParameters) (bufferSizeLimitReached bool, eTag string, err error) {
+func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []hostContract, up uploadParameters) (bufferSizeLimitReached bool, eTag string, err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -524,7 +549,7 @@ func (mgr *uploadManager) Upload(ctx context.Context, r io.Reader, contracts []a
 	return
 }
 
-func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem memory.Memory, contracts []api.ContractMetadata, bh uint64) (err error) {
+func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.RedundancySettings, ps api.PackedSlab, mem memory.Memory, contracts []hostContract, bh uint64) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -581,7 +606,7 @@ func (mgr *uploadManager) UploadPackedSlab(ctx context.Context, rs api.Redundanc
 	return nil
 }
 
-func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contracts []api.ContractMetadata, bh uint64, mem memory.Memory) (err error) {
+func (mgr *uploadManager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, contracts []hostContract, bh uint64, mem memory.Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -646,14 +671,12 @@ func (mgr *uploadManager) candidates(allowed map[types.PublicKey]struct{}) (cand
 	return
 }
 
-func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMetadata, bh uint64) (*upload, error) {
+func (mgr *uploadManager) newUpload(totalShards int, contracts []hostContract, bh uint64) (*upload, error) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	// refresh the uploaders
-	if err := mgr.refreshUploaders(contracts, bh); err != nil {
-		return nil, fmt.Errorf("failed to refresh uploaders: %w", err)
-	}
+	mgr.refreshUploaders(contracts, bh)
 
 	// check if we have enough contracts
 	if len(contracts) < totalShards {
@@ -675,9 +698,9 @@ func (mgr *uploadManager) newUpload(totalShards int, contracts []api.ContractMet
 	}, nil
 }
 
-func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh uint64) error {
+func (mgr *uploadManager) refreshUploaders(contracts []hostContract, bh uint64) {
 	// build map of renewals
-	renewals := make(map[types.FileContractID]api.ContractMetadata)
+	renewals := make(map[types.FileContractID]hostContract)
 	for _, c := range contracts {
 		if c.RenewedFrom != (types.FileContractID{}) {
 			renewals[c.RenewedFrom] = c
@@ -690,7 +713,7 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	for _, uploader := range mgr.uploaders {
 		// refresh uploaders that got renewed
 		if renewal, renewed := renewals[uploader.ContractID()]; renewed {
-			uploader.Refresh(renewal)
+			uploader.Refresh(&renewal.HostInfo, renewal.ContractMetadata)
 		}
 
 		// stop uploaders that expired
@@ -710,17 +733,14 @@ func (mgr *uploadManager) refreshUploaders(contracts []api.ContractMetadata, bh 
 	// add missing uploaders
 	for _, c := range contracts {
 		if _, exists := existing[c.ID]; !exists && bh < c.WindowEnd {
-			uploader, err := mgr.newUploader(mgr.cl, mgr.cs, mgr.hm, mgr.hs, c)
-			if err != nil {
-				return err
-			}
+			uploader := uploader.New(mgr.shutdownCtx, mgr.cl, mgr.cs, mgr.hm, c.HostInfo, c.ContractMetadata, mgr.logger)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}
 	}
 
 	mgr.uploaders = refreshed
-	return nil
+	return
 }
 
 func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan uploader.SectorUploadResp) {
