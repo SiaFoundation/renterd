@@ -547,8 +547,9 @@ paths:
               type: object
               properties:
                 bucket:
-                  $ref: "#/components/schemas/Bucket"
-                  description: The bucket the objects belong to
+                  allOf:
+                    - $ref: "#/components/schemas/Bucket"
+                    - description: The bucket the objects belong to
                 prefix:
                   type: string
                   example: "myDir/"
@@ -575,6 +576,35 @@ paths:
                 type: string
         "500":
           description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /worker/slab/migrate:
+    post:
+      summary: Migrate a slab
+      description: Migrates a slab from one host to another.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Slab"
+      responses:
+        "200":
+          description: Successfully migrated slab
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Consensus isn't synced
           content:
             text/plain:
               schema:
@@ -622,6 +652,16 @@ components:
       pattern: "^\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
+    FileContractID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: A unique identifier for a file contract
+
+    Hash256:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A 256-bit blake2b hash
 
     PublicKey:
       type: string
@@ -716,6 +756,11 @@ components:
           description: Whether to automatically prune deleted data from contracts
           default: false
 
+    EncryptionKey:
+      type: string
+      pattern: ^(key|skey):[0-9a-fA-F]{64}$
+      description: A key used to encrypt and decrypt data. The key is either a regular key (key) or a salted key (skey). The latter requires a seed to be used for encryption and decryption.
+
     ETag:
       type: string
       pattern: '^(W/)?".*?"$'
@@ -791,6 +836,11 @@ components:
           description: The total amount of memory available in bytes
           minimum: 1
 
+    MultipartUploadID:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A unique identifier for a multipart upload
+
     RedundancySettings:
       type: object
       properties:
@@ -805,7 +855,39 @@ components:
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
 
-    MultipartUploadID:
-      type: string
-      pattern: ^[0-9a-fA-F]{64}$
-      description: A unique identifier for a multipart upload
+    Sector:
+      type: object
+      description: Description of an uploaded sector
+      properties:
+        contracts:
+          description: The contracts that the sector is uploaded to
+          type: object
+          additionalProperties:
+            description: The contracts' IDs
+            type: array
+            items:
+              $ref: "#/components/schemas/FileContractID"
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+
+    Slab:
+      type: object
+      description: A slab of data to migrate
+      properties:
+        health:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        encryptionKey:
+          allOf:
+            - $ref: "#/components/schemas/EncryptionKey"
+            - description: The encryption key used to encrypt the slab's shards
+        minShards:
+          type: integer
+          format: uint8
+          minimum: 1
+          maximum: 255
+          description: The number of data shards the slab is split into
