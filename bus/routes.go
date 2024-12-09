@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/gouging"
-	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -926,9 +925,9 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// fetch the host from the bus
-	host, err := b.store.Host(jc.Request.Context(), c.HostKey)
-	if jc.Check("failed to fetch host for contract", err) != nil {
+	// fetch the corresponding host
+	host, err := b.store.Host(ctx, c.HostKey)
+	if jc.Check("failed to fetch host for pruning", err) != nil {
 		return
 	}
 
@@ -940,56 +939,14 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	rev, spending, pruned, remaining, err := b.rhp2Client.PruneContract(pruneCtx, rk, gc, host.NetAddress, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
-		indices, err := b.store.PrunableContractRoots(ctx, fcid, roots)
-		if err != nil {
-			return nil, err
-		} else if len(indices) > len(roots) {
-			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
-		}
-
-		filtered := indices[:0]
-		for _, index := range indices {
-			_, ok := pending[roots[index]]
-			if !ok {
-				filtered = append(filtered, index)
-			}
-		}
-		indices = filtered
-		return indices, nil
-	})
-
-	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
-		err = nil // ignore error
-	} else if !errors.Is(err, context.Canceled) {
-		if jc.Check("couldn't prune contract", err) != nil {
-			return
-		}
+	var res api.ContractPruneResponse
+	if b.isPassedV2AllowHeight() {
+		res, err = b.pruneContractV2(pruneCtx, rk, c, host.V2SiamuxAddr(), gc, pending)
+	} else {
+		res, err = b.pruneContractV1(pruneCtx, rk, c, host.NetAddress, gc, pending)
 	}
-
-	// record spending
-	if !spending.Total().IsZero() {
-		b.store.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
-			{
-				ContractSpending: spending,
-				ContractID:       fcid,
-				RevisionNumber:   rev.RevisionNumber,
-				Size:             rev.Filesize,
-
-				MissedHostPayout:  rev.MissedHostPayout(),
-				ValidRenterPayout: rev.ValidRenterPayout(),
-			},
-		})
-	}
-
-	// return response
-	res := api.ContractPruneResponse{
-		ContractSize: rev.Filesize,
-		Pruned:       pruned,
-		Remaining:    remaining,
-	}
-	if err != nil {
-		res.Error = err.Error()
+	if jc.Check("failed to prune contract", err) != nil {
+		return
 	}
 	jc.Encode(res)
 }
