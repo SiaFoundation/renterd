@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/internal/upload"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
@@ -34,7 +35,7 @@ type (
 	}
 )
 
-func newTestWorker(t test.TestingCommon) *testWorker {
+func newTestWorker(t test.TestingCommon, cfg config.Worker) *testWorker {
 	// create bus dependencies
 	cs := mocks.NewContractStore()
 	os := mocks.NewObjectStore(testBucket, cs)
@@ -46,7 +47,6 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	ulmm := mocks.NewMemoryManager()
 
 	// create worker
-	cfg := newTestWorkerCfg()
 	mk := utils.MasterKey(blake2b.Sum256([]byte("testwork")))
 	w, err := New(cfg, mk, b, zap.NewNop())
 	if err != nil {
@@ -57,8 +57,7 @@ func newTestWorker(t test.TestingCommon) *testWorker {
 	hm := newTestHostManager(t)
 	uploadKey := mk.DeriveUploadKey()
 	w.downloadManager = download.NewManager(context.Background(), &uploadKey, hm, b, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, zap.NewNop())
-	w.uploadManager.hm = hm
-	w.uploadManager.mm = ulmm
+	w.uploadManager = upload.NewManager(context.Background(), &uploadKey, hm, b, b, b, cfg.DownloadMaxMemory, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, zap.NewNop())
 
 	return &testWorker{
 		test.NewTT(t),
@@ -91,21 +90,21 @@ func (w *testWorker) BlockUploads() func() {
 	return w.ulmm.Block()
 }
 
-func (w *testWorker) BlockAsyncPackedSlabUploads(up uploadParameters) {
+func (w *testWorker) BlockAsyncPackedSlabUploads(up upload.Parameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
-	key := fmt.Sprintf("%d-%d", up.rs.MinShards, up.rs.TotalShards)
+	key := fmt.Sprintf("%d-%d", up.RS.MinShards, up.RS.TotalShards)
 	w.uploadingPackedSlabs[key] = struct{}{}
 }
 
-func (w *testWorker) UnblockAsyncPackedSlabUploads(up uploadParameters) {
+func (w *testWorker) UnblockAsyncPackedSlabUploads(up upload.Parameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
-	key := fmt.Sprintf("%d-%d", up.rs.MinShards, up.rs.TotalShards)
+	key := fmt.Sprintf("%d-%d", up.RS.MinShards, up.RS.TotalShards)
 	delete(w.uploadingPackedSlabs, key)
 }
 
-func (w *testWorker) Contracts() (hcs []hostContract) {
+func (w *testWorker) UploadHosts() (hcs []upload.HostInfo) {
 	hosts, err := w.hs.UsableHosts(context.Background())
 	if err != nil {
 		w.tt.Fatal(err)
@@ -121,7 +120,12 @@ func (w *testWorker) Contracts() (hcs []hostContract) {
 	}
 	for _, c := range contracts {
 		if h, ok := hmap[c.HostKey]; ok {
-			hcs = append(hcs, hostContract{c, h})
+			hcs = append(hcs, upload.HostInfo{
+				HostInfo:            h,
+				ContractEndHeight:   c.WindowEnd,
+				ContractID:          c.ID,
+				ContractRenewedFrom: c.RenewedFrom,
+			})
 		}
 	}
 

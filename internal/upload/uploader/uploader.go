@@ -95,7 +95,7 @@ type (
 	}
 )
 
-func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, hi api.HostInfo, cm api.ContractMetadata, l *zap.SugaredLogger) *Uploader {
+func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, hi api.HostInfo, fcid types.FileContractID, endHeight uint64, l *zap.SugaredLogger) *Uploader {
 	return &Uploader{
 		cl:     cl,
 		cs:     cs,
@@ -103,7 +103,7 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		logger: l,
 
 		// static
-		hk:              cm.HostKey,
+		hk:              hi.PublicKey,
 		shutdownCtx:     ctx,
 		signalNewUpload: make(chan struct{}, 1),
 
@@ -112,9 +112,9 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
-		host:      hm.Uploader(hi, cm.ID),
-		fcid:      cm.ID,
-		endHeight: cm.WindowEnd,
+		host:      hm.Uploader(hi, fcid),
+		fcid:      fcid,
+		endHeight: endHeight,
 		queue:     make([]*SectorUploadReq, 0),
 	}
 }
@@ -145,16 +145,16 @@ func (u *Uploader) PublicKey() types.PublicKey {
 	return u.hk
 }
 
-func (u *Uploader) Refresh(hi *api.HostInfo, cm api.ContractMetadata) {
+func (u *Uploader) Refresh(hi *api.HostInfo, fcid types.FileContractID, endHeight uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	if hi != nil {
-		u.host = u.hm.Uploader(*hi, cm.ID)
+		u.host = u.hm.Uploader(*hi, fcid)
 	}
 
-	u.fcid = cm.ID
-	u.endHeight = cm.WindowEnd
+	u.endHeight = endHeight
+	u.fcid = fcid
 }
 
 func (u *Uploader) Start() {
@@ -424,7 +424,7 @@ func (u *Uploader) tryRefresh(ctx context.Context) bool {
 	}
 
 	// renew the uploader with the renewed contract
-	u.Refresh(nil, renewed)
+	u.Refresh(nil, renewed.ID, renewed.WindowEnd)
 	return true
 }
 
