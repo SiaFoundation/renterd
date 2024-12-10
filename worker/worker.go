@@ -388,27 +388,6 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 		return
 	}
 
-	var prefix string
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
-	var sortBy string
-	if jc.DecodeForm("sortby", &sortBy) != nil {
-		return
-	}
-	var sortDir string
-	if jc.DecodeForm("sortdir", &sortDir) != nil {
-		return
-	}
-	var marker string
-	if jc.DecodeForm("marker", &marker) != nil {
-		return
-	}
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoredelim", &ignoreDelim) != nil {
-		return
-	}
-
 	key := jc.PathParam("key")
 	if key == "" {
 		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
@@ -620,10 +599,6 @@ func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
 	jc.Check("couldn't remove objects", w.bus.RemoveObjects(jc.Request.Context(), orr.Bucket, orr.Prefix))
 }
 
-func (w *Worker) idHandlerGET(jc jape.Context) {
-	jc.Encode(w.id)
-}
-
 func (w *Worker) memoryGET(jc jape.Context) {
 	api.WriteResponse(jc, api.MemoryResponse{
 		Download: w.downloadManager.MemoryStatus(),
@@ -740,13 +715,10 @@ func (w *Worker) Handler() http.Handler {
 		"GET    /accounts":               w.accountsHandlerGET,
 		"GET    /account/:hostkey":       w.accountHandlerGET,
 		"POST   /account/:id/resetdrift": w.accountsResetDriftHandlerPOST,
-		"GET    /id":                     w.idHandlerGET,
 
 		"GET    /memory": w.memoryGET,
 
-		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
-		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
-		"POST   /slab/migrate":    w.slabMigrateHandler,
+		"PUT    /multipart/*key": w.multipartUploadHandlerPUT,
 
 		"HEAD   /object/*key":    w.objectHandlerHEAD,
 		"GET    /object/*key":    w.objectHandlerGET,
@@ -754,9 +726,12 @@ func (w *Worker) Handler() http.Handler {
 		"DELETE /object/*key":    w.objectHandlerDELETE,
 		"POST   /objects/remove": w.objectsRemoveHandlerPOST,
 
-		"PUT    /multipart/*key": w.multipartUploadHandlerPUT,
+		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /state": w.stateHandlerGET,
+
+		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
+		"GET    /stats/uploads":   w.uploadsStatsHandlerGET,
 	})
 }
 

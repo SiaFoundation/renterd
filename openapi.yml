@@ -178,14 +178,612 @@ paths:
                     type: boolean
                     description: Indicates whether the request triggered a new iteration of the maintenance loop. If maintenance was already ongoing, this will be false.
 
+  #############################
+  #
+  # Autopilot routes
+  #
+  #############################
+  /worker/account/{hostkey}:
+    get:
+      summary: Get a worker account
+      description: Returns the account the worker maintains with the specified host for payment.
+      parameters:
+        - name: hostkey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+          description: The host's public key
+      responses:
+        "200":
+          description: Successfully retrieved worker account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /worker/accounts:
+    get:
+      summary: Get all worker accounts
+      description: Returns all accounts the worker maintains with hosts for payment.
+      responses:
+        "200":
+          description: Successfully retrieved worker accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+
+  /worker/{id}/resetdrift:
+    post:
+      summary: Reset drift for a worker's account
+      description: Resets the drift for the specified account to 0.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/PublicKey"
+              - description: The account's ID
+      responses:
+        "200":
+          description: Successfully reset drift for worker account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /worker/memory:
+    get:
+      summary: Get overview of worker's memory usage.
+      description: Returns the memory usage of the worker for both uploads and downloads.
+      responses:
+        "200":
+          description: Successfully retrieved memory usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download:
+                    allOf:
+                      - $ref: "#/components/schemas/MemoryStatus"
+                      - description: The memory status for for downloads
+                  upload:
+                    allOf:
+                      - $ref: "#/components/schemas/MemoryStatus"
+                      - description: The memory status for for uploads
+
+  /worker/multipart/{key}:
+    put:
+      summary: Upload a part of an ongoing multipart upload
+      description: Upload a single part of an ongoing multipart upload. Parts can be uploaded in parallel and then combined afterwards.
+      parameters:
+        - name: key
+          description: The key of the file to upload
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the multipart upload belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+        - name: uploadid
+          description: The ID of the ongoing multipart upload
+          in: query
+          required: true
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/MultipartUploadID"
+              - example: 7aaac83c6d553865755286c326e852a68300bebf7feea1b435d61bd3610bf82b
+        - name: partnumber
+          description: The part number of the part being uploaded
+          example: 0
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: uint32
+        - name: minshards
+          description: Used to override the minimum number of shards the part should be split into.
+          example: 10
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: totalshards
+          description: Used to override the total number of shards the part should be split into.
+          example: 30
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: encryptionoffset
+          description: The offset of the part within the final object. This is required unless the upload was explicitly created to not be encrypted before erasure coding.
+          example: 0
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint64
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Successfully uploaded part
+          headers:
+            ETag:
+              description: The ETag of the uploaded part
+              schema:
+                $ref: "#/components/schemas/ETag"
+        "400":
+          description: Invalid combination of request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Bucket or upload weren't found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Consensus isn't synced
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /worker/object/{key}:
+    get:
+      summary: Download an object
+      description: Downloads an object from the Sia network.
+      parameters:
+        - name: key
+          description: The key of the file to download
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the object belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+        - name: Range
+          in: header
+          description: The range of bytes to download. If not provided, the entire object will be downloaded.
+          schema:
+            type: string
+            example: "bytes=0-100"
+      responses:
+        "200":
+          description: Successfully downloaded object
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            "Accept-Ranges":
+              description: The range units the server supports
+              schema:
+                type: string
+            "Content-Range":
+              description: The range of bytes that were downloaded
+              schema:
+                type: string
+            "Content-Type":
+              description: The content type of the object
+              schema:
+                type: string
+            "ETag":
+              description: The ETag of the downloaded object
+              schema:
+                $ref: "#/components/schemas/ETag"
+        "400":
+          description: Invalid range or missing parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: invalid range
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: object not found
+        "416":
+          description: No overlap between 'Range' and object's content
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "invalid range: failed to overlap"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "failed to fetch object metadata"
+    put:
+      summary: Upload an object
+      description: Uploads an object to the Sia network.
+      parameters:
+        - name: key
+          description: The key of the file to upload
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the object belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+        - name: minshards
+          description: Used to override the minimum number of shards the object should be split into.
+          example: 10
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: totalshards
+          description: Used to override the total number of shards the object should be split into.
+          example: 30
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: uint32
+        - name: mimetype
+          description: The MIME type of the object
+          example: "text/plain"
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Successfully uploaded object
+          headers:
+            ETag:
+              description: The ETag of the uploaded object
+              schema:
+                $ref: "#/components/schemas/ETag"
+        "400":
+          description: Invalid combination of request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Consensus isn't synced
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      summary: Deletes an object
+      description: Deletes an object from the local database. The object is not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
+      parameters:
+        - name: key
+          description: The key of the file to delete
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            minLength: 1
+        - name: bucket
+          description: The bucket the object belongs to
+          example: "myBucket"
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/Bucket"
+      responses:
+        "200":
+          description: Successfully deleted object
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /worker/objects/remove:
+    post:
+      summary: Delete a batch of objects with a given prefix
+      description: Deletes all objects with the provided prefix from the local database. The objects are not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  allOf:
+                    - $ref: "#/components/schemas/Bucket"
+                    - description: The bucket the objects belong to
+                prefix:
+                  type: string
+                  example: "myDir/"
+                  minLength: 1
+                  description: The prefix of the objects to delete
+      responses:
+        "200":
+          description: Successfully removed objects
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Missing prefix or bucket
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /worker/slab/migrate:
+    post:
+      summary: Migrate a slab
+      description: Migrates a slab from one host to another.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Slab"
+      responses:
+        "200":
+          description: Successfully migrated slab
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Consensus isn't synced
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /worker/state:
+    get:
+      summary: Get the worker's state.
+      description: Returns general information about the work.
+      responses:
+        "200":
+          description: Successfully retrieved worker state
+          content:
+            application/json:
+              schema:
+                type: object
+                allOf:
+                  - $ref: "#/components/schemas/BuildState"
+                properties:
+                  id:
+                    type: string
+                    description: The worker's ID
+                  startTime:
+                    type: string
+                    format: date-time
+                    description: When the worker was started
+
+  /worker/stats/downloads:
+    get:
+      summary: Get download stats
+      description: Returns the download stats of the worker.
+      responses:
+        "200":
+          description: Successfully retrieved download stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  avgDownloadSpeedMbps:
+                    type: number
+                    format: float
+                    description: The average download speed in Mbps
+                  avgOverdrivePct:
+                    type: number
+                    format: float
+                    description: The average overdrive percentage
+                  healthyDownloaders:
+                    type: integer
+                    format: uint64
+                    description: The number of healthy downloaders
+                  numDownloaders:
+                    type: integer
+                    format: uint64
+                    description: The number of total downloaders
+                  downloadersStats:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        avgSectorDownloadSpeedMbps:
+                          type: number
+                          format: float
+                          description: The average sector download speed in Mbps
+                        hostKey:
+                          allOf:
+                            - $ref: "#/components/schemas/PublicKey"
+                            - description: The host's public key
+
+  /worker/stats/uploads:
+    get:
+      summary: Get upload stats
+      description: Returns the upload stats of the worker.
+      responses:
+        "200":
+          description: Successfully retrieved upload stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  avgUploadSpeedMbps:
+                    type: number
+                    format: float
+                    description: The average upload speed in Mbps
+                  avgOverdrivePct:
+                    type: number
+                    format: float
+                    description: The average overdrive percentage
+                  healthyUploaders:
+                    type: integer
+                    format: uint64
+                    description: The number of healthy uploaders
+                  numUploaders:
+                    type: integer
+                    format: uint64
+                    description: The number of total uploaders
+                  uploadersStats:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        avgSectorUploadSpeedMbps:
+                          type: number
+                          format: float
+                          description: The average sector upload speed in Mbps
+                        hostKey:
+                          allOf:
+                            - $ref: "#/components/schemas/PublicKey"
+                            - description: The host's public key
 components:
   schemas:
+    #############################
+    #
+    # Core types
+    #
+    #############################
+    Account:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The account's ID
+        cleanShutdown:
+          type: boolean
+          description: Whether the account has been cleanly shutdown. If not, the account will require a sync with the host.
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The host's public key
+        balance:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The account's balance as expected by the worker
+        drift:
+          allOf:
+            - $ref: "#/components/schemas/SignedCurrency"
+            - description: The accumulated drift between the worker's expected balance and the host's actual balance. Used to track if a host is trying to cheat the renter over time.
+        owner:
+          type: string
+          description: The owner of the account that manages it. This is the id of the worker that maintains the account.
+          minLength: 1
+        requiresSync:
+          type: boolean
+          description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
+
+    Currency:
+      type: string
+      pattern: "^\\d+$"
+      maxLength: 39 # fits 2^128 - 1
+      description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
+    FileContractID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: A unique identifier for a file contract
+
+    Hash256:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A 256-bit blake2b hash
+
+    PublicKey:
+      type: string
+      pattern: "^ed25519:[0-9a-fA-F]{64}$"
+      description: A ed25519 public key
+
+    SignedCurrency:
+      type: string
+      pattern: "^-?\\d+$"
+      maxLength: 39 # fits 2^128 - 1
+      description: A signed amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
     #############################
     #
     # Helper types
     #
     #############################
-
     AutopilotConfig:
       type: object
       properties:
@@ -196,6 +794,11 @@ components:
           $ref: "#/components/schemas/ContractsConfig"
         hosts:
           $ref: "#/components/schemas/HostsConfig"
+
+    Bucket:
+      type: string
+      pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+      description: A bucket logically groups together objects.
 
     BuildState:
       type: object
@@ -258,24 +861,39 @@ components:
           description: Whether to automatically prune deleted data from contracts
           default: false
 
+    EncryptionKey:
+      type: string
+      pattern: ^(key|skey):[0-9a-fA-F]{64}$
+      description: A key used to encrypt and decrypt data. The key is either a regular key (key) or a salted key (skey). The latter requires a seed to be used for encryption and decryption.
+
+    ETag:
+      type: string
+      pattern: '^(W/)?".*?"$'
+      description: An ETag representing a resource
+
     GougingSettings:
       type: object
       properties:
         maxRPCPrice:
-          type: string
-          description: The maximum base price a host can charge per RPC
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum base price a host can charge per RPC
         maxContractPrice:
-          type: string
-          description: The maximum price a host can charge for a contract formation
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for a contract formation
         maxDownloadPrice:
-          type: string
-          description: The maximum price a host can charge for downloading in hastings / byte
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for downloading in hastings / byte
         maxUploadPrice:
-          type: string
-          description: The maximum price a host can charge for uploading in hastings / byte
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for uploading in hastings / byte
         maxStoragePrice:
-          type: string
-          description: The maximum price a host can charge for storage in hastings / byte / block
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum price a host can charge for storage in hastings / byte / block
         hostBlockHeightLeeway:
           type: integer
           format: uint32
@@ -289,8 +907,9 @@ components:
           format: uint64
           description: The minimum amount of time an account on a host can be idle for before expiring
         minMaxEphemeralAccountBalance:
-          type: string
-          description: The minimum max balance a host should allow us to fund an account with
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The minimum max balance a host should allow us to fund an account with
 
     HostsConfig:
       type: object
@@ -309,6 +928,24 @@ components:
           type: string
           description: The minimum supported protocol version of a host to be considered good
 
+    MemoryStatus:
+      type: object
+      properties:
+        available:
+          type: integer
+          format: uint64
+          description: The amount of remaining memory currently available in bytes
+        total:
+          type: integer
+          format: uint64
+          description: The total amount of memory available in bytes
+          minimum: 1
+
+    MultipartUploadID:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A unique identifier for a multipart upload
+
     RedundancySettings:
       type: object
       properties:
@@ -322,3 +959,40 @@ components:
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+
+    Sector:
+      type: object
+      description: Description of an uploaded sector
+      properties:
+        contracts:
+          description: The contracts that the sector is uploaded to
+          type: object
+          additionalProperties:
+            description: The contracts' IDs
+            type: array
+            items:
+              $ref: "#/components/schemas/FileContractID"
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+
+    Slab:
+      type: object
+      description: A slab of data to migrate
+      properties:
+        health:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        encryptionKey:
+          allOf:
+            - $ref: "#/components/schemas/EncryptionKey"
+            - description: The encryption key used to encrypt the slab's shards
+        minShards:
+          type: integer
+          format: uint8
+          minimum: 1
+          maximum: 255
+          description: The number of data shards the slab is split into
