@@ -65,7 +65,7 @@ func (m *migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, h
 	ctx = gouging.WithChecker(ctx, m.bus, gp)
 
 	// sync the account
-	h := m.Host(host.PublicKey, fcid, host.SiamuxAddr)
+	h := m.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
 	err = m.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})
@@ -83,7 +83,7 @@ func (m *migrator) withRevision(ctx context.Context, fcid types.FileContractID, 
 			defer cancel()
 		}
 
-		rev, err := m.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
+		rev, err := m.hostManager.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
 		if err != nil {
 			return err
 		}

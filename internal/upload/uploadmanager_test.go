@@ -12,8 +12,10 @@ import (
 
 type hostManager struct{}
 
-func (hm *hostManager) Downloader(hi api.HostInfo) host.Downloader                        { return nil }
-func (hm *hostManager) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader { return nil }
+func (hm *hostManager) Downloader(hi api.HostInfo) host.Downloader { return nil }
+func (hm *hostManager) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader {
+	return nil
+}
 func (hm *hostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
 	return nil
 }

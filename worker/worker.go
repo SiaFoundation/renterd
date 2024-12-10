@@ -25,10 +25,11 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/accounts"
+	"go.sia.tech/renterd/internal/contracts"
 	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/hosts"
 	"go.sia.tech/renterd/internal/memory"
-	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -144,22 +145,6 @@ type (
 	}
 )
 
-// TODO: deriving the renter key from the host key using the master key only
-// works if we persist a hash of the renter's master key in the database and
-// compare it on startup, otherwise there's no way of knowing the derived key is
-// usuable
-// NOTE: Instead of hashing the masterkey and comparing, we could use random
-// bytes + the HMAC thereof as the salt. e.g. 32 bytes + 32 bytes HMAC. Then
-// whenever we read a specific salt we can verify that is was created with a
-// given key. That would eventually allow different masterkeys to coexist in the
-// same bus.
-//
-// TODO: instead of deriving a renter key use a randomly generated salt so we're
-// not limited to one key per host
-func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	return w.masterKey.DeriveContractKey(hostKey)
-}
-
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type Worker struct {
@@ -176,17 +161,15 @@ type Worker struct {
 
 	downloadManager *download.Manager
 	uploadManager   *upload.Manager
+	hostManager     hosts.Manager
 
-	accounts    *accounts.Manager
-	dialer      *rhp.FallbackDialer
-	cache       iworker.WorkerCache
-	priceTables *prices.PriceTables
-	pricesCache *prices.PricesCache
+	accounts *accounts.Manager
+	cache    iworker.WorkerCache
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
 
-	contractSpendingRecorder ContractSpendingRecorder
+	contractSpendingRecorder contracts.SpendingRecorder
 
 	shutdownCtx       context.Context
 	shutdownCtxCancel context.CancelFunc
@@ -211,7 +194,7 @@ func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk
 			defer cancel()
 		}
 
-		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
+		rev, err := w.hostManager.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
 		if err != nil {
 			return err
 		}
@@ -624,13 +607,10 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	w := &Worker{
 		alerts:               a,
 		cache:                iworker.NewCache(b, l),
-		dialer:               dialer,
 		id:                   cfg.ID,
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
-		priceTables:          prices.NewPriceTables(),
-		pricesCache:          prices.NewPricesCache(),
 		rhp2Client:           rhp2.New(dialer, l),
 		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
@@ -646,13 +626,15 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	uploadKey := w.masterKey.DeriveUploadKey()
 
+	w.contractSpendingRecorder = contracts.NewSpendingRecorder(w.shutdownCtx, w.bus, cfg.BusFlushInterval, l)
+	hm := hosts.NewManager(w.masterKey, w.accounts, w.contractSpendingRecorder, dialer, l)
+
 	dlmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
-	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, hm, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	ulmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
-	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, w, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, hm, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
-	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil
 }
 
@@ -844,7 +826,7 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hos
 	ctx = gouging.WithChecker(ctx, w.bus, gp)
 
 	// sync the account
-	h := w.Host(host.PublicKey, fcid, host.SiamuxAddr)
+	h := w.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
 	err = w.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})

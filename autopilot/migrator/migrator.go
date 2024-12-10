@@ -15,11 +15,11 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/accounts"
+	"go.sia.tech/renterd/internal/contracts"
 	"go.sia.tech/renterd/internal/download"
+	"go.sia.tech/renterd/internal/hosts"
 	"go.sia.tech/renterd/internal/memory"
-	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/upload"
 	"go.sia.tech/renterd/internal/utils"
@@ -92,17 +92,12 @@ type (
 
 		masterKey utils.MasterKey
 
-		contractSpendingRecorder *contractSpendingRecorder
-
+		accounts        *accounts.Manager
 		downloadManager *download.Manager
 		uploadManager   *upload.Manager
+		hostManager     hosts.Manager
 
-		rhp3Client *rhp3.Client
 		rhp4Client *rhp4.Client
-
-		accounts    *accounts.Manager
-		priceTables *prices.PriceTables
-		pricesCache *prices.PricesCache
 
 		signalConsensusNotSynced  chan struct{}
 		signalMaintenanceFinished chan struct{}
@@ -127,7 +122,6 @@ func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, al
 		return nil, fmt.Errorf("accounts refill interval must be set")
 	}
 
-	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, logger)
 	m := &migrator{
 		alerts: alerts,
 		bus:    b,
@@ -137,12 +131,6 @@ func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, al
 		parallelSlabsPerWorker: cfg.ParallelSlabsPerWorker,
 
 		masterKey: masterKey,
-
-		rhp3Client: rhp3.New(dialer, logger),
-		rhp4Client: rhp4.New(dialer),
-
-		priceTables: prices.NewPriceTables(),
-		pricesCache: prices.NewPricesCache(),
 
 		signalConsensusNotSynced:  make(chan struct{}, 1),
 		signalMaintenanceFinished: make(chan struct{}, 1),
@@ -154,26 +142,25 @@ func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, al
 		logger: logger.Sugar(),
 	}
 
-	mgr, err := accounts.NewManager(masterKey.DeriveAccountsKey("migrator"), "migrator", alerts, m, m, b, b, b, b, cfg.AccountsRefillInterval, logger)
+	// create account manager
+	am, err := accounts.NewManager(masterKey.DeriveAccountsKey("migrator"), "migrator", alerts, m, m, b, b, b, b, cfg.AccountsRefillInterval, logger)
 	if err != nil {
 		return nil, err
 	}
-	m.accounts = mgr
+	m.accounts = am
 
+	// create host manager
+	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, logger)
+	csr := contracts.NewSpendingRecorder(ctx, b, 5*time.Second, logger)
+	hm := hosts.NewManager(masterKey, am, csr, dialer, logger)
+	m.hostManager = hm
+	m.rhp4Client = rhp4.New(dialer)
+
+	// create upload & download manager
 	mm := memory.NewManager(math.MaxInt64, logger)
 	uk := masterKey.DeriveUploadKey()
-	m.downloadManager = download.NewManager(ctx, &uk, m, mm, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, logger)
-	m.uploadManager = upload.NewManager(ctx, &uk, m, mm, b, b, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, logger)
-
-	m.contractSpendingRecorder = &contractSpendingRecorder{
-		bus:    b,
-		logger: logger.Named("spending").Sugar(),
-
-		flushCtx:      ctx,
-		flushInterval: 5 * time.Second, // TODO: can be removed once we've moved it to the bus
-
-		contractSpendings: make(map[types.FileContractID]api.ContractSpendingRecord),
-	}
+	m.downloadManager = download.NewManager(ctx, &uk, hm, mm, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, logger)
+	m.uploadManager = upload.NewManager(ctx, &uk, hm, mm, b, b, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, logger)
 
 	return m, nil
 }

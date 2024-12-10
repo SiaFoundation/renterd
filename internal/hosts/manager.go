@@ -1,35 +1,74 @@
-package worker
+package hosts
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"math"
+	"net"
+
+	"go.sia.tech/core/types"
+	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/accounts"
+	"go.sia.tech/renterd/internal/contracts"
+	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/host"
+	"go.sia.tech/renterd/internal/prices"
+	"go.sia.tech/renterd/internal/utils"
+	"go.uber.org/zap"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
-	"go.sia.tech/core/types"
-	rhp "go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/accounts"
-	"go.sia.tech/renterd/internal/gouging"
-	"go.sia.tech/renterd/internal/host"
-	"go.sia.tech/renterd/internal/prices"
+
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
-	"go.sia.tech/renterd/internal/utils"
-	"go.uber.org/zap"
+
+	rhp "go.sia.tech/coreutils/rhp/v4"
+)
+
+var (
+	_ host.Host = (*hostClient)(nil)
+	_ Manager   = (*hostManager)(nil)
 )
 
 type (
+	AccountStore interface {
+		ForHost(pk types.PublicKey) *accounts.Account
+	}
+
+	Dialer interface {
+		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
+	}
+
+	Manager interface {
+		Downloader(hi api.HostInfo) host.Downloader
+		Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader
+		Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host
+	}
+)
+
+type (
+	hostManager struct {
+		masterKey utils.MasterKey
+
+		rhp3Client *rhp3.Client
+		rhp4Client *rhp4.Client
+
+		accounts    AccountStore
+		contracts   contracts.SpendingRecorder
+		priceTables *prices.PriceTables
+		pricesCache *prices.PricesCache
+		logger      *zap.SugaredLogger
+	}
+
 	hostClient struct {
 		hk         types.PublicKey
 		renterKey  types.PrivateKey
 		siamuxAddr string
 
 		acc    *accounts.Account
-		csr    ContractSpendingRecorder
+		csr    contracts.SpendingRecorder
 		pts    *prices.PriceTables
 		rhp3   *rhp3.Client
 		logger *zap.SugaredLogger
@@ -55,7 +94,7 @@ type (
 		rk   types.PrivateKey
 
 		acc  *accounts.Account
-		csr  ContractSpendingRecorder
+		csr  contracts.SpendingRecorder
 		pts  *prices.PriceTables
 		rhp3 *rhp3.Client
 	}
@@ -66,69 +105,81 @@ type (
 		rk   types.PrivateKey
 
 		acc  *accounts.Account
-		csr  ContractSpendingRecorder
+		csr  contracts.SpendingRecorder
 		pts  *prices.PricesCache
 		rhp4 *rhp4.Client
 	}
 )
 
-var (
-	_ host.Host        = (*hostClient)(nil)
-	_ host.HostManager = (*Worker)(nil)
-)
+func NewManager(masterKey utils.MasterKey, as AccountStore, csr contracts.SpendingRecorder, dialer Dialer, logger *zap.Logger) Manager {
+	logger = logger.Named("hostmanager")
+	return &hostManager{
+		masterKey: masterKey,
 
-func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
-	return &hostClient{
-		rhp3:       w.rhp3Client,
-		hk:         hk,
-		acc:        w.accounts.ForHost(hk),
-		csr:        w.contractSpendingRecorder,
-		logger:     w.logger.Named(hk.String()[:4]),
-		siamuxAddr: siamuxAddr,
-		renterKey:  w.deriveRenterKey(hk),
-		pts:        w.priceTables,
+		rhp3Client: rhp3.New(dialer, logger),
+		rhp4Client: rhp4.New(dialer),
+
+		accounts:    as,
+		contracts:   csr,
+		priceTables: prices.NewPriceTables(),
+		pricesCache: prices.NewPricesCache(),
+
+		logger: logger.Sugar(),
 	}
 }
 
-func (w *Worker) Downloader(hi api.HostInfo) host.Downloader {
+func (m *hostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
+	return &hostClient{
+		rhp3:       m.rhp3Client,
+		hk:         hk,
+		acc:        m.accounts.ForHost(hk),
+		csr:        m.contracts,
+		logger:     m.logger.Named(hk.String()[:4]),
+		siamuxAddr: siamuxAddr,
+		renterKey:  m.masterKey.DeriveContractKey(hk),
+		pts:        m.priceTables,
+	}
+}
+
+func (m *hostManager) Downloader(hi api.HostInfo) host.Downloader {
 	if hi.IsV2() {
 		return &hostV2DownloadClient{
 			hi:   hi,
-			acc:  w.accounts.ForHost(hi.PublicKey),
-			pts:  w.pricesCache,
-			rhp4: w.rhp4Client,
+			acc:  m.accounts.ForHost(hi.PublicKey),
+			pts:  m.pricesCache,
+			rhp4: m.rhp4Client,
 		}
 	}
 	return &hostDownloadClient{
 		hi:   hi,
-		acc:  w.accounts.ForHost(hi.PublicKey),
-		pts:  w.priceTables,
-		rhp3: w.rhp3Client,
+		acc:  m.accounts.ForHost(hi.PublicKey),
+		pts:  m.priceTables,
+		rhp3: m.rhp3Client,
 	}
 }
 
-func (w *Worker) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader {
+func (m *hostManager) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader {
 	if hi.IsV2() {
 		return &hostV2UploadClient{
 			fcid: fcid,
 			hi:   hi,
-			rk:   w.deriveRenterKey(hi.PublicKey),
+			rk:   m.masterKey.DeriveContractKey(hi.PublicKey),
 
-			acc:  w.accounts.ForHost(hi.PublicKey),
-			csr:  w.contractSpendingRecorder,
-			pts:  w.pricesCache,
-			rhp4: w.rhp4Client,
+			acc:  m.accounts.ForHost(hi.PublicKey),
+			csr:  m.contracts,
+			pts:  m.pricesCache,
+			rhp4: m.rhp4Client,
 		}
 	}
 	return &hostUploadClient{
 		fcid: fcid,
 		hi:   hi,
-		rk:   w.deriveRenterKey(hi.PublicKey),
+		rk:   m.masterKey.DeriveContractKey(hi.PublicKey),
 
-		acc:  w.accounts.ForHost(hi.PublicKey),
-		csr:  w.contractSpendingRecorder,
-		pts:  w.priceTables,
-		rhp3: w.rhp3Client,
+		acc:  m.accounts.ForHost(hi.PublicKey),
+		csr:  m.contracts,
+		pts:  m.priceTables,
+		rhp3: m.rhp3Client,
 	}
 }
 
