@@ -1,4 +1,4 @@
-package worker
+package contracts
 
 import (
 	"context"
@@ -12,8 +12,16 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	_ SpendingRecorder = (*contractSpendingRecorder)(nil)
+)
+
 type (
-	ContractSpendingRecorder interface {
+	Bus interface {
+		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
+	}
+
+	SpendingRecorder interface {
 		RecordV1(types.FileContractRevision, api.ContractSpending)
 		RecordV2(rhp.ContractRevision, api.ContractSpending)
 		Stop(context.Context)
@@ -33,19 +41,13 @@ type (
 	}
 )
 
-var (
-	_ ContractSpendingRecorder = (*contractSpendingRecorder)(nil)
-)
+func NewSpendingRecorder(ctx context.Context, b Bus, flushInterval time.Duration, logger *zap.Logger) SpendingRecorder {
+	logger = logger.Named("spending")
+	return &contractSpendingRecorder{
+		bus:    b,
+		logger: logger.Sugar(),
 
-func (w *Worker) initContractSpendingRecorder(flushInterval time.Duration) {
-	if w.contractSpendingRecorder != nil {
-		panic("ContractSpendingRecorder already initialized") // developer error
-	}
-	w.contractSpendingRecorder = &contractSpendingRecorder{
-		bus:    w.bus,
-		logger: w.logger,
-
-		flushCtx:      w.shutdownCtx,
+		flushCtx:      ctx,
 		flushInterval: flushInterval,
 
 		contractSpendings: make(map[types.FileContractID]api.ContractSpendingRecord),

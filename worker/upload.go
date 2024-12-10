@@ -11,6 +11,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/internal/upload"
 	"go.uber.org/zap"
@@ -187,7 +188,7 @@ func (w *Worker) uploadPackedSlab(ctx context.Context, mem memory.Memory, ps api
 	}
 
 	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+	ctx = gouging.WithChecker(ctx, w.bus, up.GougingParams)
 
 	// upload packed slab
 	err = w.uploadManager.UploadPackedSlab(ctx, rs, ps, mem, contracts, up.CurrentHeight)

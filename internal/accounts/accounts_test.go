@@ -1,4 +1,4 @@
-package worker
+package accounts
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func TestAccounts(t *testing.T) {
 			},
 		},
 	}
-	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, b, time.Second, zap.NewNop())
+	mgr, err := NewManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestResetAccountDriftRate(t *testing.T) {
 	hi := api.HostInfo{
 		PublicKey: hk,
 	}
-	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, b, time.Second, zap.NewNop())
+	mgr, err := NewManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

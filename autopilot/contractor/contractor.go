@@ -497,6 +497,11 @@ func activeContracts(ctx context.Context, bus Bus, logger *zap.SugaredLogger) ([
 	}
 
 	wg.Wait()
+	logger.
+		With("elapsed", time.Since(start)).
+		With("contracts", len(contracts)).
+		Info("done fetching all revisions")
+
 	return contracts, nil
 }
 

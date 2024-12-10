@@ -117,7 +117,7 @@ func (h *testHost) PublicKey() types.PublicKey {
 }
 
 func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
-	sector, exist := h.Sector(root)
+	sector, exist := h.Contract.Sector(root)
 	if !exist {
 		return rhp3.ErrSectorNotFound
 	}
@@ -129,7 +129,7 @@ func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.H
 }
 
 func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
-	h.AddSector(sectorRoot, sector)
+	h.Contract.AddSector(sectorRoot, sector)
 	if h.uploadDelay > 0 {
 		select {
 		case <-time.After(h.uploadDelay):

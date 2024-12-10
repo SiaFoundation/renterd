@@ -10,10 +10,8 @@ import (
 )
 
 var (
-	alertHealthRefreshID     = alerts.RandomAlertID() // constant until restarted
-	alertLowBalanceID        = alerts.RandomAlertID() // constant until restarted
-	alertOngoingMigrationsID = alerts.RandomAlertID() // constant until restarted
-	alertPruningID           = alerts.RandomAlertID() // constant until restarted
+	alertLowBalanceID = alerts.RandomAlertID() // constant until restarted
+	alertPruningID    = alerts.RandomAlertID() // constant until restarted
 )
 
 func (ap *Autopilot) RegisterAlert(ctx context.Context, a alerts.Alert) {
@@ -54,33 +52,6 @@ func newContractPruningFailedAlert(hk types.PublicKey, version, release string, 
 			"hostKey":     hk.String(),
 			"hostVersion": version,
 			"hostRelease": release,
-		},
-		Timestamp: time.Now(),
-	}
-}
-
-func newOngoingMigrationsAlert(n int, estimate time.Duration) alerts.Alert {
-	data := make(map[string]interface{})
-	if rounded := estimate.Round(time.Minute); rounded > 0 {
-		data["estimate"] = fmt.Sprintf("~%v remaining", rounded)
-	}
-
-	return alerts.Alert{
-		ID:        alertOngoingMigrationsID,
-		Severity:  alerts.SeverityInfo,
-		Message:   fmt.Sprintf("Migrating %d slabs", n),
-		Timestamp: time.Now(),
-		Data:      data,
-	}
-}
-
-func newRefreshHealthFailedAlert(err error) alerts.Alert {
-	return alerts.Alert{
-		ID:       alertHealthRefreshID,
-		Severity: alerts.SeverityCritical,
-		Message:  "Health refresh failed",
-		Data: map[string]interface{}{
-			"error": err.Error(),
 		},
 		Timestamp: time.Now(),
 	}
