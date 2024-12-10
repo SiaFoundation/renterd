@@ -26,11 +26,13 @@ import (
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
+	"go.sia.tech/renterd/internal/upload"
 	"go.sia.tech/renterd/internal/utils"
 	iworker "go.sia.tech/renterd/internal/worker"
 	"go.sia.tech/renterd/object"
@@ -172,7 +174,7 @@ type Worker struct {
 	startTime time.Time
 
 	downloadManager *download.Manager
-	uploadManager   *uploadManager
+	uploadManager   *upload.Manager
 
 	accounts    *iworker.AccountMgr
 	dialer      *rhp.FallbackDialer
@@ -308,7 +310,7 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 
 	// prepare upload stats
 	var uss []api.UploaderStats
-	for hk, mbps := range stats.uploadSpeedsMBPS {
+	for hk, mbps := range stats.UploadSpeedsMBPS {
 		uss = append(uss, api.UploaderStats{
 			HostKey:                  hk,
 			AvgSectorUploadSpeedMBPS: mbps,
@@ -320,10 +322,10 @@ func (w *Worker) uploadsStatsHandlerGET(jc jape.Context) {
 
 	// encode response
 	api.WriteResponse(jc, api.UploadStatsResponse{
-		AvgSlabUploadSpeedMBPS: math.Ceil(stats.avgSlabUploadSpeedMBPS*100) / 100,
-		AvgOverdrivePct:        math.Floor(stats.avgOverdrivePct*100*100) / 100,
-		HealthyUploaders:       stats.healthyUploaders,
-		NumUploaders:           stats.numUploaders,
+		AvgSlabUploadSpeedMBPS: math.Ceil(stats.AvgSlabUploadSpeedMBPS*100) / 100,
+		AvgOverdrivePct:        math.Floor(stats.AvgOverdrivePct*100*100) / 100,
+		HealthyUploaders:       stats.HealthyUploaders,
+		NumUploaders:           stats.NumUploaders,
 		UploadersStats:         uss,
 	})
 }
@@ -600,7 +602,7 @@ func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
 func (w *Worker) memoryGET(jc jape.Context) {
 	api.WriteResponse(jc, api.MemoryResponse{
 		Download: w.downloadManager.MemoryStatus(),
-		Upload:   w.uploadManager.mm.Status(),
+		Upload:   w.uploadManager.MemoryStatus(),
 	})
 }
 
@@ -696,8 +698,12 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	}
 
 	uploadKey := w.masterKey.DeriveUploadKey()
-	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, w.bus, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
-	w.initUploadManager(&uploadKey, cfg.UploadMaxMemory, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+
+	dlmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
+	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+
+	ulmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
+	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, w, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil
@@ -923,14 +929,14 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 
 	// upload
 	eTag, err := w.upload(ctx, bucket, key, up.RedundancySettings, r, contracts,
-		WithBlockHeight(up.CurrentHeight),
-		WithMimeType(opts.MimeType),
-		WithPacking(up.UploadPacking),
-		WithObjectUserMetadata(opts.Metadata),
+		upload.WithBlockHeight(up.CurrentHeight),
+		upload.WithMimeType(opts.MimeType),
+		upload.WithPacking(up.UploadPacking),
+		upload.WithObjectUserMetadata(opts.Metadata),
 	)
 	if err != nil {
 		w.logger.With(zap.Error(err)).With("key", key).With("bucket", bucket).Error("failed to upload object")
-		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
+		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, upload.ErrUploadCancelled) && !errors.Is(err, context.Canceled) {
 			w.registerAlert(newUploadFailedAlert(bucket, key, opts.MimeType, up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return nil, fmt.Errorf("couldn't upload object: %w", err)
@@ -948,7 +954,7 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	}
 
 	// fetch upload from bus
-	upload, err := w.bus.MultipartUpload(ctx, uploadID)
+	mu, err := w.bus.MultipartUpload(ctx, uploadID)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch multipart upload: %w", err)
 	}
@@ -957,21 +963,21 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
 
 	// prepare opts
-	uploadOpts := []UploadOption{
-		WithBlockHeight(up.CurrentHeight),
-		WithPacking(up.UploadPacking),
-		WithCustomKey(upload.EncryptionKey),
-		WithPartNumber(partNumber),
-		WithUploadID(uploadID),
+	uploadOpts := []upload.Option{
+		upload.WithBlockHeight(up.CurrentHeight),
+		upload.WithPacking(up.UploadPacking),
+		upload.WithCustomKey(mu.EncryptionKey),
+		upload.WithPartNumber(partNumber),
+		upload.WithUploadID(uploadID),
 	}
 
 	// make sure only one of the following is set
-	if encryptionEnabled := !upload.EncryptionKey.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
+	if encryptionEnabled := !mu.EncryptionKey.IsNoopKey(); encryptionEnabled && opts.EncryptionOffset == nil {
 		return nil, fmt.Errorf("%w: if object encryption (pre-erasure coding) wasn't disabled by creating the multipart upload with the no-op key, the offset needs to be set", api.ErrInvalidMultipartEncryptionSettings)
 	} else if opts.EncryptionOffset != nil && *opts.EncryptionOffset < 0 {
 		return nil, fmt.Errorf("%w: encryption offset must be positive", api.ErrInvalidMultipartEncryptionSettings)
 	} else if encryptionEnabled {
-		uploadOpts = append(uploadOpts, WithCustomEncryptionOffset(uint64(*opts.EncryptionOffset)))
+		uploadOpts = append(uploadOpts, upload.WithCustomEncryptionOffset(uint64(*opts.EncryptionOffset)))
 	}
 
 	// fetch host & contract info
@@ -984,7 +990,7 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	eTag, err := w.upload(ctx, bucket, path, up.RedundancySettings, r, contracts, uploadOpts...)
 	if err != nil {
 		w.logger.With(zap.Error(err)).With("path", path).With("bucket", bucket).Error("failed to upload object")
-		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, errUploadInterrupted) && !errors.Is(err, context.Canceled) {
+		if !errors.Is(err, ErrShuttingDown) && !errors.Is(err, upload.ErrUploadCancelled) && !errors.Is(err, context.Canceled) {
 			w.registerAlert(newUploadFailedAlert(bucket, path, "", up.RedundancySettings.MinShards, up.RedundancySettings.TotalShards, len(contracts), up.UploadPacking, false, err))
 		}
 		return nil, fmt.Errorf("couldn't upload object: %w", err)

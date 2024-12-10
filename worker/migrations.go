@@ -7,11 +7,12 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/upload"
 	"go.sia.tech/renterd/object"
 	"go.uber.org/zap"
 )
 
-func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulContracts []hostContract, bh uint64) error {
+func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulHosts []upload.HostInfo, bh uint64) error {
 	// map usable hosts
 	usableHosts := make(map[types.PublicKey]struct{})
 	for _, h := range dlHosts {
@@ -20,8 +21,8 @@ func (w *Worker) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostI
 
 	// map usable contracts
 	usableContracts := make(map[types.FileContractID]struct{})
-	for _, c := range ulContracts {
-		usableContracts[c.ID] = struct{}{}
+	for _, c := range ulHosts {
+		usableContracts[c.ContractID] = struct{}{}
 	}
 
 	// collect indices of shards that need to be migrated
@@ -69,15 +70,15 @@ SHARDS:
 	}
 
 	// perform some sanity checks
-	if len(ulContracts) < int(s.MinShards) {
-		return fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulContracts), int(s.MinShards))
+	if len(ulHosts) < int(s.MinShards) {
+		return fmt.Errorf("not enough hosts to repair unhealthy shard to minimum redundancy, %d<%d", len(ulHosts), int(s.MinShards))
 	}
 	if len(s.Shards)-missingShards < int(s.MinShards) {
 		return fmt.Errorf("not enough hosts to download unhealthy shard, %d<%d", len(s.Shards)-missingShards, int(s.MinShards))
 	}
 
 	// acquire memory for the migration
-	mem := w.uploadManager.mm.AcquireMemory(ctx, uint64(len(shardIndices))*rhpv2.SectorSize)
+	mem := w.uploadManager.AcquireMemory(ctx, uint64(len(shardIndices))*rhpv2.SectorSize)
 	if mem == nil {
 		return fmt.Errorf("failed to acquire memory for migration")
 	}
@@ -102,11 +103,11 @@ SHARDS:
 	shards = shards[:len(shardIndices)]
 
 	// filter upload contracts to the ones we haven't used yet
-	var allowed []hostContract
-	for _, c := range ulContracts {
-		if _, used := seen[c.HostKey]; !used {
-			allowed = append(allowed, c)
-			seen[c.HostKey] = struct{}{}
+	var allowed []upload.HostInfo
+	for _, h := range ulHosts {
+		if _, used := seen[h.PublicKey]; !used {
+			allowed = append(allowed, h)
+			seen[h.PublicKey] = struct{}{}
 		}
 	}
 
