@@ -276,6 +276,7 @@ func (ap *Autopilot) Shutdown(ctx context.Context) error {
 		ap.shutdownCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
+		ap.m.Stop()
 		ap.s.Shutdown(ctx)
 		ap.startTime = time.Time{}
 	}

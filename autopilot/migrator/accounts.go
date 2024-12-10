@@ -64,35 +64,8 @@ func (m *migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, h
 	}
 	ctx = gouging.WithChecker(ctx, m.bus, gp)
 
-	// sync the account
-	h := m.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
-	err = m.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
-		return h.SyncAccount(ctx, &rev)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to sync account; %w", err)
-	}
-	return nil
-}
-
-func (m *migrator) withRevision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
-	return m.withContractLock(ctx, fcid, lockPriority, func() error {
-		if fetchTimeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, fetchTimeout)
-			defer cancel()
-		}
-
-		rev, err := m.hostManager.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
-		if err != nil {
-			return err
-		}
-		return fn(rev)
-	})
-}
-
-func (m *migrator) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
-	contractLock, err := m.acquireContractLock(ctx, fcid, priority)
+	// acquire lock
+	contractLock, err := locking.NewContractLock(ctx, fcid, lockingPrioritySyncing, m.bus, m.logger)
 	if err != nil {
 		return err
 	}
@@ -102,9 +75,20 @@ func (m *migrator) withContractLock(ctx context.Context, fcid types.FileContract
 		cancel()
 	}()
 
-	return fn()
-}
+	h := m.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
 
-func (m *migrator) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ *locking.ContractLock, err error) {
-	return locking.NewContractLock(ctx, fcid, priority, m.bus, m.logger)
+	// fetch revision
+	ctx, cancel := context.WithTimeout(ctx, defaultRevisionFetchTimeout)
+	defer cancel()
+	rev, err := h.FetchRevision(ctx, fcid)
+	if err != nil {
+		return err
+	}
+
+	// sync the account
+	err = h.SyncAccount(ctx, &rev)
+	if err != nil {
+		return fmt.Errorf("failed to sync account; %w", err)
+	}
+	return nil
 }
