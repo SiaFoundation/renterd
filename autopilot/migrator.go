@@ -140,13 +140,6 @@ func (m *migrator) performMigrations(p *workerPool) {
 					ctx, cancel := context.WithCancel(m.ap.shutdownCtx)
 					defer cancel()
 
-					// fetch worker id once
-					id, err := w.ID(ctx)
-					if err != nil {
-						m.logger.Errorf("failed to reach worker, err: %v", err)
-						return
-					}
-
 					// process jobs
 					for j := range jobs {
 						duration, err := j.execute(ctx, w)
@@ -161,8 +154,7 @@ func (m *migrator) performMigrations(p *workerPool) {
 						} else if err != nil {
 							m.logger.Errorw("migration failed",
 								zap.Float64("health", j.Health),
-								zap.Stringer("slab", j.EncryptionKey),
-								zap.String("worker", id))
+								zap.Stringer("slab", j.EncryptionKey))
 						}
 					}
 				}(w)

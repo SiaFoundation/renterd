@@ -50,7 +50,12 @@ func TestBlocklist(t *testing.T) {
 	// add h1 to the blocklist
 	h1, err := b.Host(context.Background(), hk1)
 	tt.OK(err)
-	tt.OK(b.UpdateHostBlocklist(ctx, []string{h1.NetAddress}, nil, false))
+
+	netAddresses := []string{h1.NetAddress}
+	if len(h1.V2SiamuxAddresses) > 0 {
+		netAddresses = h1.V2SiamuxAddresses
+	}
+	tt.OK(b.UpdateHostBlocklist(ctx, netAddresses, nil, false))
 
 	// assert h1 is no longer usable
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -66,7 +71,7 @@ func TestBlocklist(t *testing.T) {
 
 	// clear the allowlist and blocklist and assert we have 3 usable hosts again
 	tt.OK(b.UpdateHostAllowlist(ctx, nil, []types.PublicKey{hk1, hk2}, false))
-	tt.OK(b.UpdateHostBlocklist(ctx, nil, []string{h1.NetAddress}, false))
+	tt.OK(b.UpdateHostBlocklist(ctx, nil, netAddresses, false))
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		hosts, err := b.UsableHosts(ctx)
 		tt.OK(err)
@@ -80,7 +85,7 @@ func TestBlocklist(t *testing.T) {
 	h := cluster.NewHost()
 
 	// update blocklist to block just that host
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h.RHPv2Addr()}, nil, false))
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h.RHPv2Addr(), h.RHPv4Addr()}, nil, false))
 
 	// add the host
 	cluster.AddHost(h)

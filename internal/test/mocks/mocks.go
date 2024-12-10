@@ -6,6 +6,7 @@ import (
 	"log"
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -97,8 +98,9 @@ func NewHost(hk types.PublicKey) *Host {
 	return &Host{
 		hk: hk,
 		hi: api.Host{
-			PublicKey: hk,
-			Scanned:   true,
+			NetAddress: "localhost:1234",
+			PublicKey:  hk,
+			Scanned:    true,
 		},
 	}
 }
@@ -107,8 +109,16 @@ func (h *Host) UpdatePriceTable(pt api.HostPriceTable) {
 	h.hi.PriceTable = pt
 }
 
+func (h *Host) UpdatePrices(prices rhpv4.HostPrices) {
+	h.hi.V2Settings.Prices = prices
+}
+
 func (h *Host) HostPriceTable() api.HostPriceTable {
 	return h.hi.PriceTable
+}
+
+func (h *Host) HostPrices() rhpv4.HostPrices {
+	return h.hi.V2Settings.Prices
 }
 
 func (h *Host) PublicKey() types.PublicKey {

@@ -19,11 +19,13 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/sql"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"lukechampine.com/frand"
@@ -38,8 +40,9 @@ var (
 type (
 	HostInfo struct {
 		api.HostInfo
-		HS rhpv2.HostSettings
-		PT rhpv3.HostPriceTable
+		HS   rhpv2.HostSettings
+		PT   rhpv3.HostPriceTable
+		V2HS rhp.HostSettings
 	}
 
 	multipartUpload struct {
@@ -150,10 +153,8 @@ func AncestorContracts(ctx context.Context, tx sql.Tx, fcid types.FileContractID
 			c.fcid, c.host_id, c.host_key, c.v2,
 			c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 			c.contract_price, c.initial_renter_funds,
-			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
-			COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "")
+			c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending
 		FROM contracts AS c
-		LEFT JOIN hosts h ON h.public_key = c.host_key
 		WHERE start_height >= ? AND archival_reason IS NOT NULL
 		ORDER BY start_height DESC
 	`, FileContractID(fcid), startHeight)
@@ -804,6 +805,7 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 
 	rows, err = tx.Query(ctx, fmt.Sprintf(`
 SELECT
+	h.id,
 	h.created_at,
 	h.last_announcement,
 	h.public_key,
@@ -812,6 +814,7 @@ SELECT
 	h.price_table,
 	h.price_table_expiry,
 	h.settings,
+	h.v2_settings,
 
 	h.total_scans,
 	h.last_scan,
@@ -823,7 +826,6 @@ SELECT
 	h.failed_interactions,
 	COALESCE(h.lost_sectors, 0),
 	h.scanned,
-	h.resolved_addresses,
 
 	%s,
 
@@ -832,6 +834,7 @@ SELECT
 	COALESCE(hc.usability_low_score, 0),
 	COALESCE(hc.usability_redundant_ip, 0),
 	COALESCE(hc.usability_gouging, 0),
+	COALESCE(hc.usability_low_max_duration, 0),
 	COALESCE(hc.usability_not_accepting_contracts, 0),
 	COALESCE(hc.usability_not_announced, 0),
 	COALESCE(hc.usability_not_completing_scan, 0),
@@ -844,7 +847,6 @@ SELECT
 	COALESCE(hc.score_version,0),
 	COALESCE(hc.score_prices,0),
 
-	COALESCE(hc.gouging_contract_err, ""),
 	COALESCE(hc.gouging_download_err, ""),
 	COALESCE(hc.gouging_gouging_err, ""),
 	COALESCE(hc.gouging_prune_err, ""),
@@ -860,34 +862,38 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 	defer rows.Close()
 
 	var hosts []api.Host
+	var hostIDs []int64
 	for rows.Next() {
 		var h api.Host
+		var hostID int64
 		var pte dsql.NullTime
-		var resolvedAddresses string
-		err := rows.Scan(&h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
+		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
 			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.Settings), (*V2HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
-			&h.Scanned, &resolvedAddresses, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
-			&h.Checks.UsabilityBreakdown.Gouging, &h.Checks.UsabilityBreakdown.NotAcceptingContracts, &h.Checks.UsabilityBreakdown.NotAnnounced, &h.Checks.UsabilityBreakdown.NotCompletingScan,
+			&h.Scanned, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
+			&h.Checks.UsabilityBreakdown.Gouging, &h.Checks.UsabilityBreakdown.LowMaxDuration, &h.Checks.UsabilityBreakdown.NotAcceptingContracts, &h.Checks.UsabilityBreakdown.NotAnnounced, &h.Checks.UsabilityBreakdown.NotCompletingScan,
 			&h.Checks.ScoreBreakdown.Age, &h.Checks.ScoreBreakdown.Collateral, &h.Checks.ScoreBreakdown.Interactions, &h.Checks.ScoreBreakdown.StorageRemaining, &h.Checks.ScoreBreakdown.Uptime,
-			&h.Checks.ScoreBreakdown.Version, &h.Checks.ScoreBreakdown.Prices, &h.Checks.GougingBreakdown.ContractErr, &h.Checks.GougingBreakdown.DownloadErr, &h.Checks.GougingBreakdown.GougingErr,
+			&h.Checks.ScoreBreakdown.Version, &h.Checks.ScoreBreakdown.Prices, &h.Checks.GougingBreakdown.DownloadErr, &h.Checks.GougingBreakdown.GougingErr,
 			&h.Checks.GougingBreakdown.PruneErr, &h.Checks.GougingBreakdown.UploadErr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		if resolvedAddresses != "" {
-			h.ResolvedAddresses = strings.Split(resolvedAddresses, ",")
-			h.Subnets, err = utils.AddressesToSubnets(h.ResolvedAddresses)
-			if err != nil {
-				return nil, fmt.Errorf("failed to convert addresses to subnets: %w", err)
-			}
-		}
 		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[h.PublicKey]
 		hosts = append(hosts, h)
+		hostIDs = append(hostIDs, hostID)
+	}
+
+	// fill in v2 addresses
+	err = fillInV2Addresses(ctx, tx, hostIDs, func(i int, addrs []string) {
+		hosts[i].V2SiamuxAddresses = addrs
+		i++
+	})
+	if err != nil {
+		return nil, err
 	}
 	return hosts, nil
 }
@@ -1621,11 +1627,11 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
+		v2_settings = CASE WHEN ? THEN ? ELSE settings END,
 		price_table = CASE WHEN ? THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
-		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END,
-		resolved_addresses = CASE WHEN ? THEN ? ELSE resolved_addresses END
+		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
 		WHERE public_key = ?
 	`)
 	if err != nil {
@@ -1645,52 +1651,15 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success, scanTime, scanTime, // uptime
 			scanTime,                                  // last_scan
 			scan.Success, HostSettings(scan.Settings), // settings
+			scan.Success, V2HostSettings(scan.V2Settings), // settings
 			scan.Success, PriceTable(scan.PriceTable), // price_table
 			scan.Success, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
-			len(scan.ResolvedAddresses) > 0, strings.Join(scan.ResolvedAddresses, ","),
 			PublicKey(scan.HostKey),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to update host with scan: %w", err)
-		}
-	}
-	return nil
-}
-
-func RecordPriceTables(ctx context.Context, tx sql.Tx, priceTableUpdates []api.HostPriceTableUpdate) error {
-	if len(priceTableUpdates) == 0 {
-		return nil
-	}
-
-	stmt, err := tx.Prepare(ctx, `
-		UPDATE hosts SET
-		recent_downtime = CASE WHEN ? THEN recent_downtime = 0 ELSE recent_downtime END,
-		recent_scan_failures = CASE WHEN ? THEN recent_scan_failures = 0 ELSE recent_scan_failures END,
-		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry =  CASE WHEN ? THEN ? ELSE price_table_expiry END,
-		successful_interactions =  CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
-		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
-		WHERE public_key = ?
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to update host with price table: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, ptu := range priceTableUpdates {
-		_, err := stmt.Exec(ctx,
-			ptu.Success,                                            // recent_downtime
-			ptu.Success,                                            // recent_scan_failures
-			ptu.Success, PriceTable(ptu.PriceTable.HostPriceTable), // price_table
-			ptu.Success, ptu.PriceTable.Expiry, // price_table_expiry
-			ptu.Success,  // successful_interactions
-			!ptu.Success, // failed_interactions
-			PublicKey(ptu.HostKey),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update host with price table: %w", err)
 		}
 	}
 	return nil
@@ -1743,10 +1712,8 @@ SELECT
 	c.fcid, c.host_id, c.host_key, c.v2,
 	c.archival_reason, c.proof_height, c.renewed_from, c.renewed_to, c.revision_height, c.revision_number, c.size, c.start_height, c.state, c.usability, c.window_start, c.window_end,
 	c.contract_price, c.initial_renter_funds,
-	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending,
-	COALESCE(h.net_address, ""), COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port
+	c.delete_spending, c.fund_account_spending, c.sector_roots_spending, c.upload_spending
 FROM contracts AS c
-LEFT JOIN hosts h ON h.public_key = c.host_key
 %s
 ORDER BY c.id ASC`, whereExpr), whereArgs...)
 	if err != nil {
@@ -2196,6 +2163,7 @@ EXISTS (
 		hc.usability_low_score = 0 AND
 		hc.usability_redundant_ip = 0 AND
 		hc.usability_gouging = 0 AND
+		hc.usability_low_max_duration = 0 AND
 		hc.usability_not_accepting_contracts = 0 AND
 		hc.usability_not_announced = 0 AND
 		hc.usability_not_completing_scan = 0
@@ -2204,11 +2172,13 @@ EXISTS (
 	// query hosts
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 	SELECT
+	h.id,
 	h.public_key,
 	COALESCE(h.net_address, ""),
 	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
 	h.price_table,
-	h.settings
+	h.settings,
+	h.v2_settings
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
 	INNER JOIN host_checks hc on hc.db_host_id = h.id
@@ -2220,31 +2190,47 @@ EXISTS (
 	defer rows.Close()
 
 	var hosts []HostInfo
+	var hostIDs []int64
 	for rows.Next() {
+		var hostID int64
 		var hk PublicKey
 		var addr, port string
 		var pt PriceTable
 		var hs HostSettings
-		err := rows.Scan(&hk, &addr, &port, &pt, &hs)
+		var v2Hs V2HostSettings
+		err := rows.Scan(&hostID, &hk, &addr, &port, &pt, &hs, &v2Hs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
 		// exclude hosts with invalid address
+		var siamuxAddr string
 		host, _, err := net.SplitHostPort(addr)
-		if err != nil || host == "" {
-			continue
+		if err == nil {
+			siamuxAddr = net.JoinHostPort(host, port)
 		}
 
 		hosts = append(hosts, HostInfo{
 			api.HostInfo{
 				PublicKey:  types.PublicKey(hk),
-				SiamuxAddr: net.JoinHostPort(host, port),
+				SiamuxAddr: siamuxAddr,
 			},
 			rhpv2.HostSettings(hs),
 			rhpv3.HostPriceTable(pt),
+			rhp.HostSettings(v2Hs),
 		})
+		hostIDs = append(hostIDs, hostID)
 	}
+
+	// fill in v2 addresses
+	err = fillInV2Addresses(ctx, tx, hostIDs, func(i int, addrs []string) {
+		hosts[i].V2SiamuxAddresses = addrs
+		i++
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return hosts, nil
 }
 
@@ -2626,6 +2612,47 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 			Slabs: slabSlices,
 		},
 	}, nil
+}
+
+func fillInV2Addresses(ctx context.Context, tx sql.Tx, hostIDs []int64, assignFn func(int, []string)) error {
+	// fill in v2 addresses
+	netAddrsStmt, err := tx.Prepare(ctx, "SELECT ha.net_address, ha.protocol FROM host_addresses ha INNER JOIN hosts h ON ha.db_host_id = h.id WHERE h.id = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare stmt for fetching host addresses: %w", err)
+	}
+	defer netAddrsStmt.Close()
+
+	fetchAddrs := func(hostID int64) ([]chain.NetAddress, error) {
+		rows, err := netAddrsStmt.Query(ctx, hostID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var addrs []chain.NetAddress
+		for rows.Next() {
+			var addr chain.NetAddress
+			if err := rows.Scan(&addr.Address, (*ChainProtocol)(&addr.Protocol)); err != nil {
+				return nil, err
+			}
+			addrs = append(addrs, addr)
+		}
+		return addrs, nil
+	}
+
+	for i, hostID := range hostIDs {
+		netAddrs, err := fetchAddrs(hostID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch net addresses for host %d: %w", hostIDs[i], err)
+		}
+		var addrs []string
+		for _, addr := range netAddrs {
+			if addr.Protocol == rhp4.ProtocolTCPSiaMux {
+				addrs = append(addrs, addr.Address)
+			}
+		}
+		assignFn(i, addrs)
+	}
+	return nil
 }
 
 func listObjectsNoDelim(ctx context.Context, tx Tx, bucket, prefix, substring, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error) {

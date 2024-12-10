@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -27,7 +26,6 @@ const (
 
 var (
 	errAcquireContractFailed = errors.New("failed to acquire contract lock")
-	errFetchRevisionFailed   = errors.New("failed to fetch revision")
 	ErrStopped               = errors.New("uploader was stopped")
 )
 
@@ -78,14 +76,13 @@ type (
 		logger *zap.SugaredLogger
 
 		hk              types.PublicKey
-		siamuxAddr      string
 		signalNewUpload chan struct{}
 		shutdownCtx     context.Context
 
 		mu        sync.Mutex
 		endHeight uint64
 		fcid      types.FileContractID
-		host      host.Host
+		host      host.Uploader
 		queue     []*SectorUploadReq
 		stopped   bool
 
@@ -98,7 +95,7 @@ type (
 	}
 )
 
-func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, c api.ContractMetadata, l *zap.SugaredLogger) *Uploader {
+func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, hi api.HostInfo, fcid types.FileContractID, endHeight uint64, l *zap.SugaredLogger) *Uploader {
 	return &Uploader{
 		cl:     cl,
 		cs:     cs,
@@ -106,8 +103,7 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		logger: l,
 
 		// static
-		hk:              c.HostKey,
-		siamuxAddr:      c.SiamuxAddr,
+		hk:              hi.PublicKey,
 		shutdownCtx:     ctx,
 		signalNewUpload: make(chan struct{}, 1),
 
@@ -116,9 +112,9 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
-		host:      hm.Host(c.HostKey, c.ID, c.SiamuxAddr),
-		fcid:      c.ID,
-		endHeight: c.WindowEnd,
+		host:      hm.Uploader(hi, fcid),
+		fcid:      fcid,
+		endHeight: endHeight,
 		queue:     make([]*SectorUploadReq, 0),
 	}
 }
@@ -149,14 +145,16 @@ func (u *Uploader) PublicKey() types.PublicKey {
 	return u.hk
 }
 
-func (u *Uploader) Refresh(c api.ContractMetadata) {
+func (u *Uploader) Refresh(hi *api.HostInfo, fcid types.FileContractID, endHeight uint64) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	u.host = u.hm.Host(c.HostKey, c.ID, c.SiamuxAddr)
-	u.fcid = c.ID
-	u.siamuxAddr = c.SiamuxAddr
-	u.endHeight = c.WindowEnd
+	if hi != nil {
+		u.host = u.hm.Uploader(*hi, fcid)
+	}
+
+	u.endHeight = endHeight
+	u.fcid = fcid
 }
 
 func (u *Uploader) Start() {
@@ -255,7 +253,7 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	if utils.IsErr(uploadErr, ErrSectorUploadFinished) {
 		slowDial := utils.IsErr(uploadErr, rhp3.ErrDialTransport) && totalDuration > time.Second
 		slowLock := utils.IsErr(uploadErr, errAcquireContractFailed) && totalDuration > time.Second
-		slowFetchRev := utils.IsErr(uploadErr, errFetchRevisionFailed) && totalDuration > time.Second
+		slowFetchRev := utils.IsErr(uploadErr, rhp3.ErrFailedToFetchRevision) && totalDuration > time.Second
 		if !overdrive || slowDial || slowLock || slowFetchRev {
 			failure = overdrive
 			uploadEstimateMS = float64(totalDuration.Milliseconds() * 10)
@@ -350,17 +348,9 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 	ctx, cancel := context.WithTimeout(req.Ctx, sectorUploadTimeout)
 	defer cancel()
 
-	// fetch the revision
-	rev, err := host.FetchRevision(ctx, revisionFetchTimeout)
-	if err != nil {
-		return 0, fmt.Errorf("%w; %w", errFetchRevisionFailed, err)
-	} else if rev.RevisionNumber == math.MaxUint64 {
-		return 0, rhp3.ErrMaxRevisionReached
-	}
-
 	// upload the sector
 	start := time.Now()
-	err = host.UploadSector(ctx, req.Root, req.Data, rev)
+	err = host.UploadSector(ctx, req.Root, req.Data)
 	if err != nil {
 		return 0, fmt.Errorf("failed to upload sector to contract %v; %w", fcid, err)
 	}
@@ -434,7 +424,7 @@ func (u *Uploader) tryRefresh(ctx context.Context) bool {
 	}
 
 	// renew the uploader with the renewed contract
-	u.Refresh(renewed)
+	u.Refresh(nil, renewed.ID, renewed.WindowEnd)
 	return true
 }
 

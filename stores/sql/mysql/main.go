@@ -350,6 +350,10 @@ func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook
 	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
+func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error) {
+	return ssql.FileContractElement(ctx, tx, fcid)
+}
+
 func (tx *MainDatabaseTx) DeleteBucket(ctx context.Context, bucket string) error {
 	return ssql.DeleteBucket(ctx, tx, bucket)
 }
@@ -788,10 +792,6 @@ func (tx *MainDatabaseTx) RecordHostScans(ctx context.Context, scans []api.HostS
 	return ssql.RecordHostScans(ctx, tx, scans)
 }
 
-func (tx *MainDatabaseTx) RecordPriceTables(ctx context.Context, priceTableUpdates []api.HostPriceTableUpdate) error {
-	return ssql.RecordPriceTables(ctx, tx, priceTableUpdates)
-}
-
 func (tx *MainDatabaseTx) RemoveOfflineHosts(ctx context.Context, minRecentFailures uint64, maxDownTime time.Duration) (int64, error) {
 	return ssql.RemoveOfflineHosts(ctx, tx, minRecentFailures, maxDownTime)
 }
@@ -1044,7 +1044,14 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 			SUBSTRING_INDEX(net_address,':',1) = ? OR
 			SUBSTRING_INDEX(net_address,':',1) LIKE ?
 		) AS _
-		`)
+		UNION ALL
+		SELECT ?, db_host_id FROM (
+			SELECT db_host_id
+			FROM host_addresses
+			WHERE net_address=? OR
+			SUBSTRING_INDEX(net_address,':',1) = ? OR
+			SUBSTRING_INDEX(net_address,':',1) LIKE ?
+		) AS _`)
 		if err != nil {
 			return fmt.Errorf("failed to prepare join statement: %w", err)
 		}
@@ -1055,7 +1062,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
 			} else if entryID, err := res.LastInsertId(); err != nil {
 				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
-			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry), entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
 				return fmt.Errorf("failed to join host blocklist entry: %w", err)
 			}
 		}
@@ -1080,25 +1087,25 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 func (tx *MainDatabaseTx) UpdateHostCheck(ctx context.Context, hk types.PublicKey, hc api.HostChecks) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO host_checks (created_at, db_host_id, usability_blocked, usability_offline, usability_low_score,
-			usability_redundant_ip, usability_gouging, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
+			usability_redundant_ip, usability_gouging, usability_low_max_duration, usability_not_accepting_contracts, usability_not_announced, usability_not_completing_scan,
 			score_age, score_collateral, score_interactions, score_storage_remaining, score_uptime, score_version, score_prices,
-			gouging_contract_err, gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
+			gouging_download_err, gouging_gouging_err, gouging_prune_err, gouging_upload_err)
 	    VALUES (?,
 			(SELECT id FROM hosts WHERE public_key = ?),
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			created_at = VALUES(created_at), db_host_id = VALUES(db_host_id),
 			usability_blocked = VALUES(usability_blocked), usability_offline = VALUES(usability_offline), usability_low_score = VALUES(usability_low_score),
-			usability_redundant_ip = VALUES(usability_redundant_ip), usability_gouging = VALUES(usability_gouging), usability_not_accepting_contracts = VALUES(usability_not_accepting_contracts),
+			usability_redundant_ip = VALUES(usability_redundant_ip), usability_gouging = VALUES(usability_gouging), usability_low_max_duration = VALUES(usability_low_max_duration), usability_not_accepting_contracts = VALUES(usability_not_accepting_contracts),
 			usability_not_announced = VALUES(usability_not_announced), usability_not_completing_scan = VALUES(usability_not_completing_scan),
 			score_age = VALUES(score_age), score_collateral = VALUES(score_collateral), score_interactions = VALUES(score_interactions),
 			score_storage_remaining = VALUES(score_storage_remaining), score_uptime = VALUES(score_uptime), score_version = VALUES(score_version),
-			score_prices = VALUES(score_prices), gouging_contract_err = VALUES(gouging_contract_err), gouging_download_err = VALUES(gouging_download_err),
+			score_prices = VALUES(score_prices), gouging_download_err = VALUES(gouging_download_err),
 			gouging_gouging_err = VALUES(gouging_gouging_err), gouging_prune_err = VALUES(gouging_prune_err), gouging_upload_err = VALUES(gouging_upload_err)
 	`, time.Now(), ssql.PublicKey(hk), hc.UsabilityBreakdown.Blocked, hc.UsabilityBreakdown.Offline, hc.UsabilityBreakdown.LowScore,
-		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
+		hc.UsabilityBreakdown.RedundantIP, hc.UsabilityBreakdown.Gouging, hc.UsabilityBreakdown.LowMaxDuration, hc.UsabilityBreakdown.NotAcceptingContracts, hc.UsabilityBreakdown.NotAnnounced, hc.UsabilityBreakdown.NotCompletingScan,
 		hc.ScoreBreakdown.Age, hc.ScoreBreakdown.Collateral, hc.ScoreBreakdown.Interactions, hc.ScoreBreakdown.StorageRemaining, hc.ScoreBreakdown.Uptime, hc.ScoreBreakdown.Version, hc.ScoreBreakdown.Prices,
-		hc.GougingBreakdown.ContractErr, hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
+		hc.GougingBreakdown.DownloadErr, hc.GougingBreakdown.GougingErr, hc.GougingBreakdown.PruneErr, hc.GougingBreakdown.UploadErr,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert host check: %w", err)

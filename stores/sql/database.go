@@ -19,16 +19,17 @@ import (
 type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
+		ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error)
 		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
-		InsertFileContractElements([]types.V2FileContractElement) error
-		RemoveFileContractElements([]types.FileContractID) error
+		PruneFileContractElements(threshold uint64) error
+		UpdateFileContractElements([]types.V2FileContractElement) error
 		UpdateChainIndex(index types.ChainIndex) error
 		UpdateFileContractElementProofs(updater wallet.ProofUpdater) error
 		UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error
 		UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error
 		UpdateContractState(fcid types.FileContractID, state api.ContractState) error
 		UpdateFailedContracts(blockHeight uint64) error
-		UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
+		UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error
 
 		wallet.UpdateTx
 	}
@@ -151,6 +152,10 @@ type (
 		// webhooks.ErrWebhookNotFound is returned.
 		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
+		// FileContractElement returns the up-to-date file contract element for
+		// a given contract id.
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
+
 		// Hosts returns a list of hosts that match the provided filters
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 
@@ -253,10 +258,6 @@ type (
 		// expired since price tables from scans are not paid for and are
 		// therefore only useful for gouging checks.
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
-
-		// RecordPriceTables records price tables for hosts in the database
-		// increasing the successful/failed interactions accordingly.
-		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 
 		// RemoveOfflineHosts removes all hosts that have been offline for
 		// longer than maxDownTime and been scanned at least minRecentFailures

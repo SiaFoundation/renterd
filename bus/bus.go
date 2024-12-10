@@ -17,8 +17,10 @@ import (
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	cRhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
@@ -124,7 +126,7 @@ type (
 
 	Syncer interface {
 		Addr() string
-		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastHeader(h types.BlockHeader)
 		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 		BroadcastTransactionSet([]types.Transaction)
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
@@ -193,6 +195,7 @@ type (
 	// A ChainStore stores information about the chain.
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
@@ -203,7 +206,6 @@ type (
 		HostBlocklist(ctx context.Context) ([]string, error)
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
@@ -374,7 +376,7 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 
 	// create chain subscriber
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(wm, cm, store, b.s, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
@@ -526,44 +528,21 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 	)
 }
 
-func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.store.PutContract(ctx, api.ContractMetadata{
-		ID:                 rev.ID(),
-		HostKey:            rev.HostKey(),
-		StartHeight:        startHeight,
-		State:              state,
-		Usability:          api.ContractUsabilityGood,
-		WindowStart:        rev.Revision.WindowStart,
-		WindowEnd:          rev.Revision.WindowEnd,
-		ContractPrice:      contractPrice,
-		InitialRenterFunds: initialRenterFunds,
-	}); err != nil {
+func (b *Bus) addContract(ctx context.Context, contract api.ContractMetadata) (api.ContractMetadata, error) {
+	if err := b.store.PutContract(ctx, contract); err != nil {
 		return api.ContractMetadata{}, err
 	}
-
-	return b.store.Contract(ctx, rev.ID())
+	return b.store.Contract(ctx, contract.ID)
 }
 
-func (b *Bus) addRenewal(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, initialRenterFunds types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	if err := b.store.AddRenewal(ctx, api.ContractMetadata{
-		ID:                 rev.ID(),
-		HostKey:            rev.HostKey(),
-		RenewedFrom:        renewedFrom,
-		StartHeight:        startHeight,
-		State:              state,
-		Usability:          api.ContractUsabilityGood,
-		WindowStart:        rev.Revision.WindowStart,
-		WindowEnd:          rev.Revision.WindowEnd,
-		ContractPrice:      contractPrice,
-		InitialRenterFunds: initialRenterFunds,
-	}); err != nil {
+func (b *Bus) addRenewal(ctx context.Context, contract api.ContractMetadata) (api.ContractMetadata, error) {
+	if err := b.store.AddRenewal(ctx, contract); err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
 	}
-
-	return b.store.Contract(ctx, rev.ID())
+	return b.store.Contract(ctx, contract.ID)
 }
 
-func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
+func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error) {
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
 	if err != nil {
@@ -581,27 +560,76 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
 
+	// fetch host
+	host, err := b.store.Host(ctx, c.HostKey)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch host; %w", err)
+	}
+	fee := b.cm.RecommendedFee().Mul64(10e3)
+
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
-	// fetch revision
-	rev, err := b.rhp2Client.SignedRevision(ctx, c.HostIP, c.HostKey, renterKey, fcid, time.Minute)
-	if err != nil {
-		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
-	}
-
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		// fetch revision
+		rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.V2SiamuxAddr(), fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		}
+
+		// fetch parent contract element
+		fce, err := b.store.FileContractElement(ctx, fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch file contract element; %w", err)
+		}
+
+		// create the transaction
+		txn := types.V2Transaction{
+			MinerFee: fee,
+			FileContractRevisions: []types.V2FileContractRevision{
+				{
+					Parent:   fce,
+					Revision: rev,
+				},
+			},
+		}
+
+		// fund the transaction (only the fee)
+		basis, toSign, err := b.w.FundV2Transaction(&txn, fee, true)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+		}
+		// sign the transaction
+		b.w.SignV2Inputs(&txn, toSign)
+
+		// verify the transaction and add it to the transaction pool
+		txnSet := []types.V2Transaction{txn}
+		_, err = b.cm.AddV2PoolTransactions(basis, txnSet)
+		if err != nil {
+			b.w.ReleaseInputs(nil, txnSet)
+			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
+		}
+
+		// broadcast the transaction
+		b.s.BroadcastV2TransactionSet(basis, txnSet)
+		return txn.ID(), nil
 	} else {
+		// fetch revision
+		rev, err := b.rhp2Client.SignedRevision(ctx, host.NetAddress, c.HostKey, renterKey, fcid, time.Minute)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		}
+
 		// create the transaction
 		txn := types.Transaction{
+			MinerFees:             []types.Currency{fee},
 			FileContractRevisions: []types.FileContractRevision{rev.Revision},
 			Signatures:            rev.Signatures[:],
 		}
 
 		// fund the transaction (only the fee)
-		toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
+		toSign, err := b.w.FundTransaction(&txn, fee, true)
 		if err != nil {
 			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
 		}
@@ -618,13 +646,11 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 		// broadcast the transaction
 		b.s.BroadcastTransactionSet(txnset)
-		txnID = txn.ID()
+		return txn.ID(), nil
 	}
-
-	return
 }
 
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
@@ -641,7 +667,7 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
 	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if err != nil {
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("couldn't fund transaction: %w", err)
 	}
 
 	// sign the transaction
@@ -651,20 +677,72 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	contract, txnSet, err := b.rhp2Client.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, err
+		return api.ContractMetadata{}, err
 	}
 
 	// add transaction set to the pool
 	_, err = b.cm.AddPoolTransactions(txnSet)
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
 	}
 
 	// broadcast the transaction set
 	go b.s.BroadcastTransactionSet(txnSet)
 
-	return contract, nil
+	return api.ContractMetadata{
+		ID:                 contract.ID(),
+		HostKey:            contract.HostKey(),
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.WindowStart,
+		WindowEnd:          contract.Revision.WindowEnd,
+		ContractPrice:      contract.Revision.MissedHostPayout().Sub(hostCollateral),
+		InitialRenterFunds: renterFunds,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 false,
+	}, nil
+}
+
+func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+	cs := b.cm.TipState()
+	key := b.masterKey.DeriveContractKey(hk)
+	signer := ibus.NewFormContractSigner(b.w, key)
+
+	// form the contract
+	res, err := b.rhp4Client.FormContract(ctx, hk, hostIP, b.cm, signer, cs, prices, hostAddr, rhpv4.RPCFormContractParams{
+		RenterPublicKey: key.PublicKey(),
+		RenterAddress:   renterAddr,
+		Allowance:       renterFunds,
+		Collateral:      collateral,
+		ProofHeight:     endHeight,
+	})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to form v2 contract: %w", err)
+	}
+
+	// add transaction set to the pool
+	_, err = b.cm.AddV2PoolTransactions(res.FormationSet.Basis, res.FormationSet.Transactions)
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to add v2 transaction set to the pool: %w", err)
+	}
+
+	// broadcast the transaction set
+	go b.s.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions)
+
+	contract := res.Contract
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            contract.Revision.HostPublicKey,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ProofHeight + rhpv4.ProofWindow,
+		ContractPrice:      res.Usage.RenterCost(),
+		InitialRenterFunds: renterFunds,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
 }
 
 func (b *Bus) isPassedV2AllowHeight() bool {
@@ -714,136 +792,126 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 	}
 }
 
-func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
+func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
-	// acquire contract lock indefinitely and defer the release
-	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
-	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't acquire contract lock; %w", err)
-	}
-	defer func() {
-		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
-		}
-	}()
-
 	// fetch the revision
-	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, hs.SiamuxAddr())
 	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
+		return api.ContractMetadata{}, err
 	}
 
 	// renew contract
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, hs.SiamuxAddr(), prepareRenew, b.w.SignTransaction)
 	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
+		return api.ContractMetadata{}, err
 	}
 
 	// broadcast the transaction set
 	b.s.BroadcastTransactionSet(txnSet)
 
-	return newRevision, contractPrice, fundAmount, nil
+	return api.ContractMetadata{
+		ID:                 newRevision.ID(),
+		HostKey:            newRevision.HostKey(),
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        newRevision.Revision.WindowStart,
+		WindowEnd:          newRevision.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: fundAmount,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 false,
+	}, nil
 }
 
-func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
-	logger := b.logger.With("host", hostKey).With("hostIP", hostIP).With("timeout", timeout)
+func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
-	// prepare a helper to create a context for scanning
-	timeoutCtx := func() (context.Context, context.CancelFunc) {
-		if timeout > 0 {
-			return context.WithTimeout(ctx, timeout)
-		}
-		return ctx, func() {}
-	}
-
-	// prepare a helper for scanning
-	scan := func() (rhpv2.HostSettings, rhpv3.HostPriceTable, time.Duration, error) {
-		// fetch the host settings
-		start := time.Now()
-		scanCtx, cancel := timeoutCtx()
-		settings, err := b.rhp2Client.Settings(scanCtx, hostKey, hostIP)
-		cancel()
-		if err != nil {
-			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
-		}
-
-		// fetch the host pricetable
-		scanCtx, cancel = timeoutCtx()
-		pt, err := b.rhp3Client.PriceTableUnpaid(scanCtx, hostKey, settings.SiamuxAddr())
-		cancel()
-		if err != nil {
-			return settings, rhpv3.HostPriceTable{}, time.Since(start), err
-		}
-		return settings, pt.HostPriceTable, time.Since(start), nil
-	}
-
-	// resolve host ip, don't scan if the host is on a private network or if it
-	// resolves to more than two addresses of the same type, if it fails for
-	// another reason the host scan won't have subnets
-	resolvedAddresses, private, err := utils.ResolveHostIP(ctx, hostIP)
-	if errors.Is(err, utils.ErrHostTooManyAddresses) {
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
-	} else if private && !b.allowPrivateIPs {
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, api.ErrHostOnPrivateNetwork
-	}
-
-	// scan: first try
-	settings, pt, duration, err := scan()
+	// fetch the revision
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
 	if err != nil {
-		logger = logger.With(zap.Error(err))
+		return api.ContractMetadata{}, err
+	}
 
-		// scan: second try
-		select {
-		case <-ctx.Done():
-			return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
-		case <-time.After(time.Second):
+	// fetch prices and check them
+	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.V2SiamuxAddr())
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	if gb := gc.CheckV2(settings); gb.Gouging() {
+		return api.ContractMetadata{}, errors.New(gb.String())
+	}
+
+	// determine the new collateral we want the host to put into the
+	// renewed/refreshed contract
+	newCollateral := settings.Prices.Collateral.Mul64(expectedNewStorage).Mul64(endHeight - cs.Index.Height)
+	if newCollateral.Cmp(minNewCollateral) < 0 {
+		newCollateral = minNewCollateral
+	}
+	if newCollateral.Cmp(settings.MaxCollateral) > 0 {
+		newCollateral = settings.MaxCollateral
+	}
+	if newCollateral.Cmp(minNewCollateral) < 0 {
+		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v (max: %v)", newCollateral, minNewCollateral, settings.MaxCollateral)
+	}
+
+	var contract cRhp4.ContractRevision
+	var txnSet cRhp4.TransactionSet
+	if c.EndHeight() == endHeight {
+		// when refreshing, the 'collateral' is added on top of the existing
+		// collateral so we account for that by subtracting the rolled over
+		// value
+		collateral := types.ZeroCurrency
+		if rev.MissedHostValue.Cmp(newCollateral) < 0 {
+			collateral = newCollateral.Sub(rev.MissedHostValue)
 		}
-		settings, pt, duration, err = scan()
-
-		logger = logger.With("elapsed", duration).With(zap.Error(err))
-		if err == nil {
-			logger.Info("successfully scanned host on second try")
-		} else if !isErrHostUnreachable(err) {
-			logger.Infow("failed to scan host")
-		}
+		// refresh
+		var res cRhp4.RPCRefreshContractResult
+		res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
+			ContractID: c.ID,
+			Allowance:  renterFunds,
+			Collateral: collateral,
+		})
+		contract = res.Contract
+		txnSet = res.RenewalSet
+	} else {
+		var res cRhp4.RPCRenewContractResult
+		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
+			ContractID:  c.ID,
+			Allowance:   renterFunds,
+			Collateral:  newCollateral,
+			ProofHeight: endHeight,
+		})
+		contract = res.Contract
+		txnSet = res.RenewalSet
+	}
+	if err != nil {
+		return api.ContractMetadata{}, err
 	}
 
-	// check if the scan failed due to a shutdown - shouldn't be necessary but
-	// just in case since recording a failed scan might have serious
-	// repercussions
-	select {
-	case <-ctx.Done():
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
-	default:
-	}
+	// broadcast the transaction set
+	b.s.BroadcastV2TransactionSet(txnSet.Basis, txnSet.Transactions)
 
-	// record host scan - make sure this is interrupted by the request ctx and
-	// not the context with the timeout used to time out the scan itself.
-	// Otherwise scans that time out won't be recorded.
-	scanErr := b.store.RecordHostScans(ctx, []api.HostScan{
-		{
-			HostKey:           hostKey,
-			PriceTable:        pt,
-			ResolvedAddresses: resolvedAddresses,
-
-			// NOTE: A scan is considered successful if both fetching the price
-			// table and the settings succeeded. Right now scanning can't fail
-			// due to a reason that is our fault unless we are offline. If that
-			// changes, we should adjust this code to account for that.
-			Success:   err == nil,
-			Settings:  settings,
-			Timestamp: time.Now(),
-		},
-	})
-	if scanErr != nil {
-		logger.Errorw("failed to record host scan", zap.Error(scanErr))
-	}
-	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
-	return settings, pt, duration, err
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            h.PublicKey,
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ExpirationHeight,
+		ContractPrice:      settings.Prices.ContractPrice,
+		InitialRenterFunds: contract.Revision.RenterOutput.Value,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
 }
 
 func isErrHostUnreachable(err error) bool {

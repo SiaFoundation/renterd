@@ -414,7 +414,6 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// assert it's equal
-	c.HostIP = inserted.HostIP
 	if !reflect.DeepEqual(inserted, c) {
 		t.Fatal("contract mismatch", cmp.Diff(inserted, c))
 	}

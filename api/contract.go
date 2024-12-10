@@ -65,10 +65,6 @@ type (
 		InitialRenterFunds types.Currency   `json:"initialRenterFunds"`
 		Spending           ContractSpending `json:"spending"`
 
-		// following fields are decorated
-		HostIP     string `json:"hostIP"`
-		SiamuxAddr string `json:"siamuxAddr,omitempty"`
-
 		// following fields are only set on archived contracts
 		ArchivalReason string               `json:"archivalReason,omitempty"`
 		RenewedTo      types.FileContractID `json:"renewedTo,omitempty"`
@@ -127,7 +123,6 @@ type (
 		EndHeight      uint64          `json:"endHeight"`
 		HostCollateral types.Currency  `json:"hostCollateral"`
 		HostKey        types.PublicKey `json:"hostKey"`
-		HostIP         string          `json:"hostIP"`
 		RenterFunds    types.Currency  `json:"renterFunds"`
 		RenterAddress  types.Address   `json:"renterAddress"`
 	}
@@ -209,11 +204,10 @@ func (cm ContractMetadata) IsGood() bool {
 
 type (
 	Revision struct {
-		ContractID types.FileContractID `json:"contractID"`
-		types.V2FileContract
+		ContractID      types.FileContractID `json:"contractID"`
+		MissedHostValue types.Currency       `json:"missedHostValue"`
+		RenterFunds     types.Currency       `json:"renterFunds"`
+		RevisionNumber  uint64               `json:"revisionNumber"`
+		Size            uint64               `json:"size"`
 	}
 )
-
-func (rev *Revision) EndHeight() uint64 {
-	return rev.ProofHeight
-}
