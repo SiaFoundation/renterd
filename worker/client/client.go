@@ -39,7 +39,7 @@ func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account 
 
 // Accounts returns all accounts.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts"), &accounts)
+	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
 	return
 }
 

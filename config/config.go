@@ -24,6 +24,7 @@ type (
 		Worker    Worker    `yaml:"worker,omitempty"`
 		S3        S3        `yaml:"s3,omitempty"`
 
+		Migrator Migrator     `yaml:"migrator,omitempty"`
 		Database Database     `yaml:"database,omitempty"`
 		Explorer ExplorerData `yaml:"explorer,omitempty"`
 	}
@@ -103,11 +104,6 @@ type (
 		MetricsDatabase string `yaml:"metricsDatabase,omitempty"`
 	}
 
-	RemoteWorker struct {
-		Address  string `yaml:"address,omitempty"`
-		Password string `yaml:"password,omitempty"`
-	}
-
 	S3 struct {
 		Address           string   `yaml:"address,omitempty"`
 		DisableAuth       bool     `yaml:"disableAuth,omitempty"`
@@ -118,32 +114,39 @@ type (
 
 	// Worker contains the configuration for a worker.
 	Worker struct {
-		Enabled                       bool           `yaml:"enabled,omitempty"`
-		ID                            string         `yaml:"id,omitempty"`
-		Remotes                       []RemoteWorker `yaml:"remotes,omitempty"`
-		AccountsRefillInterval        time.Duration  `yaml:"accountsRefillInterval,omitempty"`
-		BusFlushInterval              time.Duration  `yaml:"busFlushInterval,omitempty"`
-		DownloadOverdriveTimeout      time.Duration  `yaml:"downloadOverdriveTimeout,omitempty"`
-		UploadOverdriveTimeout        time.Duration  `yaml:"uploadOverdriveTimeout,omitempty"`
-		DownloadMaxOverdrive          uint64         `yaml:"downloadMaxOverdrive,omitempty"`
-		DownloadMaxMemory             uint64         `yaml:"downloadMaxMemory,omitempty"`
-		UploadMaxMemory               uint64         `yaml:"uploadMaxMemory,omitempty"`
-		UploadMaxOverdrive            uint64         `yaml:"uploadMaxOverdrive,omitempty"`
-		AllowUnauthenticatedDownloads bool           `yaml:"allowUnauthenticatedDownloads,omitempty"`
+		Enabled                       bool          `yaml:"enabled,omitempty"`
+		ID                            string        `yaml:"id,omitempty"`
+		AccountsRefillInterval        time.Duration `yaml:"accountsRefillInterval,omitempty"`
+		BusFlushInterval              time.Duration `yaml:"busFlushInterval,omitempty"`
+		DownloadOverdriveTimeout      time.Duration `yaml:"downloadOverdriveTimeout,omitempty"`
+		UploadOverdriveTimeout        time.Duration `yaml:"uploadOverdriveTimeout,omitempty"`
+		DownloadMaxOverdrive          uint64        `yaml:"downloadMaxOverdrive,omitempty"`
+		DownloadMaxMemory             uint64        `yaml:"downloadMaxMemory,omitempty"`
+		UploadMaxMemory               uint64        `yaml:"uploadMaxMemory,omitempty"`
+		UploadMaxOverdrive            uint64        `yaml:"uploadMaxOverdrive,omitempty"`
+		AllowUnauthenticatedDownloads bool          `yaml:"allowUnauthenticatedDownloads,omitempty"`
 	}
 
 	// Autopilot contains the configuration for an autopilot.
 	Autopilot struct {
-		Enabled                        bool          `yaml:"enabled,omitempty"`
-		AllowRedundantHostIPs          bool          `yaml:"allowRedundantHostIPs,omitempty"`
-		Heartbeat                      time.Duration `yaml:"heartbeat,omitempty"`
-		MigrationHealthCutoff          float64       `yaml:"migrationHealthCutoff,omitempty"`
-		RevisionBroadcastInterval      time.Duration `yaml:"revisionBroadcastInterval,omitempty"`
-		RevisionSubmissionBuffer       uint64        `yaml:"revisionSubmissionBuffer,omitempty"`
-		ScannerInterval                time.Duration `yaml:"scannerInterval,omitempty"`
-		ScannerBatchSize               uint64        `yaml:"scannerBatchSize,omitempty"`
-		ScannerNumThreads              uint64        `yaml:"scannerNumThreads,omitempty"`
-		MigratorParallelSlabsPerWorker uint64        `yaml:"migratorParallelSlabsPerWorker,omitempty"`
+		Enabled                   bool          `yaml:"enabled,omitempty"`
+		AllowRedundantHostIPs     bool          `yaml:"allowRedundantHostIPs,omitempty"`
+		Heartbeat                 time.Duration `yaml:"heartbeat,omitempty"`
+		RevisionBroadcastInterval time.Duration `yaml:"revisionBroadcastInterval,omitempty"`
+		RevisionSubmissionBuffer  uint64        `yaml:"revisionSubmissionBuffer,omitempty"`
+		ScannerInterval           time.Duration `yaml:"scannerInterval,omitempty"`
+		ScannerBatchSize          uint64        `yaml:"scannerBatchSize,omitempty"`
+		ScannerNumThreads         uint64        `yaml:"scannerNumThreads,omitempty"`
+	}
+
+	// Migrator contains the configuration for a migrator.
+	Migrator struct {
+		DownloadMaxOverdrive     uint64        `yaml:"downloadMaxOverdrive,omitempty"`
+		DownloadOverdriveTimeout time.Duration `yaml:"downloadOverdriveTimeout,omitempty"`
+		HealthCutoff             float64       `yaml:"healthCutoff,omitempty"`
+		ParallelSlabsPerWorker   uint64        `yaml:"parallelSlabsPerWorker,omitempty"`
+		UploadMaxOverdrive       uint64        `yaml:"uploadMaxOverdrive,omitempty"`
+		UploadOverdriveTimeout   time.Duration `yaml:"uploadOverdriveTimeout,omitempty"`
 	}
 )
 

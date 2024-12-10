@@ -1,4 +1,4 @@
-package worker
+package migrator
 
 import (
 	"context"
@@ -74,61 +74,61 @@ type (
 
 var (
 	_ host.Host        = (*hostClient)(nil)
-	_ host.HostManager = (*Worker)(nil)
+	_ host.HostManager = (*migrator)(nil)
 )
 
-func (w *Worker) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
+func (m *migrator) Host(hk types.PublicKey, fcid types.FileContractID, siamuxAddr string) host.Host {
 	return &hostClient{
-		rhp3:       w.rhp3Client,
+		rhp3:       m.rhp3Client,
 		hk:         hk,
-		acc:        w.accounts.ForHost(hk),
-		csr:        w.contractSpendingRecorder,
-		logger:     w.logger.Named(hk.String()[:4]),
+		acc:        m.accounts.ForHost(hk),
+		csr:        m.contractSpendingRecorder,
+		logger:     m.logger.Named(hk.String()[:4]),
 		siamuxAddr: siamuxAddr,
-		renterKey:  w.deriveRenterKey(hk),
-		pts:        w.priceTables,
+		renterKey:  m.masterKey.DeriveContractKey(hk),
+		pts:        m.priceTables,
 	}
 }
 
-func (w *Worker) Downloader(hi api.HostInfo) host.Downloader {
+func (m *migrator) Downloader(hi api.HostInfo) host.Downloader {
 	if hi.IsV2() {
 		return &hostV2DownloadClient{
 			hi:   hi,
-			acc:  w.accounts.ForHost(hi.PublicKey),
-			pts:  w.pricesCache,
-			rhp4: w.rhp4Client,
+			acc:  m.accounts.ForHost(hi.PublicKey),
+			pts:  m.pricesCache,
+			rhp4: m.rhp4Client,
 		}
 	}
 	return &hostDownloadClient{
 		hi:   hi,
-		acc:  w.accounts.ForHost(hi.PublicKey),
-		pts:  w.priceTables,
-		rhp3: w.rhp3Client,
+		acc:  m.accounts.ForHost(hi.PublicKey),
+		pts:  m.priceTables,
+		rhp3: m.rhp3Client,
 	}
 }
 
-func (w *Worker) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader {
+func (m *migrator) Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader {
 	if hi.IsV2() {
 		return &hostV2UploadClient{
 			fcid: fcid,
 			hi:   hi,
-			rk:   w.deriveRenterKey(hi.PublicKey),
+			rk:   m.masterKey.DeriveContractKey(hi.PublicKey),
 
-			acc:  w.accounts.ForHost(hi.PublicKey),
-			csr:  w.contractSpendingRecorder,
-			pts:  w.pricesCache,
-			rhp4: w.rhp4Client,
+			acc:  m.accounts.ForHost(hi.PublicKey),
+			csr:  m.contractSpendingRecorder,
+			pts:  m.pricesCache,
+			rhp4: m.rhp4Client,
 		}
 	}
 	return &hostUploadClient{
 		fcid: fcid,
 		hi:   hi,
-		rk:   w.deriveRenterKey(hi.PublicKey),
+		rk:   m.masterKey.DeriveContractKey(hi.PublicKey),
 
-		acc:  w.accounts.ForHost(hi.PublicKey),
-		csr:  w.contractSpendingRecorder,
-		pts:  w.priceTables,
-		rhp3: w.rhp3Client,
+		acc:  m.accounts.ForHost(hi.PublicKey),
+		csr:  m.contractSpendingRecorder,
+		pts:  m.priceTables,
+		rhp3: m.rhp3Client,
 	}
 }
 
