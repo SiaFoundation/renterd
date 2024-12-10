@@ -70,9 +70,9 @@ func (c *Client) ReadSector(ctx context.Context, hk types.PublicKey, hostIP stri
 }
 
 // WriteSector writes a sector to the host.
-func (c *Client) WriteSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, rl rhp.ReaderLen, length, duration uint64) (res rhp.RPCWriteSectorResult, _ error) {
+func (c *Client) WriteSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, rl rhp.ReaderLen, length uint64) (res rhp.RPCWriteSectorResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
-		res, err = rhp.RPCWriteSector(ctx, t, prices, token, rl, length, duration)
+		res, err = rhp.RPCWriteSector(ctx, t, prices, token, rl, length)
 		return
 	})
 	return res, err
