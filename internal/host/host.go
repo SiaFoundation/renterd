@@ -26,7 +26,6 @@ type (
 		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
 		FetchRevision(ctx context.Context, fcid types.FileContractID) (types.FileContractRevision, error)
 
-		FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 	}
 )

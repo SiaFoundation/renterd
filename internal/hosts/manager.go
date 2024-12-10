@@ -218,58 +218,6 @@ func (h *hostClient) FetchRevision(ctx context.Context, fcid types.FileContractI
 	return h.rhp3.Revision(ctx, fcid, h.hk, h.siamuxAddr)
 }
 
-func (h *hostClient) FundAccount(ctx context.Context, desired types.Currency, rev *types.FileContractRevision) error {
-	log := h.logger.With(
-		zap.Stringer("host", h.hk),
-		zap.Stringer("account", h.acc.ID()),
-	)
-
-	// ensure we have at least 2H in the contract to cover the costs
-	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
-		return fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2))
-	}
-
-	// calculate the deposit amount
-	return h.acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
-		// return early if we have the desired balance
-		if balance.Cmp(desired) >= 0 {
-			return types.ZeroCurrency, nil
-		}
-		deposit := desired.Sub(balance)
-
-		// fetch pricetable directly to bypass the gouging check
-		pt, _, err := h.pts.Fetch(ctx, h, rev)
-		if err != nil {
-			return types.ZeroCurrency, err
-		}
-
-		// cap the deposit by what's left in the contract
-		cost := types.NewCurrency64(1)
-		availableFunds := rev.ValidRenterPayout().Sub(cost)
-		if deposit.Cmp(availableFunds) > 0 {
-			deposit = availableFunds
-		}
-
-		// fund the account
-		if err := h.rhp3.FundAccount(ctx, rev, h.hk, h.siamuxAddr, deposit, h.acc.ID(), pt.HostPriceTable, h.renterKey); err != nil {
-			if rhp3.IsBalanceMaxExceeded(err) {
-				h.acc.ScheduleSync()
-			}
-			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
-		}
-
-		// record the spend
-		h.csr.RecordV1(*rev, api.ContractSpending{FundAccount: deposit.Add(cost)})
-
-		// log the account balance after funding
-		log.Debugw("fund account succeeded",
-			"balance", balance.ExactString(),
-			"deposit", deposit.ExactString(),
-		)
-		return deposit, nil
-	})
-}
-
 func (h *hostClient) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
 	// fetch pricetable directly to bypass the gouging check
 	pt, _, err := h.pts.Fetch(ctx, h, rev)
