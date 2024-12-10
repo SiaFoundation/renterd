@@ -628,6 +628,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	w.contractSpendingRecorder = contracts.NewSpendingRecorder(w.shutdownCtx, w.bus, cfg.BusFlushInterval, l)
 	hm := hosts.NewManager(w.masterKey, w.accounts, w.contractSpendingRecorder, dialer, l)
+	w.hostManager = hm
 
 	dlmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
 	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, hm, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
