@@ -115,6 +115,7 @@ func defaultConfig() config.Config {
 			ScannerNumThreads:         10,
 		},
 		Migrator: config.Migrator{
+			AccountsRefillInterval:   defaultAccountRefillInterval,
 			HealthCutoff:             0.75,
 			ParallelSlabsPerWorker:   1,
 			DownloadMaxOverdrive:     5,
@@ -301,6 +302,7 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "Timeout for node shutdown")
 
 	// migrator
+	flag.DurationVar(&cfg.Migrator.AccountsRefillInterval, "migrator.accountRefillInterval", cfg.Migrator.AccountsRefillInterval, "Interval for refilling migrator' account balances")
 	flag.Float64Var(&cfg.Migrator.HealthCutoff, "migrator.healthCutoff", cfg.Migrator.HealthCutoff, "Threshold for migrating slabs based on health")
 	flag.Uint64Var(&cfg.Migrator.ParallelSlabsPerWorker, "migrator.parallelSlabsPerWorker", cfg.Migrator.ParallelSlabsPerWorker, "Parallel slab migrations per worker (overrides with RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER)")
 	flag.Uint64Var(&cfg.Migrator.DownloadMaxOverdrive, "migrator.downloadMaxOverdrive", cfg.Migrator.DownloadMaxOverdrive, "Max overdrive workers for migration downloads")

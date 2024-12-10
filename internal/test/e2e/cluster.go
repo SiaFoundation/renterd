@@ -1014,6 +1014,7 @@ func testApCfg() config.Autopilot {
 
 func testMigratorCfg() config.Migrator {
 	return config.Migrator{
+		AccountsRefillInterval:   10 * time.Millisecond,
 		HealthCutoff:             0.99,
 		ParallelSlabsPerWorker:   1,
 		DownloadMaxOverdrive:     5,

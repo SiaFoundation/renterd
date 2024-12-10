@@ -141,6 +141,7 @@ type (
 
 	// Migrator contains the configuration for a migrator.
 	Migrator struct {
+		AccountsRefillInterval   time.Duration `yaml:"accountsRefillInterval,omitempty"`
 		DownloadMaxOverdrive     uint64        `yaml:"downloadMaxOverdrive,omitempty"`
 		DownloadOverdriveTimeout time.Duration `yaml:"downloadOverdriveTimeout,omitempty"`
 		HealthCutoff             float64       `yaml:"healthCutoff,omitempty"`

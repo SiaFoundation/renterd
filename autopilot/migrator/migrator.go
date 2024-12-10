@@ -2,6 +2,7 @@ package migrator
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net"
 	"sort"
@@ -122,6 +123,10 @@ type (
 func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, alerts alerts.Alerter, ss SlabStore, b Bus, logger *zap.Logger) (*migrator, error) {
 	logger = logger.Named("migrator")
 
+	if cfg.AccountsRefillInterval == 0 {
+		return nil, fmt.Errorf("accounts refill interval must be set")
+	}
+
 	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, logger)
 	m := &migrator{
 		alerts: alerts,
@@ -149,7 +154,7 @@ func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, al
 		logger: logger.Sugar(),
 	}
 
-	mgr, err := accounts.NewManager(masterKey.DeriveAccountsKey("migrator"), "migrator", alerts, m, m, b, b, b, b, time.Minute, logger)
+	mgr, err := accounts.NewManager(masterKey.DeriveAccountsKey("migrator"), "migrator", alerts, m, m, b, b, b, b, cfg.AccountsRefillInterval, logger)
 	if err != nil {
 		return nil, err
 	}
