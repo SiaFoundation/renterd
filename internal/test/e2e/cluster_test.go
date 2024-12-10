@@ -2559,17 +2559,18 @@ func TestDownloadAllHosts(t *testing.T) {
 	// add a host
 	cluster.AddHosts(1)
 
-	// grab random used host
-	var randomHost string
+	// grab random used host - we block both addresses since depending on how we
+	// run the test the host announces itself with either one of them
+	var randomHost []string
 	for _, host := range cluster.hosts {
 		if _, used := usedHosts[host.PublicKey()]; used {
-			randomHost = host.settings.Settings().NetAddress
+			randomHost = []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
 			break
 		}
 	}
 
 	// add it to the blocklist
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+	tt.OK(b.UpdateHostBlocklist(context.Background(), randomHost, nil, false))
 
 	// wait until we migrated away from that host
 	var newHost types.PublicKey
@@ -2599,7 +2600,8 @@ func TestDownloadAllHosts(t *testing.T) {
 	// block the new host but unblock the old one
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			tt.OK(b.UpdateHostBlocklist(context.Background(), []string{host.settings.Settings().NetAddress}, []string{randomHost}, false))
+			toBlock := []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
+			tt.OK(b.UpdateHostBlocklist(context.Background(), toBlock, randomHost, false))
 		}
 	}
 
