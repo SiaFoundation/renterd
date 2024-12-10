@@ -1104,8 +1104,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		tt.OK(err)
 
 		fundAmt := types.Siacoins(1)
-		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
-			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+		if cm.Spending.FundAccount.Cmp(fundAmt) < 0 {
+			return fmt.Errorf("invalid spending reported: %v < %v", cm.Spending.FundAccount, fundAmt)
 		}
 		return nil
 	})
