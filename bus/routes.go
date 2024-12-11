@@ -45,13 +45,16 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		return
 	}
 
-	// contract metadata
+	// fetch contract
 	cm, err := b.store.Contract(jc.Request.Context(), req.ContractID)
-	if jc.Check("failed to fetch contract metadata", err) != nil {
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch contract metadata", err) != nil {
 		return
 	}
 
-	// host
+	// fetch host
 	host, err := b.store.Host(jc.Request.Context(), cm.HostKey)
 	if jc.Check("failed to fetch host for contract", err) != nil {
 		return

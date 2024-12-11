@@ -180,7 +180,7 @@ paths:
 
   #############################
   #
-  # Autopilot routes
+  # Worker routes
   #
   #############################
   /worker/account/{hostkey}:
@@ -715,6 +715,110 @@ paths:
                           allOf:
                             - $ref: "#/components/schemas/PublicKey"
                             - description: The host's public key
+
+  #############################
+  #
+  # Bus routes
+  #
+  #############################
+  /bus/accounts:
+    get:
+      summary: Get all ephemeral accounts
+      description: Returns all known ephemeral accounts.
+      responses:
+        "200":
+          description: Successfully retrieved ephemeral accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      summary: Save accounts
+      description: Saves the provided accounts to the database.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accounts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Account"
+      responses:
+        "200":
+          description: Successfully saved accounts
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                missingOwnerField:
+                  summary: Missing owner field example
+                  value: "account is missing a valid 'owner' field"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/accounts/fund:
+    post:
+      summary: Fund account
+      description: Funds the specified account with the provided amount.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountID:
+                  allOf:
+                    - $ref: "#/components/schemas/PublicKey"
+                    - description: The ID of the account to fund.
+                amount:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The amount to fund the account with.
+                contractID:
+                  allOf:
+                    - $ref: "#/components/schemas/FileContractID"
+                    - description: The ID of the contract to fund the account with.
+      responses:
+        "200":
+          description: Successfully funded account
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+
 components:
   schemas:
     #############################
