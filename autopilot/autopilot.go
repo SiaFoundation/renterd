@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"runtime"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"go.sia.tech/renterd/autopilot/scanner"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/rhp"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
@@ -146,31 +148,36 @@ type Autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(cfg config.Autopilot, mCfg config.Migrator, masterKey utils.MasterKey, bus Bus, logger *zap.Logger) (_ *Autopilot, err error) {
+func New(cfg config.Autopilot, masterKey utils.MasterKey, bus Bus, logger *zap.Logger) (_ *Autopilot, err error) {
 	logger = logger.Named("autopilot")
-	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
+
+	ctx, cancel := context.WithCancel(context.Background())
 	ap := &Autopilot{
 		alerts: alerts.WithOrigin(bus, "autopilot"),
 		bus:    bus,
 		logger: logger.Sugar(),
 
-		shutdownCtx:       shutdownCtx,
-		shutdownCtxCancel: shutdownCtxCancel,
+		shutdownCtx:       ctx,
+		shutdownCtxCancel: cancel,
 
 		tickerDuration: cfg.Heartbeat,
 
 		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 
-	ap.s, err = scanner.New(ap.bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
+	// create scanner
+	ap.s, err = scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
 	if err != nil {
 		return
 	}
 
-	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, ap.logger)
-	ap.m, err = migrator.New(ap.shutdownCtx, mCfg, masterKey, ap.alerts, ap.bus, ap.bus, logger)
+	// create contractor
+	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, logger)
+
+	// create migrator
+	ap.m, err = migrator.New(ctx, masterKey, ap.alerts, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, logger)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	return ap, nil
@@ -253,7 +260,7 @@ func (ap *Autopilot) Run() {
 	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
-		ap.tick(forceScan, tickerFired)
+		ap.performMaintenance(forceScan, tickerFired)
 		select {
 		case <-ap.shutdownCtx.Done():
 			return
@@ -407,7 +414,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 	}
 }
 
-func (ap *Autopilot) tick(forceScan bool, tickerFired chan struct{}) {
+func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{}) {
 	defer ap.logger.Info("autopilot iteration ended")
 
 	// initiate a host scan - no need to be synced or configured for scanning

@@ -2,7 +2,6 @@ package migrator
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"net"
 	"sort"
@@ -13,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/accounts"
 	"go.sia.tech/renterd/internal/contracts"
 	"go.sia.tech/renterd/internal/download"
@@ -87,10 +85,8 @@ type (
 		bus    Bus
 		ss     SlabStore
 
-		healthCutoff           float64
-		parallelSlabsPerWorker uint64
-
-		masterKey utils.MasterKey
+		healthCutoff float64
+		numThreads   uint64
 
 		accounts        *accounts.Manager
 		downloadManager *download.Manager
@@ -115,22 +111,15 @@ type (
 	}
 )
 
-func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, alerts alerts.Alerter, ss SlabStore, b Bus, logger *zap.Logger) (*migrator, error) {
+func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, logger *zap.Logger) (*migrator, error) {
 	logger = logger.Named("migrator")
-
-	if cfg.AccountsRefillInterval == 0 {
-		return nil, fmt.Errorf("accounts refill interval must be set")
-	}
-
 	m := &migrator{
 		alerts: alerts,
 		bus:    b,
 		ss:     ss,
 
-		healthCutoff:           cfg.HealthCutoff,
-		parallelSlabsPerWorker: cfg.ParallelSlabsPerWorker,
-
-		masterKey: masterKey,
+		healthCutoff: healthCutoff,
+		numThreads:   numThreads,
 
 		signalConsensusNotSynced:  make(chan struct{}, 1),
 		signalMaintenanceFinished: make(chan struct{}, 1),
@@ -142,8 +131,12 @@ func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, al
 		logger: logger.Sugar(),
 	}
 
+	// derive keys
+	ak := masterKey.DeriveAccountsKey("migrator")
+	uk := masterKey.DeriveUploadKey()
+
 	// create account manager
-	am, err := accounts.NewManager(masterKey.DeriveAccountsKey("migrator"), "migrator", alerts, m, m, b, b, b, b, cfg.AccountsRefillInterval, logger)
+	am, err := accounts.NewManager(ak, "migrator", alerts, m, m, b, b, b, b, accountsRefillInterval, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -152,15 +145,13 @@ func New(ctx context.Context, cfg config.Migrator, masterKey utils.MasterKey, al
 	// create host manager
 	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, logger)
 	csr := contracts.NewSpendingRecorder(ctx, b, 5*time.Second, logger)
-	hm := hosts.NewManager(masterKey, am, csr, dialer, logger)
-	m.hostManager = hm
+	m.hostManager = hosts.NewManager(masterKey, am, csr, dialer, logger)
 	m.rhp4Client = rhp4.New(dialer)
 
 	// create upload & download manager
 	mm := memory.NewManager(math.MaxInt64, logger)
-	uk := masterKey.DeriveUploadKey()
-	m.downloadManager = download.NewManager(ctx, &uk, hm, mm, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, logger)
-	m.uploadManager = upload.NewManager(ctx, &uk, hm, mm, b, b, b, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, logger)
+	m.downloadManager = download.NewManager(ctx, &uk, m.hostManager, mm, b, downloadMaxOverdrive, downloadOverdriveTimeout, logger)
+	m.uploadManager = upload.NewManager(ctx, &uk, m.hostManager, mm, b, b, b, uploadMaxOverdrive, uploadOverdriveTimeout, logger)
 
 	return m, nil
 }
@@ -212,7 +203,7 @@ func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
 		return 0
 	}
 
-	totalNumMS := float64(remaining) * p90 / float64(m.parallelSlabsPerWorker)
+	totalNumMS := float64(remaining) * p90 / float64(m.numThreads)
 	return time.Duration(totalNumMS) * time.Millisecond
 }
 
@@ -228,7 +219,7 @@ func (m *migrator) performMigrations(ctx context.Context) {
 	}()
 
 	// launch workers
-	for i := uint64(0); i < m.parallelSlabsPerWorker; i++ {
+	for i := uint64(0); i < m.numThreads; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

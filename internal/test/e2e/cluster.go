@@ -237,7 +237,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		wk = *opts.walletKey
 	}
 
-	busCfg, workerCfg, apCfg, mCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testMigratorCfg(), testDBCfg()
+	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
 	}
@@ -373,7 +373,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, err := autopilot.New(apCfg, mCfg, workerKey, busClient, logger)
+	ap, err := autopilot.New(apCfg, workerKey, busClient, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
@@ -1006,21 +1006,18 @@ func testApCfg() config.Autopilot {
 		AllowRedundantHostIPs:    true,
 		Heartbeat:                time.Second,
 		RevisionSubmissionBuffer: 0,
-		ScannerInterval:          10 * time.Millisecond,
-		ScannerBatchSize:         10,
-		ScannerNumThreads:        1,
-	}
-}
 
-func testMigratorCfg() config.Migrator {
-	return config.Migrator{
-		AccountsRefillInterval:   10 * time.Millisecond,
-		HealthCutoff:             0.99,
-		ParallelSlabsPerWorker:   1,
-		DownloadMaxOverdrive:     5,
-		DownloadOverdriveTimeout: 500 * time.Millisecond,
-		UploadOverdriveTimeout:   500 * time.Millisecond,
-		UploadMaxOverdrive:       5,
+		MigratorAccountsRefillInterval:   10 * time.Millisecond,
+		MigratorHealthCutoff:             0.99,
+		MigratorNumThreads:               1,
+		MigratorDownloadMaxOverdrive:     5,
+		MigratorDownloadOverdriveTimeout: 500 * time.Millisecond,
+		MigratorUploadOverdriveTimeout:   500 * time.Millisecond,
+		MigratorUploadMaxOverdrive:       5,
+
+		ScannerInterval:   10 * time.Millisecond,
+		ScannerBatchSize:  10,
+		ScannerNumThreads: 1,
 	}
 }
 

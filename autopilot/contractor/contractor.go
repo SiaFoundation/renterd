@@ -125,13 +125,13 @@ type (
 	}
 )
 
-func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.SugaredLogger) *Contractor {
+func New(bus Bus, alerter alerts.Alerter, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.Logger) *Contractor {
 	logger = logger.Named("contractor")
 	return &Contractor{
 		bus:     bus,
 		alerter: alerter,
 		churn:   make(accumulatedChurn),
-		logger:  logger,
+		logger:  logger.Sugar(),
 
 		allowRedundantHostIPs: allowRedundantHostIPs,
 

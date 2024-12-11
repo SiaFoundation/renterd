@@ -107,21 +107,22 @@ func defaultConfig() config.Config {
 		Autopilot: config.Autopilot{
 			Enabled: true,
 
-			RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
-			Heartbeat:                 30 * time.Minute,
+			Heartbeat: 30 * time.Minute,
+
+			MigratorAccountsRefillInterval:   defaultAccountRefillInterval,
+			MigratorHealthCutoff:             0.75,
+			MigratorNumThreads:               1,
+			MigratorDownloadMaxOverdrive:     5,
+			MigratorDownloadOverdriveTimeout: 3 * time.Second,
+			MigratorUploadMaxOverdrive:       5,
+			MigratorUploadOverdriveTimeout:   3 * time.Second,
+
 			RevisionBroadcastInterval: 7 * 24 * time.Hour,
-			ScannerBatchSize:          100,
-			ScannerInterval:           4 * time.Hour,
-			ScannerNumThreads:         10,
-		},
-		Migrator: config.Migrator{
-			AccountsRefillInterval:   defaultAccountRefillInterval,
-			HealthCutoff:             0.75,
-			ParallelSlabsPerWorker:   1,
-			DownloadMaxOverdrive:     5,
-			DownloadOverdriveTimeout: 3 * time.Second,
-			UploadMaxOverdrive:       5,
-			UploadOverdriveTimeout:   3 * time.Second,
+			RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
+
+			ScannerBatchSize:  100,
+			ScannerInterval:   4 * time.Hour,
+			ScannerNumThreads: 10,
 		},
 		S3: config.S3{
 			Address:     "localhost:8080",
@@ -301,14 +302,13 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.BoolVar(&cfg.Autopilot.Enabled, "autopilot.enabled", cfg.Autopilot.Enabled, "Enables/disables autopilot (overrides with RENTERD_AUTOPILOT_ENABLED)")
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "Timeout for node shutdown")
 
-	// migrator
-	flag.DurationVar(&cfg.Migrator.AccountsRefillInterval, "migrator.accountRefillInterval", cfg.Migrator.AccountsRefillInterval, "Interval for refilling migrator' account balances")
-	flag.Float64Var(&cfg.Migrator.HealthCutoff, "migrator.healthCutoff", cfg.Migrator.HealthCutoff, "Threshold for migrating slabs based on health")
-	flag.Uint64Var(&cfg.Migrator.ParallelSlabsPerWorker, "migrator.parallelSlabsPerWorker", cfg.Migrator.ParallelSlabsPerWorker, "Parallel slab migrations per worker (overrides with RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER)")
-	flag.Uint64Var(&cfg.Migrator.DownloadMaxOverdrive, "migrator.downloadMaxOverdrive", cfg.Migrator.DownloadMaxOverdrive, "Max overdrive workers for migration downloads")
-	flag.DurationVar(&cfg.Migrator.DownloadOverdriveTimeout, "migrator.downloadOverdriveTimeout", cfg.Migrator.DownloadOverdriveTimeout, "Timeout for overdriving migration  downloads")
-	flag.Uint64Var(&cfg.Migrator.UploadMaxOverdrive, "migrator.uploadMaxOverdrive", cfg.Migrator.UploadMaxOverdrive, "Max overdrive workers for migration uploads")
-	flag.DurationVar(&cfg.Migrator.UploadOverdriveTimeout, "migrator.uploadOverdriveTimeout", cfg.Migrator.UploadOverdriveTimeout, "Timeout for overdriving migration  uploads")
+	flag.DurationVar(&cfg.Autopilot.MigratorAccountsRefillInterval, "autopilot.migratorAccountRefillInterval", cfg.Autopilot.MigratorAccountsRefillInterval, "Interval for refilling migrator' account balances")
+	flag.Float64Var(&cfg.Autopilot.MigratorHealthCutoff, "autopilot.migratorHealthCutoff", cfg.Autopilot.MigratorHealthCutoff, "Threshold for migrating slabs based on health")
+	flag.Uint64Var(&cfg.Autopilot.MigratorNumThreads, "autopilot.migratorNumThreads", cfg.Autopilot.MigratorNumThreads, "Parallel slab migrations per worker (overrides with RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER)")
+	flag.Uint64Var(&cfg.Autopilot.MigratorDownloadMaxOverdrive, "autopilot.migratorDownloadMaxOverdrive", cfg.Autopilot.MigratorDownloadMaxOverdrive, "Max overdrive workers for migration downloads")
+	flag.DurationVar(&cfg.Autopilot.MigratorDownloadOverdriveTimeout, "autopilot.migratorDownloadOverdriveTimeout", cfg.Autopilot.MigratorDownloadOverdriveTimeout, "Timeout for overdriving migration downloads")
+	flag.Uint64Var(&cfg.Autopilot.MigratorUploadMaxOverdrive, "autopilot.migratorUploadMaxOverdrive", cfg.Autopilot.MigratorUploadMaxOverdrive, "Max overdrive workers for migration uploads")
+	flag.DurationVar(&cfg.Autopilot.MigratorUploadOverdriveTimeout, "autopilot.migratorUploadOverdriveTimeout", cfg.Autopilot.MigratorUploadOverdriveTimeout, "Timeout for overdriving migration uploads")
 
 	// s3
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")
@@ -364,8 +364,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
-
-	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Migrator.ParallelSlabsPerWorker)
 
 	parseEnvVar("RENTERD_S3_ADDRESS", &cfg.S3.Address)
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)

@@ -109,6 +109,9 @@ type (
 // save all accounts.
 func NewManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder Funder, syncer Syncer, css ConsensusStateStore, cs ContractStore, hs HostStore, s Store, refillInterval time.Duration, l *zap.Logger) (*Manager, error) {
 	logger := l.Named("accounts").Sugar()
+	if refillInterval == 0 {
+		return nil, errors.New("refill interval must be set")
+	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	a := &Manager{
