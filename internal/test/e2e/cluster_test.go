@@ -2832,21 +2832,28 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	// mine until the contract is expired
 	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
 
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
+	cluster.tt.Retry(10, time.Second, func() error {
 		// contract state should be 'failed'
 		contract, err = b.Contract(context.Background(), contract.ID)
 		tt.OK(err)
 		if contract.State != api.ContractStateFailed {
+			cluster.mineBlocks(types.VoidAddress, 1)
 			return fmt.Errorf("expected contract to be failed, got %v", contract.State)
+		}
+		// confirmed balance should be the same as before
+		wallet, err = b.Wallet(context.Background())
+		tt.OK(err)
+		if !expectedBalance.Equals(wallet.Confirmed) {
+			cluster.mineBlocks(types.VoidAddress, 1)
+			diff := types.ZeroCurrency
+			if expectedBalance.Cmp(wallet.Confirmed) < 0 {
+				diff = wallet.Confirmed.Sub(expectedBalance)
+			} else {
+				diff = expectedBalance.Sub(wallet.Confirmed)
+			}
+			return fmt.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, diff)
 		}
 		return nil
 	})
-
-	// confirmed balance should be the same as before
-	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
-	wallet, err = b.Wallet(context.Background())
-	tt.OK(err)
-	if !expectedBalance.Equals(wallet.Confirmed) {
-		t.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, expectedBalance.Sub(wallet.Confirmed))
-	}
 }
