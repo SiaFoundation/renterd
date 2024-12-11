@@ -2680,6 +2680,9 @@ func TestConsensusResync(t *testing.T) {
 	// upload some data
 	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
 
+	// mine a block to make sure we encounter the contract elements on chain
+	cluster.MineBlocks(1)
+
 	// broadcast the revision for each contract
 	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
 	tt.OK(err)
