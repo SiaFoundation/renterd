@@ -940,6 +940,186 @@ paths:
               schema:
                 type: string
 
+  /bus/buckets:
+    get:
+      summary: Get all buckets
+      description: Returns all known buckets.
+      responses:
+        "200":
+          description: Successfully retrieved buckets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bucket"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      summary: Create bucket
+      description: Create a new bucket.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+                  description: The name of the bucket
+                policy:
+                  type: object
+                  properties:
+                    publicReadAccess:
+                      type: boolean
+                      description: Whether the bucket is publicly readable
+      responses:
+        "200":
+          description: Successfully saved buckets
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidBucketName:
+                  summary: Invalid bucket name example
+                  value: "bucket name must match pattern '^(?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'"
+                bucketAlreadyExists:
+                  summary: Bucket already exists example
+                  value: "bucket already exists"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/bucket/{name}/policy:
+    put:
+      summary: Update bucket policy
+      description: Updates the policy of the specified bucket.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The name of the bucket
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy:
+                  type: object
+                  properties:
+                    publicReadAccess:
+                      type: boolean
+                      description: Whether the bucket is publicly readable
+      responses:
+        "200":
+          description: Successfully updated bucket policy
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                noBucketName:
+                  summary: No bucket name provided
+                  value: "bucket name is required"
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/bucket/{name}:
+    get:
+      summary: Get bucket
+      description: Returns the specified bucket.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The name of the bucket
+      responses:
+        "200":
+          description: Successfully retrieved bucket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bucket"
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      summary: Delete bucket
+      description: Deletes the specified bucket.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The name of the bucket
+      responses:
+        "200":
+          description: Successfully deleted bucket
+          content:
+            text/plain:
+              schema:
+                type: string
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                noBucketName:
+                  summary: No bucket name provided
+                  value: "bucket name is required"
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "409":
+          description: Bucket not empty
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
 components:
   schemas:
     #############################

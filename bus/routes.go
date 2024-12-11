@@ -279,21 +279,32 @@ func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
 	} else if bucket.Name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.store.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)) != nil {
+	}
+	err := b.store.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)
+	if errors.Is(err, api.ErrBucketExists) {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
+	jc.Check("failed to create bucket", err)
 }
 
 func (b *Bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 	var req api.BucketUpdatePolicyRequest
 	if jc.Decode(&req) != nil {
 		return
-	} else if bucket := jc.PathParam("name"); bucket == "" {
+	}
+	bucket := jc.PathParam("name")
+	if bucket == "" {
 		jc.Error(errors.New("no bucket name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.store.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)) != nil {
+	}
+
+	err := b.store.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
 		return
 	}
+	jc.Check("failed to create bucket", err)
 }
 
 func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
@@ -303,9 +314,18 @@ func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
 	} else if name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to delete bucket", b.store.DeleteBucket(jc.Request.Context(), name)) != nil {
+	}
+
+	err := b.store.DeleteBucket(jc.Request.Context(), name)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrBucketNotEmpty) {
+		jc.Error(err, http.StatusConflict)
 		return
 	}
+
+	jc.Check("failed to delete bucket", err)
 }
 
 func (b *Bus) bucketHandlerGET(jc jape.Context) {
