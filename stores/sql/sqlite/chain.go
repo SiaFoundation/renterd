@@ -226,8 +226,7 @@ func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractEle
 INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(db_contract_id) DO UPDATE SET
-	contract = excluded.contract,
-	merkle_proof = excluded.merkle_proof
+	contract = excluded.contract
 `)
 	if err != nil {
 		return err

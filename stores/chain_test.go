@@ -468,8 +468,8 @@ func TestContractElements(t *testing.T) {
 			{
 				ID: fcid,
 				StateElement: types.StateElement{
-					LeafIndex:   3, // ignored by upsert
-					MerkleProof: []types.Hash256{{3}},
+					LeafIndex:   3,                    // ignored by upsert
+					MerkleProof: []types.Hash256{{3}}, // ignored by upsert
 				},
 				V2FileContract: updatedContract,
 			},
@@ -477,7 +477,7 @@ func TestContractElements(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		assertContractElement(tx, 2, []types.Hash256{{3}}, updatedContract)
+		assertContractElement(tx, 2, []types.Hash256{{2}}, updatedContract)
 
 		// prune elements
 		if err := tx.PruneFileContractElements(math.MaxUint32); err != nil {
