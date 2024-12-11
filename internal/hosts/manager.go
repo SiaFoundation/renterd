@@ -343,7 +343,7 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 			return types.ZeroCurrency, err
 		}
 
-		res, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.acc.Token(), utils.NewReaderLen(sector[:]), rhpv2.SectorSize, api.BlocksPerDay*3)
+		res, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.acc.Token(), utils.NewReaderLen(sector[:]), rhpv2.SectorSize)
 		if err != nil {
 			return types.ZeroCurrency, fmt.Errorf("failed to write sector: %w", err)
 		}
