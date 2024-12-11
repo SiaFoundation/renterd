@@ -818,6 +818,127 @@ paths:
               schema:
                 type: string
 
+  /bus/alerts:
+    get:
+      summary: Get all alerts
+      description: Returns all currently registered alerts.
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of alerts to return
+          schema:
+            type: integer
+            minimum: -1
+            default: -1
+        - name: offset
+          in: query
+          description: The number of alerts to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Successfully retrieved alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Alert"
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more alerts to fetch
+                  totals:
+                    type: object
+                    properties:
+                      info:
+                        type: integer
+                        format: uint64
+                        description: The number of info alerts
+                      warning:
+                        type: integer
+                        format: uint64
+                        description: The number of warning alerts
+                      error:
+                        type: integer
+                        format: uint64
+                        description: The number of error alerts
+                      critical:
+                        type: integer
+                        format: uint64
+                        description: The number of critical alerts
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidLimit:
+                  summary: Invalid limit example
+                  value: "limit must be greater than or equal to -1"
+                invalidOffset:
+                  summary: Invalid offset example
+                  value: "offset must be greater than or equal to 0"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/alerts/dismiss:
+    post:
+      summary: Dismiss alerts
+      description: Dismisses the specified alerts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Successfully dismissed alerts
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/alerts/register:
+    post:
+      summary: Register an alert
+      description: Registers a new alert.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                severity:
+                  $ref: "#/components/schemas/Alert"
+      responses:
+        "200":
+          description: Successfully registered alert
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
 
 components:
   schemas:
@@ -855,6 +976,32 @@ components:
         requiresSync:
           type: boolean
           description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
+
+    Alert:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The alert's ID
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+            - critical
+          description: The severity of the alert
+        message:
+          type: string
+          description: The alert's message
+        date:
+          type: object
+          description: Arbitrary data providing additional context for the alert
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the alert was created
 
     Currency:
       type: string
