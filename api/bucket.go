@@ -2,6 +2,8 @@ package api
 
 import (
 	"errors"
+	"regexp"
+	"strings"
 )
 
 var (
@@ -44,3 +46,17 @@ type (
 		Policy BucketPolicy `json:"policy"`
 	}
 )
+
+var validBucketExp = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+func (req BucketCreateRequest) Validate() error {
+	// make sure the bucket name complies with the restrictions for S3 transfer
+	// acceleration which are the regular S3 conventions with the additional
+	// restriction that the bucket name can't contain a period.
+	if strings.HasPrefix(req.Name, "xn--") ||
+		strings.HasSuffix(req.Name, "-s3alias") ||
+		!validBucketExp.MatchString(req.Name) {
+		return errors.New("the bucket name doesn't comply with the S3 bucket naming convention (https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html)")
+	}
+	return nil
+}
