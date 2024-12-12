@@ -525,10 +525,6 @@ paths:
       responses:
         "200":
           description: Successfully deleted object
-          content:
-            text/plain:
-              schema:
-                type: string
         "404":
           description: Object not found
           content:
@@ -558,10 +554,6 @@ paths:
       responses:
         "200":
           description: Successfully removed objects
-          content:
-            text/plain:
-              schema:
-                type: string
         "400":
           description: Missing prefix or bucket
           content:
@@ -750,10 +742,6 @@ paths:
       responses:
         "200":
           description: Successfully saved accounts
-          content:
-            text/plain:
-              schema:
-                type: string
         "400":
           description: Malformed request
           content:
@@ -796,9 +784,14 @@ paths:
         "200":
           description: Successfully funded account
           content:
-            text/plain:
+            application/json:
               schema:
-                type: string
+                type: object
+                properties:
+                  deposit:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount that was deposited into the account
         "400":
           description: Malformed request
           content:
@@ -904,10 +897,6 @@ paths:
       responses:
         "200":
           description: Successfully dismissed alerts
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
           content:
@@ -929,10 +918,6 @@ paths:
       responses:
         "200":
           description: Successfully registered alert
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
           content:
@@ -1077,10 +1062,6 @@ paths:
       responses:
         "200":
           description: Successfully deleted bucket
-          content:
-            text/plain:
-              schema:
-                type: string
         "400":
           description: Malformed request
           content:

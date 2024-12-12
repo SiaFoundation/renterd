@@ -1887,9 +1887,7 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 			return
 		}
 	}
-	if b.store.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
-		return
-	}
+	jc.Check("failed to save accounts", b.store.SaveAccounts(jc.Request.Context(), req.Accounts))
 }
 
 func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
