@@ -273,16 +273,17 @@ func (b *Bus) bucketsHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
-	var bucket api.BucketCreateRequest
-	if jc.Decode(&bucket) != nil {
+	var req api.BucketCreateRequest
+	if jc.Decode(&req) != nil {
 		return
-	} else if bucket.Name == "" {
-		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
+	} else if err := req.Validate(); err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
-	err := b.store.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)
+
+	err := b.store.CreateBucket(jc.Request.Context(), req.Name, req.Policy)
 	if errors.Is(err, api.ErrBucketExists) {
-		jc.Error(err, http.StatusBadRequest)
+		jc.Error(err, http.StatusConflict)
 		return
 	}
 	jc.Check("failed to create bucket", err)

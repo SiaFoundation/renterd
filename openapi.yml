@@ -1140,6 +1140,35 @@ paths:
               schema:
                 type: string
 
+  /bus/consensus/acceptblock:
+    post:
+      summary: Accept block
+      description: Accepts a block from the consensus set.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                block:
+                  type: string
+                  description: The block to accept
+      responses:
+        "200":
+          description: Successfully accepted block
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
 components:
   schemas:
     #############################
