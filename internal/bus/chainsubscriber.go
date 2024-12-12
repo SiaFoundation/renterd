@@ -90,15 +90,7 @@ type (
 		syncSig           chan struct{}
 		wg                sync.WaitGroup
 
-		mu            sync.Mutex
 		unsubscribeFn func()
-	}
-)
-
-type (
-	revision struct {
-		revisionNumber uint64
-		fileSize       uint64
 	}
 )
 
