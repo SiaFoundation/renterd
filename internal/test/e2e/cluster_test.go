@@ -35,6 +35,7 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql/sqlite"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -2844,4 +2845,81 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	if !expectedBalance.Equals(wallet.Confirmed) {
 		t.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, expectedBalance.Sub(wallet.Confirmed))
 	}
+}
+
+func TestV1ToV2Transition(t *testing.T) {
+	// create a chain manager with a custom network that starts before the v2
+	// allow height
+	network, genesis := testNetwork()
+	network.HardforkV2.AllowHeight = 100
+	network.HardforkV2.RequireHeight = 200 // 100 blocks after the allow height
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := chain.NewManager(store, state)
+
+	// custom autopilot config
+	apCfg := test.AutopilotConfig
+	apCfg.Contracts.Amount = 2
+	apCfg.Contracts.Period = 1000 // make sure contracts are not scheduled for renew before reaching the allowheight
+	apCfg.Contracts.RenewWindow = 50
+
+	// create a test cluster
+	nHosts := 3
+	l, _ := zap.NewDevelopment()
+	cluster := newTestCluster(t, testClusterOptions{
+		autopilotConfig: &apCfg,
+		hosts:           0, // add hosts manually later
+		cm:              cm,
+		uploadPacking:   false, // disable to make sure we don't accidentally serve data from disk
+		logger:          l,
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	// add hosts and wait for contracts to form
+	cluster.AddHosts(nHosts)
+
+	// make sure we are still before the v2 allow height
+	if cm.Tip().Height >= network.HardforkV2.AllowHeight {
+		t.Fatal("should be before the v2 allow height")
+	}
+
+	// we should have 2 v1 contracts
+	var contracts []api.ContractMetadata
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+		tt.OK(err)
+		if len(contracts) != nHosts-1 {
+			return fmt.Errorf("expected %v contracts, got %v", nHosts-1, len(contracts))
+		}
+		return nil
+	})
+	contractHosts := make(map[types.PublicKey]struct{})
+	for _, c := range contracts {
+		if c.V2 {
+			t.Fatal("should not have formed v2 contracts")
+		}
+		contractHosts[c.HostKey] = struct{}{}
+	}
+
+	// sanity check number of hosts just to be safe
+	if len(contractHosts) != nHosts-1 {
+		t.Fatalf("expected %v unique hosts, got %v", nHosts-1, len(contractHosts))
+	}
+
+	// mine until we reach the v2 allowheight
+	cluster.MineBlocks(network.HardforkV2.AllowHeight - cm.Tip().Height)
+
+	// slowly mine a few more blocks to allow renter to react
+	for i := 0; i < 5; i++ {
+		cluster.MineBlocks(1)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// check the contracts again
+	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+	tt.OK(err)
+	fmt.Println("contracts", len(contracts))
 }
