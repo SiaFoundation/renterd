@@ -912,10 +912,8 @@ func (tx MainDatabaseTx) SaveAccounts(ctx context.Context, accounts []api.Accoun
 		res, err := stmt.Exec(ctx, time.Now(), (ssql.PublicKey)(acc.ID), acc.CleanShutdown, (ssql.PublicKey)(acc.HostKey), (*ssql.BigInt)(acc.Balance), (*ssql.BigInt)(acc.Drift), acc.RequiresSync, acc.Owner)
 		if err != nil {
 			return fmt.Errorf("failed to insert account %v: %w", acc.ID, err)
-		} else if n, err := res.RowsAffected(); err != nil {
+		} else if _, err := res.RowsAffected(); err != nil {
 			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n != 1 && n != 2 { // 1 for insert, 2 for update
-			return fmt.Errorf("expected 1 row affected, got %v", n)
 		}
 	}
 	return nil
