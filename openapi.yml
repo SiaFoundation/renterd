@@ -271,12 +271,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the multipart upload belongs to
+          description: The name of the bucket the multipart upload belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
         - name: uploadid
           description: The ID of the ongoing multipart upload
           in: query
@@ -364,12 +364,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the object belongs to
+          description: The name of the bucket the object belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
         - name: Range
           in: header
           description: The range of bytes to download. If not provided, the entire object will be downloaded.
@@ -442,12 +442,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the object belongs to
+          description: The name of the bucket the object belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
         - name: minshards
           description: Used to override the minimum number of shards the object should be split into.
           example: 10
@@ -516,12 +516,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the object belongs to
+          description: The name of the bucket the object belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
       responses:
         "200":
           description: Successfully deleted object
@@ -548,8 +548,8 @@ paths:
               properties:
                 bucket:
                   allOf:
-                    - $ref: "#/components/schemas/Bucket"
-                    - description: The bucket the objects belong to
+                    - $ref: "#/components/schemas/BucketName"
+                    - description: The name of the bucket the objects belong to
                 prefix:
                   type: string
                   example: "myDir/"
@@ -969,9 +969,7 @@ paths:
               type: object
               properties:
                 name:
-                  type: string
-                  pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
-                  description: The name of the bucket
+                  $ref: "#/components/schemas/BucketName"
                 policy:
                   type: object
                   properties:
@@ -981,10 +979,6 @@ paths:
       responses:
         "200":
           description: Successfully saved buckets
-          content:
-            text/plain:
-              schema:
-                type: string
         "400":
           description: Malformed request
           content:
@@ -1013,7 +1007,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
+            $ref: "#/components/schemas/BucketName"
           description: The name of the bucket
       requestBody:
         content:
@@ -1030,10 +1024,6 @@ paths:
       responses:
         "200":
           description: Successfully updated bucket policy
-          content:
-            text/plain:
-              schema:
-                type: string
         "400":
           description: Malformed request
           content:
@@ -1059,7 +1049,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
+            $ref: "#/components/schemas/BucketName"
           description: The name of the bucket
       responses:
         "200":
@@ -1067,7 +1057,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Bucket"
+                $ref: "#/components/schemas/BucketName"
         "404":
           description: Bucket not found
           content:
@@ -1082,7 +1072,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
+            $ref: "#/components/schemas/BucketName"
           description: The name of the bucket
       responses:
         "200":
@@ -1227,9 +1217,25 @@ components:
           $ref: "#/components/schemas/HostsConfig"
 
     Bucket:
+      type: object
+      properties:
+        name:
+          $ref: "#/components/schemas/BucketName"
+        policy:
+          type: object
+          properties:
+            publicReadAccess:
+              type: boolean
+              description: Whether the bucket is publicly readable
+        createdAt:
+          type: string
+          format: date-time
+          description: The time the bucket was created
+
+    BucketName:
       type: string
       pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
-      description: A bucket logically groups together objects.
+      description: The name of the bucket.
 
     BuildState:
       type: object

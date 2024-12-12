@@ -2,4 +2,9 @@
 default: major
 ---
 
-# Add bus routes to openapi spec
+# Add bus section to openapi spec
+
+Added routes:
+- accounts
+- alerts
+- buckets
