@@ -958,7 +958,6 @@ paths:
                   $ref: "#/components/schemas/ContractsConfig"
                 hosts:
                   $ref: "#/components/schemas/HostsConfig"
-              required: []
       responses:
         "200":
           description: Successfully updated autopilot configuration
