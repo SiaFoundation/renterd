@@ -24,9 +24,10 @@ var (
 )
 
 type chainUpdateTx struct {
-	ctx context.Context
-	tx  isql.Tx
-	l   *zap.SugaredLogger
+	ctx   context.Context
+	tx    isql.Tx
+	l     *zap.SugaredLogger
+	known map[types.FileContractID]bool // map to prevent rare duplicate selects
 }
 
 func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
@@ -210,12 +211,29 @@ func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2F
 	return ssql.FileContractElement(c.ctx, c.tx, fcid)
 }
 
+func (c chainUpdateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
+	if c.known == nil {
+		c.known = make(map[types.FileContractID]bool)
+	}
+
+	if relevant, ok := c.known[fcid]; ok {
+		return relevant, nil
+	}
+
+	known, err := ssql.IsKnownContract(c.ctx, c.tx, fcid)
+	if err != nil {
+		return false, err
+	}
+	c.known[fcid] = known
+	return known, nil
+}
+
 func (c chainUpdateTx) PruneFileContractElements(threshold uint64) error {
 	return ssql.PruneFileContractElements(c.ctx, c.tx, threshold)
 }
 
-func (c chainUpdateTx) RecordContractRenewal(old, new types.FileContractID) error {
-	return ssql.RecordContractRenewal(c.ctx, c.tx, old, new)
+func (c chainUpdateTx) RecordContractRenewal(oldFCID, newFCID types.FileContractID) error {
+	return ssql.RecordContractRenewal(c.ctx, c.tx, oldFCID, newFCID)
 }
 
 func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
