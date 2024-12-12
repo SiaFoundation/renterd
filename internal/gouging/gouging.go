@@ -210,7 +210,7 @@ func checkPriceGougingHS(gs api.GougingSettings, hs *rhpv2.HostSettings) error {
 
 	// check EA expiry
 	if hs.EphemeralAccountExpiry < time.Duration(gs.MinAccountExpiry) {
-		return fmt.Errorf("'EphemeralAccountExpiry' is less than the allowed minimum value, %v < %v", hs.EphemeralAccountExpiry, gs.MinAccountExpiry)
+		return fmt.Errorf("'EphemeralAccountExpiry' is less than the allowed minimum value, %v < %v", hs.EphemeralAccountExpiry, time.Duration(gs.MinAccountExpiry))
 	}
 
 	return nil
@@ -280,7 +280,7 @@ func checkPriceGougingPT(gs api.GougingSettings, cs api.ConsensusState, pt *rhpv
 
 	// check Validity
 	if pt.Validity < time.Duration(gs.MinPriceTableValidity) {
-		return fmt.Errorf("'Validity' is less than the allowed minimum value, %v < %v", pt.Validity, gs.MinPriceTableValidity)
+		return fmt.Errorf("'Validity' is less than the allowed minimum value, %v < %v", pt.Validity, time.Duration(gs.MinPriceTableValidity))
 	}
 
 	return nil
