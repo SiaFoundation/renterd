@@ -7,3 +7,4 @@ default: minor
 The following routes were added:
 - consensus
 - syncer
+- txpool

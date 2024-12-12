@@ -1250,6 +1250,61 @@ paths:
                 items:
                   $ref: "#/components/schemas/SyncerAddress"
 
+  /bus/txpool/recommendedfee:
+    get:
+      summary: Get recommended fee
+      description: Returns the recommended fee for a transaction.
+      responses:
+        "200":
+          description: Successfully retrieved recommended fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Currency"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/txpool/transactions:
+    get:
+      summary: Get all transactions
+      description: Returns all transactions in the transaction pool.
+      responses:
+        "200":
+          description: Successfully retrieved transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Transaction"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/txpool/broadcast:
+    post:
+      summary: Broadcast transaction
+      description: Broadcasts the specified transaction.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Transaction"
+      responses:
+        "200":
+          description: Successfully broadcast transaction
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
 components:
   schemas:
     #############################
