@@ -1305,6 +1305,199 @@ paths:
               schema:
                 type: string
 
+  /bus/wallet:
+    get:
+      summary: Get wallet information
+      description: Returns information about the wallet.
+      responses:
+        "200":
+          description: Successfully retrieved wallet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spendable:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of spendable siacoins in the wallet
+                  confirmed:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that have been confirmed in a block
+                  unconfirmed:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that have not been confirmed in a block
+                  immature:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that have yet to mature
+                  address:
+                    allOf:
+                      - $ref: "#/components/schemas/Address"
+                      - description: The wallet's address
+                  scanHeight:
+                    type: integer
+                    format: uint64
+                    description: The height up until which the wallet is synced
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/wallet/events:
+    get:
+      summary: Get wallet events
+      description: Returns all events related to the wallet.
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of events to return
+          schema:
+            type: integer
+            minimum: -1
+            default: -1
+        - name: offset
+          in: query
+          description: The number of events to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Successfully retrieved wallet events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidLimit:
+                  summary: Invalid limit example
+                  value: "limit must be greater than or equal to -1"
+                invalidOffset:
+                  summary: Invalid offset example
+                  value: "offset must be greater than or equal to 0"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/wallet/pending:
+    get:
+      summary: Get unconfirmed events
+      description: Returns all unconfirmed events in the wallet.
+      responses:
+        "200":
+          description: Successfully retrieved pending events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/wallet/redistribute:
+      post:
+        summary: Redistribute wallet funds
+        description: Redistributes the wallet's funds into desired number of outputs of requested value.
+        requestBody:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outputs:
+                    type: integer
+                    format: uint64
+                    description: The number of outputs to redistribute the wallet's funds into
+                  amount:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The value of each output
+        responses:
+          "200":
+            description: Successfully redistributed wallet funds
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TransactionID"
+          "400":
+            description: Malformed request
+            content:
+              text/plain:
+                schema:
+                  type: string
+          "500":
+            description: Internal server error
+            content:
+              text/plain:
+                schema:
+                  type: string
+  /bus/wallet/send:
+    post:
+      summary: Send siacoins
+      description: Sends the specified amount of siacoins to the specified address.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address:
+                  allOf:
+                    - $ref: "#/components/schemas/Address"
+                    - description: The address to send the siacoins to
+                amount:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The amount of siacoins to send
+                subtractMinerFee:
+                  type: boolean
+                  description: Whether to subtract the miner fee from the amount
+                useUnconfirmed:
+                  type: boolean
+                  description: Whether to use unconfirmed outputs
+      responses:
+        "200":
+          description: Successfully sent siacoins
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/TransactionID"
+                  - description: The ID of the transaction
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
 components:
   schemas:
     #############################
@@ -1419,6 +1612,18 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: A unique identifier for a block
+
+    ChainIndex:
+      type: object
+      properties:
+        height:
+          type: integer
+          format: uint64
+          description: The height of the block in the blockchain
+        id:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The ID of the block
 
     CoveredFields:
       type: object
@@ -1802,6 +2007,11 @@ components:
           items:
             $ref: "#/components/schemas/TransactionSignature"
 
+    TransactionID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a transaction.
+
     TransactionSignature:
       type: object
       properties:
@@ -2118,6 +2328,40 @@ components:
       type: string
       pattern: '^(W/)?".*?"$'
       description: An ETag representing a resource
+
+    Event:
+      type: object
+      description: A transaction or other event that affects the wallet including miner payouts, siafund claims, and file contract payouts.
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The event's ID
+        index:
+          allOf:
+            - $ref: "#/components/schemas/ChainIndex"
+            - description: Information about the block that triggered the creation of this event
+        confirmations:
+          type: integer
+          format: uint64
+          description: The number of blocks on top of the block that triggered the creation of this event
+        type:
+          type: string
+          description: The type of the event
+        data:
+          type: object
+        maturityHeight:
+          type: integer
+          format: uint64
+          description: The block height when the event's data can be used
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the event was created
+        relevant:
+          type: array
+          items:
+            $ref: "#/components/schemas/Address"
 
     GougingSettings:
       type: object
