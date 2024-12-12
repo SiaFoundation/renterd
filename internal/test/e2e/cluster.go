@@ -629,7 +629,7 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
-		settings.NetAddress = host.RHPv2Addr()
+		settings.NetAddress = host.rhp4Listener.Addr().(*net.TCPAddr).IP.String()
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
