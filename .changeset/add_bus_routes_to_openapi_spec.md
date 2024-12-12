@@ -7,4 +7,5 @@ default: major
 Added routes:
 - accounts
 - alerts
+- autopilot
 - buckets

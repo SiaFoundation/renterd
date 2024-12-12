@@ -925,6 +925,56 @@ paths:
               schema:
                 type: string
 
+  /bus/autopilot:
+    get:
+      summary: Get autopilot configuration
+      description: Returns the current autopilot configuration.
+      responses:
+        "200":
+          description: Successfully retrieved autopilot configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutopilotConfig"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update autopilot configuration
+      description: Updates the autopilot configuration.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  description: Whether the autopilot is enabled
+                contracts:
+                  $ref: "#/components/schemas/ContractsConfig"
+                hosts:
+                  $ref: "#/components/schemas/HostsConfig"
+              required: []
+      responses:
+        "200":
+          description: Successfully updated autopilot configuration
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/buckets:
     get:
       summary: Get all buckets
