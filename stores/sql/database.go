@@ -21,6 +21,7 @@ type (
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error)
 		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
+		IsKnownContract(fcid types.FileContractID) (bool, error)
 		PruneFileContractElements(threshold uint64) error
 		RecordContractRenewal(old, new types.FileContractID) error
 		UpdateFileContractElements([]types.V2FileContractElement) error
