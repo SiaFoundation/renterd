@@ -34,7 +34,7 @@ func (b *mockAccountMgrBackend) RegisterAlert(context.Context, alerts.Alert) err
 func (b *mockAccountMgrBackend) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, balance types.Currency) error {
 	return nil
 }
-func (b *mockAccountMgrBackend) SyncAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string) error {
+func (b *mockAccountMgrBackend) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
 	return nil
 }
 func (b *mockAccountMgrBackend) Accounts(context.Context, string) ([]api.Account, error) {
@@ -49,6 +49,9 @@ func (b *mockAccountMgrBackend) ConsensusState(ctx context.Context) (api.Consens
 func (b *mockAccountMgrBackend) Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
 	return nil, nil
 }
+func (b *mockAccountMgrBackend) UsableHosts(ctx context.Context) ([]api.HostInfo, error) {
+	return nil, nil
+}
 
 func TestAccounts(t *testing.T) {
 	// create a manager with an account for a single host
@@ -61,7 +64,7 @@ func TestAccounts(t *testing.T) {
 			},
 		},
 	}
-	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, time.Second, zap.NewNop())
+	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +175,10 @@ func TestResetAccountDriftRate(t *testing.T) {
 			},
 		},
 	}
-	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, time.Second, zap.NewNop())
+	hi := api.HostInfo{
+		PublicKey: hk,
+	}
+	mgr, err := NewAccountManager(utils.AccountsKey(types.GeneratePrivateKey()), "test", b, b, b, b, b, b, b, time.Second, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +190,7 @@ func TestResetAccountDriftRate(t *testing.T) {
 	account.acc.Drift = new(big.Int).Neg(types.Siacoins(1000).Big())
 
 	// refilling should work once
-	refilled, err := mgr.refillAccount(context.Background(), b.contracts[0], 0, 0)
+	refilled, err := mgr.refillAccount(context.Background(), b.contracts[0], hi)
 	if err != nil {
 		t.Fatal(err)
 	} else if !refilled {
@@ -197,7 +203,7 @@ func TestResetAccountDriftRate(t *testing.T) {
 	account.acc.Drift = new(big.Int).Neg(types.Siacoins(1000).Big())
 
 	// this time refilling should fail
-	refilled, err = mgr.refillAccount(context.Background(), b.contracts[0], 0, 0)
+	refilled, err = mgr.refillAccount(context.Background(), b.contracts[0], hi)
 	if !errors.Is(err, errMaxDriftExceeded) {
 		t.Error("should fail", err)
 	} else if refilled {

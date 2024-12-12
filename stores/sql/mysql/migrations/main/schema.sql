@@ -32,6 +32,7 @@ CREATE TABLE `hosts` (
   `created_at` datetime(3) DEFAULT NULL,
   `public_key` varbinary(32) NOT NULL,
   `settings` JSON,
+  `v2_settings` JSON,
   `price_table` longtext,
   `price_table_expiry` datetime(3) DEFAULT NULL,
   `total_scans` bigint unsigned DEFAULT NULL,
@@ -48,7 +49,6 @@ CREATE TABLE `hosts` (
   `lost_sectors` bigint unsigned DEFAULT NULL,
   `last_announcement` datetime(3) DEFAULT NULL,
   `net_address` varchar(191) DEFAULT NULL,
-  `resolved_addresses` varchar(255) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
   UNIQUE KEY `public_key` (`public_key`),
   KEY `idx_hosts_public_key` (`public_key`),
@@ -203,15 +203,16 @@ CREATE TABLE `host_allowlist_entry_hosts` (
   CONSTRAINT `fk_host_allowlist_entry_hosts_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- dbHostAnnouncement
-CREATE TABLE `host_announcements` (
+-- host_addresses contains addresses that the host announced itself with
+CREATE TABLE `host_addresses` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `host_key` longblob NOT NULL,
-  `block_height` bigint unsigned DEFAULT NULL,
-  `block_id` longtext,
-  `net_address` longtext,
-  PRIMARY KEY (`id`)
+  `db_host_id` bigint unsigned NOT NULL,
+  `net_address` longtext NOT NULL,
+  `protocol` tinyint unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `ìdx_host_addresses_db_host_id` (`db_host_id`),
+  CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbBlocklistEntry
@@ -357,6 +358,7 @@ CREATE TABLE `host_checks` (
   `usability_low_score` boolean NOT NULL DEFAULT false,
   `usability_redundant_ip` boolean NOT NULL DEFAULT false,
   `usability_gouging` boolean NOT NULL DEFAULT false,
+  `usability_low_max_duration` boolean NOT NULL DEFAULT false,
   `usability_not_accepting_contracts` boolean NOT NULL DEFAULT false,
   `usability_not_announced` boolean NOT NULL DEFAULT false,
   `usability_not_completing_scan` boolean NOT NULL DEFAULT false,
@@ -369,7 +371,6 @@ CREATE TABLE `host_checks` (
   `score_version` double NOT NULL,
   `score_prices` double NOT NULL,
 
-  `gouging_contract_err` text,
   `gouging_download_err` text,
   `gouging_gouging_err` text,
   `gouging_prune_err` text,
@@ -382,6 +383,7 @@ CREATE TABLE `host_checks` (
   INDEX `idx_host_checks_usability_low_score` (`usability_low_score`),
   INDEX `idx_host_checks_usability_redundant_ip` (`usability_redundant_ip`),
   INDEX `idx_host_checks_usability_gouging` (`usability_gouging`),
+  INDEX `idx_host_checks_usability_low_max_duration` (`usability_low_max_duration`),
   INDEX `idx_host_checks_usability_not_accepting_contracts` (`usability_not_accepting_contracts`),
   INDEX `idx_host_checks_usability_not_announced` (`usability_not_announced`),
   INDEX `idx_host_checks_usability_not_completing_scan` (`usability_not_completing_scan`),

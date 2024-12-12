@@ -30,6 +30,7 @@ import (
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
+	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
@@ -200,13 +201,9 @@ func TestNewTestCluster(t *testing.T) {
 	apCfg, err := cluster.Bus.AutopilotConfig(context.Background())
 	tt.OK(err)
 
-	// fetch revision
-	revision, err := cluster.Bus.ContractRevision(context.Background(), contract.ID)
-	tt.OK(err)
-
 	// verify startHeight and endHeight of the contract.
 	minEndHeight := res.BlockHeight + apCfg.Contracts.Period + apCfg.Contracts.RenewWindow
-	if contract.EndHeight() < minEndHeight || contract.EndHeight() != revision.EndHeight() {
+	if contract.EndHeight() < minEndHeight {
 		t.Fatal("wrong endHeight")
 	} else if contract.InitialRenterFunds.IsZero() || contract.ContractPrice.IsZero() {
 		t.Fatal("InitialRenterFunds and ContractPrice shouldn't be zero")
@@ -266,11 +263,11 @@ func TestNewTestCluster(t *testing.T) {
 			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
 		}
 		ac = archivedContracts[0]
-		if ac.RevisionHeight == 0 || ac.RevisionNumber != math.MaxUint64 {
+		if ac.RevisionHeight == 0 || (!ac.V2 && ac.RevisionNumber != math.MaxUint64) {
 			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
-		if ac.ProofHeight != 0 {
-			t.Fatal("proof height should be 0 since the contract was renewed and therefore doesn't require a proof")
+		if ac.ProofHeight == 0 {
+			t.Fatal("proof height should be >0 since it is set to the renewal height")
 		}
 		if ac.State != api.ContractStateComplete {
 			return fmt.Errorf("contract should be complete but was %v", ac.State)
@@ -299,7 +296,9 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		} else if hi.Settings.Release == "" {
+		} else if !hi.IsV2() && hi.Settings.Release == "" {
+			t.Fatal("release should be set")
+		} else if hi.IsV2() && hi.V2Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
 	}
@@ -1025,11 +1024,14 @@ func TestContractApplyChainUpdates(t *testing.T) {
 	h, err := b.Host(context.Background(), hosts[0].PublicKey())
 	tt.OK(err)
 
+	// scan the host
+	tt.OKAll(b.ScanHost(context.Background(), h.PublicKey, time.Minute))
+
 	// manually form a contract with the host
 	cs, _ := b.ConsensusState(context.Background())
 	wallet, _ := b.Wallet(context.Background())
 	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
-	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, h.NetAddress, types.Siacoins(1), endHeight)
+	contract, err := b.FormContract(context.Background(), wallet.Address, types.Siacoins(1), h.PublicKey, types.Siacoins(1), endHeight)
 	tt.OK(err)
 
 	// assert revision height is 0
@@ -1037,19 +1039,30 @@ func TestContractApplyChainUpdates(t *testing.T) {
 		t.Fatalf("expected revision height to be 0, got %v", contract.RevisionHeight)
 	}
 
-	// broadcast the revision for each contract
-	tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
-	cluster.MineBlocks(1)
+	lastRevisionHeight := uint64(1)
+	for i := 0; i < 2; i++ {
+		// mine a block for the contract to be mined
+		cluster.MineBlocks(1)
 
-	// check the revision height was updated.
-	tt.Retry(100, 100*time.Millisecond, func() error {
-		c, err := cluster.Bus.Contract(context.Background(), contract.ID)
+		// force a new revision by funding an account
+		_, err = b.FundAccount(context.Background(), rhpv3.Account{}, contract.ID, types.NewCurrency64(100))
 		tt.OK(err)
-		if c.RevisionHeight == 0 {
-			return fmt.Errorf("contract %v should have been revised", c.ID)
-		}
-		return nil
-	})
+
+		// broadcast the revision for each contract
+		tt.OKAll(b.BroadcastContract(context.Background(), contract.ID))
+		cluster.MineBlocks(1)
+
+		// check the revision height was updated.
+		tt.Retry(100, 100*time.Millisecond, func() error {
+			c, err := cluster.Bus.Contract(context.Background(), contract.ID)
+			tt.OK(err)
+			if c.RevisionHeight < lastRevisionHeight {
+				return fmt.Errorf("contract %v should have been revised: %v < %v", c.ID, c.RevisionHeight, lastRevisionHeight)
+			}
+			lastRevisionHeight = c.RevisionHeight
+			return nil
+		})
+	}
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
@@ -1091,8 +1104,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		tt.OK(err)
 
 		fundAmt := types.Siacoins(1)
-		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
-			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+		if cm.Spending.FundAccount.Cmp(fundAmt) < 0 {
+			return fmt.Errorf("invalid spending reported: %v < %v", cm.Spending.FundAccount, fundAmt)
 		}
 		return nil
 	})
@@ -2546,17 +2559,18 @@ func TestDownloadAllHosts(t *testing.T) {
 	// add a host
 	cluster.AddHosts(1)
 
-	// grab random used host
-	var randomHost string
+	// grab random used host - we block both addresses since depending on how we
+	// run the test the host announces itself with either one of them
+	var randomHost []string
 	for _, host := range cluster.hosts {
 		if _, used := usedHosts[host.PublicKey()]; used {
-			randomHost = host.settings.Settings().NetAddress
+			randomHost = []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
 			break
 		}
 	}
 
 	// add it to the blocklist
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+	tt.OK(b.UpdateHostBlocklist(context.Background(), randomHost, nil, false))
 
 	// wait until we migrated away from that host
 	var newHost types.PublicKey
@@ -2586,7 +2600,8 @@ func TestDownloadAllHosts(t *testing.T) {
 	// block the new host but unblock the old one
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			tt.OK(b.UpdateHostBlocklist(context.Background(), []string{host.settings.Settings().NetAddress}, []string{randomHost}, false))
+			toBlock := []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
+			tt.OK(b.UpdateHostBlocklist(context.Background(), toBlock, randomHost, false))
 		}
 	}
 
@@ -2664,6 +2679,9 @@ func TestConsensusResync(t *testing.T) {
 
 	// upload some data
 	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
+
+	// mine a block to make sure we encounter the contract elements on chain
+	cluster.MineBlocks(1)
 
 	// broadcast the revision for each contract
 	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
@@ -2753,4 +2771,89 @@ func TestConsensusResync(t *testing.T) {
 	} else if newCS.BlockHeight != cs.BlockHeight {
 		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
 	}
+}
+
+func TestContractFundsReturnWhenHostOffline(t *testing.T) {
+	// create a test cluster without autopilot
+	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
+	defer cluster.Shutdown()
+
+	if cluster.cm.Tip().Height <= cluster.network.HardforkV2.AllowHeight {
+		t.Skip("only runs against v2 network")
+	}
+
+	// convenience variables
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// add a host
+	hosts := cluster.AddHosts(1)
+	h, err := b.Host(context.Background(), hosts[0].PublicKey())
+	tt.OK(err)
+
+	// scan the host
+	tt.OKAll(b.ScanHost(context.Background(), h.PublicKey, time.Minute))
+
+	// fetch balance
+	wallet, err := b.Wallet(context.Background())
+	tt.OK(err)
+	if !wallet.Unconfirmed.IsZero() {
+		t.Fatal("wallet should not have unconfirmed balance")
+	}
+
+	// manually form a contract with the host that uses up almost all of the
+	// confirmed balance of the wallet
+	cs, _ := b.ConsensusState(context.Background())
+	endHeight := cs.BlockHeight + test.AutopilotConfig.Contracts.Period + test.AutopilotConfig.Contracts.RenewWindow
+	fundAmt := wallet.Confirmed.Mul64(96).Div64(100)
+	contract, err := b.FormContract(context.Background(), wallet.Address, fundAmt, h.PublicKey, types.Siacoins(1), endHeight)
+	tt.OK(err)
+
+	// mine a block to confirm the contract but burn the block reward
+	cluster.mineBlocks(types.VoidAddress, 1)
+	time.Sleep(time.Second)
+
+	wallet, err = b.Wallet(context.Background())
+	tt.OK(err)
+
+	fee, err := b.RecommendedFee(context.Background())
+	tt.OK(err)
+
+	// contract should be active
+	contract, err = b.Contract(context.Background(), contract.ID)
+	tt.OK(err)
+	if contract.State != api.ContractStateActive {
+		t.Fatalf("expected contract to be active, got %v", contract.State)
+	}
+
+	// stop the host
+	tt.OK(hosts[0].Close())
+
+	// mine until the contract is expired
+	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
+
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
+	cluster.tt.Retry(10, time.Second, func() error {
+		// contract state should be 'failed'
+		contract, err = b.Contract(context.Background(), contract.ID)
+		tt.OK(err)
+		if contract.State != api.ContractStateFailed {
+			cluster.mineBlocks(types.VoidAddress, 1)
+			return fmt.Errorf("expected contract to be failed, got %v", contract.State)
+		}
+		// confirmed balance should be the same as before
+		wallet, err = b.Wallet(context.Background())
+		tt.OK(err)
+		if !expectedBalance.Equals(wallet.Confirmed) {
+			cluster.mineBlocks(types.VoidAddress, 1)
+			diff := types.ZeroCurrency
+			if expectedBalance.Cmp(wallet.Confirmed) < 0 {
+				diff = wallet.Confirmed.Sub(expectedBalance)
+			} else {
+				diff = expectedBalance.Sub(wallet.Confirmed)
+			}
+			return fmt.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, diff)
+		}
+		return nil
+	})
 }

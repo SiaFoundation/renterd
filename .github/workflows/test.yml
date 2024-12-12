@@ -10,8 +10,14 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
+      - name: Setup node
+        uses: actions/setup-node@v4
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate OpenAPI spec
+        run: |
+          npm install --global swagger-spec-validator
+          swagger-spec-validator openapi.yml
       - name: Lint
         uses: golangci/golangci-lint-action@v3
         with:
@@ -61,8 +67,54 @@ jobs:
         with:
           go-test-args: "-race;-timeout=20m;-tags=netgo"
 
+  test-sqlite-v2: # Run all tests against SQLite
+    needs: analyze
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.22", "1.23"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Test
+        uses: SiaFoundation/workflows/.github/actions/go-test@master
+        with:
+          go-test-args: "-race;-timeout=20m;-tags=netgo,v2"
+
+  test-mysql-v2: # Run all tests against MySQL
+    needs: analyze
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.22", "1.23"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Configure MySQL
+        uses: mirromutth/mysql-action@v1.1
+        with:
+          host port: 3800
+          mysql version: "8"
+          mysql root password: test
+      - name: Test
+        uses: SiaFoundation/workflows/.github/actions/go-test@master
+        env:
+          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_USER: root
+          RENTERD_DB_PASSWORD: test
+        with:
+          go-test-args: "-race;-timeout=20m;-tags=netgo,v2"
+
   success: # Use in branch rulesets to ensure all matrix jobs completed successfully
-    needs: [test-sqlite, test-mysql]
+    needs: [test-sqlite, test-mysql, test-sqlite-v2, test-mysql-v2]
     runs-on: ubuntu-latest
     steps:
       - run: echo "Success!"

@@ -30,17 +30,17 @@ var (
 	}
 
 	GougingSettings = api.GougingSettings{
-		MaxRPCPrice:      types.Siacoins(1).Div64(1000),        // 1mS per RPC
-		MaxContractPrice: types.Siacoins(10),                   // 10 SC per contract
-		MaxDownloadPrice: types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
-		MaxUploadPrice:   types.Siacoins(1).Mul64(1000),        // 1000 SC per 1 TiB
-		MaxStoragePrice:  types.Siacoins(1000).Div64(144 * 30), // 1000 SC per month
+		MaxRPCPrice:      types.Siacoins(1).Div64(1000),                    // 1mS per RPC
+		MaxContractPrice: types.Siacoins(10),                               // 10 SC per contract
+		MaxDownloadPrice: types.Siacoins(1).Mul64(1000).Div64(1e12),        // 1000 SC per 1 TB
+		MaxUploadPrice:   types.Siacoins(1).Mul64(1000).Div64(1e12),        // 1000 SC per 1 TB
+		MaxStoragePrice:  types.Siacoins(1000).Div64(1e12).Div64(144 * 30), // 1000 SC per TB per month
 
 		HostBlockHeightLeeway: 240, // amount of leeway given to host block height
 
-		MinPriceTableValidity:         10 * time.Second,  // minimum value for price table validity
-		MinAccountExpiry:              time.Hour,         // minimum value for account expiry
-		MinMaxEphemeralAccountBalance: types.Siacoins(1), // 1SC
+		MinPriceTableValidity:         api.DurationMS(10 * time.Second), // minimum value for price table validity
+		MinAccountExpiry:              api.DurationMS(time.Hour),        // minimum value for account expiry
+		MinMaxEphemeralAccountBalance: types.Siacoins(1),                // 1SC
 	}
 
 	PricePinSettings = api.DefaultPinnedSettings

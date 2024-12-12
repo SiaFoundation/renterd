@@ -6,6 +6,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 )
 
 var (
@@ -90,6 +91,7 @@ type (
 		ScanError  string               `json:"scanError,omitempty"`
 		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
 		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
+		V2Settings rhp4.HostSettings    `json:"v2Settings,omitempty"`
 	}
 
 	// UpdateAutopilotRequest is the request type for the /autopilot endpoint.

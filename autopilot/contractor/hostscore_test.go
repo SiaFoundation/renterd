@@ -9,6 +9,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/test"
 )
 
@@ -146,7 +147,10 @@ func TestPriceAdjustmentScore(t *testing.T) {
 			DownloadBandwidthCost: types.NewCurrency64(50),
 			UploadBandwidthCost:   types.NewCurrency64(50),
 		}
-		return priceAdjustmentScore(pt, api.GougingSettings{
+		dppb, _ := gouging.DownloadPricePerByte(pt)
+		uppb, _ := gouging.UploadPricePerByte(pt)
+		sppb := pt.WriteStoreCost
+		return priceAdjustmentScore(dppb, uppb, sppb, api.GougingSettings{
 			MaxDownloadPrice: types.NewCurrency64(mdp),
 			MaxUploadPrice:   types.NewCurrency64(mup),
 			MaxStoragePrice:  types.NewCurrency64(msp),
@@ -228,15 +232,13 @@ func TestCollateralScore(t *testing.T) {
 	storageCost := uint64(100)
 	score := func(collateral, maxCollateral uint64) float64 {
 		t.Helper()
-		cfg := api.ContractsConfig{
-			Period: period,
-		}
 		pt := rhpv3.HostPriceTable{
 			CollateralCost: types.NewCurrency64(collateral),
 			MaxCollateral:  types.NewCurrency64(maxCollateral),
 			WriteStoreCost: types.NewCurrency64(storageCost),
 		}
-		return collateralScore(cfg, pt, rhpv2.SectorSize)
+		appendSectorCost := pt.AppendSectorCost(period).Storage
+		return collateralScore(appendSectorCost, pt.MaxCollateral, pt.CollateralCost, rhpv2.SectorSize, period)
 	}
 
 	round := func(f float64) float64 {

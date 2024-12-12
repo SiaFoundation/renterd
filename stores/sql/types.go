@@ -16,7 +16,10 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/object"
 )
 
@@ -46,6 +49,8 @@ type (
 	DurationMS     time.Duration
 	Unsigned64     uint64
 	V2Contract     types.V2FileContract
+	ChainProtocol  chain.Protocol
+	V2HostSettings rhp.HostSettings
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
@@ -80,6 +85,8 @@ var (
 	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
 	_ scannerValuer = (*V2Contract)(nil)
+	_ scannerValuer = (*ChainProtocol)(nil)
+	_ scannerValuer = (*V2HostSettings)(nil)
 )
 
 // Scan implements the sql.Scanner interface.
@@ -515,4 +522,60 @@ func (c V2Contract) Value() (driver.Value, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+const (
+	chainProtocolInvalid = iota
+	chainProtocolTCPSiaMux
+)
+
+// Scan scan value into Unsigned64, implements sql.Scanner interface.
+func (p *ChainProtocol) Scan(value interface{}) error {
+	var protocol int64
+	switch value := value.(type) {
+	case int64:
+		protocol = value
+	default:
+		return fmt.Errorf("failed to unmarshal ChainProtocol value: %v %T", value, value)
+	}
+
+	switch protocol {
+	case chainProtocolTCPSiaMux:
+		*p = ChainProtocol(rhp4.ProtocolTCPSiaMux)
+	default:
+		return fmt.Errorf("invalid protocol: %d", protocol)
+	}
+	return nil
+}
+
+// Value returns an Unsigned64 value, implements driver.Valuer interface.
+func (p ChainProtocol) Value() (driver.Value, error) {
+	switch chain.Protocol(p) {
+	case rhp4.ProtocolTCPSiaMux:
+		return int64(chainProtocolTCPSiaMux), nil
+	default:
+		return nil, fmt.Errorf("invalid ChainProtocol value: %v", p)
+	}
+}
+
+// Scan scan value into V2HostSettings, implements sql.Scanner interface.
+func (hs *V2HostSettings) Scan(value interface{}) error {
+	var bytes []byte
+	switch value := value.(type) {
+	case string:
+		bytes = []byte(value)
+	case []byte:
+		bytes = value
+	default:
+		return errors.New(fmt.Sprint("failed to unmarshal V2HostSettings value:", value))
+	}
+	return json.Unmarshal(bytes, hs)
+}
+
+// Value returns a V2HostSettings value, implements driver.Valuer interface.
+func (hs V2HostSettings) Value() (driver.Value, error) {
+	if hs == (V2HostSettings{}) {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(hs)
 }

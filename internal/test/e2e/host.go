@@ -15,6 +15,7 @@ import (
 	crhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/hostd/host/accounts"
@@ -24,6 +25,7 @@ import (
 	"go.sia.tech/hostd/host/storage"
 	"go.sia.tech/hostd/index"
 	"go.sia.tech/hostd/persist/sqlite"
+	"go.sia.tech/hostd/rhp"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.uber.org/zap"
@@ -118,8 +120,9 @@ type Host struct {
 	accounts  *accounts.AccountManager
 	contracts *contracts.Manager
 
-	rhpv2 *rhpv2.SessionHandler
-	rhpv3 *rhpv3.SessionHandler
+	rhpv2        *rhpv2.SessionHandler
+	rhpv3        *rhpv3.SessionHandler
+	rhp4Listener net.Listener
 }
 
 // defaultHostSettings returns the default settings for the test host
@@ -149,6 +152,7 @@ var defaultHostSettings = settings.Settings{
 func (h *Host) Close() error {
 	h.rhpv2.Close()
 	h.rhpv3.Close()
+	h.rhp4Listener.Close()
 	h.settings.Close()
 	h.index.Close()
 	h.wallet.Close()
@@ -168,6 +172,11 @@ func (h *Host) RHPv2Addr() string {
 // RHPv3Addr returns the address of the RHPv3 listener
 func (h *Host) RHPv3Addr() string {
 	return h.rhpv3.LocalAddr()
+}
+
+// RHPv4Addr returns the address of the RHPv4 listener
+func (h *Host) RHPv4Addr() string {
+	return h.rhp4Listener.Addr().String()
 }
 
 // AddVolume adds a new volume to the host
@@ -269,7 +278,15 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, settings.WithValidateNetAddress(false))
+	rhp4Listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
+	}
+
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, storage,
+		settings.WithValidateNetAddress(false),
+		settings.WithRHP4AnnounceAddresses([]chain.NetAddress{{Protocol: rhp4.ProtocolTCPSiaMux, Address: rhp4Listener.Addr().String()}}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
@@ -282,17 +299,20 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
-	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage, rhpv2.WithLog(log.Named("rhpv2")))
+	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage, log.Named("rhpv2"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv2 session handler: %w", err)
 	}
 	go rhpv2.Serve()
 
-	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, rhpv3.WithLog(log.Named("rhpv2")))
+	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv2"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rhpv3 session handler: %w", err)
 	}
 	go rhpv3.Serve()
+
+	rhpv4 := rhp4.NewServer(privKey, cm, s, contracts, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute), rhp4.WithContractProofWindowBuffer(1))
+	go rhp.ServeRHP4SiaMux(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
 		dir:     dir,
@@ -312,5 +332,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 		rhpv2: rhpv2,
 		rhpv3: rhpv3,
+
+		rhp4Listener: rhp4Listener,
 	}, nil
 }

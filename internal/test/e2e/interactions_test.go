@@ -6,6 +6,7 @@ import (
 	"time"
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 )
 
 func TestInteractions(t *testing.T) {
@@ -36,10 +37,10 @@ func TestInteractions(t *testing.T) {
 		t.Fatal("expected at least one scan")
 	}
 
-	// assert the price table was set
+	// assert that either prices or price table were set
 	ptUID := h.PriceTable.UID
-	if ptUID == (rhpv3.SettingsID{}) {
-		t.Fatal("expected pt UID to be set")
+	if ptUID == (rhpv3.SettingsID{}) && h.V2Settings.Prices == (rhpv4.HostPrices{}) {
+		t.Fatal("expected prices to be set")
 	}
 
 	// scan the host manually

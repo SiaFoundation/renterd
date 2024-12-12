@@ -1,4 +1,4 @@
-package worker
+package download
 
 import (
 	"bufio"
@@ -14,6 +14,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/download/downloader"
 	"go.sia.tech/renterd/internal/host"
 	"go.sia.tech/renterd/internal/memory"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -22,17 +23,26 @@ import (
 	"go.uber.org/zap"
 )
 
+type ObjectStore interface {
+	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
+	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+}
+
 const (
 	downloadMemoryLimitDenom = 6 // 1/6th of the available download memory can be used by a single download
 )
 
 var (
-	errDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
-	errDownloadCancelled      = errors.New("download was cancelled")
+	ErrDownloadCancelled      = errors.New("download was cancelled")
+	ErrDownloadNotEnoughHosts = errors.New("not enough hosts available to download the slab")
+	ErrShuttingDown           = errors.New("download manager is shutting down")
+
+	errHostNoLongerUsable = errors.New("host no longer usable")
 )
 
 type (
-	downloadManager struct {
+	Manager struct {
 		hm        host.HostManager
 		mm        memory.MemoryManager
 		os        ObjectStore
@@ -47,23 +57,16 @@ type (
 
 		shutdownCtx context.Context
 
-		mu            sync.Mutex
-		downloaders   map[types.PublicKey]*downloader
-		lastRecompute time.Time
-	}
-
-	downloaderStats struct {
-		avgSpeedMBPS float64
-		healthy      bool
-		numDownloads uint64
+		mu          sync.Mutex
+		downloaders map[types.PublicKey]*downloader.Downloader
 	}
 
 	slabDownload struct {
-		mgr *downloadManager
+		mgr *Manager
 
 		minShards int
-		offset    uint32
-		length    uint32
+		offset    uint64
+		length    uint64
 
 		created time.Time
 
@@ -85,32 +88,6 @@ type (
 		err    error
 	}
 
-	sectorDownloadReq struct {
-		ctx context.Context
-
-		length uint32
-		offset uint32
-		root   types.Hash256
-		host   *downloader
-
-		overdrive   bool
-		sectorIndex int
-		resps       *sectorResponses
-	}
-
-	sectorDownloadResp struct {
-		req    *sectorDownloadReq
-		sector []byte
-		err    error
-	}
-
-	sectorResponses struct {
-		mu        sync.Mutex
-		closed    bool
-		responses []*sectorDownloadResp
-		c         chan struct{} // signal that a new response is available
-	}
-
 	sectorInfo struct {
 		root     types.Hash256
 		data     []byte
@@ -119,10 +96,12 @@ type (
 		selected int
 	}
 
-	downloadManagerStats struct {
-		avgDownloadSpeedMBPS float64
-		avgOverdrivePct      float64
-		downloaders          map[types.PublicKey]downloaderStats
+	Stats struct {
+		AvgDownloadSpeedMBPS float64
+		AvgOverdrivePct      float64
+		HealthyDownloaders   uint64
+		NumDownloaders       uint64
+		DownloadSpeedsMBPS   map[types.PublicKey]float64
 	}
 )
 
@@ -136,18 +115,11 @@ func (s *sectorInfo) selectHost(h types.PublicKey) {
 	}
 }
 
-func (w *Worker) initDownloadManager(uploadKey *utils.UploadKey, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) {
-	if w.downloadManager != nil {
-		panic("download manager already initialized") // developer error
-	}
-	w.downloadManager = newDownloadManager(w.shutdownCtx, uploadKey, w, w.bus, maxMemory, maxOverdrive, overdriveTimeout, logger)
-}
-
-func newDownloadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, os ObjectStore, maxMemory, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *downloadManager {
+func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, mm memory.MemoryManager, os ObjectStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
 	logger = logger.Named("downloadmanager")
-	return &downloadManager{
+	return &Manager{
 		hm:        hm,
-		mm:        memory.NewManager(maxMemory, logger),
+		mm:        mm,
 		os:        os,
 		uploadKey: uploadKey,
 		logger:    logger.Sugar(),
@@ -160,11 +132,11 @@ func newDownloadManager(ctx context.Context, uploadKey *utils.UploadKey, hm host
 
 		shutdownCtx: ctx,
 
-		downloaders: make(map[types.PublicKey]*downloader),
+		downloaders: make(map[types.PublicKey]*downloader.Downloader),
 	}
 }
 
-func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, hosts []api.HostInfo) (err error) {
+func (mgr *Manager) DownloadObject(ctx context.Context, w io.Writer, o object.Object, offset, length uint64, hosts []api.HostInfo) (err error) {
 	// calculate what slabs we need
 	var ss []slabSlice
 	for _, s := range o.Slabs {
@@ -266,7 +238,7 @@ func (mgr *downloadManager) DownloadObject(ctx context.Context, w io.Writer, o o
 				}
 			}
 			if numAvailable < next.MinShards {
-				responseChan <- &slabDownloadResponse{err: fmt.Errorf("%w: %v/%v", errDownloadNotEnoughHosts, numAvailable, next.MinShards)}
+				responseChan <- &slabDownloadResponse{err: fmt.Errorf("%w: %v/%v", ErrDownloadNotEnoughHosts, numAvailable, next.MinShards)}
 				return
 			}
 
@@ -306,7 +278,7 @@ outer:
 		case <-mgr.shutdownCtx.Done():
 			return ErrShuttingDown
 		case <-ctx.Done():
-			return errDownloadCancelled
+			return ErrDownloadCancelled
 		case resp = <-responseChan:
 		}
 
@@ -369,7 +341,7 @@ outer:
 	return nil
 }
 
-func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, hosts []api.HostInfo) ([][]byte, error) {
+func (mgr *Manager) DownloadSlab(ctx context.Context, slab object.Slab, hosts []api.HostInfo) ([][]byte, error) {
 	// refresh the downloaders
 	mgr.refreshDownloaders(hosts)
 
@@ -416,49 +388,42 @@ func (mgr *downloadManager) DownloadSlab(ctx context.Context, slab object.Slab, 
 	return shards, err
 }
 
-func (mgr *downloadManager) Stats() downloadManagerStats {
-	// recompute stats
-	mgr.tryRecomputeStats()
+func (mgr *Manager) MemoryStatus() memory.Status {
+	return mgr.mm.Status()
+}
 
+func (mgr *Manager) Stats() Stats {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	// collect stats
-	stats := make(map[types.PublicKey]downloaderStats)
-	for hk, d := range mgr.downloaders {
-		stats[hk] = d.stats()
+	var numHealthy uint64
+	speeds := make(map[types.PublicKey]float64)
+	for _, d := range mgr.downloaders {
+		speeds[d.PublicKey()] = d.AvgDownloadSpeedBytesPerMS()
+		if d.Healthy() {
+			numHealthy++
+		}
 	}
 
-	return downloadManagerStats{
-		avgDownloadSpeedMBPS: mgr.statsSlabDownloadSpeedBytesPerMS.Average() * 0.008, // convert bytes per ms to mbps,
-		avgOverdrivePct:      mgr.statsOverdrivePct.Average(),
-		downloaders:          stats,
+	return Stats{
+		AvgDownloadSpeedMBPS: mgr.statsSlabDownloadSpeedBytesPerMS.Average() * 0.008, // convert bytes per ms to mbps,
+		AvgOverdrivePct:      mgr.statsOverdrivePct.Average(),
+		HealthyDownloaders:   numHealthy,
+		NumDownloaders:       uint64(len(mgr.downloaders)),
+		DownloadSpeedsMBPS:   speeds,
 	}
 }
 
-func (mgr *downloadManager) Stop() {
+func (mgr *Manager) Stop() {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, d := range mgr.downloaders {
-		d.Stop()
+		d.Stop(ErrShuttingDown)
 	}
 }
 
-func (mgr *downloadManager) tryRecomputeStats() {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	if time.Since(mgr.lastRecompute) < statsRecomputeMinInterval {
-		return
-	}
-
-	for _, d := range mgr.downloaders {
-		d.statsSectorDownloadEstimateInMS.Recompute()
-		d.statsDownloadSpeedBytesPerMS.Recompute()
-	}
-	mgr.lastRecompute = time.Now()
-}
-
-func (mgr *downloadManager) numDownloaders() int {
+func (mgr *Manager) numDownloaders() int {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	return len(mgr.downloaders)
@@ -467,7 +432,7 @@ func (mgr *downloadManager) numDownloaders() int {
 // fetchPartialSlab fetches the data of a partial slab from the bus. It will
 // fall back to ask the bus for the slab metadata in case the slab wasn't found
 // in the partial slab buffer.
-func (mgr *downloadManager) fetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error) {
+func (mgr *Manager) fetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, *object.Slab, error) {
 	data, err := mgr.os.FetchPartialSlab(ctx, key, offset, length)
 	if utils.IsErr(err, api.ErrObjectNotFound) {
 		// Check if slab was already uploaded.
@@ -482,36 +447,40 @@ func (mgr *downloadManager) fetchPartialSlab(ctx context.Context, key object.Enc
 	return data, nil, nil
 }
 
-func (mgr *downloadManager) refreshDownloaders(hosts []api.HostInfo) {
+func (mgr *Manager) refreshDownloaders(hosts []api.HostInfo) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	// build map
-	want := make(map[types.PublicKey]string)
+	want := make(map[types.PublicKey]api.HostInfo)
 	for _, h := range hosts {
-		want[h.PublicKey] = h.SiamuxAddr
+		want[h.PublicKey] = h
 	}
 
 	// prune downloaders
 	for hk := range mgr.downloaders {
 		_, wanted := want[hk]
 		if !wanted {
-			mgr.downloaders[hk].Stop()
+			mgr.downloaders[hk].Stop(errHostNoLongerUsable)
 			delete(mgr.downloaders, hk)
 			continue
 		}
 
-		delete(want, hk) // remove from want so remainging ones are the missing ones
+		// recompute the stats
+		mgr.downloaders[hk].TryRecomputeStats()
+
+		// remove from want so remainging ones are the missing ones
+		delete(want, hk)
 	}
 
 	// update downloaders
-	for hk, siamuxAddr := range want {
-		mgr.downloaders[hk] = newDownloader(mgr.shutdownCtx, mgr.hm.Downloader(hk, siamuxAddr))
-		go mgr.downloaders[hk].processQueue()
+	for hk, hi := range want {
+		mgr.downloaders[hk] = downloader.New(mgr.shutdownCtx, mgr.hm.Downloader(hi))
+		go mgr.downloaders[hk].Start()
 	}
 }
 
-func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice) *slabDownload {
+func (mgr *Manager) newSlabDownload(slice object.SlabSlice) *slabDownload {
 	// calculate the offset and length
 	offset, length := slice.SectorRegion()
 
@@ -544,7 +513,7 @@ func (mgr *downloadManager) newSlabDownload(slice object.SlabSlice) *slabDownloa
 	}
 }
 
-func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabSlice) ([][]byte, error) {
+func (mgr *Manager) downloadSlab(ctx context.Context, slice object.SlabSlice) ([][]byte, error) {
 	// prepare new download
 	slab := mgr.newSlabDownload(slice)
 
@@ -552,30 +521,7 @@ func (mgr *downloadManager) downloadSlab(ctx context.Context, slice object.SlabS
 	return slab.download(ctx)
 }
 
-func (req *sectorDownloadReq) succeed(sector []byte) {
-	req.resps.Add(&sectorDownloadResp{
-		req:    req,
-		sector: sector,
-	})
-}
-
-func (req *sectorDownloadReq) fail(err error) {
-	req.resps.Add(&sectorDownloadResp{
-		req: req,
-		err: err,
-	})
-}
-
-func (req *sectorDownloadReq) done() bool {
-	select {
-	case <-req.ctx.Done():
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *slabDownload) overdrive(ctx context.Context, resps *sectorResponses) (resetTimer func()) {
+func (s *slabDownload) overdrive(ctx context.Context, resps *downloader.SectorResponses) (resetTimer func()) {
 	// overdrive is disabled
 	if s.mgr.overdriveTimeout == 0 {
 		return func() {}
@@ -640,7 +586,7 @@ func (s *slabDownload) overdrive(ctx context.Context, resps *sectorResponses) (r
 	return
 }
 
-func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, overdrive bool) *sectorDownloadReq {
+func (s *slabDownload) nextRequest(ctx context.Context, resps *downloader.SectorResponses, overdrive bool) *downloader.SectorDownloadReq {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -671,7 +617,7 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 			return pending[i].selected < pending[j].selected
 		}
 		// both have been selected the same number of times, pick the faster one
-		return iFastest.estimate() < jFastest.estimate()
+		return iFastest.Estimate() < jFastest.Estimate()
 	})
 
 	for _, next := range pending {
@@ -682,23 +628,23 @@ func (s *slabDownload) nextRequest(ctx context.Context, resps *sectorResponses, 
 			continue
 		}
 		next.selectHost(fastest.PublicKey())
-		return &sectorDownloadReq{
-			ctx: ctx,
+		return &downloader.SectorDownloadReq{
+			Ctx: ctx,
 
-			offset: s.offset,
-			length: s.length,
-			root:   next.root,
-			host:   fastest,
+			Offset: s.offset,
+			Length: s.length,
+			Root:   next.root,
+			Host:   fastest,
 
-			overdrive:   overdrive,
-			sectorIndex: next.index,
-			resps:       resps,
+			Overdrive:   overdrive,
+			SectorIndex: next.index,
+			Resps:       resps,
 		}
 	}
 
 	// we don't know if the download failed at this point so we register an
 	// error that gets propagated in case it did
-	s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", errDownloadNotEnoughHosts)
+	s.errs[types.PublicKey{}] = fmt.Errorf("%w: no more hosts", ErrDownloadNotEnoughHosts)
 	return nil
 }
 
@@ -708,9 +654,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, error) {
 	defer cancel()
 
 	// create the responses queue
-	resps := &sectorResponses{
-		c: make(chan struct{}, 1),
-	}
+	resps := downloader.NewSectorResponses()
 	defer resps.Close()
 
 	// launch overdrive
@@ -734,7 +678,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, error) {
 			return nil, errors.New("download stopped")
 		case <-ctx.Done():
 			return nil, context.Cause(ctx)
-		case <-resps.c:
+		case <-resps.Received():
 			resetOverdrive()
 		}
 
@@ -751,16 +695,16 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, error) {
 			}
 
 			// handle errors
-			if resp.err != nil {
+			if resp.Err != nil {
 				// launch replacement request
-				if req := s.nextRequest(ctx, resps, resp.req.overdrive); req != nil {
+				if req := s.nextRequest(ctx, resps, resp.Req.Overdrive); req != nil {
 					s.launch(req)
 				}
 
 				// handle lost sectors
-				if rhp3.IsSectorNotFound(resp.err) {
-					if err := s.mgr.os.DeleteHostSector(ctx, resp.req.host.PublicKey(), resp.req.root); err != nil {
-						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.req.host.PublicKey(), "root", resp.req.root, zap.Error(err))
+				if rhp3.IsSectorNotFound(resp.Err) {
+					if err := s.mgr.os.DeleteHostSector(ctx, resp.Req.Host.PublicKey(), resp.Req.Root); err != nil {
+						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.Req.Host.PublicKey(), "root", resp.Req.Root, zap.Error(err))
 					}
 				}
 			}
@@ -816,58 +760,54 @@ func (s *slabDownload) inflight() uint64 {
 	return s.numInflight
 }
 
-func (s *slabDownload) launch(req *sectorDownloadReq) {
+func (s *slabDownload) launch(req *downloader.SectorDownloadReq) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// queue the request
-	req.host.enqueue(req)
+	req.Host.Enqueue(req)
 
 	// update the state
 	s.numInflight++
-	if req.overdrive {
+	if req.Overdrive {
 		s.numOverdriving++
 	}
 	s.numLaunched++
 }
 
-func (s *slabDownload) receive(resp sectorDownloadResp) (finished bool) {
+func (s *slabDownload) receive(resp downloader.SectorDownloadResp) (finished bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// update num overdriving
-	if resp.req.overdrive {
+	if resp.Req.Overdrive {
 		s.numOverdriving--
 	}
 
 	// failed reqs can't complete the upload
 	s.numInflight--
-	if resp.err != nil {
-		s.errs[resp.req.host.PublicKey()] = resp.err
+	if resp.Err != nil {
+		s.errs[resp.Req.Host.PublicKey()] = resp.Err
 		return false
 	}
 
 	// store the sector
-	if len(s.sectors[resp.req.sectorIndex].data) == 0 {
-		s.sectors[resp.req.sectorIndex].data = resp.sector
+	if len(s.sectors[resp.Req.SectorIndex].data) == 0 {
+		s.sectors[resp.Req.SectorIndex].data = resp.Sector
 		s.numCompleted++
 	}
 
 	return s.numCompleted >= s.minShards
 }
 
-func (mgr *downloadManager) fastest(hosts []types.PublicKey) (fastest *downloader) {
-	// recompute stats
-	mgr.tryRecomputeStats()
-
-	// return the fastest host
+func (mgr *Manager) fastest(hosts []types.PublicKey) (fastest *downloader.Downloader) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	lowest := math.MaxFloat64
 	for _, h := range hosts {
 		if d, ok := mgr.downloaders[h]; !ok {
 			continue
-		} else if estimate := d.estimate(); estimate < lowest {
+		} else if estimate := d.Estimate(); estimate < lowest {
 			lowest = estimate
 			fastest = d
 		}
@@ -915,40 +855,6 @@ func slabsForDownload(slabs []slabSlice, offset, length uint64) []slabSlice {
 	}
 	slabs[len(slabs)-1].Length = cast32(lastLength)
 	return slabs
-}
-
-func (sr *sectorResponses) Add(resp *sectorDownloadResp) {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	if sr.closed {
-		return
-	}
-	sr.responses = append(sr.responses, resp)
-	select {
-	case sr.c <- struct{}{}:
-	default:
-	}
-}
-
-func (sr *sectorResponses) Close() error {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-
-	sr.closed = true
-	sr.responses = nil // clear responses
-	close(sr.c)
-	return nil
-}
-
-func (sr *sectorResponses) Next() *sectorDownloadResp {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	if len(sr.responses) == 0 {
-		return nil
-	}
-	resp := sr.responses[0]
-	sr.responses = sr.responses[1:]
-	return resp
 }
 
 func isSectorAvailable(s object.Sector, hosts map[types.PublicKey]struct{}) bool {

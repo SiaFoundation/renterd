@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/renterd/internal/utils"
 )
 
 type transportPool struct {
@@ -46,7 +48,12 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 		if err != nil {
 			return err
 		}
-		return fn(client)
+		err = fn(client)
+		if err != nil && rhpv4.ErrorCode(err) != rhpv4.ErrorCodeTransport {
+			// wrap error to indicate that the error was returned by the host
+			err = fmt.Errorf("%w: %w", utils.ErrHost, err)
+		}
+		return err
 	}()
 
 	// Decrement refcounter again and clean up pool.

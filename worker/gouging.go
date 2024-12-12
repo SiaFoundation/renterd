@@ -33,5 +33,5 @@ func WithGougingChecker(ctx context.Context, cs gouging.ConsensusState, gp api.G
 }
 
 func newGougingChecker(settings api.GougingSettings, cs api.ConsensusState) gouging.Checker {
-	return gouging.NewChecker(settings, cs, nil, nil)
+	return gouging.NewChecker(settings, cs)
 }

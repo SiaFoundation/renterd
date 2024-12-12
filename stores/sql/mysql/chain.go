@@ -2,7 +2,9 @@ package mysql
 
 import (
 	"context"
+	dsql "database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -200,16 +202,50 @@ func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.
 	return ssql.UpdateContractState(c.ctx, c.tx, fcid, state, c.l)
 }
 
+func (c chainUpdateTx) ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error) {
+	return ssql.ExpiredFileContractElements(c.ctx, c.tx, bh)
+}
+
 func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error) {
 	return ssql.FileContractElement(c.ctx, c.tx, fcid)
 }
 
-func (c chainUpdateTx) InsertFileContractElements(fces []types.V2FileContractElement) error {
-	return ssql.InsertFileContractElements(c.ctx, c.tx, fces)
+func (c chainUpdateTx) PruneFileContractElements(threshold uint64) error {
+	return ssql.PruneFileContractElements(c.ctx, c.tx, threshold)
 }
 
-func (c chainUpdateTx) RemoveFileContractElements(fcids []types.FileContractID) error {
-	return ssql.RemoveFileContractElements(c.ctx, c.tx, fcids)
+func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
+	contractIDStmt, err := c.tx.Prepare(c.ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer contractIDStmt.Close()
+
+	insertStmt, err := c.tx.Prepare(c.ctx, `
+INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof)
+VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+	contract = VALUES(contract)
+`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, fce := range fces {
+		var contractID int64
+		err = contractIDStmt.QueryRow(c.ctx, ssql.Hash256(fce.ID)).Scan(&contractID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return fmt.Errorf("%w: %v", api.ErrContractNotFound, fce.ID)
+		} else if err != nil {
+			return err
+		}
+		_, err = insertStmt.Exec(c.ctx, time.Now(), contractID, ssql.V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, ssql.MerkleProof{Hashes: fce.StateElement.MerkleProof})
+		if err != nil {
+			return fmt.Errorf("failed to insert file contract element: %w", err)
+		}
+	}
+	return nil
 }
 
 func (c chainUpdateTx) UpdateFileContractElementProofs(updater wallet.ProofUpdater) error {
@@ -220,26 +256,14 @@ func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return ssql.UpdateFailedContracts(c.ctx, c.tx, blockHeight, c.l)
 }
 
-func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
-	c.l.Debugw("update host", "hk", hk, "netaddress", ha.NetAddress)
-
-	// create the announcement
-	if _, err := c.tx.Exec(c.ctx,
-		"INSERT IGNORE INTO host_announcements (created_at, host_key, block_height, block_id, net_address) VALUES (?, ?, ?, ?, ?)",
-		time.Now().UTC(),
-		ssql.PublicKey(hk),
-		bh,
-		blockID.String(),
-		ha.NetAddress,
-	); err != nil {
-		return fmt.Errorf("failed to insert host announcement: %w", err)
-	}
+func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
+	c.l.Debugw("update host", "hk", hk, "netaddress", v1Addr)
 
 	// create the host
 	var hostID int64
 	if res, err := c.tx.Exec(c.ctx, `
-	INSERT INTO hosts (created_at, public_key, settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO hosts (created_at, public_key, settings, v2_settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		last_announcement = VALUES(last_announcement),
 		net_address = VALUES(net_address),
@@ -248,6 +272,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
 		ssql.HostSettings{},
+		ssql.V2HostSettings{},
 		ssql.PriceTable{},
 		0,
 		0,
@@ -262,11 +287,29 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		0,
 		0,
 		ts.UTC(),
-		ha.NetAddress,
+		v1Addr,
 	); err != nil {
 		return fmt.Errorf("failed to insert host: %w", err)
 	} else if hostID, err = res.LastInsertId(); err != nil {
 		return fmt.Errorf("failed to fetch host id: %w", err)
+	}
+
+	// delete previous addresses
+	if _, err := c.tx.Exec(c.ctx, "DELETE FROM host_addresses WHERE db_host_id = ?", hostID); err != nil {
+		return fmt.Errorf("failed to remove previous announcments: %w", err)
+	}
+
+	// insert new addresses
+	for _, ha := range v2Ha {
+		if _, err := c.tx.Exec(c.ctx,
+			"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
+			time.Now().UTC(),
+			hostID,
+			ha.Address,
+			ssql.ChainProtocol(ha.Protocol),
+		); err != nil {
+			return fmt.Errorf("failed to insert host announcement: %w", err)
+		}
 	}
 
 	// update allow list
@@ -299,10 +342,17 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	}
 
 	// update blocklist
-	values := []string{ha.NetAddress}
-	host, _, err := net.SplitHostPort(ha.NetAddress)
-	if err == nil {
-		values = append(values, host)
+	var values []string
+	addAddr := func(addr string) {
+		values = append(values, addr)
+		host, _, err := net.SplitHostPort(addr)
+		if err == nil {
+			values = append(values, host)
+		}
+	}
+	addAddr(v1Addr)
+	for _, ha := range v2Ha {
+		addAddr(ha.Address)
 	}
 
 	rows, err = c.tx.Query(c.ctx, "SELECT id, entry FROM host_blocklist_entries")

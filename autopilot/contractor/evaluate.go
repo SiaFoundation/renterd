@@ -11,9 +11,9 @@ import (
 var ErrMissingRequiredFields = errors.New("missing required fields in configuration, amount must be set")
 
 func countUsableHosts(cfg api.AutopilotConfig, cs api.ConsensusState, period uint64, rs api.RedundancySettings, gs api.GougingSettings, hosts []api.Host) (usables uint64) {
-	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
+	gc := gouging.NewChecker(gs, cs)
 	for _, host := range hosts {
-		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore)
+		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore, period)
 		if hc.UsabilityBreakdown.IsUsable() {
 			usables++
 		}
@@ -31,12 +31,12 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	}
 
 	period := cfg.Contracts.Period
-	gc := gouging.NewChecker(gs, cs, &period, &cfg.Contracts.RenewWindow)
+	gc := gouging.NewChecker(gs, cs)
 
 	resp.Hosts = uint64(len(hosts))
 	for i, host := range hosts {
 		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight // ignore block height
-		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore)
+		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore, cfg.Contracts.Period)
 		if hc.UsabilityBreakdown.IsUsable() {
 			resp.Usable++
 			continue
@@ -44,14 +44,14 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 		if hc.UsabilityBreakdown.Blocked {
 			resp.Unusable.Blocked++
 		}
+		if hc.UsabilityBreakdown.LowMaxDuration {
+			resp.Unusable.LowMaxDuration++
+		}
 		if hc.UsabilityBreakdown.NotAcceptingContracts {
 			resp.Unusable.NotAcceptingContracts++
 		}
 		if hc.UsabilityBreakdown.NotCompletingScan {
 			resp.Unusable.NotScanned++
-		}
-		if hc.GougingBreakdown.ContractErr != "" {
-			resp.Unusable.Gouging.Contract++
 		}
 		if hc.GougingBreakdown.DownloadErr != "" {
 			resp.Unusable.Gouging.Download++

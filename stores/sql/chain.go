@@ -5,7 +5,6 @@ import (
 	dsql "database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -156,12 +155,42 @@ func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []Siaco
 	return nil
 }
 
+func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fces []types.V2FileContractElement, _ error) {
+	rows, err := tx.Query(ctx, "SELECT c.fcid, contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.window_end < ?",
+		bh)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fcid FileContractID
+		var contract V2Contract
+		var leafIndex uint64
+		var proof MerkleProof
+		if err := rows.Scan(&fcid, &contract, &leafIndex, &proof); err != nil {
+			return nil, err
+		}
+		fces = append(fces, types.V2FileContractElement{
+			ID: types.FileContractID(fcid),
+			StateElement: types.StateElement{
+				LeafIndex:   leafIndex,
+				MerkleProof: proof.Hashes,
+			},
+			V2FileContract: types.V2FileContract(contract),
+		})
+	}
+	return fces, nil
+}
+
 func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (types.V2FileContractElement, error) {
 	var contract V2Contract
 	var leafIndex uint64
 	var proof MerkleProof
 	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", FileContractID(fcid)).
 		Scan(&contract, &leafIndex, &proof)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return types.V2FileContractElement{}, api.ErrContractNotFound
+	}
 	if err != nil {
 		return types.V2FileContractElement{}, err
 	}
@@ -175,61 +204,18 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	}, nil
 }
 
-func InsertFileContractElements(ctx context.Context, tx sql.Tx, fces []types.V2FileContractElement) error {
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
-	if err != nil {
-		return err
-	}
-	defer contractIDStmt.Close()
-
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof) VALUES (?, ?, ?, ?, ?)")
-	if err != nil {
-		return err
-	}
-	defer insertStmt.Close()
-
-	for _, fce := range fces {
-		var contractID int64
-		err = contractIDStmt.QueryRow(ctx, Hash256(fce.ID)).Scan(&contractID)
-		if errors.Is(err, dsql.ErrNoRows) {
-			return contractNotFoundErr(fce.ID)
-		} else if err != nil {
-			return err
-		}
-		_, err = insertStmt.Exec(ctx, time.Now(), contractID, V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, MerkleProof{fce.StateElement.MerkleProof})
-		if err != nil {
-			return fmt.Errorf("failed to insert file contract element: %w", err)
-		}
-	}
-	return nil
-}
-
-func RemoveFileContractElements(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) error {
-	contractIDStmt, err := tx.Prepare(ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
-	if err != nil {
-		return err
-	}
-	defer contractIDStmt.Close()
-
-	deleteStmt, err := tx.Prepare(ctx, "DELETE FROM contract_elements WHERE db_contract_id = ?")
-	if err != nil {
-		return err
-	}
-	defer deleteStmt.Close()
-
-	for _, fcid := range fcids {
-		var contractID int64
-		if err := contractIDStmt.QueryRow(ctx, FileContractID(fcid)).Scan(&contractID); errors.Is(err, dsql.ErrNoRows) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		_, err := deleteStmt.Exec(ctx, contractID)
-		if err != nil {
-			return fmt.Errorf("failed to remove contract element %v: %w", fcid, err)
-		}
-	}
-	return nil
+func PruneFileContractElements(ctx context.Context, tx sql.Tx, threshold uint64) error {
+	_, err := tx.Exec(ctx, `
+DELETE FROM contract_elements
+WHERE contract_elements.db_contract_id IN (
+	SELECT * FROM (
+		SELECT c.id
+		FROM contracts c
+		INNER JOIN contract_elements ON c.id = contract_elements.db_contract_id
+		WHERE c.window_end < ?
+	) _
+)`, threshold)
+	return err
 }
 
 func UpdateFileContractElementProofs(ctx context.Context, tx sql.Tx, updater wallet.ProofUpdater) error {
