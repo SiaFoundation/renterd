@@ -216,12 +216,19 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	}
 
 	// v1 contracts
-	cus := make(map[types.FileContractID]contractUpdate)
+	var err error
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
-		cus[types.FileContractID(fce.ID)] = v1ContractUpdate(fce, rev, resolved, valid)
+		if err != nil {
+			return
+		}
+		err = s.applyV1ContractUpdate(tx, cau.State.Index, fce, rev, resolved, valid)
 	})
+	if err != nil {
+		return fmt.Errorf("failed to apply contract update: %w", err)
+	}
 
 	// v2 contracts
+	cus := make(map[types.FileContractID]contractUpdate)
 	var revisedContracts []types.V2FileContractElement
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, _ bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if rev == nil {
@@ -234,7 +241,7 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 
 	// updates - this updates the 'known' contracts too so we do this first
 	for _, cu := range cus {
-		if err := s.updateContract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
+		if err := s.updateV2Contract(tx, cau.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
 			return fmt.Errorf("failed to apply contract updates: %w", err)
 		}
 	}
@@ -275,13 +282,19 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	// NOTE: host updates are not reverted
 
 	// v1 contracts
-	var cus []contractUpdate
+	var err error
 	cru.ForEachFileContractElement(func(fce types.FileContractElement, _ bool, rev *types.FileContractElement, resolved, valid bool) {
-		cus = append(cus, v1ContractUpdate(fce, rev, resolved, valid))
+		if err != nil {
+			return
+		}
+		err = s.revertV1ContractUpdate(tx, fce, rev, resolved, valid)
 	})
+	if err != nil {
+		return fmt.Errorf("failed to revert v1 contract update: %w", err)
+	}
 
 	// v2 contracts
-	cus = cus[:0]
+	var cus []contractUpdate
 	var revertedContracts []types.V2FileContractElement
 	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if created {
@@ -294,7 +307,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// updates - this updates the 'known' contracts too so we do this first
 	for _, cu := range cus {
-		if err := s.updateContract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
+		if err := s.updateV2Contract(tx, cru.State.Index, cu.fcid, cu.prev, cu.curr, cu.resolved, cu.valid); err != nil {
 			return fmt.Errorf("failed to revert v2 contract update: %w", err)
 		}
 	}
@@ -444,7 +457,7 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 	}
 }
 
-func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
+func (s *chainSubscriber) updateV2Contract(tx sql.ChainUpdateTx, index types.ChainIndex, fcid types.FileContractID, prev, curr *revision, resolved, valid bool) error {
 	// sanity check at least one is not nil
 	if prev == nil && curr == nil {
 		return errors.New("both prev and curr revisions are nil") // developer error
@@ -559,6 +572,136 @@ func (s *chainSubscriber) updateContract(tx sql.ChainUpdateTx, index types.Chain
 	return nil
 }
 
+func (s *chainSubscriber) applyV1ContractUpdate(tx sql.ChainUpdateTx, index types.ChainIndex, fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) error {
+	fcid := fce.ID
+	if rev != nil {
+		fcid = rev.ID
+	}
+
+	// ignore unknown contracts
+	if !s.isKnownContract(fcid) {
+		return nil
+	}
+
+	// fetch contract state
+	state, err := tx.ContractState(fcid)
+	if err != nil && utils.IsErr(err, api.ErrContractNotFound) {
+		s.updateKnownContracts(fcid, false) // ignore unknown contracts
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get contract state: %w", err)
+	}
+
+	// update revision number and file size
+	revisionNumber := fce.FileContract.RevisionNumber
+	fileSize := fce.FileContract.Filesize
+	if rev != nil {
+		revisionNumber = rev.FileContract.RevisionNumber
+		fileSize = rev.FileContract.Filesize
+	}
+	if err := tx.UpdateContractRevision(fcid, index.Height, revisionNumber, fileSize); err != nil {
+		return fmt.Errorf("failed to update contract %v: %w", fcid, err)
+	}
+
+	// consider a contract resolved if it has a max revision number and zero
+	// file size
+	if rev != nil && rev.FileContract.RevisionNumber == math.MaxUint64 && rev.FileContract.Filesize == 0 {
+		resolved = true
+		valid = true
+	}
+
+	// update state from 'pending' -> 'active'
+	if state == api.ContractStatePending || state == api.ContractStateUnknown {
+		if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
+			return fmt.Errorf("failed to update contract state: %w", err)
+		}
+		s.logger.Infow("contract state changed: pending -> active",
+			"fcid", fcid,
+			"reason", "contract confirmed")
+		return nil
+	}
+
+	// storage proof: 'active' -> 'complete/failed'
+	if resolved {
+		if err := tx.UpdateContractProofHeight(fcid, index.Height); err != nil {
+			return fmt.Errorf("failed to update contract proof height: %w", err)
+		}
+		if valid {
+			if err := tx.UpdateContractState(fcid, api.ContractStateComplete); err != nil {
+				return fmt.Errorf("failed to update contract state: %w", err)
+			}
+			s.logger.Infow("contract state changed: active -> complete",
+				"fcid", fcid,
+				"reason", "storage proof valid")
+			return nil
+		} else {
+			if err := tx.UpdateContractState(fcid, api.ContractStateFailed); err != nil {
+				return fmt.Errorf("failed to update contract state: %w", err)
+			}
+			s.logger.Infow("contract state changed: active -> failed",
+				"fcid", fcid,
+				"reason", "storage proof missed")
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *chainSubscriber) revertV1ContractUpdate(tx sql.ChainUpdateTx, fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) error {
+	fcid := fce.ID
+	if rev != nil {
+		fcid = rev.ID
+	}
+
+	// ignore unknown contracts
+	if !s.isKnownContract(fcid) {
+		return nil
+	}
+
+	// fetch contract state to see if contract is known
+	_, err := tx.ContractState(fcid)
+	if err != nil && utils.IsErr(err, api.ErrContractNotFound) {
+		s.updateKnownContracts(fcid, false) // ignore unknown contracts
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get contract state: %w", err)
+	}
+
+	// consider a contract resolved if it has a max revision number and zero
+	// file size
+	if rev != nil && rev.FileContract.RevisionNumber == math.MaxUint64 && rev.FileContract.Filesize == 0 {
+		resolved = true
+		valid = true
+	}
+
+	// reverted storage proof: 'complete/failed' -> 'active'
+	if resolved {
+		if err := tx.UpdateContractState(fcid, api.ContractStateActive); err != nil {
+			return fmt.Errorf("failed to update contract state: %w", err)
+		}
+		if valid {
+			s.logger.Infow("contract state changed: complete -> active",
+				"fcid", fcid,
+				"reason", "storage proof reverted")
+		} else {
+			s.logger.Infow("contract state changed: failed -> active",
+				"fcid", fcid,
+				"reason", "storage proof reverted")
+		}
+		return nil
+	}
+
+	// update state from 'active' -> 'pending'
+	if rev == nil && fce.FileContract.RevisionNumber == 0 {
+		if err := tx.UpdateContractState(fcid, api.ContractStatePending); err != nil {
+			return fmt.Errorf("failed to update contract state: %w", err)
+		}
+		return nil
+	}
+
+	return nil
+}
+
 func (s *chainSubscriber) isClosed() bool {
 	select {
 	case <-s.shutdownCtx.Done():
@@ -582,28 +725,6 @@ func (s *chainSubscriber) updateKnownContracts(fcid types.FileContractID, known 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.knownContracts[fcid] = known
-}
-
-func v1ContractUpdate(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) contractUpdate {
-	curr := &revision{
-		revisionNumber: fce.FileContract.RevisionNumber,
-		fileSize:       fce.FileContract.Filesize,
-	}
-	if rev != nil {
-		curr.revisionNumber = rev.FileContract.RevisionNumber
-		curr.fileSize = rev.FileContract.Filesize
-	}
-	if curr.revisionNumber == math.MaxUint64 && curr.fileSize == 0 {
-		resolved = true
-		valid = true
-	}
-	return contractUpdate{
-		fcid:     types.FileContractID(fce.ID),
-		prev:     nil,
-		curr:     curr,
-		resolved: resolved,
-		valid:    valid,
-	}
 }
 
 func v2ContractUpdate(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) contractUpdate {
