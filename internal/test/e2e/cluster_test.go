@@ -383,7 +383,7 @@ func TestObjectsBucket(t *testing.T) {
 	tt := cluster.tt
 
 	// create a test bucket
-	bucket := "hello world"
+	bucket := "hello-world"
 	tt.OK(b.CreateBucket(context.Background(), bucket, api.CreateBucketOptions{}))
 
 	// upload an object to this bucket
@@ -1104,8 +1104,8 @@ func TestEphemeralAccounts(t *testing.T) {
 		tt.OK(err)
 
 		fundAmt := types.Siacoins(1)
-		if cm.Spending.FundAccount.Cmp(fundAmt) <= 0 {
-			return fmt.Errorf("invalid spending reported: %v > %v", fundAmt.String(), cm.Spending.FundAccount.String())
+		if cm.Spending.FundAccount.Cmp(fundAmt) < 0 {
+			return fmt.Errorf("invalid spending reported: %v < %v", cm.Spending.FundAccount, fundAmt)
 		}
 		return nil
 	})
@@ -2559,17 +2559,18 @@ func TestDownloadAllHosts(t *testing.T) {
 	// add a host
 	cluster.AddHosts(1)
 
-	// grab random used host
-	var randomHost string
+	// grab random used host - we block both addresses since depending on how we
+	// run the test the host announces itself with either one of them
+	var randomHost []string
 	for _, host := range cluster.hosts {
 		if _, used := usedHosts[host.PublicKey()]; used {
-			randomHost = host.settings.Settings().NetAddress
+			randomHost = []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
 			break
 		}
 	}
 
 	// add it to the blocklist
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{randomHost}, nil, false))
+	tt.OK(b.UpdateHostBlocklist(context.Background(), randomHost, nil, false))
 
 	// wait until we migrated away from that host
 	var newHost types.PublicKey
@@ -2599,7 +2600,8 @@ func TestDownloadAllHosts(t *testing.T) {
 	// block the new host but unblock the old one
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			tt.OK(b.UpdateHostBlocklist(context.Background(), []string{host.settings.Settings().NetAddress}, []string{randomHost}, false))
+			toBlock := []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
+			tt.OK(b.UpdateHostBlocklist(context.Background(), toBlock, randomHost, false))
 		}
 	}
 
@@ -2677,6 +2679,9 @@ func TestConsensusResync(t *testing.T) {
 
 	// upload some data
 	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader([]byte{1, 2, 3}), testBucket, "foo", api.UploadObjectOptions{}))
+
+	// mine a block to make sure we encounter the contract elements on chain
+	cluster.MineBlocks(1)
 
 	// broadcast the revision for each contract
 	contracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{})
@@ -2827,21 +2832,28 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	// mine until the contract is expired
 	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
 
-	cluster.tt.Retry(100, 100*time.Millisecond, func() error {
+	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
+	cluster.tt.Retry(10, time.Second, func() error {
 		// contract state should be 'failed'
 		contract, err = b.Contract(context.Background(), contract.ID)
 		tt.OK(err)
 		if contract.State != api.ContractStateFailed {
+			cluster.mineBlocks(types.VoidAddress, 1)
 			return fmt.Errorf("expected contract to be failed, got %v", contract.State)
+		}
+		// confirmed balance should be the same as before
+		wallet, err = b.Wallet(context.Background())
+		tt.OK(err)
+		if !expectedBalance.Equals(wallet.Confirmed) {
+			cluster.mineBlocks(types.VoidAddress, 1)
+			diff := types.ZeroCurrency
+			if expectedBalance.Cmp(wallet.Confirmed) < 0 {
+				diff = wallet.Confirmed.Sub(expectedBalance)
+			} else {
+				diff = expectedBalance.Sub(wallet.Confirmed)
+			}
+			return fmt.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, diff)
 		}
 		return nil
 	})
-
-	// confirmed balance should be the same as before
-	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
-	wallet, err = b.Wallet(context.Background())
-	tt.OK(err)
-	if !expectedBalance.Equals(wallet.Confirmed) {
-		t.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, expectedBalance.Sub(wallet.Confirmed))
-	}
 }
