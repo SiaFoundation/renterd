@@ -45,13 +45,16 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		return
 	}
 
-	// contract metadata
+	// fetch contract
 	cm, err := b.store.Contract(jc.Request.Context(), req.ContractID)
-	if jc.Check("failed to fetch contract metadata", err) != nil {
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch contract metadata", err) != nil {
 		return
 	}
 
-	// host
+	// fetch host
 	host, err := b.store.Host(jc.Request.Context(), cm.HostKey)
 	if jc.Check("failed to fetch host for contract", err) != nil {
 		return
@@ -276,21 +279,33 @@ func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
 	} else if err := req.Validate(); err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.store.CreateBucket(jc.Request.Context(), req.Name, req.Policy)) != nil {
+	}
+
+	err := b.store.CreateBucket(jc.Request.Context(), req.Name, req.Policy)
+	if errors.Is(err, api.ErrBucketExists) {
+		jc.Error(err, http.StatusConflict)
 		return
 	}
+	jc.Check("failed to create bucket", err)
 }
 
 func (b *Bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 	var req api.BucketUpdatePolicyRequest
 	if jc.Decode(&req) != nil {
 		return
-	} else if bucket := jc.PathParam("name"); bucket == "" {
+	}
+	bucket := jc.PathParam("name")
+	if bucket == "" {
 		jc.Error(errors.New("no bucket name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.store.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)) != nil {
+	}
+
+	err := b.store.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
 		return
 	}
+	jc.Check("failed to create bucket", err)
 }
 
 func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
@@ -300,9 +315,18 @@ func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
 	} else if name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to delete bucket", b.store.DeleteBucket(jc.Request.Context(), name)) != nil {
+	}
+
+	err := b.store.DeleteBucket(jc.Request.Context(), name)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrBucketNotEmpty) {
+		jc.Error(err, http.StatusConflict)
 		return
 	}
+
+	jc.Check("failed to delete bucket", err)
 }
 
 func (b *Bus) bucketHandlerGET(jc jape.Context) {
@@ -1864,9 +1888,7 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 			return
 		}
 	}
-	if b.store.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
-		return
-	}
+	jc.Check("failed to save accounts", b.store.SaveAccounts(jc.Request.Context(), req.Accounts))
 }
 
 func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
