@@ -1119,26 +1119,62 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                block:
-                  type: string
-                  description: The block to accept
+              $ref: "#/components/schemas/Block"
       responses:
         "200":
           description: Successfully accepted block
-        "400":
-          description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
           content:
             text/plain:
               schema:
                 type: string
+  /bus/consensus/network:
+    get:
+      summary: Get network details
+      description: Returns various details about the network.
+      responses:
+        "200":
+          description: Successfully retrieved network
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Network"
+  /bus/consensus/siafundfee/{payout}:
+    get:
+      summary: Get siafund fee
+      description: Returns the siafund fee for the specified payout.
+      parameters:
+        - name: payout
+          in: path
+          required: true
+          description: The payout to calculate the fee for
+          schema:
+            $ref: "#/components/schemas/Currency"
+      responses:
+        "200":
+          description: Successfully retrieved siafund fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Currency"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/consensus/state:
+    get:
+      summary: Get consensus state
+      description: Returns the current consensus state.
+      responses:
+        "200":
+          description: Successfully retrieved consensus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsensusState"
 
 components:
   schemas:
@@ -1177,6 +1213,11 @@ components:
           type: boolean
           description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
 
+    Address:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: The hash of a set of UnlockConditions
+
     Alert:
       type: object
       properties:
@@ -1203,16 +1244,208 @@ components:
           format: date-time
           description: The time the alert was created
 
+    Attestation:
+      type: object
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        key:
+          type: string
+        value:
+          type: string
+          format: byte
+        signature:
+          $ref: "#/components/schemas/Signature"
+
+    Block:
+      type: object
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The ID of the parent block
+        nonce:
+          type: integer
+          format: uint64
+          description: The nonce used to mine the block
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the block was mined
+        minerPayouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        v2:
+          $ref: "#/components/schemas/V2BlockData"
+
+    BlockID:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: A unique identifier for a block
+
+    CoveredFields:
+      type: object
+      properties:
+        wholeTransaction:
+          type: boolean
+          description: Whether the whole transaction is covered by the signature
+        siacoinInputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        siacoinOutputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        fileContracts:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        fileContractRevisions:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        storageProofs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        siafundInputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        siafundOutputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        minerFees:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        arbitraryData:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        signatures:
+          type: array
+          items:
+            type: integer
+            format: uint64
+
     Currency:
       type: string
       pattern: "^\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
 
+    FileContract:
+      type: object
+      description: A storage agreement between a renter and a host.
+      properties:
+        filesize:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes.
+        fileMerkleRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the contract's data.
+        windowStart:
+          type: integer
+          format: uint64
+          description: The block height when the contract's proof window starts.
+        windowEnd:
+          type: integer
+          format: uint64
+          description: The block height when the contract's proof window ends.
+        payout:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The total payout for the contract.
+        validProofOutputs:
+          type: array
+          description: List of outputs created if the contract is successfully fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        missedProofOutputs:
+          type: array
+          description: List of outputs created if the contract is not fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        unlockHash:
+            $ref: "#/components/schemas/Address"
+        revisionNumber:
+          type: integer
+          format: uint64
+          description: The revision number of the contract.
+
     FileContractID:
       allOf:
         - $ref: "#/components/schemas/Hash256"
         - description: A unique identifier for a file contract
+
+    FileContractRevision:
+      type: object
+      description: Represents a revision to an existing file contract.
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the parent file contract being revised.
+        unlockConditions:
+          allOf:
+            - $ref: "#/components/schemas/UnlockConditions"
+            - description: The conditions required to unlock the contract for revision.
+        filesize:
+          type: integer
+          format: uint64
+          description: The size of the file in bytes after the revision.
+        fileMerkleRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The updated Merkle root of the file's data.
+        windowStart:
+          type: integer
+          format: uint64
+          description: The block height when the revised proof window starts.
+        windowEnd:
+          type: integer
+          format: uint64
+          description: The block height when the revised proof window ends.
+        validProofOutputs:
+          type: array
+          description: Updated outputs if the revised contract is successfully fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        missedProofOutputs:
+          type: array
+          description: Updated outputs if the revised contract is not fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        unlockHash:
+          allOf:
+            - $ref: "#/components/schemas/Address"
+            - description: The updated hash of the conditions required to unlock the contract funds.
+        revisionNumber:
+          type: integer
+          format: uint64
+          description: The updated revision number of the contract.
 
     Hash256:
       type: string
@@ -1224,11 +1457,415 @@ components:
       pattern: "^ed25519:[0-9a-fA-F]{64}$"
       description: A ed25519 public key
 
+    SatisfiedPolicy:
+      type: object
+      properties:
+        policy:
+          type: object
+        signature:
+          type: array
+          items:
+            type: string
+            format: byte
+        preimages:
+          type: array
+          items:
+            type: string
+            format: byte
+
+    SiacoinElement:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SiacoinOutputID"
+            - description: The ID of the element
+        stateElement:
+          allOf:
+            - $ref: "#/components/schemas/StateElement"
+            - description: The state of the element
+        siafundOutput:
+          allOf:
+            - $ref: "#/components/schemas/SiacoinOutput"
+            - description: The output of the element
+        maturityHeight:
+          type: integer
+          format: uint64
+          description: The block height when the output matures
+
+    SiacoinInput:
+      type: object
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/SiacoinOutputID"
+            - description: The ID of the output being spent
+        unlockConditions:
+          allOf:
+            - $ref: "#/components/schemas/UnlockConditions"
+            - description: The unlock conditions required to spend the output
+
+    SiacoinOutput:
+      type: object
+      properties:
+        value:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The amount of Siacoins in the output
+        address:
+          $ref: "#/components/schemas/Address"
+
+    SiacoinOutputID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a Siacoin output.
+
+    SiafundElement:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SiafundOutputID"
+            - description: The ID of the element
+        stateElement:
+          allOf:
+            - $ref: "#/components/schemas/StateElement"
+            - description: The state of the element
+        siafundOutput:
+          allOf:
+            - $ref: "#/components/schemas/SiafundOutput"
+            - description: The output of the element
+        claimStart:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: value of SiafundTaxRevenue when element was created
+
+    SiafundInput:
+      type: object
+      description: Represents an input used to spend an unspent Siafund output.
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/SiafundOutputID"
+            - description: The ID of the parent Siafund output being spent.
+        unlockConditions:
+          allOf:
+            - $ref: "#/components/schemas/UnlockConditions"
+            - description: The conditions required to unlock the parent Siafund output.
+        claimAddress:
+          allOf:
+            - $ref: "#/components/schemas/Address"
+            - description: The address receiving the Siacoin claim generated by the Siafund output.
+
+    SiafundOutput:
+      type: object
+      description: Represents an output created to distribute Siafund.
+      properties:
+        value:
+          type: integer
+          format: uint64
+          description: The amount of Siafund in the output.
+        address:
+          allOf:
+            - $ref: "#/components/schemas/Address"
+            - description: The address receiving the Siafund.
+
+    SiafundOutputID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a Siafund output.
+
+    Signature:
+      type: string
+      format: byte
+      pattern: "[0-9a-fA-F]{64}"
+      description: A ed25519 signature
+
     SignedCurrency:
       type: string
       pattern: "^-?\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: A signed amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
+    StateElement:
+      type: object
+      properties:
+        leafIndex:
+          type: integer
+          format: uint64
+          description: The index of the element in the Merkle tree
+        merkleProof:
+          type: array
+          description: The Merkle proof demonstrating the inclusion of the leaf
+          items:
+            $ref: "#/components/schemas/Hash256"
+
+    StorageProof:
+      type: object
+      description: Represents a proof of storage for a file contract.
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the file contract being proven.
+        leaf:
+          type: string
+          format: byte
+          description: The selected leaf from the Merkle tree of the file's data.
+        proof:
+          type: array
+          description: The Merkle proof demonstrating the inclusion of the leaf.
+          items:
+            $ref: "#/components/schemas/Hash256"
+
+    Transaction:
+      type: object
+      properties:
+        siacoinInputs:
+          type: array
+          description: List of Siacoin inputs used in the transaction.
+          items:
+            $ref: "#/components/schemas/SiacoinInput"
+        siacoinOutputs:
+          type: array
+          description: List of Siacoin outputs created by the transaction.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        fileContracts:
+          type: array
+          description: List of file contracts created by the transaction.
+          items:
+            $ref: "#/components/schemas/FileContract"
+        fileContractRevisions:
+          type: array
+          description: List of revisions to existing file contracts included in the transaction.
+          items:
+            $ref: "#/components/schemas/FileContractRevision"
+        storageProofs:
+          type: array
+          description: List of storage proofs asserting the storage of data for file contracts.
+          items:
+            $ref: "#/components/schemas/StorageProof"
+        siafundInputs:
+          type: array
+          description: List of Siafund inputs spent in the transaction.
+          items:
+            $ref: "#/components/schemas/SiafundInput"
+        siafundOutputs:
+          type: array
+          description: List of Siafund outputs created by the transaction.
+          items:
+            $ref: "#/components/schemas/SiafundOutput"
+        minerFees:
+          type: array
+          description: List of miner fees included in the transaction.
+          items:
+            $ref: "#/components/schemas/Currency"
+        arbitraryData:
+          type: array
+          description: Arbitrary binary data included in the transaction.
+          items:
+            type: string
+            format: byte
+        signatures:
+          type: array
+          description: List of cryptographic signatures verifying the transaction.
+          items:
+            $ref: "#/components/schemas/TransactionSignature"
+
+    TransactionSignature:
+      type: object
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The ID of the transaction being signed
+        publicKeyIndex:
+          type: integer
+          format: uint64
+          description: The index of the public key used to sign the transaction
+        timelock:
+          type: integer
+          format: uint64
+          description: The block height at which the output can be spent
+        coveredFields:
+          allOf:
+            - $ref: "#/components/schemas/CoveredFields"
+            - description: Indicates which fields of the transaction are covered by the signature
+        signature:
+          type: string
+          format: byte
+          description: The signature of the transaction
+
+    UnlockConditions:
+      type: object
+      properties:
+        timelock:
+          type: integer
+          format: uint64
+          description: The block height at which the output can be spent
+        publicKeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnlockKey"
+        signaturesRequired:
+          type: integer
+          format: uint64
+          description: The number of signatures required to spend the output
+
+    UnlockKey:
+      type: object
+      properties:
+        algorithm:
+          type: string
+          format: bytes
+        key:
+          type: string
+          format: bytes
+
+    V2BlockData:
+      type: object
+      properties:
+        height:
+          type: integer
+          format: uint64
+          description: The height of the block
+        commitment:
+          $ref: "#/components/schemas/Hash256"
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2Transaction"
+
+    V2FileContract:
+      type: object
+      properties:
+        capacity:
+          type: integer
+          format: uint64
+        filesize:
+          type: integer
+          format: uint64
+        fileMerkleRoot:
+          $ref: "#/components/schemas/Hash256"
+        proofHeight:
+          type: integer
+          format: uint64
+        expirationHeight:
+          type: integer
+          format: uint64
+        renterOutput:
+          $ref: "#/components/schemas/SiacoinOutput"
+        hostOutput:
+          $ref: "#/components/schemas/SiacoinOutput"
+        missedHostValue:
+          $ref: "#/components/schemas/Currency"
+        totalCollateral:
+          $ref: "#/components/schemas/Currency"
+        renterPublicKey:
+          $ref: "#/components/schemas/PublicKey"
+        hostPublicKey:
+          $ref: "#/components/schemas/PublicKey"
+        revisionNumber:
+          type: integer
+          format: uint64
+        renterSignature:
+          $ref: "#/components/schemas/Signature"
+        hostSignature:
+          $ref: "#/components/schemas/Signature"
+
+    V2FileContractElement:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the element
+        stateElement:
+          allOf:
+            - $ref: "#/components/schemas/StateElement"
+            - description: The state of the element
+        v2FileContract:
+          $ref: "#/components/schemas/V2FileContract"
+
+    V2FileContractResolution:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/V2FileContractElement"
+        resolution:
+          type: object
+
+    V2FileContractRevision:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/V2FileContractElement"
+        revision:
+          $ref: "#/components/schemas/V2FileContract"
+
+    V2SiacoinInput:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/SiacoinElement"
+        satisfiedPolicy:
+          $ref: "#/components/schemas/SatisfiedPolicy"
+
+    V2SiafundInput:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/SiafundElement"
+        claimAddress:
+          $ref: "#/components/schemas/Address"
+        satisfiedPolicy:
+          $ref: "#/components/schemas/SatisfiedPolicy"
+
+    V2Transaction:
+      type: object
+      properties:
+        siacoinInputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2SiacoinInput"
+        siacoinOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        siafundInputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2SiafundInput"
+        siafundOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiafundOutput"
+        fileContracts:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2FileContract"
+        fileContractRevisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2FileContractRevision"
+        fileContractResolutions:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2FileContractResolution"
+        attestations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attestation"
+        arbitraryData:
+          type: array
+          items:
+            type: string
+            format: byte
+        newFoundationAddress:
+          $ref: "#/components/schemas/Address"
+        minerFee:
+          $ref: "#/components/schemas/Currency"
 
     #############################
     #
@@ -1289,6 +1926,21 @@ components:
       properties:
         gougingSettings:
           $ref: "#/components/schemas/GougingSettings"
+
+    ConsensusState:
+      type: object
+      properties:
+        blockHeight:
+          type: integer
+          format: uint64
+          description: The current block height
+        lastBlockTime:
+          type: string
+          format: date-time
+          description: The time of the last block
+        synced:
+          type: boolean
+          description: Whether the node is synced with the network
 
     ContractsConfig:
       type: object
@@ -1412,6 +2064,118 @@ components:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
       description: A unique identifier for a multipart upload
+
+    Network:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The name of the network
+        initialCoinbase:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The initial coinbase reward
+        minimumCoinbase:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The minimum coinbase reward
+        initialTarget:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The initial target
+        blockInterval:
+          type: integer
+          format: uint64
+          description: The block interval
+        maturityDelay:
+          type: integer
+          format: uint64
+          description: The maturity delay
+        hardforkDevAddr:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+              description: The height of the hardfork
+            oldAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The old developer address
+            newAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The new developer address
+        hardforkTax:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+              description: The height of the hardfork
+        hardforkStorageProof:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+              description: The height of the hardfork
+        hardforkOak:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+              description: The height of the hardfork
+            fixHeight:
+              type: integer
+              format: uint64
+              description: The fix height
+            genesisTimestamp:
+              type: string
+              format: date-time
+              description: The genesis timestamp
+        hardforkASIC:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+              description: The height of the hardfork
+            oakTime:
+              type: integer
+              format: uint64
+              description: The oak time
+            oakTarget:
+              allOf:
+                - $ref: "#/components/schemas/BlockID"
+                - description: The oak target
+        hardforkFoundation:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+              description: The height of the hardfork
+            primaryAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The primary address
+            failsafeAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The failsafe address
+        hardforkV2:
+          type: object
+          properties:
+            allowHeight:
+              type: integer
+              format: uint64
+              description: The allow height
+            requireHeight:
+              type: integer
+              format: uint64
+              description: The require height
 
     RedundancySettings:
       type: object
