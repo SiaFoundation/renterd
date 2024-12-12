@@ -1205,6 +1205,51 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConsensusState"
 
+  /bus/syncer/address:
+    get:
+      summary: Get the syncer's address
+      description: Returns the address of the syncer.
+      responses:
+        "200":
+          description: Successfully retrieved syncer address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncerAddress"
+  /bus/syncer/connect:
+    post:
+      summary: Connect to a syncer
+      description: Connects to the specified syncer.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SyncerAddress"
+                - description: The address of the syncer to connect to
+      responses:
+        "200":
+          description: Successfully connected to syncer
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/syncer/peers:
+    get:
+      summary: Get syncer peers
+      description: Returns the syncer's peers.
+      responses:
+        "200":
+          description: Successfully retrieved syncer peers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncerAddress"
+
 components:
   schemas:
     #############################
@@ -2256,3 +2301,8 @@ components:
           minimum: 1
           maximum: 255
           description: The number of data shards the slab is split into
+
+    SyncerAddress:
+      type: string
+      description: The address of the syncer
+      example: "118.92.232.145:9981"
