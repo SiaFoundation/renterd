@@ -214,6 +214,10 @@ func (c chainUpdateTx) PruneFileContractElements(threshold uint64) error {
 	return ssql.PruneFileContractElements(c.ctx, c.tx, threshold)
 }
 
+func (c chainUpdateTx) RecordContractRenewal(old, new types.FileContractID) error {
+	return ssql.RecordContractRenewal(c.ctx, c.tx, old, new)
+}
+
 func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
 	contractIDStmt, err := c.tx.Prepare(c.ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
 	if err != nil {

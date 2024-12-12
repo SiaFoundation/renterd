@@ -22,6 +22,7 @@ type (
 		ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error)
 		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
 		PruneFileContractElements(threshold uint64) error
+		RecordContractRenewal(old, new types.FileContractID) error
 		UpdateFileContractElements([]types.V2FileContractElement) error
 		UpdateChainIndex(index types.ChainIndex) error
 		UpdateFileContractElementProofs(updater wallet.ProofUpdater) error

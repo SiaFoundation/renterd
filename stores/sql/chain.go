@@ -204,6 +204,18 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	}, nil
 }
 
+func RecordContractRenewal(ctx context.Context, tx sql.Tx, old, new types.FileContractID) error {
+	_, err := tx.Exec(ctx, "UPDATE contracts SET contracts.renewed_to = ? WHERE contracts.fcid = ?", FileContractID(new), FileContractID(old))
+	if err != nil {
+		return fmt.Errorf("failed to update renewed_to of old contract: %w", err)
+	}
+	_, err = tx.Exec(ctx, "UPDATE contracts SET contracts.renewed_from = ? WHERE contracts.fcid = ?", FileContractID(old), FileContractID(new))
+	if err != nil {
+		return fmt.Errorf("failed to update renewed_to of new contract: %w", err)
+	}
+	return nil
+}
+
 func PruneFileContractElements(ctx context.Context, tx sql.Tx, threshold uint64) error {
 	_, err := tx.Exec(ctx, `
 DELETE FROM contract_elements
