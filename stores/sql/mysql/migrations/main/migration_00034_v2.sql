@@ -30,3 +30,38 @@ CREATE TABLE `host_addresses` (
     KEY `ìdx_host_addresses_db_host_id` (`db_host_id`),
     CONSTRAINT `fk_host_addresses_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+-- update gouging setting durations from ns to ms
+UPDATE settings
+SET
+    value = (
+        -- Update settings to new values
+        SELECT
+            JSON_REPLACE (
+                value,
+                '$.minAccountExpiry',
+                newMinAccountExpiry,
+                '$.minPriceTableValidity',
+                newMinPriceTableValidity
+            )
+        FROM
+            (
+                -- Convert ns to ms by trimming the last 3 digits
+                SELECT
+                    SUBSTR (minAccountExpiry, 1, LENGTH (minAccountExpiry) -3) AS newMinAccountExpiry,
+                    SUBSTR (
+                        minPriceTableValidity,
+                        1,
+                        LENGTH (minPriceTableValidity) -3
+                    ) AS newMinPriceTableValidity
+                FROM
+                    (
+                        -- SELECT previous settings
+                        SELECT
+                            JSON_UNQUOTE (JSON_EXTRACT (value, '$.minAccountExpiry')) AS minAccountExpiry,
+                            JSON_UNQUOTE (JSON_EXTRACT (value, '$.minPriceTableValidity')) AS minPriceTableValidity
+                    ) AS _
+            ) AS _
+    )
+WHERE
+    settings.key = "gouging";
