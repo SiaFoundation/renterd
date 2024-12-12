@@ -687,9 +687,6 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 		return api.ContractMetadata{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
 	}
 
-	// broadcast the transaction set
-	go b.s.BroadcastTransactionSet(txnSet)
-
 	return api.ContractMetadata{
 		ID:                 contract.ID(),
 		HostKey:            contract.HostKey(),
@@ -726,9 +723,6 @@ func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP str
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to add v2 transaction set to the pool: %w", err)
 	}
-
-	// broadcast the transaction set
-	go b.s.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions)
 
 	contract := res.Contract
 	return api.ContractMetadata{
@@ -805,13 +799,10 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 	// renew contract
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, hs.SiamuxAddr(), prepareRenew, b.w.SignTransaction)
+	newRevision, _, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, hs.SiamuxAddr(), prepareRenew, b.w.SignTransaction)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
-
-	// broadcast the transaction set
-	b.s.BroadcastTransactionSet(txnSet)
 
 	return api.ContractMetadata{
 		ID:                 newRevision.ID(),
@@ -863,7 +854,6 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 	}
 
 	var contract cRhp4.ContractRevision
-	var txnSet cRhp4.TransactionSet
 	if c.EndHeight() == endHeight {
 		// when refreshing, the 'collateral' is added on top of the existing
 		// collateral so we account for that by subtracting the rolled over
@@ -880,7 +870,6 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 			Collateral: collateral,
 		})
 		contract = res.Contract
-		txnSet = res.RenewalSet
 	} else {
 		var res cRhp4.RPCRenewContractResult
 		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
@@ -890,14 +879,10 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 			ProofHeight: endHeight,
 		})
 		contract = res.Contract
-		txnSet = res.RenewalSet
 	}
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
-
-	// broadcast the transaction set
-	b.s.BroadcastV2TransactionSet(txnSet.Basis, txnSet.Transactions)
 
 	return api.ContractMetadata{
 		ID:                 contract.ID,
