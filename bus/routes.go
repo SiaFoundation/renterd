@@ -2320,6 +2320,13 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 			return
 		}
 
+		// cap v1 formations to the v2 require height since the host won't allow
+		// us to form contracts beyond that
+		v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+		if rfr.EndHeight >= v2ReqHeight {
+			rfr.EndHeight = v2ReqHeight - 1
+		}
+
 		// check gouging
 		breakdown := gc.CheckSettings(settings)
 		if breakdown.Gouging() {

@@ -630,7 +630,7 @@ func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
 		settings.NetAddress = host.rhp4Listener.Addr().(*net.TCPAddr).IP.String()
-		if err := host.settings.UpdateSettings(settings); err != nil {
+		if err := host.UpdateSettings(settings); err != nil {
 			return err
 		}
 		if err := host.settings.Announce(); err != nil {

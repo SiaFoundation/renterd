@@ -463,7 +463,9 @@ func activeContracts(ctx context.Context, bus Bus, logger *zap.SugaredLogger) ([
 	// fetch active contracts
 	logger.Info("fetching active contracts")
 	start := time.Now()
-	metadatas, err := bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
+	metadatas, err := bus.Contracts(ctx, api.ContractsOpts{
+		FilterMode: api.ContractFilterModeActive,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -902,7 +904,9 @@ func performContractFormations(ctx *mCtx, bus Bus, cr contractReviser, hf hostFi
 	wanted := int(ctx.WantedContracts())
 
 	// fetch all active contracts
-	contracts, err := bus.Contracts(ctx, api.ContractsOpts{})
+	contracts, err := bus.Contracts(ctx, api.ContractsOpts{
+		FilterMode: api.ContractFilterModeActive,
+	})
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch contracts: %w", err)
 	}
@@ -1052,7 +1056,9 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 
 func performPostMaintenanceTasks(ctx *mCtx, bus Bus, alerter alerts.Alerter, cc contractChecker, rb revisionBroadcaster, logger *zap.SugaredLogger) error {
 	// fetch some contract and host info
-	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{})
+	allContracts, err := bus.Contracts(ctx, api.ContractsOpts{
+		FilterMode: api.ContractFilterModeActive,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to fetch all contracts: %w", err)
 	}
@@ -1117,7 +1123,7 @@ func performV2ContractMigration(ctx *mCtx, bus Bus, cr contractReviser, logger *
 	}
 
 	contracts, err := bus.Contracts(ctx, api.ContractsOpts{
-		FilterMode: api.ContractFilterModeAll, // TODO: change to usable
+		FilterMode: api.ContractFilterModeActive,
 	})
 	if err != nil {
 		logger.With(zap.Error(err)).Error("failed to fetch contracts for migration")
@@ -1149,7 +1155,7 @@ func performV2ContractMigration(ctx *mCtx, bus Bus, cr contractReviser, logger *
 		}
 
 		// form a new contract with the same host
-		contract, _, err := cr.formContract(ctx, bus, host, InitialContractFunding, logger)
+		_, _, err = cr.formContract(ctx, bus, host, InitialContractFunding, logger)
 		if err != nil {
 			logger.Errorf("failed to form a v2 contract with the host")
 			continue

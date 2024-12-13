@@ -35,7 +35,6 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql/sqlite"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -2859,6 +2858,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	})
 }
 
+// TODO: upload and download
 func TestV1ToV2Transition(t *testing.T) {
 	// create a chain manager with a custom network that starts before the v2
 	// allow height
@@ -2874,18 +2874,16 @@ func TestV1ToV2Transition(t *testing.T) {
 	// custom autopilot config
 	apCfg := test.AutopilotConfig
 	apCfg.Contracts.Amount = 2
-	apCfg.Contracts.Period = 1000 // make sure contracts are not scheduled for renew before reaching the allowheight
+	apCfg.Contracts.Period = 1000 // make sure we handle trying to form contracts with a proof height after the v2 require height
 	apCfg.Contracts.RenewWindow = 50
 
 	// create a test cluster
 	nHosts := 3
-	l, _ := zap.NewDevelopment()
 	cluster := newTestCluster(t, testClusterOptions{
 		autopilotConfig: &apCfg,
 		hosts:           0, // add hosts manually later
 		cm:              cm,
 		uploadPacking:   false, // disable to make sure we don't accidentally serve data from disk
-		logger:          l,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -2912,6 +2910,8 @@ func TestV1ToV2Transition(t *testing.T) {
 	for _, c := range contracts {
 		if c.V2 {
 			t.Fatal("should not have formed v2 contracts")
+		} else if c.EndHeight() != network.HardforkV2.RequireHeight-1 {
+			t.Fatalf("expected proof height to be %v, got %v", network.HardforkV2.RequireHeight-1, c.EndHeight())
 		}
 		contractHosts[c.HostKey] = struct{}{}
 	}
@@ -2929,9 +2929,43 @@ func TestV1ToV2Transition(t *testing.T) {
 		cluster.MineBlocks(1)
 		time.Sleep(100 * time.Millisecond)
 	}
+	time.Sleep(time.Second)
 
-	// check the contracts again
-	contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+	// check that we have 1 archived contract for every contract we had before
+	archivedContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
 	tt.OK(err)
-	fmt.Println("contracts", len(contracts))
+	if len(archivedContracts) != nHosts-1 {
+		t.Fatalf("expected %v archived contracts, got %v", 2*(nHosts-1), len(archivedContracts))
+	}
+
+	// they should be on nHosts-1 unique hosts
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, c := range archivedContracts {
+		if c.ArchivalReason != "migrated to v2" {
+			t.Fatalf("expected archival reason to be 'migrated to v2', got %v", c.ArchivalReason)
+		} else if c.V2 {
+			t.Fatalf("expected contract to be v1, got v2")
+		}
+		usedHosts[c.HostKey] = struct{}{}
+	}
+	if len(usedHosts) != nHosts-1 {
+		t.Fatalf("expected %v unique hosts, got %v", nHosts-1, len(usedHosts))
+	}
+
+	// we should have the same number of active contracts
+	activeContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
+	tt.OK(err)
+	if len(activeContracts) != nHosts-1 {
+		t.Fatalf("expected %v active contracts, got %v", nHosts-1, len(activeContracts))
+	}
+
+	// they should be on the same hosts as before
+	for _, c := range activeContracts {
+		if _, ok := usedHosts[c.HostKey]; !ok {
+			t.Fatal("host not found in used hosts")
+		} else if !c.V2 {
+			t.Fatal("expected contract to be v2, got v1", c.ID, c.ArchivalReason)
+		}
+		delete(usedHosts, c.HostKey)
+	}
 }
