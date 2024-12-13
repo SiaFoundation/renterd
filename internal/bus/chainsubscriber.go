@@ -265,7 +265,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 
 	// v1 contracts
 	var err error
-	cru.ForEachFileContractElement(func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, valid bool) {
+	cru.ForEachFileContractElement(func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, _ bool) {
 		if err != nil {
 			return
 		} else if known, lookupErr := tx.IsKnownContract(fce.ID); err != nil {
@@ -274,7 +274,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 		} else if !known {
 			return // only consider known contracts
 		}
-		err = s.revertV1ContractUpdate(tx, fce, created, rev, resolved, valid)
+		err = s.revertV1ContractUpdate(tx, fce, created, rev, resolved)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to revert v1 contract update: %w", err)
@@ -508,7 +508,7 @@ func (s *chainSubscriber) applyV1ContractUpdate(tx sql.ChainUpdateTx, index type
 	return nil
 }
 
-func (s *chainSubscriber) revertV1ContractUpdate(tx sql.ChainUpdateTx, fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, valid bool) error {
+func (s *chainSubscriber) revertV1ContractUpdate(tx sql.ChainUpdateTx, fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved bool) error {
 	fcid := fce.ID
 	if rev != nil {
 		fcid = rev.ID
@@ -524,7 +524,6 @@ func (s *chainSubscriber) revertV1ContractUpdate(tx sql.ChainUpdateTx, fce types
 	// file size
 	if rev != nil && rev.FileContract.RevisionNumber == math.MaxUint64 && rev.FileContract.Filesize == 0 {
 		resolved = true
-		valid = true
 	}
 
 	// contract was reverted -> 'pending'
