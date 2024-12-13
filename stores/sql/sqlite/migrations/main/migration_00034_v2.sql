@@ -4,7 +4,7 @@ ADD COLUMN v2_settings text;
 
 UPDATE hosts
 SET
-    hosts.v2_settings = '{}';
+    v2_settings = '{}';
 
 -- drop resolved addresses
 ALTER TABLE hosts
