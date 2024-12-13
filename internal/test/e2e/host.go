@@ -304,7 +304,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	rhpv2 := rhpv2.NewSessionHandler(rhp2Listener, privKey, cm, s, wallet, contracts, settings, storage, log.Named("rhpv2"))
 	go rhpv2.Serve()
 
-	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv2"))
+	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv3"))
 	go rhpv3.Serve()
 
 	rhpv4 := rhp4.NewServer(privKey, cm, s, contracts, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute), rhp4.WithContractProofWindowBuffer(1))
