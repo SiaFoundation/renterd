@@ -193,22 +193,19 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	}
 
 	// delete host sectors that are no longer associated with any contract
-	_, err = tx.Exec(ctx, `DELETE FROM host_sectors
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM contract_sectors
-    WHERE contract_sectors.db_sector_id = host_sectors.db_sector_id
-)
-OR NOT EXISTS (
-    SELECT 1
-    FROM contracts
-    INNER JOIN hosts ON contracts.host_id = hosts.id
-    WHERE contracts.archival_reason IS NULL
-    AND hosts.id = host_sectors.db_host_id
-)`)
-	if err != nil {
-		return fmt.Errorf("failed to delete host_sectors: %w", err)
-	}
+	// TODO: instead of deleting, set the timestamp of all host sectors
+	// belonging to a host that we don't have a contract with to 'now'.
+	//	_, err = tx.Exec(ctx, `DELETE FROM host_sectors
+	//  WHERE NOT EXISTS (
+	//    SELECT 1
+	//    FROM contracts
+	//    INNER JOIN hosts ON contracts.host_id = hosts.id
+	//    WHERE contracts.archival_reason IS NULL
+	//    AND hosts.id = host_sectors.db_host_id
+	//  )`)
+	//	if err != nil {
+	//		return fmt.Errorf("failed to delete host_sectors: %w", err)
+	//	}
 	return nil
 }
 
@@ -1831,11 +1828,11 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 
 	// fetch contracts for each sector
 	stmt, err := tx.Prepare(ctx, `
-		SELECT h.public_key, c.fcid
-		FROM contract_sectors cs
-		INNER JOIN contracts c ON c.id = cs.db_contract_id
-		INNER JOIN hosts h ON h.public_key = c.host_key
-		WHERE cs.db_sector_id = ?
+		SELECT h.public_key, COALESCE(c.fcid, ?)
+		FROM host_sectors hs
+		INNER JOIN hosts h ON h.id = hs.db_host_id
+		LEFT JOIN contracts c ON c.host_key = h.public_key AND c.archival_reason IS NULL
+		WHERE hs.db_sector_id = ?
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -1844,7 +1841,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	defer stmt.Close()
 
 	for i, sectorID := range sectorIDs {
-		rows, err := stmt.Query(ctx, sectorID)
+		rows, err := stmt.Query(ctx, FileContractID{}, sectorID)
 		if err != nil {
 			return object.Slab{}, fmt.Errorf("failed to fetch contracts: %w", err)
 		}
@@ -1858,7 +1855,12 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 				if err := rows.Scan((*PublicKey)(&pk), (*FileContractID)(&fcid)); err != nil {
 					return fmt.Errorf("failed to scan contract: %w", err)
 				}
-				slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
+				if _, exists := slab.Shards[i].Contracts[pk]; !exists {
+					slab.Shards[i].Contracts[pk] = []types.FileContractID{}
+				}
+				if fcid != (types.FileContractID{}) {
+					slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
+				}
 			}
 			return nil
 		}(); err != nil {
@@ -2531,8 +2533,9 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
 		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
-		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
-		LEFT JOIN contracts c ON c.id = csec.db_contract_id
+		LEFT JOIN host_sectors hs ON hs.db_sector_id = sec.id
+		LEFT JOIN hosts h ON h.id = hs.db_host_id
+		LEFT JOIN contracts c ON c.host_key = h.public_key AND c.archival_reason IS NULL
 		WHERE sli.db_object_id = ?
 		ORDER BY sli.object_index ASC, sec.slab_index ASC
 	`, Hash256{}, FileContractID{}, PublicKey{}, objID)
@@ -2595,7 +2598,12 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 			if current.Shards[len(current.Shards)-1].Contracts == nil {
 				current.Shards[len(current.Shards)-1].Contracts = make(map[types.PublicKey][]types.FileContractID)
 			}
-			current.Shards[len(current.Shards)-1].Contracts[hk] = append(current.Shards[len(current.Shards)-1].Contracts[hk], fcid)
+			if _, exists := current.Shards[len(current.Shards)-1].Contracts[hk]; !exists {
+				current.Shards[len(current.Shards)-1].Contracts[hk] = []types.FileContractID{}
+			}
+			if fcid != (types.FileContractID{}) {
+				current.Shards[len(current.Shards)-1].Contracts[hk] = append(current.Shards[len(current.Shards)-1].Contracts[hk], fcid)
+			}
 		}
 	}
 

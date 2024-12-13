@@ -3634,6 +3634,19 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
 	}
+
+	// delete one of the contracts - this should cause the host to still be in
+	// the slab but the associated slice should be empty
+	if err := ss.ArchiveContract(context.Background(), contracts[0].ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	slab.Shards[0].Contracts[hks[0]] = []types.FileContractID{}
+	rSlab, err = ss.Slab(context.Background(), slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(slab, rSlab) {
+		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab, cmp.AllowUnexported(object.EncryptionKey{})))
+	}
 }
 
 func TestSlabHealthInvalidation(t *testing.T) {
