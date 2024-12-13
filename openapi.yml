@@ -180,7 +180,7 @@ paths:
 
   #############################
   #
-  # Autopilot routes
+  # Worker routes
   #
   #############################
   /worker/account/{hostkey}:
@@ -271,12 +271,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the multipart upload belongs to
+          description: The name of the bucket the multipart upload belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
         - name: uploadid
           description: The ID of the ongoing multipart upload
           in: query
@@ -364,12 +364,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the object belongs to
+          description: The name of the bucket the object belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
         - name: Range
           in: header
           description: The range of bytes to download. If not provided, the entire object will be downloaded.
@@ -442,12 +442,12 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the object belongs to
+          description: The name of the bucket the object belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
         - name: minshards
           description: Used to override the minimum number of shards the object should be split into.
           example: 10
@@ -516,19 +516,15 @@ paths:
             example: "myDir/myFile"
             minLength: 1
         - name: bucket
-          description: The bucket the object belongs to
+          description: The name of the bucket the object belongs to
           example: "myBucket"
           in: query
           required: true
           schema:
-            $ref: "#/components/schemas/Bucket"
+            $ref: "#/components/schemas/BucketName"
       responses:
         "200":
           description: Successfully deleted object
-          content:
-            text/plain:
-              schema:
-                type: string
         "404":
           description: Object not found
           content:
@@ -548,8 +544,8 @@ paths:
               properties:
                 bucket:
                   allOf:
-                    - $ref: "#/components/schemas/Bucket"
-                    - description: The bucket the objects belong to
+                    - $ref: "#/components/schemas/BucketName"
+                    - description: The name of the bucket the objects belong to
                 prefix:
                   type: string
                   example: "myDir/"
@@ -558,10 +554,6 @@ paths:
       responses:
         "200":
           description: Successfully removed objects
-          content:
-            text/plain:
-              schema:
-                type: string
         "400":
           description: Missing prefix or bucket
           content:
@@ -715,6 +707,468 @@ paths:
                           allOf:
                             - $ref: "#/components/schemas/PublicKey"
                             - description: The host's public key
+
+  #############################
+  #
+  # Bus routes
+  #
+  #############################
+  /bus/accounts:
+    get:
+      summary: Get all ephemeral accounts
+      description: Returns all known ephemeral accounts.
+      responses:
+        "200":
+          description: Successfully retrieved ephemeral accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      summary: Save accounts
+      description: Saves the provided accounts to the database.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accounts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Account"
+      responses:
+        "200":
+          description: Successfully saved accounts
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                missingOwnerField:
+                  summary: Missing owner field example
+                  value: "account is missing a valid 'owner' field"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/accounts/fund:
+    post:
+      summary: Fund account
+      description: Funds the specified account with the provided amount.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountID:
+                  allOf:
+                    - $ref: "#/components/schemas/PublicKey"
+                    - description: The ID of the account to fund.
+                amount:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The amount to fund the account with.
+                contractID:
+                  allOf:
+                    - $ref: "#/components/schemas/FileContractID"
+                    - description: The ID of the contract to fund the account with.
+      responses:
+        "200":
+          description: Successfully funded account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deposit:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount that was deposited into the account
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/alerts:
+    get:
+      summary: Get all alerts
+      description: Returns all currently registered alerts.
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of alerts to return
+          schema:
+            type: integer
+            minimum: -1
+            default: -1
+        - name: offset
+          in: query
+          description: The number of alerts to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Successfully retrieved alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Alert"
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more alerts to fetch
+                  totals:
+                    type: object
+                    properties:
+                      info:
+                        type: integer
+                        format: uint64
+                        description: The number of info alerts
+                      warning:
+                        type: integer
+                        format: uint64
+                        description: The number of warning alerts
+                      error:
+                        type: integer
+                        format: uint64
+                        description: The number of error alerts
+                      critical:
+                        type: integer
+                        format: uint64
+                        description: The number of critical alerts
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidLimit:
+                  summary: Invalid limit example
+                  value: "limit must be greater than or equal to -1"
+                invalidOffset:
+                  summary: Invalid offset example
+                  value: "offset must be greater than or equal to 0"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/alerts/dismiss:
+    post:
+      summary: Dismiss alerts
+      description: Dismisses the specified alerts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Successfully dismissed alerts
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/alerts/register:
+    post:
+      summary: Register an alert
+      description: Registers a new alert.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                severity:
+                  $ref: "#/components/schemas/Alert"
+      responses:
+        "200":
+          description: Successfully registered alert
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/autopilot:
+    get:
+      summary: Get autopilot configuration
+      description: Returns the current autopilot configuration.
+      responses:
+        "200":
+          description: Successfully retrieved autopilot configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutopilotConfig"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update autopilot configuration
+      description: Updates the autopilot configuration.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  description: Whether the autopilot is enabled
+                contracts:
+                  $ref: "#/components/schemas/ContractsConfig"
+                hosts:
+                  $ref: "#/components/schemas/HostsConfig"
+      responses:
+        "200":
+          description: Successfully updated autopilot configuration
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/buckets:
+    get:
+      summary: Get all buckets
+      description: Returns all known buckets.
+      responses:
+        "200":
+          description: Successfully retrieved buckets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bucket"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      summary: Create bucket
+      description: Create a new bucket.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  $ref: "#/components/schemas/BucketName"
+                policy:
+                  type: object
+                  properties:
+                    publicReadAccess:
+                      type: boolean
+                      description: Whether the bucket is publicly readable
+      responses:
+        "200":
+          description: Successfully saved buckets
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidBucketName:
+                  summary: Invalid bucket name example
+                  value: "bucket name must match pattern '^(?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'"
+                bucketAlreadyExists:
+                  summary: Bucket already exists example
+                  value: "bucket already exists"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/bucket/{name}/policy:
+    put:
+      summary: Update bucket policy
+      description: Updates the policy of the specified bucket.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+          description: The name of the bucket
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy:
+                  type: object
+                  properties:
+                    publicReadAccess:
+                      type: boolean
+                      description: Whether the bucket is publicly readable
+      responses:
+        "200":
+          description: Successfully updated bucket policy
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                noBucketName:
+                  summary: No bucket name provided
+                  value: "bucket name is required"
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+  /bus/bucket/{name}:
+    get:
+      summary: Get bucket
+      description: Returns the specified bucket.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+          description: The name of the bucket
+      responses:
+        "200":
+          description: Successfully retrieved bucket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BucketName"
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      summary: Delete bucket
+      description: Deletes the specified bucket.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+          description: The name of the bucket
+      responses:
+        "200":
+          description: Successfully deleted bucket
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                noBucketName:
+                  summary: No bucket name provided
+                  value: "bucket name is required"
+        "404":
+          description: Bucket not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "409":
+          description: Bucket not empty
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/consensus/acceptblock:
+    post:
+      summary: Accept block
+      description: Accepts a block from the consensus set.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                block:
+                  type: string
+                  description: The block to accept
+      responses:
+        "200":
+          description: Successfully accepted block
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
 components:
   schemas:
     #############################
@@ -751,6 +1205,32 @@ components:
         requiresSync:
           type: boolean
           description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
+
+    Alert:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The alert's ID
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+            - critical
+          description: The severity of the alert
+        message:
+          type: string
+          description: The alert's message
+        date:
+          type: object
+          description: Arbitrary data providing additional context for the alert
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the alert was created
 
     Currency:
       type: string
@@ -796,9 +1276,25 @@ components:
           $ref: "#/components/schemas/HostsConfig"
 
     Bucket:
+      type: object
+      properties:
+        name:
+          $ref: "#/components/schemas/BucketName"
+        policy:
+          type: object
+          properties:
+            publicReadAccess:
+              type: boolean
+              description: Whether the bucket is publicly readable
+        createdAt:
+          type: string
+          format: date-time
+          description: The time the bucket was created
+
+    BucketName:
       type: string
       pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
-      description: A bucket logically groups together objects.
+      description: The name of the bucket.
 
     BuildState:
       type: object

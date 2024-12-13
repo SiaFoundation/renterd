@@ -154,7 +154,8 @@ func (m *migrator) performMigrations(p *workerPool) {
 						} else if err != nil {
 							m.logger.Errorw("migration failed",
 								zap.Float64("health", j.Health),
-								zap.Stringer("slab", j.EncryptionKey))
+								zap.Stringer("slab", j.EncryptionKey),
+								zap.Error(err))
 						}
 					}
 				}(w)

@@ -196,12 +196,12 @@ func (h *Host) UpdateSettings(settings settings.Settings) error {
 
 // RHPv2Settings returns the host's current RHPv2 settings
 func (h *Host) RHPv2Settings() (crhpv2.HostSettings, error) {
-	return h.rhpv2.Settings()
+	return h.settings.RHP2Settings()
 }
 
 // RHPv3PriceTable returns the host's current RHPv3 price table
 func (h *Host) RHPv3PriceTable() (crhpv3.HostPriceTable, error) {
-	return h.rhpv3.PriceTable()
+	return h.settings.RHP3PriceTable()
 }
 
 // WalletAddress returns the host's wallet address
@@ -283,9 +283,11 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, storage,
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, storage, wallet,
 		settings.WithValidateNetAddress(false),
-		settings.WithRHP4AnnounceAddresses([]chain.NetAddress{{Protocol: rhp4.ProtocolTCPSiaMux, Address: rhp4Listener.Addr().String()}}),
+		settings.WithRHP2Port(uint16(rhp2Listener.Addr().(*net.TCPAddr).Port)),
+		settings.WithRHP3Port(uint16(rhp3Listener.Addr().(*net.TCPAddr).Port)),
+		settings.WithRHP4Port(uint16(rhp4Listener.Addr().(*net.TCPAddr).Port)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
@@ -299,16 +301,10 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
-	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage, log.Named("rhpv2"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rhpv2 session handler: %w", err)
-	}
+	rhpv2 := rhpv2.NewSessionHandler(rhp2Listener, privKey, cm, s, wallet, contracts, settings, storage, log.Named("rhpv2"))
 	go rhpv2.Serve()
 
-	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv2"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rhpv3 session handler: %w", err)
-	}
+	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv3"))
 	go rhpv3.Serve()
 
 	rhpv4 := rhp4.NewServer(privKey, cm, s, contracts, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute), rhp4.WithContractProofWindowBuffer(1))

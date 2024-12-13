@@ -118,6 +118,10 @@ func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContrac
 	return h.contracts.SectorRoots(fcid), nil
 }
 
+func (tc *TestCluster) IsPassedV2AllowHeight() bool {
+	return tc.cm.Tip().Height >= tc.network.HardforkV2.AllowHeight
+}
+
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
 	tc.tt.Helper()
 	for _, fn := range tc.autopilotShutdownFns {
@@ -625,7 +629,7 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
-		settings.NetAddress = host.RHPv2Addr()
+		settings.NetAddress = host.rhp4Listener.Addr().(*net.TCPAddr).IP.String()
 		if err := host.settings.UpdateSettings(settings); err != nil {
 			return err
 		}
