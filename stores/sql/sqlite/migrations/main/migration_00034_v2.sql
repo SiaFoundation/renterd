@@ -40,9 +40,9 @@ SET
             JSON_REPLACE (
                 value,
                 '$.minAccountExpiry',
-                newMinAccountExpiry,
+                CAST(newMinAccountExpiry AS INTEGER),
                 '$.minPriceTableValidity',
-                newMinPriceTableValidity
+                CAST(newMinPriceTableValidity AS INTEGER)
             )
         FROM
             (
