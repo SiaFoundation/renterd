@@ -97,6 +97,7 @@ func defaultConfig() config.Config {
 			ID:                     "",
 			AccountsRefillInterval: defaultAccountRefillInterval,
 			BusFlushInterval:       5 * time.Second,
+			CacheExpiry:            5 * time.Minute,
 
 			DownloadMaxOverdrive:     5,
 			DownloadOverdriveTimeout: 3 * time.Second,
