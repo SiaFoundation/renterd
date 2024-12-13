@@ -2973,7 +2973,18 @@ func TestV1ToV2Transition(t *testing.T) {
 			t.Fatal("expected contract to be v2, got v1", c.ID, c.ArchivalReason)
 		}
 		delete(usedHosts, c.HostKey)
+		fmt.Println("new contract", c.ID)
 	}
 
-	// TODO: check health, contracts and download
+	// check health is 1
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		object, err := cluster.Bus.Object(context.Background(), testBucket, "foo", api.GetObjectOptions{})
+		tt.OK(err)
+		if object.Health != 1 {
+			return fmt.Errorf("expected health to be 1, got %v", object.Health)
+		}
+		return nil
+	})
+
+	// TODO: check contracts and download
 }

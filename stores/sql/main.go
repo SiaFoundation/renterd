@@ -1828,11 +1828,11 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 
 	// fetch contracts for each sector
 	stmt, err := tx.Prepare(ctx, `
-		SELECT h.public_key, COALESCE(c.fcid, ?)
-		FROM host_sectors hs
-		INNER JOIN hosts h ON h.id = hs.db_host_id
-		LEFT JOIN contracts c ON c.host_key = h.public_key AND c.archival_reason IS NULL
-		WHERE hs.db_sector_id = ?
+		SELECT h.public_key, c.fcid
+		FROM contract_sectors cs
+		INNER JOIN contracts c ON c.id = cs.db_contract_id
+		INNER JOIN hosts h ON h.public_key = c.host_key
+		WHERE cs.db_sector_id = ?
 		ORDER BY c.id
 	`)
 	if err != nil {
@@ -1840,8 +1840,21 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	}
 	defer stmt.Close()
 
+	// fetch hosts for each sector
+	hostStmt, err := tx.Prepare(ctx, `
+		SELECT h.public_key
+		FROM host_sectors hs
+		INNER JOIN hosts h ON h.id = hs.db_host_id
+		WHERE hs.db_sector_id = ?
+	`)
+	if err != nil {
+		return object.Slab{}, fmt.Errorf("failed to prepare statement to fetch hosts: %w", err)
+	}
+	defer hostStmt.Close()
+
 	for i, sectorID := range sectorIDs {
-		rows, err := stmt.Query(ctx, FileContractID{}, sectorID)
+		// contracts
+		rows, err := stmt.Query(ctx, sectorID)
 		if err != nil {
 			return object.Slab{}, fmt.Errorf("failed to fetch contracts: %w", err)
 		}
@@ -1861,6 +1874,26 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 				if fcid != (types.FileContractID{}) {
 					slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
 				}
+			}
+			return nil
+		}(); err != nil {
+			return object.Slab{}, err
+		}
+
+		// hosts
+		rows, err = hostStmt.Query(ctx, sectorID)
+		if err != nil {
+			return object.Slab{}, fmt.Errorf("failed to fetch hosts: %w", err)
+		}
+		if err := func() error {
+			defer rows.Close()
+
+			for rows.Next() {
+				var pk types.PublicKey
+				if err := rows.Scan((*PublicKey)(&pk)); err != nil {
+					return fmt.Errorf("failed to scan host: %w", err)
+				}
+				slab.Shards[i].Contracts[pk] = []types.FileContractID{}
 			}
 			return nil
 		}(); err != nil {
@@ -2529,13 +2562,14 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
+		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(h.public_key, ?)
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
-		LEFT JOIN host_sectors hs ON hs.db_sector_id = sec.id
+		INNER JOIN sectors sec ON sec.db_slab_id = sla.id
+		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
+		LEFT JOIN contracts c ON c.id = csec.db_contract_id
+		LEFT JOIN host_sectors hs ON hs.db_sector_id = csec.db_sector_id
 		LEFT JOIN hosts h ON h.id = hs.db_host_id
-		LEFT JOIN contracts c ON c.host_key = h.public_key AND c.archival_reason IS NULL
 		WHERE sli.db_object_id = ?
 		ORDER BY sli.object_index ASC, sec.slab_index ASC
 	`, Hash256{}, FileContractID{}, PublicKey{}, objID)
