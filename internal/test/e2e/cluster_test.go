@@ -21,6 +21,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
@@ -2973,7 +2974,6 @@ func TestV1ToV2Transition(t *testing.T) {
 			t.Fatal("expected contract to be v2, got v1", c.ID, c.ArchivalReason)
 		}
 		delete(usedHosts, c.HostKey)
-		fmt.Println("new contract", c.ID)
 	}
 
 	// check health is 1
@@ -2986,5 +2986,19 @@ func TestV1ToV2Transition(t *testing.T) {
 		return nil
 	})
 
-	// TODO: check contracts and download
+	// check that the contracts now contain the data
+	activeContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
+	tt.OK(err)
+	for _, c := range activeContracts {
+		if c.Size != rhpv4.SectorSize {
+			t.Fatalf("expected sector size to be %v, got %v", rhpv4.SectorSize, c.Size)
+		}
+	}
+
+	// download file to make sure it's still there
+	buf := new(bytes.Buffer)
+	tt.OK(cluster.Worker.DownloadObject(context.Background(), buf, testBucket, "foo", api.DownloadObjectOptions{}))
+	if !bytes.Equal(data, buf.Bytes()) {
+		t.Fatal("data mismatch")
+	}
 }
