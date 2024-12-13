@@ -2858,7 +2858,6 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	})
 }
 
-// TODO: upload and download
 func TestV1ToV2Transition(t *testing.T) {
 	// create a chain manager with a custom network that starts before the v2
 	// allow height
@@ -2921,6 +2920,13 @@ func TestV1ToV2Transition(t *testing.T) {
 		t.Fatalf("expected %v unique hosts, got %v", nHosts-1, len(contractHosts))
 	}
 
+	// upload some data
+	data := frand.Bytes(100)
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{
+		MinShards:   1,
+		TotalShards: nHosts - 1,
+	}))
+
 	// mine until we reach the v2 allowheight
 	cluster.MineBlocks(network.HardforkV2.AllowHeight - cm.Tip().Height)
 
@@ -2968,4 +2974,6 @@ func TestV1ToV2Transition(t *testing.T) {
 		}
 		delete(usedHosts, c.HostKey)
 	}
+
+	// TODO: check health, contracts and download
 }
