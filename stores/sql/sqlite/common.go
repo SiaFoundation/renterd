@@ -53,19 +53,20 @@ func applyMigration(ctx context.Context, db *sql.DB, fn func(tx sql.Tx) (bool, e
 		defer rows.Close()
 
 		// check if there are any foreign key constraint violations
+		var errs []error
 		var tableName, foreignKey string
 		var rowID int
 		for rows.Next() {
 			if err := rows.Scan(&tableName, &rowID, &foreignKey); err != nil {
 				return fmt.Errorf("failed to scan foreign key check result: %w", err)
 			}
-			return fmt.Errorf("foreign key constraint violation in table '%s': row %d, foreign key %s", tableName, rowID, foreignKey)
+			errs = append(errs, fmt.Errorf("foreign key constraint violation in table '%s': row %d, foreign key %s", tableName, rowID, foreignKey))
 		}
 
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("error iterating foreign key check results: %w", err)
 		}
-		return nil
+		return errors.Join(errs...)
 	})
 }
 
