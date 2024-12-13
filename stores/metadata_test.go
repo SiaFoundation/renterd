@@ -2614,7 +2614,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(obj, *fetched.Object) {
-		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
+		t.Fatal("mismatch", cmp.Diff(obj, *fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
 	// Add the second slab.

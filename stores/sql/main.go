@@ -1853,32 +1853,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	defer hostStmt.Close()
 
 	for i, sectorID := range sectorIDs {
-		// contracts
-		rows, err := stmt.Query(ctx, sectorID)
-		if err != nil {
-			return object.Slab{}, fmt.Errorf("failed to fetch contracts: %w", err)
-		}
-		if err := func() error {
-			defer rows.Close()
-
-			slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
-			for rows.Next() {
-				var pk types.PublicKey
-				var fcid types.FileContractID
-				if err := rows.Scan((*PublicKey)(&pk), (*FileContractID)(&fcid)); err != nil {
-					return fmt.Errorf("failed to scan contract: %w", err)
-				}
-				if _, exists := slab.Shards[i].Contracts[pk]; !exists {
-					slab.Shards[i].Contracts[pk] = []types.FileContractID{}
-				}
-				if fcid != (types.FileContractID{}) {
-					slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
-				}
-			}
-			return nil
-		}(); err != nil {
-			return object.Slab{}, err
-		}
+		slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
 
 		// hosts
 		rows, err = hostStmt.Query(ctx, sectorID)
@@ -1893,7 +1868,35 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 				if err := rows.Scan((*PublicKey)(&pk)); err != nil {
 					return fmt.Errorf("failed to scan host: %w", err)
 				}
-				slab.Shards[i].Contracts[pk] = []types.FileContractID{}
+				if _, exists := slab.Shards[i].Contracts[pk]; !exists {
+					slab.Shards[i].Contracts[pk] = []types.FileContractID{}
+				}
+			}
+			return nil
+		}(); err != nil {
+			return object.Slab{}, err
+		}
+
+		// contracts
+		rows, err := stmt.Query(ctx, sectorID)
+		if err != nil {
+			return object.Slab{}, fmt.Errorf("failed to fetch contracts: %w", err)
+		}
+		if err := func() error {
+			defer rows.Close()
+
+			for rows.Next() {
+				var pk types.PublicKey
+				var fcid types.FileContractID
+				if err := rows.Scan((*PublicKey)(&pk), (*FileContractID)(&fcid)); err != nil {
+					return fmt.Errorf("failed to scan contract: %w", err)
+				}
+				if _, exists := slab.Shards[i].Contracts[pk]; !exists {
+					slab.Shards[i].Contracts[pk] = []types.FileContractID{}
+				}
+				if fcid != (types.FileContractID{}) {
+					slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
+				}
 			}
 			return nil
 		}(); err != nil {
@@ -2565,7 +2568,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(h.public_key, ?)
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-		INNER JOIN sectors sec ON sec.db_slab_id = sla.id
+		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
 		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
 		LEFT JOIN contracts c ON c.id = csec.db_contract_id
 		LEFT JOIN host_sectors hs ON hs.db_sector_id = csec.db_sector_id
