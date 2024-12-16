@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/host"
+	"go.sia.tech/renterd/internal/hosts"
 	"go.sia.tech/renterd/internal/locking"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	"go.sia.tech/renterd/internal/utils"
@@ -72,7 +73,7 @@ type (
 	Uploader struct {
 		cs     ContractStore
 		cl     locking.ContractLocker
-		hm     host.HostManager
+		hm     hosts.Manager
 		logger *zap.SugaredLogger
 
 		hk              types.PublicKey
@@ -95,7 +96,7 @@ type (
 	}
 )
 
-func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm host.HostManager, hi api.HostInfo, fcid types.FileContractID, endHeight uint64, l *zap.SugaredLogger) *Uploader {
+func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm hosts.Manager, hi api.HostInfo, fcid types.FileContractID, endHeight uint64, l *zap.SugaredLogger) *Uploader {
 	return &Uploader{
 		cl:     cl,
 		cs:     cs,

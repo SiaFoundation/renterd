@@ -161,9 +161,6 @@ func (m *Manager) Info() ([]Webhook, []WebhookQueueInfo) {
 }
 
 func (m *Manager) Register(ctx context.Context, wh Webhook) error {
-	ctx, cancel := context.WithTimeout(m.shutdownCtx, webhookTimeout)
-	defer cancel()
-
 	// Test URL.
 	err := sendEvent(ctx, wh.URL, wh.Headers, Event{
 		Event: WebhookEventPing,

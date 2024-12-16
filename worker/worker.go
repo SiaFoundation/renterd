@@ -24,10 +24,12 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/accounts"
+	"go.sia.tech/renterd/internal/contracts"
 	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/internal/hosts"
 	"go.sia.tech/renterd/internal/memory"
-	"go.sia.tech/renterd/internal/prices"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -70,7 +72,7 @@ type (
 		webhooks.Broadcaster
 
 		AccountFunder
-		iworker.AccountStore
+		accounts.Store
 
 		ContractLocker
 		ContractStore
@@ -143,22 +145,6 @@ type (
 	}
 )
 
-// TODO: deriving the renter key from the host key using the master key only
-// works if we persist a hash of the renter's master key in the database and
-// compare it on startup, otherwise there's no way of knowing the derived key is
-// usuable
-// NOTE: Instead of hashing the masterkey and comparing, we could use random
-// bytes + the HMAC thereof as the salt. e.g. 32 bytes + 32 bytes HMAC. Then
-// whenever we read a specific salt we can verify that is was created with a
-// given key. That would eventually allow different masterkeys to coexist in the
-// same bus.
-//
-// TODO: instead of deriving a renter key use a randomly generated salt so we're
-// not limited to one key per host
-func (w *Worker) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	return w.masterKey.DeriveContractKey(hostKey)
-}
-
 // A worker talks to Sia hosts to perform contract and storage operations within
 // a renterd system.
 type Worker struct {
@@ -175,17 +161,15 @@ type Worker struct {
 
 	downloadManager *download.Manager
 	uploadManager   *upload.Manager
+	hostManager     hosts.Manager
 
-	accounts    *iworker.AccountMgr
-	dialer      *rhp.FallbackDialer
-	cache       iworker.WorkerCache
-	priceTables *prices.PriceTables
-	pricesCache *prices.PricesCache
+	accounts *accounts.Manager
+	cache    iworker.WorkerCache
 
 	uploadsMu            sync.Mutex
 	uploadingPackedSlabs map[string]struct{}
 
-	contractSpendingRecorder ContractSpendingRecorder
+	contractSpendingRecorder contracts.SpendingRecorder
 
 	shutdownCtx       context.Context
 	shutdownCtxCancel context.CancelFunc
@@ -210,7 +194,7 @@ func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk
 			defer cancel()
 		}
 
-		rev, err := w.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
+		rev, err := w.hostManager.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
 		if err != nil {
 			return err
 		}
@@ -224,60 +208,6 @@ func (w *Worker) registerAlert(a alerts.Alert) {
 		w.logger.Errorf("failed to register alert, err: %v", err)
 	}
 	cancel()
-}
-
-func (w *Worker) slabMigrateHandler(jc jape.Context) {
-	ctx := jc.Request.Context()
-
-	// decode the slab
-	var slab object.Slab
-	if jc.Decode(&slab) != nil {
-		return
-	}
-
-	// fetch the upload parameters
-	up, err := w.bus.UploadParams(ctx)
-	if jc.Check("couldn't fetch upload parameters from bus", err) != nil {
-		return
-	}
-
-	// cancel the upload if consensus is not synced
-	if !up.ConsensusState.Synced {
-		w.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
-		jc.Error(api.ErrConsensusNotSynced, http.StatusServiceUnavailable)
-		return
-	}
-
-	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
-
-	// fetch hosts
-	dlHosts, err := w.cache.UsableHosts(ctx)
-	if jc.Check("couldn't fetch hosts from bus", err) != nil {
-		return
-	}
-
-	// fetch host & contract info
-	ulContracts, err := w.hostContracts(ctx)
-	if jc.Check("couldn't fetch contracts from bus", err) != nil {
-		return
-	}
-
-	// migrate the slab and handle alerts
-	err = w.migrate(ctx, slab, dlHosts, ulContracts, up.CurrentHeight)
-	if err != nil && !utils.IsErr(err, api.ErrSlabNotFound) {
-		var objects []api.ObjectMetadata
-		if res, err := w.bus.Objects(ctx, "", api.ListObjectOptions{SlabEncryptionKey: slab.EncryptionKey}); err != nil {
-			w.logger.Errorf("failed to list objects for slab key; %v", err)
-		} else {
-			objects = res.Objects
-		}
-		w.alerts.RegisterAlert(ctx, newMigrationFailedAlert(slab.EncryptionKey, slab.Health, objects, err))
-	} else if err == nil {
-		w.alerts.DismissAlerts(jc.Request.Context(), alerts.IDForSlab(alertMigrationID, slab.EncryptionKey))
-	}
-
-	jc.Check("failed to migrate slab", err)
 }
 
 func (w *Worker) downloadsStatsHandlerGET(jc jape.Context) {
@@ -624,7 +554,7 @@ func (w *Worker) accountsResetDriftHandlerPOST(jc jape.Context) {
 		return
 	}
 	err := w.accounts.ResetDrift(id)
-	if errors.Is(err, iworker.ErrAccountNotFound) {
+	if errors.Is(err, accounts.ErrAccountNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	}
@@ -680,13 +610,10 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	w := &Worker{
 		alerts:               a,
 		cache:                iworker.NewCache(b, cfg.CacheExpiry, l),
-		dialer:               dialer,
 		id:                   cfg.ID,
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
-		priceTables:          prices.NewPriceTables(),
-		pricesCache:          prices.NewPricesCache(),
 		rhp2Client:           rhp2.New(dialer, l),
 		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
@@ -702,13 +629,16 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 
 	uploadKey := w.masterKey.DeriveUploadKey()
 
+	w.contractSpendingRecorder = contracts.NewSpendingRecorder(w.shutdownCtx, w.bus, cfg.BusFlushInterval, l)
+	hm := hosts.NewManager(w.masterKey, w.accounts, w.contractSpendingRecorder, dialer, l)
+	w.hostManager = hm
+
 	dlmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
-	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, w, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, hm, dlmm, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
 	ulmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
-	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, w, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, hm, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
 
-	w.initContractSpendingRecorder(cfg.BusFlushInterval)
 	return w, nil
 }
 
@@ -728,8 +658,6 @@ func (w *Worker) Handler() http.Handler {
 		"PUT    /object/*key":    w.objectHandlerPUT,
 		"DELETE /object/*key":    w.objectHandlerDELETE,
 		"POST   /objects/remove": w.objectsRemoveHandlerPOST,
-
-		"POST   /slab/migrate": w.slabMigrateHandler,
 
 		"GET    /state": w.stateHandlerGET,
 
@@ -796,11 +724,9 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 		if balance.Cmp(desired) >= 0 {
 			return types.ZeroCurrency, nil
 		}
-		deposit := desired.Sub(balance)
 
 		// fund the account
-		var err error
-		deposit, err = w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
+		deposit, err := w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
 		if err != nil {
 			if rhp3.IsBalanceMaxExceeded(err) {
 				acc.ScheduleSync()
@@ -855,7 +781,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 	} else {
 		// otherwise return a pipe reader
 		downloadFn := func(wr io.Writer, offset, length int64) error {
-			ctx = WithGougingChecker(ctx, w.bus, gp)
+			ctx = gouging.WithChecker(ctx, w.bus, gp)
 			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), hosts)
 			if err != nil {
 				w.logger.Error(err)
@@ -901,10 +827,10 @@ func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, hos
 	if err != nil {
 		return fmt.Errorf("couldn't get gouging parameters; %w", err)
 	}
-	ctx = WithGougingChecker(ctx, w.bus, gp)
+	ctx = gouging.WithChecker(ctx, w.bus, gp)
 
 	// sync the account
-	h := w.Host(host.PublicKey, fcid, host.SiamuxAddr)
+	h := w.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
 	err = w.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
 		return h.SyncAccount(ctx, &rev)
 	})
@@ -922,7 +848,7 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	}
 
 	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+	ctx = gouging.WithChecker(ctx, w.bus, up.GougingParams)
 
 	// fetch host & contract info
 	contracts, err := w.hostContracts(ctx)
@@ -963,7 +889,7 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	}
 
 	// attach gouging checker to the context
-	ctx = WithGougingChecker(ctx, w.bus, up.GougingParams)
+	ctx = gouging.WithChecker(ctx, w.bus, up.GougingParams)
 
 	// prepare opts
 	uploadOpts := []upload.Option{
@@ -1007,7 +933,7 @@ func (w *Worker) initAccounts(refillInterval time.Duration) (err error) {
 	if w.accounts != nil {
 		panic("priceTables already initialized") // developer error
 	}
-	w.accounts, err = iworker.NewAccountManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
+	w.accounts, err = accounts.NewManager(w.masterKey.DeriveAccountsKey(w.id), w.id, w.bus, w, w, w.bus, w.bus, w.bus, w.bus, refillInterval, w.logger.Desugar())
 	return err
 }
 

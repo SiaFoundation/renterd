@@ -40,9 +40,7 @@ var (
 	disableStdin bool
 	enableANSI   = runtime.GOOS != "windows"
 
-	hostBasesStr         string
-	workerRemotePassStr  string
-	workerRemoteAddrsStr string
+	hostBasesStr string
 )
 
 func defaultConfig() config.Config {
@@ -110,14 +108,22 @@ func defaultConfig() config.Config {
 		Autopilot: config.Autopilot{
 			Enabled: true,
 
-			RevisionSubmissionBuffer:       150, // 144 + 6 blocks leeway
-			Heartbeat:                      30 * time.Minute,
-			MigrationHealthCutoff:          0.75,
-			RevisionBroadcastInterval:      7 * 24 * time.Hour,
-			ScannerBatchSize:               100,
-			ScannerInterval:                4 * time.Hour,
-			ScannerNumThreads:              10,
-			MigratorParallelSlabsPerWorker: 1,
+			Heartbeat: 30 * time.Minute,
+
+			MigratorAccountsRefillInterval:   defaultAccountRefillInterval,
+			MigratorHealthCutoff:             0.75,
+			MigratorNumThreads:               1,
+			MigratorDownloadMaxOverdrive:     5,
+			MigratorDownloadOverdriveTimeout: 3 * time.Second,
+			MigratorUploadMaxOverdrive:       5,
+			MigratorUploadOverdriveTimeout:   3 * time.Second,
+
+			RevisionBroadcastInterval: 7 * 24 * time.Hour,
+			RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
+
+			ScannerBatchSize:  100,
+			ScannerInterval:   4 * time.Hour,
+			ScannerNumThreads: 10,
 		},
 		S3: config.S3{
 			Address:     "localhost:8080",
@@ -173,22 +179,6 @@ func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.
 }
 
 func sanitizeConfig(cfg *config.Config) error {
-	// parse remotes
-	if workerRemoteAddrsStr != "" && workerRemotePassStr != "" {
-		cfg.Worker.Remotes = cfg.Worker.Remotes[:0]
-		for _, addr := range strings.Split(workerRemoteAddrsStr, ";") {
-			cfg.Worker.Remotes = append(cfg.Worker.Remotes, config.RemoteWorker{
-				Address:  addr,
-				Password: workerRemotePassStr,
-			})
-		}
-	}
-
-	// disable worker if remotes are set
-	if len(cfg.Worker.Remotes) > 0 {
-		cfg.Worker.Enabled = false
-	}
-
 	// combine host bucket bases
 	for _, base := range strings.Split(hostBasesStr, ",") {
 		if trimmed := strings.TrimSpace(base); trimmed != "" {
@@ -306,14 +296,20 @@ func parseCLIFlags(cfg *config.Config) {
 
 	// autopilot
 	flag.DurationVar(&cfg.Autopilot.Heartbeat, "autopilot.heartbeat", cfg.Autopilot.Heartbeat, "Interval for autopilot loop execution")
-	flag.Float64Var(&cfg.Autopilot.MigrationHealthCutoff, "autopilot.migrationHealthCutoff", cfg.Autopilot.MigrationHealthCutoff, "Threshold for migrating slabs based on health")
 	flag.DurationVar(&cfg.Autopilot.RevisionBroadcastInterval, "autopilot.revisionBroadcastInterval", cfg.Autopilot.RevisionBroadcastInterval, "Interval for broadcasting contract revisions (overrides with RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL)")
 	flag.Uint64Var(&cfg.Autopilot.ScannerBatchSize, "autopilot.scannerBatchSize", cfg.Autopilot.ScannerBatchSize, "Batch size for host scanning")
 	flag.DurationVar(&cfg.Autopilot.ScannerInterval, "autopilot.scannerInterval", cfg.Autopilot.ScannerInterval, "Interval for scanning hosts")
 	flag.Uint64Var(&cfg.Autopilot.ScannerNumThreads, "autopilot.scannerNumThreads", cfg.Autopilot.ScannerNumThreads, "Number of threads for scanning hosts")
-	flag.Uint64Var(&cfg.Autopilot.MigratorParallelSlabsPerWorker, "autopilot.migratorParallelSlabsPerWorker", cfg.Autopilot.MigratorParallelSlabsPerWorker, "Parallel slab migrations per worker (overrides with RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER)")
 	flag.BoolVar(&cfg.Autopilot.Enabled, "autopilot.enabled", cfg.Autopilot.Enabled, "Enables/disables autopilot (overrides with RENTERD_AUTOPILOT_ENABLED)")
 	flag.DurationVar(&cfg.ShutdownTimeout, "node.shutdownTimeout", cfg.ShutdownTimeout, "Timeout for node shutdown")
+
+	flag.DurationVar(&cfg.Autopilot.MigratorAccountsRefillInterval, "autopilot.migratorAccountRefillInterval", cfg.Autopilot.MigratorAccountsRefillInterval, "Interval for refilling migrator' account balances")
+	flag.Float64Var(&cfg.Autopilot.MigratorHealthCutoff, "autopilot.migratorHealthCutoff", cfg.Autopilot.MigratorHealthCutoff, "Threshold for migrating slabs based on health")
+	flag.Uint64Var(&cfg.Autopilot.MigratorNumThreads, "autopilot.migratorNumThreads", cfg.Autopilot.MigratorNumThreads, "Parallel slab migrations per worker (overrides with RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER)")
+	flag.Uint64Var(&cfg.Autopilot.MigratorDownloadMaxOverdrive, "autopilot.migratorDownloadMaxOverdrive", cfg.Autopilot.MigratorDownloadMaxOverdrive, "Max overdrive workers for migration downloads")
+	flag.DurationVar(&cfg.Autopilot.MigratorDownloadOverdriveTimeout, "autopilot.migratorDownloadOverdriveTimeout", cfg.Autopilot.MigratorDownloadOverdriveTimeout, "Timeout for overdriving migration downloads")
+	flag.Uint64Var(&cfg.Autopilot.MigratorUploadMaxOverdrive, "autopilot.migratorUploadMaxOverdrive", cfg.Autopilot.MigratorUploadMaxOverdrive, "Max overdrive workers for migration uploads")
+	flag.DurationVar(&cfg.Autopilot.MigratorUploadOverdriveTimeout, "autopilot.migratorUploadOverdriveTimeout", cfg.Autopilot.MigratorUploadOverdriveTimeout, "Timeout for overdriving migration uploads")
 
 	// s3
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")
@@ -369,7 +365,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 
 	parseEnvVar("RENTERD_AUTOPILOT_ENABLED", &cfg.Autopilot.Enabled)
 	parseEnvVar("RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL", &cfg.Autopilot.RevisionBroadcastInterval)
-	parseEnvVar("RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER", &cfg.Autopilot.MigratorParallelSlabsPerWorker)
 
 	parseEnvVar("RENTERD_S3_ADDRESS", &cfg.S3.Address)
 	parseEnvVar("RENTERD_S3_ENABLED", &cfg.S3.Enabled)
@@ -388,9 +383,6 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	parseEnvVar("RENTERD_LOG_DATABASE_LEVEL", &cfg.Log.Database.Level)
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
-
-	parseEnvVar("RENTERD_WORKER_REMOTE_ADDRS", &workerRemoteAddrsStr)
-	parseEnvVar("RENTERD_WORKER_API_PASSWORD", &workerRemotePassStr)
 
 	parseEnvVar("RENTERD_EXPLORER_DISABLE", &cfg.Explorer.Disable)
 	parseEnvVar("RENTERD_EXPLORER_URL", &cfg.Explorer.URL)
