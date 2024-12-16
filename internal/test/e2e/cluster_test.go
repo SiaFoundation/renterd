@@ -2564,7 +2564,7 @@ func TestDownloadAllHosts(t *testing.T) {
 	var randomHost []string
 	for _, host := range cluster.hosts {
 		if _, used := usedHosts[host.PublicKey()]; used {
-			randomHost = []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
+			randomHost = []string{host.RHPv2Addr(), host.RHPv4Addr()}
 			break
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -140,11 +139,6 @@ func (c *Client) AccountBalance(ctx context.Context, hk types.PublicKey, hostIP 
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
 		balance, err = rhp.RPCAccountBalance(ctx, c, account)
 		if err != nil {
-			// TODO: remove this hack once the host is fixed
-			if strings.Contains(err.Error(), "internal error") {
-				err = nil
-				balance = types.ZeroCurrency
-			}
 			return err
 		}
 		return err
