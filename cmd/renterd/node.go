@@ -68,9 +68,6 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	if cfg.Bus.RemoteAddr != "" && !cfg.Worker.Enabled && !cfg.Autopilot.Enabled {
 		return nil, errors.New("remote bus, remote worker, and no autopilot -- nothing to do!")
 	}
-	if cfg.Autopilot.Enabled && !cfg.Worker.Enabled && len(cfg.Worker.Remotes) == 0 {
-		return nil, errors.New("can't enable autopilot without providing either workers to connect to or creating a worker")
-	}
 
 	// initialise directory
 	err := os.MkdirAll(cfg.Directory, 0700)
@@ -156,58 +153,49 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	// initialise workers
 	var s3Srv *http.Server
 	var s3Listener net.Listener
-	var workers []autopilot.Worker
-	if len(cfg.Worker.Remotes) == 0 {
-		if cfg.Worker.Enabled {
-			workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
-			w, err := worker.New(cfg.Worker, workerKey, bc, logger)
+	if cfg.Worker.Enabled {
+		workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
+		w, err := worker.New(cfg.Worker, workerKey, bc, logger)
+		if err != nil {
+			logger.Fatal("failed to create worker: " + err.Error())
+		}
+		shutdownFns = append(shutdownFns, fn{
+			name: "Worker",
+			fn:   w.Shutdown,
+		})
+
+		mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
+
+		if cfg.S3.Enabled {
+			s3Handler, err := s3.New(bc, w, logger, s3.Opts{
+				AuthDisabled:      cfg.S3.DisableAuth,
+				HostBucketBases:   cfg.S3.HostBucketBases,
+				HostBucketEnabled: cfg.S3.HostBucketEnabled,
+			})
 			if err != nil {
-				logger.Fatal("failed to create worker: " + err.Error())
+				err = errors.Join(err, w.Shutdown(context.Background()))
+				logger.Fatal("failed to create s3 handler: " + err.Error())
+			}
+
+			s3Srv = &http.Server{
+				Addr:    cfg.S3.Address,
+				Handler: s3Handler,
+			}
+			s3Listener, err = utils.ListenTCP(cfg.S3.Address, logger)
+			if err != nil {
+				logger.Fatal("failed to create listener: " + err.Error())
 			}
 			shutdownFns = append(shutdownFns, fn{
-				name: "Worker",
-				fn:   w.Shutdown,
+				name: "S3",
+				fn:   s3Srv.Shutdown,
 			})
-
-			mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
-			wc := worker.NewClient(cfg.HTTP.Address+"/api/worker", cfg.HTTP.Password)
-			workers = append(workers, wc)
-
-			if cfg.S3.Enabled {
-				s3Handler, err := s3.New(bc, w, logger, s3.Opts{
-					AuthDisabled:      cfg.S3.DisableAuth,
-					HostBucketBases:   cfg.S3.HostBucketBases,
-					HostBucketEnabled: cfg.S3.HostBucketEnabled,
-				})
-				if err != nil {
-					err = errors.Join(err, w.Shutdown(context.Background()))
-					logger.Fatal("failed to create s3 handler: " + err.Error())
-				}
-
-				s3Srv = &http.Server{
-					Addr:    cfg.S3.Address,
-					Handler: s3Handler,
-				}
-				s3Listener, err = utils.ListenTCP(cfg.S3.Address, logger)
-				if err != nil {
-					logger.Fatal("failed to create listener: " + err.Error())
-				}
-				shutdownFns = append(shutdownFns, fn{
-					name: "S3",
-					fn:   s3Srv.Shutdown,
-				})
-			}
-		}
-	} else {
-		for _, remote := range cfg.Worker.Remotes {
-			workers = append(workers, worker.NewClient(remote.Address, remote.Password))
-			logger.Info("connecting to remote worker at " + remote.Address)
 		}
 	}
 
 	// initialise autopilot
 	if cfg.Autopilot.Enabled {
-		ap, err := autopilot.New(cfg.Autopilot, bc, workers, logger)
+		workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
+		ap, err := autopilot.New(cfg.Autopilot, workerKey, bc, logger)
 		if err != nil {
 			logger.Fatal("failed to create autopilot: " + err.Error())
 		}

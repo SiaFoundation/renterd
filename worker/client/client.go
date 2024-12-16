@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
 )
 
 // A Client provides methods for interacting with a worker.
@@ -39,7 +38,7 @@ func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account 
 
 // Accounts returns all accounts.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/accounts"), &accounts)
+	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
 	return
 }
 
@@ -146,11 +145,6 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 func (c *Client) Memory(ctx context.Context) (resp api.MemoryResponse, err error) {
 	err = c.c.WithContext(ctx).GET("/memory", &resp)
 	return
-}
-
-// MigrateSlab migrates the specified slab.
-func (c *Client) MigrateSlab(ctx context.Context, slab object.Slab) error {
-	return c.c.WithContext(ctx).POST("/slab/migrate", slab, nil)
 }
 
 // RemoveObjects removes the object with given prefix.
