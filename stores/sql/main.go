@@ -201,7 +201,7 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 		  INNER JOIN hosts ON contracts.host_id = hosts.id
 		  WHERE contracts.archival_reason IS NULL
 		  AND hosts.id = host_sectors.db_host_id
-		)`, time.Now())
+		)`)
 	if err != nil {
 		return fmt.Errorf("failed to delete host_sectors: %w", err)
 	}

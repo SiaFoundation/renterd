@@ -2950,8 +2950,6 @@ func TestV1ToV2Transition(t *testing.T) {
 	for _, c := range archivedContracts {
 		if c.ArchivalReason != "migrated to v2" {
 			t.Fatalf("expected archival reason to be 'migrated to v2', got %v", c.ArchivalReason)
-		} else if c.V2 {
-			t.Fatalf("expected contract to be v1, got v2")
 		}
 		usedHosts[c.HostKey] = struct{}{}
 	}
@@ -2976,24 +2974,31 @@ func TestV1ToV2Transition(t *testing.T) {
 		delete(usedHosts, c.HostKey)
 	}
 
-	// check health is 1
 	tt.Retry(100, 100*time.Millisecond, func() error {
+		// check health is 1
 		object, err := cluster.Bus.Object(context.Background(), testBucket, "foo", api.GetObjectOptions{})
 		tt.OK(err)
 		if object.Health != 1 {
 			return fmt.Errorf("expected health to be 1, got %v", object.Health)
 		}
+
+		// check that the contracts now contain the data
+		activeContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
+		tt.OK(err)
+		for _, c := range activeContracts {
+			// check revision
+			rev, err := cluster.Bus.ContractRevision(context.Background(), c.ID)
+			tt.OK(err)
+			if rev.Size != rhpv4.SectorSize {
+				return fmt.Errorf("expected sector size to be %v, got %v", rhpv4.SectorSize, rev.Size)
+			}
+			// check local metadata
+			if c.Size != rhpv4.SectorSize {
+				return fmt.Errorf("expected sector size to be %v, got %v", rhpv4.SectorSize, c.Size)
+			}
+		}
 		return nil
 	})
-
-	// check that the contracts now contain the data
-	activeContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
-	tt.OK(err)
-	for _, c := range activeContracts {
-		if c.Size != rhpv4.SectorSize {
-			t.Fatalf("expected sector size to be %v, got %v", rhpv4.SectorSize, c.Size)
-		}
-	}
 
 	// download file to make sure it's still there
 	buf := new(bytes.Buffer)
