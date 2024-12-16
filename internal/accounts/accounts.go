@@ -1,4 +1,4 @@
-package worker
+package accounts
 
 import (
 	"context"
@@ -42,15 +42,15 @@ var (
 )
 
 type (
-	AccountFunder interface {
+	Funder interface {
 		FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error
 	}
 
-	AccountSyncer interface {
+	Syncer interface {
 		SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error
 	}
 
-	AccountStore interface {
+	Store interface {
 		Accounts(context.Context, string) ([]api.Account, error)
 		UpdateAccounts(context.Context, []api.Account) error
 	}
@@ -69,14 +69,14 @@ type (
 )
 
 type (
-	AccountMgr struct {
+	Manager struct {
 		alerts         alerts.Alerter
-		funder         AccountFunder
-		syncer         AccountSyncer
+		funder         Funder
+		syncer         Syncer
 		cs             ContractStore
 		hs             HostStore
 		css            ConsensusStateStore
-		s              AccountStore
+		s              Store
 		key            utils.AccountsKey
 		logger         *zap.SugaredLogger
 		owner          string
@@ -104,14 +104,17 @@ type (
 	}
 )
 
-// NewAccountManager creates a new account manager. It will load all accounts
-// from the given store and mark the shutdown as unclean. When Shutdown is
-// called it will save all accounts.
-func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder AccountFunder, syncer AccountSyncer, css ConsensusStateStore, cs ContractStore, hs HostStore, s AccountStore, refillInterval time.Duration, l *zap.Logger) (*AccountMgr, error) {
+// NewManager creates a new account manager. It will load all accounts from the
+// given store and mark the shutdown as unclean. When Shutdown is called it will
+// save all accounts.
+func NewManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, funder Funder, syncer Syncer, css ConsensusStateStore, cs ContractStore, hs HostStore, s Store, refillInterval time.Duration, l *zap.Logger) (*Manager, error) {
 	logger := l.Named("accounts").Sugar()
+	if refillInterval == 0 {
+		return nil, errors.New("refill interval must be set")
+	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	a := &AccountMgr{
+	a := &Manager{
 		alerts: alerter,
 		funder: funder,
 		syncer: syncer,
@@ -140,13 +143,13 @@ func NewAccountManager(key utils.AccountsKey, owner string, alerter alerts.Alert
 }
 
 // Account returns the account with the given id.
-func (a *AccountMgr) Account(hostKey types.PublicKey) api.Account {
+func (a *Manager) Account(hostKey types.PublicKey) api.Account {
 	acc := a.account(hostKey)
 	return acc.convert()
 }
 
 // Accounts returns all accounts.
-func (a *AccountMgr) Accounts() []api.Account {
+func (a *Manager) Accounts() []api.Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	accounts := make([]api.Account, 0, len(a.byID))
@@ -157,7 +160,7 @@ func (a *AccountMgr) Accounts() []api.Account {
 }
 
 // ResetDrift resets the drift on an account.
-func (a *AccountMgr) ResetDrift(id rhpv3.Account) error {
+func (a *Manager) ResetDrift(id rhpv3.Account) error {
 	a.mu.Lock()
 	account, exists := a.byID[id]
 	if !exists {
@@ -170,7 +173,7 @@ func (a *AccountMgr) ResetDrift(id rhpv3.Account) error {
 	return nil
 }
 
-func (a *AccountMgr) Shutdown(ctx context.Context) error {
+func (a *Manager) Shutdown(ctx context.Context) error {
 	accounts := a.Accounts()
 	err := a.s.UpdateAccounts(ctx, accounts)
 	if err != nil {
@@ -194,7 +197,7 @@ func (a *AccountMgr) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (a *AccountMgr) account(hk types.PublicKey) *Account {
+func (a *Manager) account(hk types.PublicKey) *Account {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -226,11 +229,11 @@ func (a *AccountMgr) account(hk types.PublicKey) *Account {
 
 // ForHost returns an account to use for a given host. If the account
 // doesn't exist, a new one is created.
-func (a *AccountMgr) ForHost(hk types.PublicKey) *Account {
+func (a *Manager) ForHost(hk types.PublicKey) *Account {
 	return a.account(hk)
 }
 
-func (a *AccountMgr) run() {
+func (a *Manager) run() {
 	// wait for store to become available
 	var saved []api.Account
 	var err error
@@ -300,7 +303,7 @@ func (a *AccountMgr) run() {
 	}
 }
 
-func (a *AccountMgr) markRefillInProgress(hk types.PublicKey) bool {
+func (a *Manager) markRefillInProgress(hk types.PublicKey) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	_, inProgress := a.inProgressRefills[hk]
@@ -311,7 +314,7 @@ func (a *AccountMgr) markRefillInProgress(hk types.PublicKey) bool {
 	return true
 }
 
-func (a *AccountMgr) markRefillDone(hk types.PublicKey) {
+func (a *Manager) markRefillDone(hk types.PublicKey) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	_, inProgress := a.inProgressRefills[hk]
@@ -326,7 +329,7 @@ func (a *AccountMgr) markRefillDone(hk types.PublicKey) {
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
 // until the previously launched goroutine returns.
-func (a *AccountMgr) refillAccounts() {
+func (a *Manager) refillAccounts() {
 	// fetch all contracts
 	contracts, err := a.cs.Contracts(a.shutdownCtx, api.ContractsOpts{})
 	if err != nil {
@@ -386,7 +389,7 @@ func (a *AccountMgr) refillAccounts() {
 	}
 }
 
-func (a *AccountMgr) refillAccount(ctx context.Context, contract api.ContractMetadata, host api.HostInfo) (bool, error) {
+func (a *Manager) refillAccount(ctx context.Context, contract api.ContractMetadata, host api.HostInfo) (bool, error) {
 	// fetch the account
 	account := a.Account(contract.HostKey)
 
