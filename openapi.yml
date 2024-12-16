@@ -729,6 +729,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/accounts/fund:
     post:
       summary: Fund account
@@ -854,6 +855,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/alerts/dismiss:
     post:
       summary: Dismiss alerts
@@ -874,6 +876,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/alerts/register:
     post:
       summary: Register an alert
@@ -1003,6 +1006,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/bucket/{name}/policy:
     put:
       summary: Update bucket policy
@@ -1045,6 +1049,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/bucket/{name}:
     get:
       summary: Get bucket
@@ -1119,14 +1124,623 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                block:
-                  type: string
-                  description: The block to accept
+              $ref: "#/components/schemas/Block"
       responses:
         "200":
           description: Successfully accepted block
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/consensus/network:
+    get:
+      summary: Get network details
+      description: Returns various details about the network.
+      responses:
+        "200":
+          description: Successfully retrieved network
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Network"
+
+  /bus/consensus/siafundfee/{payout}:
+    get:
+      summary: Get siafund fee
+      description: Returns the siafund fee for the specified payout.
+      parameters:
+        - name: payout
+          in: path
+          required: true
+          description: The payout to calculate the fee for
+          schema:
+            $ref: "#/components/schemas/Currency"
+      responses:
+        "200":
+          description: Successfully retrieved siafund fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Currency"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/consensus/state:
+    get:
+      summary: Get consensus state
+      description: Returns the current consensus state.
+      responses:
+        "200":
+          description: Successfully retrieved consensus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsensusState"
+
+  /bus/contracts:
+    get:
+      summary: Get all contracts
+      parameters:
+        - name: filtermode
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, all, good]
+            default: active
+      responses:
+        "200":
+          description: List of contracts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractMetadata"
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidFilterMode:
+                  summary: Invalid filter mode example
+                  value: "invalid filter mode 'bad', must be one of [active, archived, all, good]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Add a contract
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractMetadata"
+      responses:
+        "200":
+          description: Successfully updated contract
+        "500":
+          description: Internal server error
+
+  /contracts/all:
+    delete:
+      summary: Archives all contracts
+      responses:
+        "200":
+          description: All contracts where archived successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/archive:
+    post:
+      summary: Archive contracts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A mapping of file contract IDs to archive reasons.
+              additionalProperties:
+                $ref: "#/components/schemas/FileContractID"
+              example:
+                "fcid:fd887808d78b3c8c6c04d1bbc14a0f6ebc2f546514e3a4b79102e31da712423c": "custom reason"
+                "fcid:82ffce83b89817e876194a07f1b4442052e2bb4932ca80a6a51753d86da3d840": "custom reason"
+      responses:
+        "200":
+          description: Contracts archived successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/form:
+    post:
+      summary: Form a new contract
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The request body for the POST /contracts endpoint.
+              properties:
+                endHeight:
+                  allOf:
+                    - $ref: "#/components/schemas/BlockHeight"
+                    - description: The block height at which the contract will end.
+                hostCollateral:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The amount of collateral the host is committing.
+                hostKey:
+                  allOf:
+                    - $ref: "#/components/schemas/PublicKey"
+                    - description: The public key of the host.
+                renterFunds:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The funds the renter is committing.
+                renterAddress:
+                  allOf:
+                    - $ref: "#/components/schemas/Address"
+                    - description: The renter's address
+      responses:
+        "200":
+          description: Contract formed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+        "400":
+          description: Invalid request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidEndHeight:
+                  summary: No end height provided
+                  value: "EndHeight can not be zero"
+                invalidHostKey:
+                  summary: No host key provided
+                  value: "HostKey must be provided"
+                invalidHostCollateral:
+                  summary: No host collateral provided
+                  value: "HostCollateral can not be zero"
+                invalidRenterFunds:
+                  summary: No renter funds provided
+                  value: "RenterFunds can not be zero"
+                invalidRenterAddress:
+                  summary: No renter address provided
+                  value: "RenterAddress must be provided"
+        "404":
+          description: Host not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/prunable:
+    get:
+      summary: Get prunable contract data
+      responses:
+        "200":
+          description: Prunable contract data
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The response containing prunable contract data and summary statistics.
+                properties:
+                  contracts:
+                    type: array
+                    description: A list of prunable contracts with their size information.
+                    items:
+                      type: object
+                      description: Contains the ID and size information of a prunable contract.
+                      properties:
+                        id:
+                          $ref: "#/components/schemas/FileContractID"
+                        prunable:
+                          type: integer
+                          format: uint64
+                          description: The amount of prunable data in bytes.
+                        size:
+                          type: integer
+                          format: uint64
+                          description: The size of the contract in bytes
+                          example:
+                  totalPrunable:
+                    type: integer
+                    format: uint64
+                    description: The total prunable size across all contracts in bytes
+                  totalSize:
+                    type: integer
+                    format: uint64
+                    description: The total size of all contracts in bytes
+
+  /contracts/renewed/{id}:
+    get:
+      summary: Get renewed contract
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Renewed contract metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/spending:
+    post:
+      summary: Record contract spending
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  deletions:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on sector deletions
+                  fundAccount:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on funding ephemeral accounts
+                  sectorRoots:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on listing sector roots
+                  uploads:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on storing sectors
+
+                  contractID:
+                    $ref: "#/components/schemas/FileContractID"
+                  revisionNumber:
+                    $ref: "#/components/schemas/RevisionNumber"
+                  size:
+                    type: integer
+                    format: uint64
+                    description: The size of the contract in bytes
+                  missedHostPayout:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that the host will receive if the contract resolves missed
+                  validRenterPayout:
+                      allOf:
+                        - $ref: "#/components/schemas/Currency"
+                        - description: The amount of siacoins that the renter will receive if the contract resolves valid.
+      responses:
+        "200":
+          description: Spending recorded successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/syncer/address:
+    get:
+      summary: Get the syncer's address
+      description: Returns the address of the syncer.
+      responses:
+        "200":
+          description: Successfully retrieved syncer address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncerAddress"
+
+  /bus/syncer/connect:
+    post:
+      summary: Connect to a syncer
+      description: Connects to the specified syncer.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/SyncerAddress"
+                - description: The address of the syncer to connect to
+      responses:
+        "200":
+          description: Successfully connected to syncer
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/syncer/peers:
+    get:
+      summary: Get syncer peers
+      description: Returns the syncer's peers.
+      responses:
+        "200":
+          description: Successfully retrieved syncer peers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncerAddress"
+
+  /bus/txpool/recommendedfee:
+    get:
+      summary: Get recommended fee
+      description: Returns the recommended fee for a transaction.
+      responses:
+        "200":
+          description: Successfully retrieved recommended fee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Currency"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/txpool/transactions:
+    get:
+      summary: Get all transactions
+      description: Returns all transactions in the transaction pool.
+      responses:
+        "200":
+          description: Successfully retrieved transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Transaction"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/txpool/broadcast:
+    post:
+      summary: Broadcast transaction
+      description: Broadcasts the specified transaction.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Transaction"
+      responses:
+        "200":
+          description: Successfully broadcast transaction
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/wallet:
+    get:
+      summary: Get wallet information
+      description: Returns information about the wallet.
+      responses:
+        "200":
+          description: Successfully retrieved wallet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spendable:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of spendable siacoins in the wallet
+                  confirmed:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that have been confirmed in a block
+                  unconfirmed:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that have not been confirmed in a block
+                  immature:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that have yet to mature
+                  address:
+                    allOf:
+                      - $ref: "#/components/schemas/Address"
+                      - description: The wallet's address
+                  scanHeight:
+                    type: integer
+                    format: uint64
+                    description: The height up until which the wallet is synced
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/wallet/events:
+    get:
+      summary: Get wallet events
+      description: Returns all events related to the wallet.
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of events to return
+          schema:
+            type: integer
+            minimum: -1
+            default: -1
+        - name: offset
+          in: query
+          description: The number of events to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Successfully retrieved wallet events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidLimit:
+                  summary: Invalid limit example
+                  value: "limit must be greater than or equal to -1"
+                invalidOffset:
+                  summary: Invalid offset example
+                  value: "offset must be greater than or equal to 0"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/wallet/pending:
+    get:
+      summary: Get unconfirmed events
+      description: Returns all unconfirmed events in the wallet.
+      responses:
+        "200":
+          description: Successfully retrieved pending events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/wallet/redistribute:
+      post:
+        summary: Redistribute wallet funds
+        description: Redistributes the wallet's funds into desired number of outputs of requested value.
+        requestBody:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outputs:
+                    type: integer
+                    format: uint64
+                    description: The number of outputs to redistribute the wallet's funds into
+                  amount:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The value of each output
+        responses:
+          "200":
+            description: Successfully redistributed wallet funds
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TransactionID"
+          "400":
+            description: Malformed request
+            content:
+              text/plain:
+                schema:
+                  type: string
+          "500":
+            description: Internal server error
+            content:
+              text/plain:
+                schema:
+                  type: string
+
+  /bus/wallet/send:
+    post:
+      summary: Send siacoins
+      description: Sends the specified amount of siacoins to the specified address.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address:
+                  allOf:
+                    - $ref: "#/components/schemas/Address"
+                    - description: The address to send the siacoins to
+                amount:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The amount of siacoins to send
+                subtractMinerFee:
+                  type: boolean
+                  description: Whether to subtract the miner fee from the amount
+                useUnconfirmed:
+                  type: boolean
+                  description: Whether to use unconfirmed outputs
+      responses:
+        "200":
+          description: Successfully sent siacoins
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/TransactionID"
+                  - description: The ID of the transaction
         "400":
           description: Malformed request
           content:
@@ -1177,6 +1791,11 @@ components:
           type: boolean
           description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
 
+    Address:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: The hash of a set of UnlockConditions
+
     Alert:
       type: object
       properties:
@@ -1203,16 +1822,317 @@ components:
           format: date-time
           description: The time the alert was created
 
+    Attestation:
+      type: object
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        key:
+          type: string
+        value:
+          type: string
+          format: byte
+        signature:
+          $ref: "#/components/schemas/Signature"
+
+    Block:
+      type: object
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The ID of the parent block
+        nonce:
+          type: integer
+          format: uint64
+          description: The nonce used to mine the block
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the block was mined
+        minerPayouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        v2:
+          $ref: "#/components/schemas/V2BlockData"
+
+    BlockID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: A unique identifier for a block
+
+    ChainIndex:
+      type: object
+      properties:
+        height:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height of the block in the blockchain
+        id:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The ID of the block
+
+    ContractMetadata:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The unique identifier for the file contract.
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host.
+        v2:
+          type: boolean
+          description: Indicates if the contract is a V2 contract.
+        proofHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height at which the storage proof needs to be submitted
+        renewedFrom:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the contract this one was renewed from
+        revisionHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height of the latest revision
+        revisionNumber:
+          allOf:
+            - $ref: "#/components/schemas/RevisionNumber"
+            - description: The current revision number of the contract
+        size:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes
+        startHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the contract created
+        state:
+          type: string
+          description: The state of the contract
+          enum:
+            - pending
+            - active
+            - complete
+            - failed
+        usability:
+          type: string
+          description: The usability status of the contract
+          enum:
+            - good
+            - bad
+        windowStart:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window starts.
+        windowEnd:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window ends.
+        contractPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The price of forming the contract.
+        initialRenterFunds:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The initial funds provided by the renter.
+        spending:
+          allOf:
+            - $ref: "#/components/schemas/ContractSpending"
+            - description: Costs and spending details of the contract.
+        archivalReason:
+          type: string
+          description: The reason for archiving the contract, if applicable.
+          enum:
+            - renewed
+            - removed
+            - hostpruned
+        renewedTo:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the contract this one was renewed to, if applicable.
+
+    ContractSpending:
+      type: object
+      properties:
+        deletions:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on sector deletions
+        fundAccount:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on funding ephemeral accounts
+        sectorRoots:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on listing sector roots
+        uploads:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on storing sectors
+
+    CoveredFields:
+      type: object
+      properties:
+        wholeTransaction:
+          type: boolean
+          description: Whether the whole transaction is covered by the signature
+        siacoinInputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        siacoinOutputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        fileContracts:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        fileContractRevisions:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        storageProofs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        siafundInputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        siafundOutputs:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        minerFees:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        arbitraryData:
+          type: array
+          items:
+            type: integer
+            format: uint64
+        signatures:
+          type: array
+          items:
+            type: integer
+            format: uint64
+
     Currency:
       type: string
       pattern: "^\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
 
+    FileContract:
+      type: object
+      description: A storage agreement between a renter and a host.
+      properties:
+        filesize:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes.
+        fileMerkleRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the contract's data.
+        windowStart:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window starts.
+        windowEnd:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window ends.
+        payout:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The total payout for the contract.
+        validProofOutputs:
+          type: array
+          description: List of outputs created if the contract is successfully fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        missedProofOutputs:
+          type: array
+          description: List of outputs created if the contract is not fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        unlockHash:
+          $ref: "#/components/schemas/Address"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+
     FileContractID:
-      allOf:
-        - $ref: "#/components/schemas/Hash256"
-        - description: A unique identifier for a file contract
+      type: string
+      pattern: "^fcid:[0-9a-fA-F]{64}$"
+      description: A unique identifier for a file contract
+
+    FileContractRevision:
+      type: object
+      description: Represents a revision to an existing file contract.
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the parent file contract being revised.
+        unlockConditions:
+          allOf:
+            - $ref: "#/components/schemas/UnlockConditions"
+            - description: The conditions required to unlock the contract for revision.
+        filesize:
+          type: integer
+          format: uint64
+          description: The size of the file in bytes after the revision.
+        fileMerkleRoot:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The updated Merkle root of the file's data.
+        windowStart:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the revised proof window starts.
+        windowEnd:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the revised proof window ends.
+        validProofOutputs:
+          type: array
+          description: Updated outputs if the revised contract is successfully fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        missedProofOutputs:
+          type: array
+          description: Updated outputs if the revised contract is not fulfilled.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        unlockHash:
+          allOf:
+            - $ref: "#/components/schemas/Address"
+            - description: The updated hash of the conditions required to unlock the contract funds.
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
 
     Hash256:
       type: string
@@ -1224,11 +2144,426 @@ components:
       pattern: "^ed25519:[0-9a-fA-F]{64}$"
       description: A ed25519 public key
 
+    SatisfiedPolicy:
+      type: object
+      properties:
+        policy:
+          type: object
+        signature:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signature"
+        preimages:
+          type: array
+          items:
+            type: string
+            format: byte
+
+    SiacoinElement:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SiacoinOutputID"
+            - description: The ID of the element
+        stateElement:
+          allOf:
+            - $ref: "#/components/schemas/StateElement"
+            - description: The state of the element
+        siafundOutput:
+          allOf:
+            - $ref: "#/components/schemas/SiacoinOutput"
+            - description: The output of the element
+        maturityHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the output matures
+
+    SiacoinInput:
+      type: object
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/SiacoinOutputID"
+            - description: The ID of the output being spent
+        unlockConditions:
+          allOf:
+            - $ref: "#/components/schemas/UnlockConditions"
+            - description: The unlock conditions required to spend the output
+
+    SiacoinOutput:
+      type: object
+      properties:
+        value:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The amount of Siacoins in the output
+        address:
+          $ref: "#/components/schemas/Address"
+
+    SiacoinOutputID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a Siacoin output.
+
+    SiafundElement:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SiafundOutputID"
+            - description: The ID of the element
+        stateElement:
+          allOf:
+            - $ref: "#/components/schemas/StateElement"
+            - description: The state of the element
+        siafundOutput:
+          allOf:
+            - $ref: "#/components/schemas/SiafundOutput"
+            - description: The output of the element
+        claimStart:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: value of SiafundTaxRevenue when element was created
+
+    SiafundInput:
+      type: object
+      description: Represents an input used to spend an unspent Siafund output.
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/SiafundOutputID"
+            - description: The ID of the parent Siafund output being spent.
+        unlockConditions:
+          allOf:
+            - $ref: "#/components/schemas/UnlockConditions"
+            - description: The conditions required to unlock the parent Siafund output.
+        claimAddress:
+          allOf:
+            - $ref: "#/components/schemas/Address"
+            - description: The address receiving the Siacoin claim generated by the Siafund output.
+
+    SiafundOutput:
+      type: object
+      description: Represents an output created to distribute Siafund.
+      properties:
+        value:
+          type: integer
+          format: uint64
+          description: The amount of Siafund in the output.
+        address:
+          allOf:
+            - $ref: "#/components/schemas/Address"
+            - description: The address receiving the Siafund.
+
+    SiafundOutputID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a Siafund output.
+
+    Signature:
+      type: string
+      format: byte
+      pattern: "[0-9a-fA-F]{64}"
+      description: A ed25519 signature
+
     SignedCurrency:
       type: string
       pattern: "^-?\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: A signed amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
+    StateElement:
+      type: object
+      properties:
+        leafIndex:
+          type: integer
+          format: uint64
+          description: The index of the element in the Merkle tree
+        merkleProof:
+          type: array
+          description: The Merkle proof demonstrating the inclusion of the leaf
+          items:
+            $ref: "#/components/schemas/Hash256"
+
+    StorageProof:
+      type: object
+      description: Represents a proof of storage for a file contract.
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the file contract being proven.
+        leaf:
+          type: string
+          format: byte
+          description: The selected leaf from the Merkle tree of the file's data.
+        proof:
+          type: array
+          description: The Merkle proof demonstrating the inclusion of the leaf.
+          items:
+            $ref: "#/components/schemas/Hash256"
+
+    Transaction:
+      type: object
+      properties:
+        siacoinInputs:
+          type: array
+          description: List of Siacoin inputs used in the transaction.
+          items:
+            $ref: "#/components/schemas/SiacoinInput"
+        siacoinOutputs:
+          type: array
+          description: List of Siacoin outputs created by the transaction.
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        fileContracts:
+          type: array
+          description: List of file contracts created by the transaction.
+          items:
+            $ref: "#/components/schemas/FileContract"
+        fileContractRevisions:
+          type: array
+          description: List of revisions to existing file contracts included in the transaction.
+          items:
+            $ref: "#/components/schemas/FileContractRevision"
+        storageProofs:
+          type: array
+          description: List of storage proofs asserting the storage of data for file contracts.
+          items:
+            $ref: "#/components/schemas/StorageProof"
+        siafundInputs:
+          type: array
+          description: List of Siafund inputs spent in the transaction.
+          items:
+            $ref: "#/components/schemas/SiafundInput"
+        siafundOutputs:
+          type: array
+          description: List of Siafund outputs created by the transaction.
+          items:
+            $ref: "#/components/schemas/SiafundOutput"
+        minerFees:
+          type: array
+          description: List of miner fees included in the transaction.
+          items:
+            $ref: "#/components/schemas/Currency"
+        arbitraryData:
+          type: array
+          description: Arbitrary binary data included in the transaction.
+          items:
+            type: string
+            format: byte
+        signatures:
+          type: array
+          description: List of cryptographic signatures verifying the transaction.
+          items:
+            $ref: "#/components/schemas/TransactionSignature"
+
+    TransactionID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a transaction.
+
+    TransactionSignature:
+      type: object
+      properties:
+        parentID:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The ID of the transaction being signed
+        publicKeyIndex:
+          type: integer
+          format: uint64
+          description: The index of the public key used to sign the transaction
+        timelock:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the outputs in the transaction can be spent
+        coveredFields:
+          allOf:
+            - $ref: "#/components/schemas/CoveredFields"
+            - description: Indicates which fields of the transaction are covered by the signature
+        signature:
+          allOf:
+          - $ref: "#/components/schemas/Signature"
+          - description: The signature of the transaction
+
+    UnlockConditions:
+      type: object
+      properties:
+        timelock:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the outputs can be spent
+        publicKeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnlockKey"
+        signaturesRequired:
+          type: integer
+          format: uint64
+          description: The number of signatures required to spend the output
+
+    UnlockKey:
+      type: object
+      properties:
+        algorithm:
+          type: string
+          format: bytes
+          description: |
+            A fixed 16-byte array that specifies the algorithm used to generate
+            the key
+          example: "ed25519"
+        key:
+          description: |
+            A 32-byte key represented as a hex-encoded string. Must be exactly
+            64 characters long, containing only hexadecimal digits
+          type: string
+          format: bytes
+          pattern: "^[a-fA-F0-9]{64}$"
+
+    V2BlockData:
+      type: object
+      properties:
+        height:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height of the block
+        commitment:
+          $ref: "#/components/schemas/Hash256"
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2Transaction"
+
+    V2FileContract:
+      type: object
+      properties:
+        capacity:
+          type: integer
+          format: uint64
+        filesize:
+          type: integer
+          format: uint64
+        fileMerkleRoot:
+          $ref: "#/components/schemas/Hash256"
+        proofHeight:
+          type: integer
+          format: uint64
+        expirationHeight:
+          type: integer
+          format: uint64
+        renterOutput:
+          $ref: "#/components/schemas/SiacoinOutput"
+        hostOutput:
+          $ref: "#/components/schemas/SiacoinOutput"
+        missedHostValue:
+          $ref: "#/components/schemas/Currency"
+        totalCollateral:
+          $ref: "#/components/schemas/Currency"
+        renterPublicKey:
+          $ref: "#/components/schemas/PublicKey"
+        hostPublicKey:
+          $ref: "#/components/schemas/PublicKey"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        renterSignature:
+          $ref: "#/components/schemas/Signature"
+        hostSignature:
+          $ref: "#/components/schemas/Signature"
+
+    V2FileContractElement:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the element
+        stateElement:
+          allOf:
+            - $ref: "#/components/schemas/StateElement"
+            - description: The state of the element
+        v2FileContract:
+          $ref: "#/components/schemas/V2FileContract"
+
+    V2FileContractResolution:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/V2FileContractElement"
+        resolution:
+          type: object
+
+    V2FileContractRevision:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/V2FileContractElement"
+        revision:
+          $ref: "#/components/schemas/V2FileContract"
+
+    V2SiacoinInput:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/SiacoinElement"
+        satisfiedPolicy:
+          $ref: "#/components/schemas/SatisfiedPolicy"
+
+    V2SiafundInput:
+      type: object
+      properties:
+        parent:
+          $ref: "#/components/schemas/SiafundElement"
+        claimAddress:
+          $ref: "#/components/schemas/Address"
+        satisfiedPolicy:
+          $ref: "#/components/schemas/SatisfiedPolicy"
+
+    V2Transaction:
+      type: object
+      properties:
+        siacoinInputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2SiacoinInput"
+        siacoinOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiacoinOutput"
+        siafundInputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2SiafundInput"
+        siafundOutputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiafundOutput"
+        fileContracts:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2FileContract"
+        fileContractRevisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2FileContractRevision"
+        fileContractResolutions:
+          type: array
+          items:
+            $ref: "#/components/schemas/V2FileContractResolution"
+        attestations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attestation"
+        arbitraryData:
+          type: array
+          items:
+            type: string
+            format: byte
+        newFoundationAddress:
+          $ref: "#/components/schemas/Address"
+        minerFee:
+          $ref: "#/components/schemas/Currency"
 
     #############################
     #
@@ -1245,6 +2580,12 @@ components:
           $ref: "#/components/schemas/ContractsConfig"
         hosts:
           $ref: "#/components/schemas/HostsConfig"
+
+    BlockHeight:
+      type: integer
+      format: uint64
+      description: The height of a block
+      example: 92813
 
     Bucket:
       type: object
@@ -1289,6 +2630,21 @@ components:
       properties:
         gougingSettings:
           $ref: "#/components/schemas/GougingSettings"
+
+    ConsensusState:
+      type: object
+      properties:
+        blockHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The current block height
+        lastBlockTime:
+          type: string
+          format: date-time
+          description: The time of the last block
+        synced:
+          type: boolean
+          description: Whether the node is synced with the network
 
     ContractsConfig:
       type: object
@@ -1337,6 +2693,48 @@ components:
       type: string
       pattern: '^(W/)?".*?"$'
       description: An ETag representing a resource
+
+    Event:
+      type: object
+      description: A transaction or other event that affects the wallet including miner payouts, siafund claims, and file contract payouts.
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The event's ID
+        index:
+          allOf:
+            - $ref: "#/components/schemas/ChainIndex"
+            - description: Information about the block that triggered the creation of this event
+        confirmations:
+          type: integer
+          format: uint64
+          description: The number of blocks on top of the block that triggered the creation of this event
+        type:
+          type: string
+          enum:
+            - miner
+            - foundation
+            - siafundClaim
+            - v1Transaction
+            - v1ContractResolution
+            - v2Transaction
+            - v2ContractResolution
+          description: The type of the event
+        data:
+          type: object
+        maturityHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the payout matures.
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the event was created
+        relevant:
+          type: array
+          items:
+            $ref: "#/components/schemas/Address"
 
     GougingSettings:
       type: object
@@ -1413,6 +2811,137 @@ components:
       pattern: ^[0-9a-fA-F]{64}$
       description: A unique identifier for a multipart upload
 
+    Network:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The name of the network
+        initialCoinbase:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The initial coinbase reward
+            - default: "300000000000000000000000000000"
+        minimumCoinbase:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The minimum coinbase reward
+            - default: "30000000000000000000000000000"
+        initialTarget:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The initial target
+            - default: "0000000020000000000000000000000000000000000000000000000000000000"
+        blockInterval:
+          type: integer
+          format: uint64
+          description: The block interval
+          default: 600000000000
+        maturityDelay:
+          type: integer
+          format: uint64
+          description: The maturity delay
+          default: 144
+        hardforkDevAddr:
+          type: object
+          properties:
+            height:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 10000
+            oldAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The old developer address
+                - default: "7d0c44f7664e2d34e53efde0661a6f628ec9264785ae8e3cd7c973e8d190c3c97b5e3ecbc567"
+            newAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The new developer address
+                - default: "f371c70bce9eb8979cd5099f599ec4e4fcb14e0afcf31f9791e03e6496a4c0b358c98279730b"
+        hardforkTax:
+          type: object
+          properties:
+            height:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 21000
+        hardforkStorageProof:
+          type: object
+          properties:
+            height:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 100000
+        hardforkOak:
+          type: object
+          properties:
+            height:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 135000
+            fixHeight:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the fix
+                - example: 139000
+            genesisTimestamp:
+              type: string
+              format: date-time
+              description: The genesis timestamp
+              default: "2015-06-06T16:13:20+02:00"
+        hardforkASIC:
+          type: object
+          properties:
+            height:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 179000
+            oakTime:
+              type: integer
+              format: uint64
+              description: The oak time
+            oakTarget:
+              allOf:
+                - $ref: "#/components/schemas/BlockID"
+                - description: The oak target
+        hardforkFoundation:
+          type: object
+          properties:
+            height:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 298000
+            primaryAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The primary address
+                - default: "053b2def3cbdd078c19d62ce2b4f0b1a3c5e0ffbeeff01280efb1f8969b2f5bb4fdc680f0807"
+            failsafeAddress:
+              allOf:
+                - $ref: "#/components/schemas/Address"
+                - description: The failsafe address
+                - default: "27c22a6c6e6645802a3b8fa0e5374657438ef12716d2205d3e866272de1b644dbabd53d6d560"
+        hardforkV2:
+          type: object
+          properties:
+            allowHeight:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height at which V2 consensus types are allowed
+                - example: 1000000
+            requireHeight:
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height at which V2 consensus types are required
+                - example: 1025000
+
     RedundancySettings:
       type: object
       properties:
@@ -1426,6 +2955,12 @@ components:
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+
+    RevisionNumber:
+      type: integer
+      format: uint64
+      description: The revision number of the contract
+      example: 246
 
     Sector:
       type: object
@@ -1463,3 +2998,8 @@ components:
           minimum: 1
           maximum: 255
           description: The number of data shards the slab is split into
+
+    SyncerAddress:
+      type: string
+      description: The address of the syncer
+      example: "118.92.232.145:9981"
