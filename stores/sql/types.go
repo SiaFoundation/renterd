@@ -299,7 +299,7 @@ func (k *EncryptionKey) Scan(value interface{}) error {
 	case string:
 		bytes = []byte(v)
 	default:
-		return errors.New(fmt.Sprintf("failed to unmarshal EncryptionKey value from %t", value))
+		return fmt.Errorf("failed to unmarshal EncryptionKey value from %t", value)
 	}
 	var ec object.EncryptionKey
 	if err := ec.UnmarshalBinary(bytes); err != nil {
