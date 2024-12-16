@@ -1184,6 +1184,275 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConsensusState"
 
+  /bus/contracts:
+    get:
+      summary: Get all contracts
+      parameters:
+        - name: filtermode
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, all, good]
+            default: active
+      responses:
+        "200":
+          description: List of contracts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractMetadata"
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidFilterMode:
+                  summary: Invalid filter mode example
+                  value: "invalid filter mode 'bad', must be one of [active, archived, all, good]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Add a contract
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractMetadata"
+      responses:
+        "200":
+          description: Successfully updated contract
+        "500":
+          description: Internal server error
+
+  /contracts/all:
+    delete:
+      summary: Archives all contracts
+      responses:
+        "200":
+          description: All contracts where archived successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/archive:
+    post:
+      summary: Archive contracts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A mapping of file contract IDs to archive reasons.
+              additionalProperties:
+                $ref: "#/components/schemas/FileContractID"
+              example:
+                "fcid:fd887808d78b3c8c6c04d1bbc14a0f6ebc2f546514e3a4b79102e31da712423c": "custom reason"
+                "fcid:82ffce83b89817e876194a07f1b4442052e2bb4932ca80a6a51753d86da3d840": "custom reason"
+      responses:
+        "200":
+          description: Contracts archived successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/form:
+    post:
+      summary: Form a new contract
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The request body for the POST /contracts endpoint.
+              properties:
+                endHeight:
+                  allOf:
+                    - $ref: "#/components/schemas/BlockHeight"
+                    - description: The block height at which the contract will end.
+                hostCollateral:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The amount of collateral the host is committing.
+                hostKey:
+                  allOf:
+                    - $ref: "#/components/schemas/PublicKey"
+                    - description: The public key of the host.
+                renterFunds:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The funds the renter is committing.
+                renterAddress:
+                  allOf:
+                    - $ref: "#/components/schemas/Address"
+                    - description: The renter's address
+      responses:
+        "200":
+          description: Contract formed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+        "400":
+          description: Invalid request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidEndHeight:
+                  summary: No end height provided
+                  value: "EndHeight can not be zero"
+                invalidHostKey:
+                  summary: No host key provided
+                  value: "HostKey must be provided"
+                invalidHostCollateral:
+                  summary: No host collateral provided
+                  value: "HostCollateral can not be zero"
+                invalidRenterFunds:
+                  summary: No renter funds provided
+                  value: "RenterFunds can not be zero"
+                invalidRenterAddress:
+                  summary: No renter address provided
+                  value: "RenterAddress must be provided"
+        "404":
+          description: Host not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/prunable:
+    get:
+      summary: Get prunable contract data
+      responses:
+        "200":
+          description: Prunable contract data
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The response containing prunable contract data and summary statistics.
+                properties:
+                  contracts:
+                    type: array
+                    description: A list of prunable contracts with their size information.
+                    items:
+                      type: object
+                      description: Contains the ID and size information of a prunable contract.
+                      properties:
+                        id:
+                          $ref: "#/components/schemas/FileContractID"
+                        prunable:
+                          type: integer
+                          format: uint64
+                          description: The amount of prunable data in bytes.
+                        size:
+                          type: integer
+                          format: uint64
+                          description: The size of the contract in bytes
+                          example:
+                  totalPrunable:
+                    type: integer
+                    format: uint64
+                    description: The total prunable size across all contracts in bytes
+                  totalSize:
+                    type: integer
+                    format: uint64
+                    description: The total size of all contracts in bytes
+
+  /contracts/renewed/{id}:
+    get:
+      summary: Get renewed contract
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Renewed contract metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contracts/spending:
+    post:
+      summary: Record contract spending
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  deletions:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on sector deletions
+                  fundAccount:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on funding ephemeral accounts
+                  sectorRoots:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on listing sector roots
+                  uploads:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: Total amount spent on storing sectors
+
+                  contractID:
+                    $ref: "#/components/schemas/FileContractID"
+                  revisionNumber:
+                    $ref: "#/components/schemas/RevisionNumber"
+                  size:
+                    type: integer
+                    format: uint64
+                    description: The size of the contract in bytes
+                  missedHostPayout:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that the host will receive if the contract resolves missed
+                  validRenterPayout:
+                      allOf:
+                        - $ref: "#/components/schemas/Currency"
+                        - description: The amount of siacoins that the renter will receive if the contract resolves valid.
+      responses:
+        "200":
+          description: Spending recorded successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/syncer/address:
     get:
       summary: Get the syncer's address
@@ -1609,6 +1878,110 @@ components:
             - $ref: "#/components/schemas/BlockID"
             - description: The ID of the block
 
+    ContractMetadata:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The unique identifier for the file contract.
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host.
+        v2:
+          type: boolean
+          description: Indicates if the contract is a V2 contract.
+        proofHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height at which the storage proof needs to be submitted
+        renewedFrom:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the contract this one was renewed from
+        revisionHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height of the latest revision
+        revisionNumber:
+          allOf:
+            - $ref: "#/components/schemas/RevisionNumber"
+            - description: The current revision number of the contract
+        size:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes
+        startHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the contract created
+        state:
+          type: string
+          description: The state of the contract
+          enum:
+            - pending
+            - active
+            - complete
+            - failed
+        usability:
+          type: string
+          description: The usability status of the contract
+          enum:
+            - good
+            - bad
+        windowStart:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window starts.
+        windowEnd:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window ends.
+        contractPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The price of forming the contract.
+        initialRenterFunds:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The initial funds provided by the renter.
+        spending:
+          allOf:
+            - $ref: "#/components/schemas/ContractSpending"
+            - description: Costs and spending details of the contract.
+        archivalReason:
+          type: string
+          description: The reason for archiving the contract, if applicable.
+          enum:
+            - renewed
+            - removed
+            - hostpruned
+        renewedTo:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the contract this one was renewed to, if applicable.
+
+    ContractSpending:
+      type: object
+      properties:
+        deletions:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on sector deletions
+        fundAccount:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on funding ephemeral accounts
+        sectorRoots:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on listing sector roots
+        uploads:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on storing sectors
+
     CoveredFields:
       type: object
       properties:
@@ -1712,9 +2085,9 @@ components:
           $ref: "#/components/schemas/RevisionNumber"
 
     FileContractID:
-      allOf:
-        - $ref: "#/components/schemas/Hash256"
-        - description: A unique identifier for a file contract
+      type: string
+      pattern: "^fcid:[0-9a-fA-F]{64}$"
+      description: A unique identifier for a file contract
 
     FileContractRevision:
       type: object

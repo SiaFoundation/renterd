@@ -787,7 +787,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	case api.ContractFilterModeArchived:
 	case api.ContractFilterModeGood:
 	default:
-		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("invalid filter mode '%v', must be one of [active, archived, all, good]", filterMode), http.StatusBadRequest)
 		return
 	}
 
