@@ -2576,88 +2576,33 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(h.public_key, ?)
+		SELECT sla.id, sla.health, sla.key, sla.min_shards
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
-		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
-		LEFT JOIN contracts c ON c.id = csec.db_contract_id
-		LEFT JOIN host_sectors hs ON hs.db_sector_id = csec.db_sector_id
-		LEFT JOIN hosts h ON h.id = hs.db_host_id
 		WHERE sli.db_object_id = ?
-		ORDER BY sli.object_index ASC, sec.slab_index ASC
-	`, Hash256{}, FileContractID{}, PublicKey{}, objID)
+		ORDER BY sli.object_index ASC
+	`, objID)
 	if err != nil {
 		return api.Object{}, fmt.Errorf("failed to fetch slabs: %w", err)
 	}
 	defer rows.Close()
 
-	slabSlices := object.SlabSlices{}
-	var current *object.SlabSlice
-	var currObjIdx, currSlaIdx int64
+	var slabSlices []object.SlabSlice
 	for rows.Next() {
-		var bufferedSlab bool
-		var objectIndex int64
-		var slabIndex int64
+		var id int64
 		var ss object.SlabSlice
-		var sector object.Sector
-		var fcid types.FileContractID
-		var hk types.PublicKey
-		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
-			&objectIndex, &ss.Offset, &ss.Length, // slice info
-			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
-			&slabIndex, (*Hash256)(&sector.Root), // sector info
-			(*PublicKey)(&fcid), // contract info
-			(*PublicKey)(&hk),   // host info
-		); err != nil {
+		if err := rows.Scan(&id, &ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards); err != nil {
 			return api.Object{}, fmt.Errorf("failed to scan slab slice: %w", err)
 		}
-
-		// sanity check object for corruption
-		isFirst := current == nil && objectIndex == 1 && slabIndex == 1
-		isBuffered := bufferedSlab && objectIndex == currObjIdx+1 && slabIndex == 0
-		isNewSlab := isFirst || isBuffered || (current != nil && objectIndex == currObjIdx+1 && slabIndex == 1)
-		isNewShard := isNewSlab || (objectIndex == currObjIdx && slabIndex == currSlaIdx+1)
-		isNewContract := isNewShard || (objectIndex == currObjIdx && slabIndex == currSlaIdx)
-		if !isFirst && !isBuffered && !isNewSlab && !isNewShard && !isNewContract {
-			return api.Object{}, fmt.Errorf("%w: object index %d, slab index %d, current object index %d, current slab index %d", api.ErrObjectCorrupted, objectIndex, slabIndex, currObjIdx, currSlaIdx)
-		}
-
-		// update indices
-		currObjIdx = objectIndex
-		currSlaIdx = slabIndex
-
-		if isNewSlab {
-			if current != nil {
-				slabSlices = append(slabSlices, *current)
-			}
-			current = &ss
-		}
-
-		// if the slab is buffered there are no sectors/contracts to add
-		if bufferedSlab {
-			continue
-		}
-
-		if isNewShard {
-			current.Shards = append(current.Shards, sector)
-		}
-		if isNewContract {
-			if current.Shards[len(current.Shards)-1].Contracts == nil {
-				current.Shards[len(current.Shards)-1].Contracts = make(map[types.PublicKey][]types.FileContractID)
-			}
-			if _, exists := current.Shards[len(current.Shards)-1].Contracts[hk]; !exists {
-				current.Shards[len(current.Shards)-1].Contracts[hk] = []types.FileContractID{}
-			}
-			if fcid != (types.FileContractID{}) {
-				current.Shards[len(current.Shards)-1].Contracts[hk] = append(current.Shards[len(current.Shards)-1].Contracts[hk], fcid)
-			}
-		}
+		slabSlices = append(slabSlices, ss)
 	}
 
-	// add last slab slice
-	if current != nil {
-		slabSlices = append(slabSlices, *current)
+	// fill in the shards
+	for i := range slabSlices {
+		slabSlices[i].Slab, err = Slab(ctx, tx, slabSlices[i].EncryptionKey)
+		if err != nil {
+			return api.Object{}, fmt.Errorf("failed to fetch slab: %w", err)
+		}
 	}
 
 	return api.Object{
