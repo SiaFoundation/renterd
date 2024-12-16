@@ -2576,7 +2576,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.id, sla.health, sla.key, sla.min_shards
+		SELECT sla.id, sla.health, sla.key, sla.min_shards, sli.offset, sli.length
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
 		WHERE sli.db_object_id = ?
@@ -2587,11 +2587,11 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 	}
 	defer rows.Close()
 
-	var slabSlices []object.SlabSlice
+	slabSlices := object.SlabSlices{}
 	for rows.Next() {
 		var id int64
 		var ss object.SlabSlice
-		if err := rows.Scan(&id, &ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards); err != nil {
+		if err := rows.Scan(&id, &ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, &ss.Offset, &ss.Length); err != nil {
 			return api.Object{}, fmt.Errorf("failed to scan slab slice: %w", err)
 		}
 		slabSlices = append(slabSlices, ss)
