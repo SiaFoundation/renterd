@@ -7,6 +7,7 @@ default: major
 The following routes were added:
 - consensus
 - contracts
+- contract
 - syncer
 - txpool
 - wallet
