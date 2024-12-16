@@ -119,7 +119,8 @@ func (c *Client) FundAccounts(ctx context.Context, hk types.PublicKey, hostIP st
 // LatestRevision returns the latest revision of a contract.
 func (c *Client) LatestRevision(ctx context.Context, hk types.PublicKey, addr string, contractID types.FileContractID) (revision types.V2FileContract, _ error) {
 	err := c.tpool.withTransport(ctx, hk, addr, func(c rhp.TransportClient) (err error) {
-		revision, err = rhp.RPCLatestRevision(ctx, c, contractID)
+		res, err := rhp.RPCLatestRevision(ctx, c, contractID)
+		revision = res.Contract
 		return err
 	})
 	return revision, err
