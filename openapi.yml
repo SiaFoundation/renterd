@@ -2040,9 +2040,17 @@ components:
         algorithm:
           type: string
           format: bytes
+          description: |
+            A fixed 16-byte array that specifies the algorithm used to generate
+            the key
+          example: "ed25519"
         key:
+          description: |
+            A 32-byte key represented as a hex-encoded string. Must be exactly
+            64 characters long, containing only hexadecimal digits
           type: string
           format: bytes
+          pattern: "^[a-fA-F0-9]{64}$"
 
     V2BlockData:
       type: object
