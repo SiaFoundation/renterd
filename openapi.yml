@@ -1622,12 +1622,9 @@ components:
           $ref: "#/components/schemas/V2BlockData"
 
     BlockID:
-      type: object
-      properties:
-        id:
-          allOf:
-            - $ref: "#/components/schemas/Hash256"
-            - description: A unique identifier for a block
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: A unique identifier for a block
 
     ChainIndex:
       type: object
@@ -2480,73 +2477,87 @@ components:
           allOf:
             - $ref: "#/components/schemas/Currency"
             - description: The initial coinbase reward
+            - default: "300000000000000000000000000000"
         minimumCoinbase:
           allOf:
             - $ref: "#/components/schemas/Currency"
             - description: The minimum coinbase reward
+            - default: "30000000000000000000000000000"
         initialTarget:
           allOf:
             - $ref: "#/components/schemas/BlockID"
             - description: The initial target
+            - default: "0000000020000000000000000000000000000000000000000000000000000000"
         blockInterval:
           type: integer
           format: uint64
           description: The block interval
+          default: 600000000000
         maturityDelay:
           type: integer
           format: uint64
           description: The maturity delay
+          default: 144
         hardforkDevAddr:
           type: object
           properties:
             height:
-              type: integer
-              format: uint64
-              description: The height of the hardfork
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 10000
             oldAddress:
               allOf:
                 - $ref: "#/components/schemas/Address"
                 - description: The old developer address
+                - default: "7d0c44f7664e2d34e53efde0661a6f628ec9264785ae8e3cd7c973e8d190c3c97b5e3ecbc567"
             newAddress:
               allOf:
                 - $ref: "#/components/schemas/Address"
                 - description: The new developer address
+                - default: "f371c70bce9eb8979cd5099f599ec4e4fcb14e0afcf31f9791e03e6496a4c0b358c98279730b"
         hardforkTax:
           type: object
           properties:
             height:
-              type: integer
-              format: uint64
-              description: The height of the hardfork
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 21000
         hardforkStorageProof:
           type: object
           properties:
             height:
-              type: integer
-              format: uint64
-              description: The height of the hardfork
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 100000
         hardforkOak:
           type: object
           properties:
             height:
-              type: integer
-              format: uint64
-              description: The height of the hardfork
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 135000
             fixHeight:
-              type: integer
-              format: uint64
-              description: The fix height
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the fix
+                - example: 139000
             genesisTimestamp:
               type: string
               format: date-time
               description: The genesis timestamp
+              default: "2015-06-06T16:13:20+02:00"
         hardforkASIC:
           type: object
           properties:
             height:
-              type: integer
-              format: uint64
-              description: The height of the hardfork
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 179000
             oakTime:
               type: integer
               format: uint64
@@ -2559,28 +2570,33 @@ components:
           type: object
           properties:
             height:
-              type: integer
-              format: uint64
-              description: The height of the hardfork
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height of the hardfork
+                - example: 298000
             primaryAddress:
               allOf:
                 - $ref: "#/components/schemas/Address"
                 - description: The primary address
+                - default: "053b2def3cbdd078c19d62ce2b4f0b1a3c5e0ffbeeff01280efb1f8969b2f5bb4fdc680f0807"
             failsafeAddress:
               allOf:
                 - $ref: "#/components/schemas/Address"
                 - description: The failsafe address
+                - default: "27c22a6c6e6645802a3b8fa0e5374657438ef12716d2205d3e866272de1b644dbabd53d6d560"
         hardforkV2:
           type: object
           properties:
             allowHeight:
-              type: integer
-              format: uint64
-              description: The allow height
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height at which V2 consensus types are allowed
+                - example: 1000000
             requireHeight:
-              type: integer
-              format: uint64
-              description: The require height
+              allOf:
+                - $ref: "#/components/schemas/BlockHeight"
+                - description: The height at which V2 consensus types are required
+                - example: 1025000
 
     RedundancySettings:
       type: object

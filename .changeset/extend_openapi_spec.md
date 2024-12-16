@@ -1,5 +1,5 @@
 ---
-default: patch
+default: major
 ---
 
 # Extend OpenAPI spec

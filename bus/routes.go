@@ -219,7 +219,7 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
-	jc.Encode(*b.cm.TipState().Network)
+	jc.Encode(b.cm.TipState().Network)
 }
 
 func (b *Bus) postSystemSQLite3BackupHandler(jc jape.Context) {
