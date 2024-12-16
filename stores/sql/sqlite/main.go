@@ -650,9 +650,10 @@ func (tx *MainDatabaseTx) Peers(ctx context.Context) ([]syncer.PeerInfo, error) 
 
 func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.ChainUpdateTx) error) (err error) {
 	return fn(&chainUpdateTx{
-		ctx: ctx,
-		tx:  tx,
-		l:   tx.log.Named("ProcessChainUpdate"),
+		ctx:   ctx,
+		known: make(map[types.FileContractID]bool),
+		tx:    tx,
+		l:     tx.log.Named("ProcessChainUpdate"),
 	})
 }
 

@@ -200,7 +200,7 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	cau.ForEachFileContractElement(func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, valid bool) {
 		if err != nil {
 			return
-		} else if known, lookupErr := tx.IsKnownContract(fce.ID); err != nil {
+		} else if known, lookupErr := tx.IsKnownContract(fce.ID); lookupErr != nil {
 			err = lookupErr
 			return
 		} else if !known {
@@ -217,7 +217,7 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if err != nil {
 			return
-		} else if known, lookupErr := tx.IsKnownContract(fce.ID); err != nil {
+		} else if known, lookupErr := tx.IsKnownContract(fce.ID); lookupErr != nil {
 			err = lookupErr
 			return
 		} else if !known {
@@ -268,7 +268,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	cru.ForEachFileContractElement(func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, _ bool) {
 		if err != nil {
 			return
-		} else if known, lookupErr := tx.IsKnownContract(fce.ID); err != nil {
+		} else if known, lookupErr := tx.IsKnownContract(fce.ID); lookupErr != nil {
 			err = lookupErr
 			return
 		} else if !known {
@@ -285,7 +285,7 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 	cru.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		if err != nil {
 			return
-		} else if known, lookupErr := tx.IsKnownContract(fce.ID); err != nil {
+		} else if known, lookupErr := tx.IsKnownContract(fce.ID); lookupErr != nil {
 			err = lookupErr
 			return
 		} else if !known {

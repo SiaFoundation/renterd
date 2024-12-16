@@ -213,10 +213,6 @@ func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2F
 }
 
 func (c chainUpdateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
-	if c.known == nil {
-		c.known = make(map[types.FileContractID]bool)
-	}
-
 	if relevant, ok := c.known[fcid]; ok {
 		return relevant, nil
 	}
