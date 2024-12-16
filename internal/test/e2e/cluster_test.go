@@ -2831,7 +2831,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	tt.OK(hosts[0].Close())
 
 	// mine until the contract is expired
-	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight+10)
+	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight)
 
 	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
 	cluster.tt.Retry(10, time.Second, func() error {

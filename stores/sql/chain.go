@@ -204,6 +204,27 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 	}, nil
 }
 
+func IsKnownContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (known bool, _ error) {
+	err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM contracts WHERE fcid = ?)", FileContractID(fcid)).
+		Scan(&known)
+	if err != nil {
+		return false, err
+	}
+	return known, nil
+}
+
+func RecordContractRenewal(ctx context.Context, tx sql.Tx, oldFCID, newFCID types.FileContractID) error {
+	_, err := tx.Exec(ctx, "UPDATE contracts SET renewed_to = ? WHERE fcid = ?", FileContractID(newFCID), FileContractID(oldFCID))
+	if err != nil {
+		return fmt.Errorf("failed to update renewed_to of old contract: %w", err)
+	}
+	_, err = tx.Exec(ctx, "UPDATE contracts SET renewed_from = ? WHERE fcid = ?", FileContractID(oldFCID), FileContractID(newFCID))
+	if err != nil {
+		return fmt.Errorf("failed to update renewed_from of new contract: %w", err)
+	}
+	return nil
+}
+
 func PruneFileContractElements(ctx context.Context, tx sql.Tx, threshold uint64) error {
 	_, err := tx.Exec(ctx, `
 DELETE FROM contract_elements
