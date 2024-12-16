@@ -16,7 +16,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/host"
+	"go.sia.tech/renterd/internal/hosts"
 	"go.sia.tech/renterd/internal/memory"
 	"go.sia.tech/renterd/internal/upload/uploader"
 	"go.sia.tech/renterd/internal/utils"
@@ -63,7 +63,7 @@ type (
 	}
 
 	Manager struct {
-		hm        host.HostManager
+		hm        hosts.Manager
 		mm        memory.MemoryManager
 		os        ObjectStore
 		cl        ContractLocker
@@ -150,7 +150,7 @@ type (
 	}
 )
 
-func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm host.HostManager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
+func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
 	logger = logger.Named("uploadmanager")
 	return &Manager{
 		hm:        hm,

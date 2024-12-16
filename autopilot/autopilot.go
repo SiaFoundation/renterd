@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	rhpv3 "go.sia.tech/core/rhp/v3"
+
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -16,6 +18,7 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/autopilot/migrator"
 	"go.sia.tech/renterd/autopilot/scanner"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/config"
@@ -31,6 +34,8 @@ type Bus interface {
 
 	// accounts
 	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
+	FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
+	UpdateAccounts(context.Context, []api.Account) error
 
 	// autopilot
 	AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
@@ -49,6 +54,8 @@ type Bus interface {
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
 	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
 	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
+	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
+	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
 	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
 	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
 	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
@@ -65,16 +72,36 @@ type Bus interface {
 	// buckets
 	ListBuckets(ctx context.Context) ([]api.Bucket, error)
 
+	// migrations
+	UploadParams(ctx context.Context) (api.UploadParams, error)
+	UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error)
+	AddMultipartPart(ctx context.Context, bucket, key, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+	AddObject(ctx context.Context, bucket, key string, o object.Object, opts api.AddObjectOptions) error
+	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
+	AddUploadingSectors(ctx context.Context, uID api.UploadID, root []types.Hash256) error
+	FinishUpload(ctx context.Context, uID api.UploadID) error
+	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
+	TrackUpload(ctx context.Context, uID api.UploadID) error
+	UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
+
+	// locker
+	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
+	KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error)
+	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
+
 	// objects
 	Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
 	RefreshHealth(ctx context.Context) error
 	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 	SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
+	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
+	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 
 	// scanner
 	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (resp api.HostScanResponse, err error)
 
 	// settings
+	GougingParams(ctx context.Context) (api.GougingParams, error)
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
 	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
 
@@ -92,13 +119,12 @@ type Bus interface {
 }
 
 type Autopilot struct {
-	alerts  alerts.Alerter
-	bus     Bus
-	logger  *zap.SugaredLogger
-	workers *workerPool
+	alerts alerts.Alerter
+	bus    Bus
+	logger *zap.SugaredLogger
 
 	c *contractor.Contractor
-	m *migrator
+	m migrator.Migrator
 	s scanner.Scanner
 
 	tickerDuration time.Duration
@@ -120,30 +146,37 @@ type Autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(cfg config.Autopilot, bus Bus, workers []Worker, logger *zap.Logger) (_ *Autopilot, err error) {
+func New(cfg config.Autopilot, masterKey utils.MasterKey, bus Bus, logger *zap.Logger) (_ *Autopilot, err error) {
 	logger = logger.Named("autopilot")
-	shutdownCtx, shutdownCtxCancel := context.WithCancel(context.Background())
-	ap := &Autopilot{
-		alerts:  alerts.WithOrigin(bus, "autopilot"),
-		bus:     bus,
-		logger:  logger.Sugar(),
-		workers: newWorkerPool(workers),
 
-		shutdownCtx:       shutdownCtx,
-		shutdownCtxCancel: shutdownCtxCancel,
+	ctx, cancel := context.WithCancel(context.Background())
+	ap := &Autopilot{
+		alerts: alerts.WithOrigin(bus, "autopilot"),
+		bus:    bus,
+		logger: logger.Sugar(),
+
+		shutdownCtx:       ctx,
+		shutdownCtxCancel: cancel,
 
 		tickerDuration: cfg.Heartbeat,
 
 		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
 	}
 
-	ap.s, err = scanner.New(ap.bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
+	// create scanner
+	ap.s, err = scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
 	if err != nil {
 		return
 	}
 
-	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, ap.logger)
-	ap.m = newMigrator(ap, cfg.MigrationHealthCutoff, cfg.MigratorParallelSlabsPerWorker)
+	// create contractor
+	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, logger)
+
+	// create migrator
+	ap.m, err = migrator.New(ctx, masterKey, ap.alerts, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	return ap, nil
 }
@@ -225,88 +258,7 @@ func (ap *Autopilot) Run() {
 	for !ap.isStopped() {
 		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
-		ap.workers.withWorker(func(w Worker) {
-			defer ap.logger.Info("autopilot iteration ended")
-
-			// initiate a host scan - no need to be synced or configured for scanning
-			ap.s.Scan(ap.shutdownCtx, ap.bus, forceScan)
-
-			// reset forceScans
-			forceScan = false
-
-			// block until consensus is synced
-			if synced, blocked, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
-				if interrupted {
-					close(tickerFired)
-					return
-				}
-				ap.logger.Info("autopilot stopped before consensus was synced")
-				return
-			} else if blocked {
-				if scanning, _ := ap.s.Status(); !scanning {
-					ap.s.Scan(ap.shutdownCtx, ap.bus, true)
-				}
-			}
-
-			// block until the autopilot is enabled
-			if enabled, interrupted := ap.blockUntilEnabled(ap.ticker.C); !enabled {
-				if interrupted {
-					close(tickerFired)
-					return
-				}
-				ap.logger.Info("autopilot stopped before it was able to confirm it was enabled in the bus")
-				return
-			}
-
-			// fetch autopilot config
-			apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
-			if err != nil {
-				ap.logger.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
-				return
-			}
-
-			// update the scanner with the hosts config
-			ap.s.UpdateHostsConfig(apCfg.Hosts)
-
-			// perform wallet maintenance
-			err = ap.performWalletMaintenance(ap.shutdownCtx)
-			if err != nil {
-				ap.logger.Errorf("wallet maintenance failed, err: %v", err)
-			}
-
-			// build maintenance state
-			buildState, err := ap.buildState(ap.shutdownCtx)
-			if err != nil {
-				ap.logger.Errorf("aborting maintenance, failed to build state, err: %v", err)
-				return
-			}
-
-			// perform maintenance
-			setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, buildState)
-			if err != nil && utils.IsErr(err, context.Canceled) {
-				return
-			} else if err != nil {
-				ap.logger.Errorf("contract maintenance failed, err: %v", err)
-			}
-			maintenanceSuccess := err == nil
-
-			// upon success, notify the migrator. The health of slabs might have
-			// changed.
-			if maintenanceSuccess && setChanged {
-				ap.m.SignalMaintenanceFinished()
-			}
-
-			// migration
-			ap.m.tryPerformMigrations(ap.workers)
-
-			// pruning
-			if apCfg.Contracts.Prune {
-				ap.tryPerformPruning()
-			} else {
-				ap.logger.Info("pruning disabled")
-			}
-		})
-
+		ap.performMaintenance(forceScan, tickerFired)
 		select {
 		case <-ap.shutdownCtx.Done():
 			return
@@ -329,6 +281,7 @@ func (ap *Autopilot) Shutdown(ctx context.Context) error {
 		ap.shutdownCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
+		ap.m.Stop()
 		ap.s.Shutdown(ctx)
 		ap.startTime = time.Time{}
 	}
@@ -456,6 +409,88 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 			}
 		}
 		return
+	}
+}
+
+func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{}) {
+	defer ap.logger.Info("autopilot iteration ended")
+
+	// initiate a host scan - no need to be synced or configured for scanning
+	ap.s.Scan(ap.shutdownCtx, ap.bus, forceScan)
+
+	// reset forceScans
+	forceScan = false
+
+	// block until consensus is synced
+	if synced, blocked, interrupted := ap.blockUntilSynced(ap.ticker.C); !synced {
+		if interrupted {
+			close(tickerFired)
+			return
+		}
+		ap.logger.Info("autopilot stopped before consensus was synced")
+		return
+	} else if blocked {
+		if scanning, _ := ap.s.Status(); !scanning {
+			ap.s.Scan(ap.shutdownCtx, ap.bus, true)
+		}
+	}
+
+	// block until the autopilot is enabled
+	if enabled, interrupted := ap.blockUntilEnabled(ap.ticker.C); !enabled {
+		if interrupted {
+			close(tickerFired)
+			return
+		}
+		ap.logger.Info("autopilot stopped before it was able to confirm it was enabled in the bus")
+		return
+	}
+
+	// fetch autopilot config
+	apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
+	if err != nil {
+		ap.logger.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
+		return
+	}
+
+	// update the scanner with the hosts config
+	ap.s.UpdateHostsConfig(apCfg.Hosts)
+
+	// perform wallet maintenance
+	err = ap.performWalletMaintenance(ap.shutdownCtx)
+	if err != nil {
+		ap.logger.Errorf("wallet maintenance failed, err: %v", err)
+	}
+
+	// build maintenance state
+	buildState, err := ap.buildState(ap.shutdownCtx)
+	if err != nil {
+		ap.logger.Errorf("aborting maintenance, failed to build state, err: %v", err)
+		return
+	}
+
+	// perform maintenance
+	setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, buildState)
+	if err != nil && utils.IsErr(err, context.Canceled) {
+		return
+	} else if err != nil {
+		ap.logger.Errorf("contract maintenance failed, err: %v", err)
+	}
+	maintenanceSuccess := err == nil
+
+	// upon success, notify the migrator. The health of slabs might have
+	// changed.
+	if maintenanceSuccess && setChanged {
+		ap.m.SignalMaintenanceFinished()
+	}
+
+	// migration
+	ap.m.Migrate(ap.shutdownCtx)
+
+	// pruning
+	if apCfg.Contracts.Prune {
+		ap.tryPerformPruning()
+	} else {
+		ap.logger.Info("pruning disabled")
 	}
 }
 

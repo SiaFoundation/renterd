@@ -79,17 +79,19 @@ overview of all settings configurable through the CLI.
 | `Worker.UploadOverdriveTimeout`      | Timeout for overdriving slab uploads                 | `3s`                              | `--worker.uploadOverdriveTimeout` | -                                              | `worker.uploadOverdriveTimeout`     |
 | `Worker.Enabled`                     | Enables/disables worker                              | `true`                            | `--worker.enabled`               | `RENTERD_WORKER_ENABLED`                       | `worker.enabled`                    |
 | `Worker.AllowUnauthenticatedDownloads` | Allows unauthenticated downloads                    | -                                 | `--worker.unauthenticatedDownloads` | `RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS` | `worker.allowUnauthenticatedDownloads` |
-| `Worker.RemoteAddrs`                 | List of remote worker addresses (semicolon delimited) | -                                | -                                | `RENTERD_WORKER_REMOTE_ADDRS`                     | `worker.remotes`                    |
-| `Worker.RemotePassword`               | API password for the remote workers                 | -                                | -                                | `RENTERD_WORKER_API_PASSWORD`                     | `worker.remotes`              |
 | `Autopilot.Enabled`					| Enables/disables autopilot							| `true`							| `--autopilot.enabled`			| `RENTERD_AUTOPILOT_ENABLED`						| `autopilot.enabled`					|
-| `Autopilot.AccountsRefillInterval`   | Interval for refilling workers' account balances     | `24h`                             | `--autopilot.accountRefillInterval` | -                                              | `autopilot.accountsRefillInterval`  |
 | `Autopilot.Heartbeat`                | Interval for autopilot loop execution                | `30m`                             | `--autopilot.heartbeat`            | -                                              | `autopilot.heartbeat`               |
-| `Autopilot.MigrationHealthCutoff`    | Threshold for migrating slabs based on health        | `0.75`                            | `--autopilot.migrationHealthCutoff` | -                                              | `autopilot.migrationHealthCutoff`   |
+| `Autopilot.MigratorRefillInterval`           | Interval for refilling account balances       | `24h`                            | `--autopilot.migratorAccountRefillInterval` | -                                     | `autopilot.migratorAccountsRefillInterval`  |
+| `Autopilot.MigratorHealthCutoff`             | Threshold for migrating slabs based on health | `0.75`                           | `--autopilot.migratorHealthCutoff` | -                                              | `autopilot.migratorHealthCutoff`   |
+| `Autopilot.MigratorNumThreads`               | Number of threads migrating slabs             | `1`                              | `--autopilot.migratorNumThreads`   | -                                              | `autopilot.migratorNumThreads` |
+| `Autopilot.MigratorDownloadMaxOverdrive`     | Max overdrive workers for migration downloads | `5`                              | `--autopilot.migratorDownloadMaxOverdrive`  | -                                     | `autopilot.migratorDownloadMaxOverdrive`       |
+| `Autopilot.MigratorDownloadOverdriveTimeout` | Timeout for overdriving migration downloads   | `3s`                             | `--autopilot.migratorDownloadOverdriveTimeout` | -                                  | `autopilot.migratorDownloadOverdriveTimeout`   |
+| `Autopilot.MigratorUploadMaxOverdrive`       | Max overdrive workers for migration uploads   | `5`                              | `--autopilot.migratorUploadMaxOverdrive`    | -                                     | `autopilot.migratorUploadMaxOverdrive`         |
+| `Autopilot.MigratorUploadOverdriveTimeout`   | Timeout for overdriving migration uploads     | `3s`                             | `--autopilot.migratorUploadOverdriveTimeout` | -                                    | `autopilot.migratorUploadOverdriveTimeout`     |
 | `Autopilot.RevisionBroadcastInterval`| Interval for broadcasting contract revisions         | `168h` (7 days)                   | `--autopilot.revisionBroadcastInterval` | `RENTERD_AUTOPILOT_REVISION_BROADCAST_INTERVAL` | `autopilot.revisionBroadcastInterval` |
 | `Autopilot.ScannerBatchSize`         | Batch size for host scanning                         | `1000`                            | `--autopilot.scannerBatchSize`      | -                                              | `autopilot.scannerBatchSize`        |
 | `Autopilot.ScannerInterval`          | Interval for scanning hosts                          | `24h`                             | `--autopilot.scannerInterval`       | -                                              | `autopilot.scannerInterval`         |
 | `Autopilot.ScannerNumThreads`        | Number of threads for scanning hosts                 | `100`                             | -                                | -                                              | `autopilot.scannerNumThreads`       |
-| `Autopilot.MigratorParallelSlabsPerWorker` | Parallel slab migrations per worker                    | `1`                               | `--autopilot.migratorParallelSlabsPerWorker` | `RENTERD_MIGRATOR_PARALLEL_SLABS_PER_WORKER` | `autopilot.migratorParallelSlabsPerWorker` |
 | `S3.Address`                         | Address for serving S3 API                           | `:9982`                          | `--s3.address`                     | `RENTERD_S3_ADDRESS`                           | `s3.address`                        |
 | `S3.DisableAuth`                     | Disables authentication for S3 API                   | `false`                           | `--s3.disableAuth`                 | `RENTERD_S3_DISABLE_AUTH`                      | `s3.disableAuth`                    |
 | `S3.Enabled`                         | Enables/disables S3 API                              | `true`                            | `--s3.enabled`                     | `RENTERD_S3_ENABLED`                           | `s3.enabled`                        |
@@ -135,11 +137,7 @@ occur. Therefor it is important to start the worker after the bus is reachable.
 
 To run the autopilot separately, the worker has to be disabled using the
 `--worker.enabled` flag. Similar to the worker, the autopilot has to be
-configured with a remote bus for the node not to start a bus itself. Alongside
-with knowing where the bus is located, the autopilot also has to be aware of the
-workers. These remote workers can be configured through yaml under the option
-`worker.remotes`, or through environment variables
-(`RENTERD_WORKER_REMOTE_ADDRS` and `RENTERD_WORKER_API_PASSWORD`).
+configured with a remote bus for the node not to start a bus itself.
 
 #### Example docker-compose with minimal configuration
 
@@ -193,8 +191,6 @@ services:
       - RENTERD_API_PASSWORD=autopilot-pass
       - RENTERD_BUS_API_PASSWORD=bus-pass
       - RENTERD_BUS_REMOTE_ADDR=http://bus:9980/api/bus
-      - RENTERD_WORKER_API_PASSWORD=<worker-password>
-      - RENTERD_WORKER_REMOTE_ADDRS=http://worker-1:9980/api/worker;http://worker-2:9980/api/worker
     ports:
       - "9984:9980"
     depends_on:
