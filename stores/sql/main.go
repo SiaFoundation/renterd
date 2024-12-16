@@ -192,20 +192,19 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
 
-	// TODO: update all updated_at timestamps of host_sectors that are no longer used and only delete the ones
-	// that haven't been updated in 72 hours
-	//	_, err = tx.Exec(ctx, `UPDATE host_sectors
-	//	  SET updated_at = ?
-	//	  WHERE NOT EXISTS (
-	//	    SELECT 1
-	//	    FROM contracts
-	//	    INNER JOIN hosts ON contracts.host_id = hosts.id
-	//	    WHERE contracts.archival_reason IS NULL
-	//	    AND hosts.id = host_sectors.db_host_id
-	//	  )`, time.Now())
-	//	if err != nil {
-	//		return fmt.Errorf("failed to delete host_sectors: %w", err)
-	//	}
+	// delete all host_sectors for every host that we don't have an active
+	// contract with anymore
+	_, err = tx.Exec(ctx, `DELETE FROM host_sectors
+		WHERE NOT EXISTS (
+		  SELECT 1
+		  FROM contracts
+		  INNER JOIN hosts ON contracts.host_id = hosts.id
+		  WHERE contracts.archival_reason IS NULL
+		  AND hosts.id = host_sectors.db_host_id
+		)`, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to delete host_sectors: %w", err)
+	}
 	return nil
 }
 
