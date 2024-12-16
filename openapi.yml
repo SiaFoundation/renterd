@@ -758,6 +758,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/accounts/fund:
     post:
       summary: Fund account
@@ -883,6 +884,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/alerts/dismiss:
     post:
       summary: Dismiss alerts
@@ -903,6 +905,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/alerts/register:
     post:
       summary: Register an alert
@@ -1032,6 +1035,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/bucket/{name}/policy:
     put:
       summary: Update bucket policy
@@ -1074,6 +1078,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/bucket/{name}:
     get:
       summary: Get bucket
@@ -1158,6 +1163,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/consensus/network:
     get:
       summary: Get network details
@@ -1169,6 +1175,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Network"
+
   /bus/consensus/siafundfee/{payout}:
     get:
       summary: Get siafund fee
@@ -1193,6 +1200,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/consensus/state:
     get:
       summary: Get consensus state
@@ -1216,6 +1224,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SyncerAddress"
+
   /bus/syncer/connect:
     post:
       summary: Connect to a syncer
@@ -1236,6 +1245,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/syncer/peers:
     get:
       summary: Get syncer peers
@@ -1267,6 +1277,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/txpool/transactions:
     get:
       summary: Get all transactions
@@ -1286,6 +1297,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/txpool/broadcast:
     post:
       summary: Broadcast transaction
@@ -1347,6 +1359,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/wallet/events:
     get:
       summary: Get wallet events
@@ -1394,6 +1407,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/wallet/pending:
     get:
       summary: Get unconfirmed events
@@ -1413,6 +1427,7 @@ paths:
             text/plain:
               schema:
                 type: string
+
   /bus/wallet/redistribute:
       post:
         summary: Redistribute wallet funds
@@ -1452,6 +1467,7 @@ paths:
               text/plain:
                 schema:
                   type: string
+
   /bus/wallet/send:
     post:
       summary: Send siacoins
@@ -1617,9 +1633,9 @@ components:
       type: object
       properties:
         height:
-          type: integer
-          format: uint64
-          description: The height of the block in the blockchain
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height of the block in the blockchain
         id:
           allOf:
             - $ref: "#/components/schemas/BlockID"
@@ -1701,13 +1717,13 @@ components:
             - $ref: "#/components/schemas/Hash256"
             - description: The Merkle root of the contract's data.
         windowStart:
-          type: integer
-          format: uint64
-          description: The block height when the contract's proof window starts.
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window starts.
         windowEnd:
-          type: integer
-          format: uint64
-          description: The block height when the contract's proof window ends.
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the contract's proof window ends.
         payout:
           allOf:
             - $ref: "#/components/schemas/Currency"
@@ -1723,11 +1739,9 @@ components:
           items:
             $ref: "#/components/schemas/SiacoinOutput"
         unlockHash:
-            $ref: "#/components/schemas/Address"
+          $ref: "#/components/schemas/Address"
         revisionNumber:
-          type: integer
-          format: uint64
-          description: The revision number of the contract.
+          $ref: "#/components/schemas/RevisionNumber"
 
     FileContractID:
       allOf:
@@ -1755,13 +1769,13 @@ components:
             - $ref: "#/components/schemas/Hash256"
             - description: The updated Merkle root of the file's data.
         windowStart:
-          type: integer
-          format: uint64
-          description: The block height when the revised proof window starts.
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the revised proof window starts.
         windowEnd:
-          type: integer
-          format: uint64
-          description: The block height when the revised proof window ends.
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the revised proof window ends.
         validProofOutputs:
           type: array
           description: Updated outputs if the revised contract is successfully fulfilled.
@@ -1777,9 +1791,7 @@ components:
             - $ref: "#/components/schemas/Address"
             - description: The updated hash of the conditions required to unlock the contract funds.
         revisionNumber:
-          type: integer
-          format: uint64
-          description: The updated revision number of the contract.
+          $ref: "#/components/schemas/RevisionNumber"
 
     Hash256:
       type: string
@@ -1799,8 +1811,7 @@ components:
         signature:
           type: array
           items:
-            type: string
-            format: byte
+            $ref: "#/components/schemas/Signature"
         preimages:
           type: array
           items:
@@ -1823,9 +1834,9 @@ components:
             - $ref: "#/components/schemas/SiacoinOutput"
             - description: The output of the element
         maturityHeight:
-          type: integer
-          format: uint64
-          description: The block height when the output matures
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height when the output matures
 
     SiacoinInput:
       type: object
@@ -2024,25 +2035,25 @@ components:
           format: uint64
           description: The index of the public key used to sign the transaction
         timelock:
-          type: integer
-          format: uint64
-          description: The block height at which the output can be spent
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the outputs in the transaction can be spent
         coveredFields:
           allOf:
             - $ref: "#/components/schemas/CoveredFields"
             - description: Indicates which fields of the transaction are covered by the signature
         signature:
-          type: string
-          format: byte
-          description: The signature of the transaction
+          allOf:
+          - $ref: "#/components/schemas/Signature"
+          - description: The signature of the transaction
 
     UnlockConditions:
       type: object
       properties:
         timelock:
-          type: integer
-          format: uint64
-          description: The block height at which the output can be spent
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the outputs can be spent
         publicKeys:
           type: array
           items:
@@ -2066,9 +2077,9 @@ components:
       type: object
       properties:
         height:
-          type: integer
-          format: uint64
-          description: The height of the block
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height of the block
         commitment:
           $ref: "#/components/schemas/Hash256"
         transactions:
@@ -2106,8 +2117,7 @@ components:
         hostPublicKey:
           $ref: "#/components/schemas/PublicKey"
         revisionNumber:
-          type: integer
-          format: uint64
+          $ref: "#/components/schemas/RevisionNumber"
         renterSignature:
           $ref: "#/components/schemas/Signature"
         hostSignature:
@@ -2222,6 +2232,12 @@ components:
         hosts:
           $ref: "#/components/schemas/HostsConfig"
 
+    BlockHeight:
+      type: integer
+      format: uint64
+      description: The height of a block
+      example: 92813
+
     Bucket:
       type: object
       properties:
@@ -2270,9 +2286,9 @@ components:
       type: object
       properties:
         blockHeight:
-          type: integer
-          format: uint64
-          description: The current block height
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The current block height
         lastBlockTime:
           type: string
           format: date-time
@@ -2347,13 +2363,21 @@ components:
           description: The number of blocks on top of the block that triggered the creation of this event
         type:
           type: string
+          enum:
+            - miner
+            - foundation
+            - siafundClaim
+            - v1Transaction
+            - v1ContractResolution
+            - v2Transaction
+            - v2ContractResolution
           description: The type of the event
         data:
           type: object
         maturityHeight:
-          type: integer
-          format: uint64
-          description: The block height when the event's data can be used
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the payout matures.
         timestamp:
           type: string
           format: date-time
@@ -2563,6 +2587,12 @@ components:
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+
+    RevisionNumber:
+      type: integer
+      format: uint64
+      description: The revision number of the contract
+      example: 246
 
     Sector:
       type: object
