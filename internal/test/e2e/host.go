@@ -112,14 +112,15 @@ type Host struct {
 	s            *syncer.Syncer
 	syncerCancel context.CancelFunc
 
-	store     *sqlite.Store
-	wallet    *wallet.SingleAddressWallet
-	settings  *settings.ConfigManager
-	storage   *storage.VolumeManager
-	index     *index.Manager
-	registry  *registry.Manager
-	accounts  *accounts.AccountManager
-	contracts *contracts.Manager
+	store       *sqlite.Store
+	wallet      *wallet.SingleAddressWallet
+	settings    *settings.ConfigManager
+	storage     *storage.VolumeManager
+	index       *index.Manager
+	registry    *registry.Manager
+	accounts    *accounts.AccountManager
+	contracts   *contracts.Manager
+	contractsV2 *testutil.EphemeralContractor
 
 	rhpv2        *rhpv2.SessionHandler
 	rhpv3        *rhpv3.SessionHandler
@@ -308,7 +309,8 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv3"))
 	go rhpv3.Serve()
 
-	rhpv4 := rhp4.NewServer(privKey, cm, s, testutil.NewEphemeralContractor(cm), wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
+	contractsV2 := testutil.NewEphemeralContractor(cm)
+	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
 	go rhp.ServeRHP4SiaMux(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
@@ -318,14 +320,15 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		s:            s,
 		syncerCancel: syncerCancel,
 
-		store:     db,
-		wallet:    wallet,
-		settings:  settings,
-		index:     idx,
-		storage:   storage,
-		registry:  registry,
-		accounts:  accounts,
-		contracts: contracts,
+		store:       db,
+		wallet:      wallet,
+		settings:    settings,
+		index:       idx,
+		storage:     storage,
+		registry:    registry,
+		accounts:    accounts,
+		contracts:   contracts,
+		contractsV2: contractsV2,
 
 		rhpv2: rhpv2,
 		rhpv3: rhpv3,
