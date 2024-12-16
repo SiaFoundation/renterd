@@ -1635,7 +1635,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
-		v2_settings = CASE WHEN ? THEN ? ELSE settings END,
+		v2_settings = CASE WHEN ? THEN ? ELSE v2_settings END,
 		price_table = CASE WHEN ? THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
