@@ -214,11 +214,11 @@ func IsKnownContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) 
 }
 
 func RecordContractRenewal(ctx context.Context, tx sql.Tx, oldFCID, newFCID types.FileContractID) error {
-	_, err := tx.Exec(ctx, "UPDATE contracts SET contracts.renewed_to = ? WHERE contracts.fcid = ?", FileContractID(newFCID), FileContractID(oldFCID))
+	_, err := tx.Exec(ctx, "UPDATE contracts SET renewed_to = ? WHERE fcid = ?", FileContractID(newFCID), FileContractID(oldFCID))
 	if err != nil {
 		return fmt.Errorf("failed to update renewed_to of old contract: %w", err)
 	}
-	_, err = tx.Exec(ctx, "UPDATE contracts SET contracts.renewed_from = ? WHERE contracts.fcid = ?", FileContractID(oldFCID), FileContractID(newFCID))
+	_, err = tx.Exec(ctx, "UPDATE contracts SET renewed_from = ? WHERE fcid = ?", FileContractID(oldFCID), FileContractID(newFCID))
 	if err != nil {
 		return fmt.Errorf("failed to update renewed_from of new contract: %w", err)
 	}
