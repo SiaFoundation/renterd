@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/hostd/host/accounts"
 	"go.sia.tech/hostd/host/contracts"
@@ -307,7 +308,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv3"))
 	go rhpv3.Serve()
 
-	rhpv4 := rhp4.NewServer(privKey, cm, s, contracts, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
+	rhpv4 := rhp4.NewServer(privKey, cm, s, testutil.NewEphemeralContractor(cm), wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
 	go rhp.ServeRHP4SiaMux(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
