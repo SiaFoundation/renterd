@@ -3622,18 +3622,62 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
 	}
+}
+
+func TestSlabSectorOnHostButNotInContract(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create host and 2 contracts with it
+	hk := types.PublicKey{1}
+	err := ss.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, contracts, err := ss.addTestContracts([]types.PublicKey{hk, hk})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare a slab - it has one shard that is pinned to contract 0.
+	shard := newTestShard(hk, contracts[0].ID, types.Hash256{1})
+	slab := object.Slab{
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Shards:        []object.Sector{shard},
+		Health:        1,
+	}
+
+	// set slab.
+	_, err = ss.addTestObject("/"+t.Name(), object.Object{
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Slabs: []object.SlabSlice{{Slab: slab}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rSlab, err := ss.Slab(context.Background(), slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(rSlab.Shards) != 1 {
+		t.Fatal("should have 1 shard", len(rSlab.Shards))
+	} else if fcids, exists := rSlab.Shards[0].Contracts[hk]; !exists || len(fcids) != 1 {
+		t.Fatalf("unexpected contracts %v, exists %v", fcids, exists)
+	}
 
 	// delete one of the contracts - this should cause the host to still be in
 	// the slab but the associated slice should be empty
 	if err := ss.ArchiveContract(context.Background(), contracts[0].ID, "test"); err != nil {
 		t.Fatal(err)
 	}
-	slab.Shards[0].Contracts[hks[0]] = []types.FileContractID{}
+
 	rSlab, err = ss.Slab(context.Background(), slab.EncryptionKey)
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(slab, rSlab) {
-		t.Fatal("unexpected slab", cmp.Diff(slab, rSlab, cmp.AllowUnexported(object.EncryptionKey{})))
+	} else if len(rSlab.Shards) != 1 {
+		t.Fatal("should have 1 shard", len(rSlab.Shards))
+	} else if fcids, exists := rSlab.Shards[0].Contracts[hk]; !exists || len(fcids) != 0 {
+		t.Fatalf("unexpected contracts %v, exists %v", fcids, exists)
 	}
 }
 
