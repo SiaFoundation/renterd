@@ -205,10 +205,9 @@ func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContract
 }
 
 func IsKnownContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (known bool, _ error) {
-	err := tx.QueryRow(ctx, "SELECT 1 FROM contracts WHERE fcid = ?", FileContractID(fcid)).Scan(&known)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return false, nil
-	} else if err != nil {
+	err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM contracts WHERE fcid = ?)", FileContractID(fcid)).
+		Scan(&known)
+	if err != nil {
 		return false, err
 	}
 	return known, nil
@@ -221,7 +220,7 @@ func RecordContractRenewal(ctx context.Context, tx sql.Tx, oldFCID, newFCID type
 	}
 	_, err = tx.Exec(ctx, "UPDATE contracts SET contracts.renewed_from = ? WHERE contracts.fcid = ?", FileContractID(oldFCID), FileContractID(newFCID))
 	if err != nil {
-		return fmt.Errorf("failed to update renewed_to of new contract: %w", err)
+		return fmt.Errorf("failed to update renewed_from of new contract: %w", err)
 	}
 	return nil
 }
