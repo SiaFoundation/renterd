@@ -1353,20 +1353,7 @@ paths:
                     type: array
                     description: A list of prunable contracts with their size information.
                     items:
-                      type: object
-                      description: Contains the ID and size information of a prunable contract.
-                      properties:
-                        id:
-                          $ref: "#/components/schemas/FileContractID"
-                        prunable:
-                          type: integer
-                          format: uint64
-                          description: The amount of prunable data in bytes.
-                        size:
-                          type: integer
-                          format: uint64
-                          description: The size of the contract in bytes
-                          example:
+                      $ref: "#/components/schemas/ContractSize"
                   totalPrunable:
                     type: integer
                     format: uint64
@@ -1446,6 +1433,384 @@ paths:
       responses:
         "200":
           description: Spending recorded successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}:
+    get:
+      summary: Get contract by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+    delete:
+      summary: Archive contract with archival reason 'removed'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract archived successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/acquire:
+    post:
+      summary: Acquire contract lock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type:
+                object
+              properties:
+                duration:
+                  allOf:
+                   - $ref: "#/components/schemas/DurationMS"
+                   - description: The duration of the lock in milliseconds
+                priority:
+                  type: integer
+                  format: int
+                  example: 80
+      responses:
+        "200":
+          description: Contract lock acquired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractLockID"
+
+  /contract/{id}/ancestors:
+    get:
+      summary: Get contract ancestors
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+        - name: minstartheight
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: uint64
+      responses:
+        "200":
+          description: Contract ancestors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/broadcast:
+    post:
+      summary: Broadcast contract's revision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract's revision broadcasted successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/keepalive:
+    post:
+      summary: Keep contract lock alive
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type:
+                object
+              properties:
+                duration:
+                  allOf:
+                    - $ref: "#/components/schemas/DurationMS"
+                    - description: The amount of miliseconds to extend the lock by
+                lockID:
+                  $ref: "#/components/schemas/ContractLockID"
+      responses:
+        "200":
+          description: Contract lock keepalive successful
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/revision:
+    get:
+      summary: Get latest contract revision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Latest contract revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "400":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/prune:
+    post:
+      summary: Prune contract data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeout:
+                  $ref: "#/components/schemas/DurationMS"
+
+      responses:
+        "200":
+          description: Contract pruned successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  size:
+                    type: integer
+                    format: uint64
+                    description: The size of the pruned contract in bytes
+                  pruned:
+                    type: integer
+                    format: uint64
+                    description: The number of bytes pruned
+                  remaining:
+                    type: integer
+                    format: uint64
+                    description: The number of prunable bytes remaining
+                  error:
+                    type: string
+                    description: An error message if the prune failed
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/renew:
+    post:
+      summary: Renew contract
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endHeight:
+                  allOf:
+                    - $ref: "#/components/schemas/BlockHeight"
+                    - description: The height at which the contract will expire
+                expectedNewStorage:
+                  type: integer
+                  format: uint64
+                minNewCollateral:
+                  $ref: "#/components/schemas/Currency"
+                renterFunds:
+                  $ref: "#/components/schemas/Currency"
+      responses:
+        "200":
+          description: Contract renewed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+
+  /contract/{id}/release:
+    post:
+      summary: Release contract lock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lockID:
+                  $ref: "#/components/schemas/ContractLockID"
+      responses:
+        "200":
+          description: Contract lock released successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/roots:
+    get:
+      summary: Get contract sector roots
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract sector roots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Hash256"
+
+  /contract/{id}/size:
+    get:
+      summary: Get contract size
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract size information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractSize"
+        "400":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /contract/{id}/usability:
+    put:
+      summary: Update contract usability
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+              enum: [good, bad]
+      responses:
+        "200":
+          description: Contract usability updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
         "500":
           description: Internal server error
           content:
@@ -2646,6 +3011,15 @@ components:
           type: boolean
           description: Whether the node is synced with the network
 
+    ContractLockID:
+      type: object
+      properties:
+        lockID:
+          type: integer
+          format: uint64
+          description: The ID of the lock
+          example: 12
+
     ContractsConfig:
       type: object
       properties:
@@ -2683,6 +3057,24 @@ components:
           type: boolean
           description: Whether to automatically prune deleted data from contracts
           default: false
+
+    ContractSize:
+      type: object
+      properties:
+        prunable:
+          type: integer
+          format: uint64
+          description: The amount of data that can be pruned from a contract
+        size:
+          type: integer
+          format: uint64
+          description: The total size of a contract
+
+    DurationMS:
+      type: integer
+      format: int64
+      description: A duration in milliseconds
+      example: 30000
 
     EncryptionKey:
       type: string
@@ -2955,6 +3347,22 @@ components:
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+
+    Revision:
+      type: object
+      properties:
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        missedHostValue:
+          $ref: "#/components/schemas/Currency"
+        renterFunds:
+          $ref: "#/components/schemas/Currency"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        size:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes
 
     RevisionNumber:
       type: integer
