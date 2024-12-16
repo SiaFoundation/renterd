@@ -115,7 +115,13 @@ func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContrac
 	if h == nil {
 		return nil, fmt.Errorf("no host found for contract %v", c)
 	}
-	return h.contracts.SectorRoots(fcid), nil
+	var roots []types.Hash256
+	state, unlock, err := h.contractsV2.LockV2Contract(fcid)
+	if err == nil {
+		roots = append(roots, state.Roots...)
+		defer unlock()
+	}
+	return append(roots, h.contracts.SectorRoots(fcid)...), nil
 }
 
 func (tc *TestCluster) IsPassedV2AllowHeight() bool {

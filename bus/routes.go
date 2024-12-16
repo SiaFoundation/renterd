@@ -219,7 +219,7 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
-	jc.Encode(*b.cm.TipState().Network)
+	jc.Encode(b.cm.TipState().Network)
 }
 
 func (b *Bus) postSystemSQLite3BackupHandler(jc jape.Context) {
@@ -787,7 +787,7 @@ func (b *Bus) contractsHandlerGET(jc jape.Context) {
 	case api.ContractFilterModeArchived:
 	case api.ContractFilterModeGood:
 	default:
-		jc.Error(fmt.Errorf("invalid filter mode: '%v'", filterMode), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("invalid filter mode '%v', must be one of [active, archived, all, good]", filterMode), http.StatusBadRequest)
 		return
 	}
 
