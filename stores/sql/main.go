@@ -504,7 +504,10 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root types.Hash256) (int, error) {
 	// fetch sector id
 	var sectorID int64
-	if err := tx.QueryRow(ctx, "SELECT s.id FROM sectors s WHERE root = ?", PublicKey(hk)).Scan(&sectorID); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT s.id FROM sectors s WHERE s.root = ?", Hash256(root)).
+		Scan(&sectorID); errors.Is(err, dsql.ErrNoRows) {
+		return 0, nil
+	} else if err != nil {
 		return 0, fmt.Errorf("failed to fetch sector id: %w", err)
 	}
 
@@ -516,7 +519,7 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 			FROM contracts c
 			WHERE c.host_key = ?
 		)
-	`, Hash256(root), PublicKey(hk))
+	`, sectorID, PublicKey(hk))
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete contract sectors: %w", err)
 	}
