@@ -320,40 +320,54 @@ func TestHosts(t *testing.T) {
 		t.Fatal("unexpected", his[1].Checks)
 	}
 
-	// assert usability filter is taken into account
-	h2c.UsabilityBreakdown.LowMaxDuration = true
-	err = ss.UpdateHostCheck(context.Background(), hk2, h2c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	his, err = ss.Hosts(context.Background(), api.HostOptions{
+	// use reflection to check whether usability is correctly taken into account
+	// for every field of the usability breakdown
+	opts := api.HostOptions{
 		FilterMode:      api.HostFilterModeAll,
-		UsabilityMode:   api.UsabilityFilterModeUsable,
 		AddressContains: "",
 		KeyIn:           nil,
 		Offset:          0,
 		Limit:           -1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(his) != 1 {
-		t.Fatal("unexpected", len(his))
 	}
 
-	his, err = ss.Hosts(context.Background(), api.HostOptions{
-		FilterMode:      api.HostFilterModeAll,
-		UsabilityMode:   api.UsabilityFilterModeUnusable,
-		AddressContains: "",
-		KeyIn:           nil,
-		Offset:          0,
-		Limit:           -1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	} else if len(his) != 1 {
-		t.Fatal("unexpected", len(his))
-	} else if his[0].PublicKey != hk2 {
-		t.Fatal("unexpected")
+	assertHostUsability := func() error {
+		t.Helper()
+
+		opts.UsabilityMode = api.UsabilityFilterModeUsable
+		if his, err := ss.Hosts(ctx, opts); err != nil {
+			return err
+		} else if len(his) != 1 {
+			return fmt.Errorf("expected one usable host, but got %d", len(his))
+		} else if his[0].PublicKey != hk1 {
+			return fmt.Errorf("unexpected host is usable, hk %v", his[0].PublicKey)
+		}
+
+		opts.UsabilityMode = api.UsabilityFilterModeUnusable
+		if his, err := ss.Hosts(context.Background(), opts); err != nil {
+			return err
+		} else if len(his) != 1 {
+			return fmt.Errorf("expected one unusable host, but got %d", len(his))
+		} else if his[0].PublicKey != hk2 {
+			return fmt.Errorf("unexpected host is unusable, hk %v", his[0].PublicKey)
+		}
+
+		return nil
+	}
+
+	v := reflect.ValueOf(&h2c.UsabilityBreakdown).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		if !field.CanSet() || field.Kind() != reflect.Bool {
+			continue
+		}
+
+		field.SetBool(true)
+		if err := ss.UpdateHostCheck(ctx, hk2, h2c); err != nil {
+			t.Fatalf("failed to update host check after setting %s: %v", v.Type().Field(i).Name, err)
+		} else if err := assertHostUsability(); err != nil {
+			t.Fatalf("usability filter is not taken into account after setting %s: %v", v.Type().Field(i).Name, err)
+		}
+		field.SetBool(false)
 	}
 
 	// assert cascade delete on host
