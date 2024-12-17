@@ -321,7 +321,7 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert usability filter is taken into account
-	h2c.UsabilityBreakdown.RedundantIP = true
+	h2c.UsabilityBreakdown.LowMaxDuration = true
 	err = ss.UpdateHostCheck(context.Background(), hk2, h2c)
 	if err != nil {
 		t.Fatal(err)
