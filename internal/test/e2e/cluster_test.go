@@ -21,10 +21,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/hostd/host/accounts"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
@@ -2855,5 +2857,59 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 			return fmt.Errorf("expected balance to be %v, got %v, diff %v", expectedBalance, wallet.Confirmed, diff)
 		}
 		return nil
+	})
+}
+
+func TestResyncAccounts(t *testing.T) {
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: test.RedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
+
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload the data
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
+
+	// download data
+	tt.OK(w.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, path, api.DownloadObjectOptions{}))
+
+	// drain all accounts on the hosts without the renter knowing
+	workerAccs, err := w.Accounts(context.Background())
+	tt.OK(err)
+	for _, h := range cluster.hosts {
+		for _, acc := range workerAccs {
+			// v1 accounts
+			balance, err := h.accounts.Balance(acc.ID)
+			tt.OK(err)
+			if balance.Cmp(types.ZeroCurrency) > 0 {
+				budget, err := h.accounts.Budget(acc.ID, balance)
+				tt.OK(err)
+				tt.OK(budget.Spend(accounts.Usage{RPCRevenue: balance}))
+				tt.OK(budget.Commit())
+			}
+
+			// v2 accounts
+			balance, err = h.contractsV2.AccountBalance(rhpv4.Account(acc.ID))
+			tt.OK(err)
+			if balance.Cmp(types.ZeroCurrency) > 0 {
+				tt.OK(h.contractsV2.DebitAccount(rhpv4.Account(acc.ID), rhpv4.Usage{Egress: balance}))
+			}
+		}
+	}
+
+	// download data again - the first time fails since all accounts are drained
+	tt.FailAll(w.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, path, api.DownloadObjectOptions{}))
+
+	// eventually succeed since accounts will be scheduled for a sync
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		return w.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, path, api.DownloadObjectOptions{})
 	})
 }
