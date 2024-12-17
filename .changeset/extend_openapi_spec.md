@@ -10,6 +10,7 @@ The following routes were added:
 - contract
 - hosts
 - host
+- metric
 - syncer
 - txpool
 - wallet

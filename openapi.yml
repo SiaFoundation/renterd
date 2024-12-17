@@ -2163,7 +2163,7 @@ paths:
                   priceTable:
                     $ref: '#/components/schemas/HostPriceTable'
                   v2Settings:
-                    $ref: '#/components/schemas/V2HostSettings'
+                    $ref: '#/components/schemas/HostV2Settings'
         "500":
           description: Internal server error
           content:
@@ -2172,6 +2172,172 @@ paths:
                 type: string
         "503":
           description: Not connected to peers
+
+  /bus/metric/{key}:
+    get:
+      summary: Get metrics
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [contract, contractprune, performance, wallet]
+          description: The type of metric to fetch
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Start time for the metrics query
+        - name: n
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Number of intervals to fetch
+        - name: interval
+          in: query
+          required: true
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/DurationMS'
+              - description: Interval duration in milliseconds
+        - name: contractid
+          in: query
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+        - name: hostkey
+          in: query
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+        - name: hostversion
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Successfully retrieved metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  oneOf:
+                    - $ref: "#/components/schemas/ContractMetric"
+                    - $ref: "#/components/schemas/ContractPruneMetric"
+                    - $ref: "#/components/schemas/WalletMetric"
+        "400":
+          description: Invalid parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidN:
+                  summary: Invalid 'n' value
+                  value: "'n' has to be greater than zero"
+                requiredInterval:
+                  summary: Missing value for parameter 'interval'
+                  value: "parameter 'interval' is required"
+                requiredN:
+                  summary: Missing value for parameter 'n'
+                  value: "parameter 'n' is required"
+                requiredStart:
+                  summary: Missing value for parameter 'start'
+                  value: "parameter 'start' is required"
+                unknownMetric:
+                  summary: Unknown metric key
+                  value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Record metrics
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [contract, contractprune, performance, wallet]
+          description: The type of metric to record
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metrics:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContractPruneMetric"
+      responses:
+        "200":
+          description: Successfully recorded metrics
+        "400":
+          description: Invalid metric key or request body
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidKey:unknownMetric:
+                  summary: Unknown metric key
+                  value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      summary: Delete metrics
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [contract, contractprune, performance, wallet]
+          description: The type of metric to delete
+        - name: cutoff
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Delete metrics older than this timestamp
+      responses:
+        "200":
+          description: Successfully deleted metrics
+        "400":
+          description: Invalid parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                requiredCutoff:
+                  summary: Missing value for parameter 'cutoff'
+                  value: "parameter 'cutoff' is required"
+                requiredMetric:
+                  summary: Missing value for parameter 'key'
+                  value: "parameter 'key' is required"
+                unknownMetric:
+                  summary: Unknown metric key
+                  value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /bus/syncer/address:
     get:
@@ -3645,6 +3811,54 @@ components:
           description: The ID of the lock
           example: 12
 
+    ContractMetric:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        hostKey:
+          $ref: "#/components/schemas/PublicKey"
+        remainingCollateral:
+          $ref: "#/components/schemas/Currency"
+        remainingFunds:
+          $ref: "#/components/schemas/Currency"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        deleteSpending:
+          $ref: "#/components/schemas/Currency"
+        fundAccountSpending:
+          $ref: "#/components/schemas/Currency"
+        sectorRootsSpending:
+          $ref: "#/components/schemas/Currency"
+        uploadSpending:
+          $ref: "#/components/schemas/Currency"
+
+    ContractPruneMetric:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        hostKey:
+          $ref: "#/components/schemas/PublicKey"
+        hostVersion:
+          type: string
+        pruned:
+          type: integer
+          format: uint64
+        remaining:
+          type: integer
+          format: uint64
+        duration:
+          type: integer
+          format: int64
+          description: Duration in nanoseconds
+
     ContractsConfig:
       type: object
       properties:
@@ -4241,3 +4455,18 @@ components:
       type: string
       description: The address of the syncer
       example: "118.92.232.145:9981"
+
+    WalletMetric:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        confirmed:
+          $ref: "#/components/schemas/Currency"
+        spendable:
+          $ref: "#/components/schemas/Currency"
+        unconfirmed:
+          $ref: "#/components/schemas/Currency"
+        immature:
+          $ref: "#/components/schemas/Currency"

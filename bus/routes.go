@@ -2018,9 +2018,9 @@ func (b *Bus) webhookHandlerPost(jc jape.Context) {
 }
 
 func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
-	metric := jc.PathParam("key")
-	if metric == "" {
-		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
+	key := jc.PathParam("key")
+	if key == "" {
+		jc.Error(errors.New("unknown metric ''"), http.StatusBadRequest)
 		return
 	}
 
@@ -2032,7 +2032,7 @@ func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
 		return
 	}
 
-	err := b.store.PruneMetrics(jc.Request.Context(), metric, cutoff)
+	err := b.store.PruneMetrics(jc.Request.Context(), key, cutoff)
 	if jc.Check("failed to prune metrics", err) != nil {
 		return
 	}
@@ -2043,7 +2043,7 @@ func (b *Bus) metricsHandlerPUT(jc jape.Context) {
 
 	key := jc.PathParam("key")
 	if key != api.MetricContractPrune {
-		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
 
