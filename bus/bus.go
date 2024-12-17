@@ -491,7 +491,8 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"PUT    /slab/:key":           b.slabHandlerPUT,
 
-		"GET    /state":         b.stateHandlerGET,
+		"GET    /state": b.stateHandlerGET,
+
 		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
