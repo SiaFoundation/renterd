@@ -469,11 +469,7 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
 
-		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
-		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
-		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-
-		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
+		"DELETE /sectors/:hostkey/:root": b.sectorsHostRootHandlerDELETE,
 
 		"GET    /settings/gouging": b.settingsGougingHandlerGET,
 		"PUT    /settings/gouging": b.settingsGougingHandlerPUT,
@@ -483,6 +479,10 @@ func (b *Bus) Handler() http.Handler {
 		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
 		"GET    /settings/upload":  b.settingsUploadHandlerGET,
 		"PUT    /settings/upload":  b.settingsUploadHandlerPUT,
+
+		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
