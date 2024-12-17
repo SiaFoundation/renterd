@@ -2601,7 +2601,7 @@ func TestDownloadAllHosts(t *testing.T) {
 	// block the new host but unblock the old one
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			toBlock := []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
+			toBlock := []string{host.RHPv2Addr(), host.RHPv4Addr()}
 			tt.OK(b.UpdateHostBlocklist(context.Background(), toBlock, randomHost, false))
 		}
 	}
@@ -2614,6 +2614,7 @@ func TestDownloadAllHosts(t *testing.T) {
 			tt.OK(host.UpdateSettings(settings))
 		}
 	}
+	time.Sleep(testWorkerCfg().CacheExpiry) // expire cache
 
 	// download the object
 	dst = new(bytes.Buffer)
