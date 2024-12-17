@@ -2445,14 +2445,7 @@ paths:
                 parts:
                   type: array
                   items:
-                    type: object
-                    properties:
-                      partNumber:
-                        type: integer
-                        description: The number of this part
-                      eTag:
-                        type: string
-                        description: The ETag of this part
+                    $ref: "#/components/schemas/MultipartCompletedPart"
                 metadata:
                   $ref: "#/components/schemas/ObjectUserMetadata"
       responses:
@@ -2683,23 +2676,7 @@ paths:
                   parts:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        partNumber:
-                          type: integer
-                          description: The number of this part
-                        lastModified:
-                          type: string
-                          format: date-time
-                          description: When this part was last modified
-                        eTag:
-                          allOf:
-                            - $ref: "#/components/schemas/ETag"
-                            - description: The ETag of this part
-                        size:
-                          type: integer
-                          format: int64
-                          description: The size of this part in bytes
+                      $ref: "#/components/schemas/MultipartListPartItem"
 
   /bus/objects/{prefix}:
     get:
@@ -6062,23 +6039,6 @@ components:
       format: uint64
       description: The revision number of the contract
       example: 246
-
-    Sector:
-      type: object
-      description: Description of an uploaded sector
-      properties:
-        contracts:
-          description: The contracts that the sector is uploaded to
-          type: object
-          additionalProperties:
-            description: The contracts' IDs
-            type: array
-            items:
-              $ref: "#/components/schemas/FileContractID"
-        root:
-          allOf:
-            - $ref: "#/components/schemas/Hash256"
-            - description: The Merkle root of the sector
 
     SemVer:
       type: array
