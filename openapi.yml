@@ -3082,6 +3082,33 @@ paths:
               schema:
                 type: string
 
+  /bus/sectors/{hostkey}/{root}:
+    delete:
+      summary: Delete host sector
+      description: Marks a sector as lost for a specific host.
+      parameters:
+        - name: hostkey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+          description: The host's public key
+        - name: root
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+          description: The Merkle root of the sector
+      responses:
+        "200":
+          description: Successfully marked sector as lost
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/slabbuffers:
     get:
       summary: Get slab buffers info

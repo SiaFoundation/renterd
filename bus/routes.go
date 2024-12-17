@@ -1511,7 +1511,7 @@ func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
 func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	var hk types.PublicKey
 	var root types.Hash256
-	if jc.DecodeParam("hk", &hk) != nil {
+	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	} else if jc.DecodeParam("root", &root) != nil {
 		return
