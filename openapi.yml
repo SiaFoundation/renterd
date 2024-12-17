@@ -2701,6 +2701,320 @@ paths:
                           format: int64
                           description: The size of this part in bytes
 
+  /bus/objects/{prefix}:
+    get:
+      summary: List objects
+      description: Lists objects with the specified prefix.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/"
+            pattern: ".*" # greedy match
+          description: The prefix to filter objects by
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+        - name: delimiter
+          in: query
+          schema:
+            type: string
+            description: Path delimiter ("/" or empty)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: -1
+            description: Maximum number of objects to return
+        - name: marker
+          in: query
+          schema:
+            type: string
+            description: Key to start listing from
+        - name: sortby
+          in: query
+          schema:
+            type: string
+            description: Field to sort results by
+        - name: sortdir
+          in: query
+          schema:
+            type: string
+            description: Sort direction (asc/desc)
+        - name: substring
+          in: query
+          schema:
+            type: string
+            description: Filter objects by substring
+        - name: slabencryptionkey
+          in: query
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/EncryptionKey"
+              - description: Encryption key for slabs
+      responses:
+        "200":
+          description: Successfully listed objects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  objects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more objects to fetch
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                unsupportedDelimiter:
+                  summary: Unsupported delimiter
+                  value: "delimiter must be '/' or empty"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/objects/copy:
+    post:
+      summary: Copy object
+      description: Copies an object from one location to another.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sourceBucket:
+                  $ref: "#/components/schemas/BucketName"
+                destinationBucket:
+                  $ref: "#/components/schemas/BucketName"
+                sourceKey:
+                  type: string
+                  description: The key of the source object
+                destinationKey:
+                  type: string
+                  description: The key for the destination object
+                mimeType:
+                  type: string
+                  description: The MIME type for the copied object
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+      responses:
+        "200":
+          description: Successfully copied object
+          headers:
+            Last-Modified:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/objects/remove:
+    post:
+      summary: Remove objects by prefix
+      description: Removes all objects with the specified prefix.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                prefix:
+                  type: string
+                  description: The prefix of objects to remove
+                  minLength: 1
+      responses:
+        "200":
+          description: Successfully removed objects
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                requiredBucket:
+                  summary: Missing value for parameter 'bucket'
+                  value: "parameter 'bucket' is required"
+                requiredPrefix:
+                  summary: Missing value for parameter 'prefix'
+                  value: "prefix cannot be empty"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/objects/rename:
+    post:
+      summary: Rename objects
+      description: Renames a single object or multiple objects with a prefix.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                from:
+                  type: string
+                  description: Source path/prefix
+                to:
+                  type: string
+                  description: Destination path/prefix
+                mode:
+                  type: string
+                  enum: [single, multi]
+                  description: Whether to rename a single object or multiple objects
+                force:
+                  type: boolean
+                  description: Whether to overwrite existing objects
+      responses:
+        "200":
+          description: Successfully renamed objects
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                requiredBucket:
+                  summary: Missing value for parameter 'bucket'
+                  value: "parameter 'bucket' is required"
+                invalidMode:
+                  summary: Invalid mode
+                  value: "mode must be 'single' or 'multi'"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/object/{key}:
+    get:
+      summary: Get object
+      description: Returns an object's metadata or full object data.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+          description: The key of the object to fetch
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+        - name: onlymetadata
+          in: query
+          required: false
+          schema:
+            type: boolean
+            description: If true, only returns object metadata without data
+      responses:
+        "200":
+          description: Successfully retrieved object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Store object
+      description: Stores or updates an object.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+          description: The key of the object
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                eTag:
+                  type: string
+                  description: The ETag of the object
+                mimeType:
+                  type: string
+                  description: The MIME type of the object
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+                object:
+                  $ref: "#/components/schemas/Object"
+      responses:
+        "200":
+          description: Successfully stored object
+    delete:
+      summary: Delete object
+      description: Deletes an object from the bucket.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+          description: The key of the object to delete
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+      responses:
+        "200":
+          description: Successfully deleted object
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/syncer/address:
     get:
       summary: Get the syncer's address
@@ -4286,6 +4600,7 @@ components:
       type: string
       pattern: '^(W/)?".*?"$'
       description: An ETag representing a resource
+      example: "W/\"33a64df551425fcc55e4d42a148795d9f25f89d4\""
 
     Event:
       type: object
@@ -4631,6 +4946,51 @@ components:
           description: The number of this part
         eTag:
           $ref: "#/components/schemas/ETag"
+
+    Object:
+      type: object
+      allOf:
+        - type: object
+          properties:
+            metadata:
+              $ref: "#/components/schemas/ObjectUserMetadata"
+        - $ref: "#/components/schemas/ObjectMetadata"
+        - type: object
+          properties:
+            encryptionKey:
+              $ref: "#/components/schemas/EncryptionKey"
+            slabs:
+              type: array
+              items:
+                $ref: "#/components/schemas/SlabSlice"
+
+    ObjectMetadata:
+      type: object
+      properties:
+        bucket:
+          $ref: "#/components/schemas/BucketName"
+        etag:
+          allOf:
+            - $ref: "#/components/schemas/ETag"
+            - description: The ETag of the object
+        health:
+          type: number
+          format: float
+          description: The health of the object
+        modTime:
+          type: string
+          format: date-time
+          description: When the object was last modified
+        key:
+          type: string
+          description: The key of the object
+        size:
+          type: integer
+          format: int64
+          description: The size of the object in bytes
+        mimeType:
+          type: string
+          description: The MIME type of the object
 
     ObjectUserMetadata:
       type: object
