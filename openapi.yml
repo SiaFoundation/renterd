@@ -3643,6 +3643,101 @@ paths:
                 items:
                   $ref: "#/components/schemas/SyncerAddress"
 
+  /bus/state:
+    get:
+      summary: Get bus state
+      description: Returns the current state of the bus including version, build info, and explorer status.
+      responses:
+        "200":
+          description: Successfully retrieved bus state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  startTime:
+                    type: string
+                    format: date-time
+                    description: When the bus was started
+                  version:
+                    type: string
+                    description: Version of renterd
+                  commit:
+                    type: string
+                    description: Git commit hash of the build
+                  os:
+                    type: string
+                    description: Operating system
+                  buildTime:
+                    type: string
+                    format: date-time
+                    description: When this version was built
+                  explorer:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: Whether the explorer is enabled
+                      url:
+                        type: string
+                        description: Base URL of the explorer
+                  network:
+                    type: string
+                    description: Name of the network (mainnet/testnet)
+
+  /bus/stats/objects:
+    get:
+      summary: Get object statistics
+      description: Returns statistics about objects in a bucket.
+      parameters:
+        - name: bucket
+          in: query
+          schema:
+            $ref: "#/components/schemas/BucketName"
+          description: Optional bucket to get stats for
+      responses:
+        "200":
+          description: Successfully retrieved object statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  numObjects:
+                    type: integer
+                    format: uint64
+                    description: Number of objects
+                  numUnfinishedObjects:
+                    type: integer
+                    format: uint64
+                    description: Number of unfinished objects
+                  minHealth:
+                    type: number
+                    format: float64
+                    description: Minimum health of all objects
+                  totalObjectsSize:
+                    type: integer
+                    format: uint64
+                    description: Size of all objects
+                  totalUnfinishedObjectsSize:
+                    type: integer
+                    format: uint64
+                    description: Size of all unfinished objects
+                  totalSectorsSize:
+                    type: integer
+                    format: uint64
+                    description: Uploaded size of all objects
+                  totalUploadedSize:
+                    type: integer
+                    format: uint64
+                    description: Uploaded size of all objects including redundant sectors
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/txpool/recommendedfee:
     get:
       summary: Get recommended fee

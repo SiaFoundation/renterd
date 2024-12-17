@@ -19,6 +19,8 @@ The following routes were added:
 - settings
 - slabbuffers
 - slabs
+- state
+- stats
 - syncer
 - txpool
 - wallet
