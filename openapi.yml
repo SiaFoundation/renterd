@@ -3356,6 +3356,246 @@ paths:
               schema:
                 type: string
 
+  /bus/slabs/migration:
+    post:
+      summary: Get slabs for migration
+      description: Returns slabs that need to be migrated based on health cutoff.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                healthCutoff:
+                  type: number
+                  format: float64
+                  description: The health cutoff at which slabs are returned for migration
+                limit:
+                  type: integer
+                  description: Maximum number of slabs to return
+      responses:
+        "200":
+          description: Successfully retrieved slabs for migration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        encryptionKey:
+                          $ref: "#/components/schemas/EncryptionKey"
+                        health:
+                          type: number
+                          format: float64
+                          description: Current health of the slab
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/partial/{key}:
+    get:
+      summary: Get partial slab
+      description: Retrieves a portion of a slab's data.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/EncryptionKey"
+        - name: offset
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            description: Offset within the slab
+        - name: length
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            description: Number of bytes to retrieve
+      responses:
+        "200":
+          description: Successfully retrieved partial slab data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidLimit:
+                  summary: Invalid limit example
+                  value: "limit must be greater than or equal to -1"
+                invalidOffset:
+                  summary: Invalid offset example
+                  value: "offset must be greater than or equal to 0"
+        "404":
+          description: Slab not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/partial:
+    post:
+      summary: Add partial slab
+      description: Adds data to a partial slab.
+      parameters:
+        - name: minshards
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            description: Minimum number of shards required
+        - name: totalshards
+          in: query
+          required: true
+          schema:
+            type: integer
+            description: Total number of shards
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Successfully added partial slab
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SlabSlice"
+                  slabBufferMaxSizeSoftReached:
+                    type: boolean
+                    description: Whether the slab buffer soft limit was reached
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidRedundancy:
+                  summary: Invalid redundancy parameters
+                  value: "minShards must be positive and totalShards must be greater than minShards"
+                invalidTotalShards:
+                  summary: Invalid total shards
+                  value: "totalShards must be less than or equal to 255"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/refreshhealth:
+    post:
+      summary: Refresh slab health
+      description: Recalculates health for all slabs.
+      responses:
+        "200":
+          description: Successfully refreshed slab health
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slab/{key}:
+    get:
+      summary: Get slab
+      description: Returns information about a specific slab.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/EncryptionKey"
+      responses:
+        "200":
+          description: Successfully retrieved slab
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slab"
+        "404":
+          description: Slab not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update slab
+      description: Updates the sectors for a slab.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/EncryptionKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  contractID:
+                    $ref: "#/components/schemas/FileContractID"
+                  root:
+                    $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Successfully updated slab
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Slab not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/syncer/address:
     get:
       summary: Get the syncer's address
