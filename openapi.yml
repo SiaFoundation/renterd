@@ -3643,6 +3643,37 @@ paths:
                 items:
                   $ref: "#/components/schemas/SyncerAddress"
 
+  /bus/system/sqlite3/backup:
+    post:
+      summary: Backup SQLite database
+      description: Creates a backup of the specified SQLite database.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                database:
+                  type: string
+                  enum: [main, metrics]
+                  description: Which database to backup
+                path:
+                  type: string
+                  description: Path where to save the backup
+      responses:
+        "200":
+          description: Successfully created backup
+        "400":
+          description: Invalid database specified
+        "404":
+          description: Backup not supported
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/state:
     get:
       summary: Get bus state
@@ -3788,6 +3819,59 @@ paths:
       responses:
         "200":
           description: Successfully broadcast transaction
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/upload/{id}:
+    post:
+      summary: Track upload
+      description: Starts tracking an upload with the given ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UploadID"
+      responses:
+        "200":
+          description: Successfully started tracking upload
+    delete:
+      summary: Finish upload
+      description: Marks an upload as finished and stops tracking it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UploadID"
+      responses:
+        "200":
+          description: Successfully finished upload
+
+  /bus/upload/{id}/sector:
+    post:
+      summary: Add sectors to upload
+      description: Adds sector roots to a tracked upload.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UploadID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Successfully added sectors
         "500":
           description: Internal server error
           content:
@@ -3985,6 +4069,80 @@ paths:
             text/plain:
               schema:
                 type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/webhooks:
+    get:
+      summary: Get webhooks
+      description: Returns all registered webhooks and their queue information.
+      responses:
+        "200":
+          description: Successfully retrieved webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queues:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookQueueInfo"
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Webhook"
+    post:
+      summary: Register webhook
+      description: Registers a new webhook.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Webhook"
+      responses:
+        "200":
+          description: Successfully registered webhook
+        "500":
+          description: Failed to register webhook
+
+  /webhooks/action:
+    post:
+      summary: Broadcast webhook action
+      description: Broadcasts a webhook event to registered webhooks.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+      responses:
+        "200":
+          description: Successfully broadcast action
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/webhook/delete:
+    post:
+      summary: Delete webhook
+      description: Deletes a registered webhook.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Webhook"
+      responses:
+        "200":
+          description: Successfully deleted webhook
+        "404":
+          description: Webhook not found
         "500":
           description: Internal server error
           content:
@@ -6071,3 +6229,66 @@ components:
           $ref: "#/components/schemas/Currency"
         immature:
           $ref: "#/components/schemas/Currency"
+
+    Webhook:
+      type: object
+      properties:
+        module:
+          type: string
+          description: The module this webhook belongs to
+          enum:
+            - alerts
+        event:
+          type: string
+          description: The event type this webhook listens for
+          enum:
+            - dismiss
+            - register
+        url:
+          type: string
+          description: The URL to send webhook events to
+          example: "https://foo.com:8000/api/events"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom headers to include in webhook requests
+
+    WebhookEvent:
+      type: object
+      properties:
+        module:
+          type: string
+          description: The module that triggered the event
+          enum:
+            - alerts
+        event:
+          type: string
+          description: The type of event that occurred
+          enum:
+            - dismiss
+            - register
+        data:
+          type: object
+          description: Event-specific data payload
+
+    WebhookQueueInfo:
+      type: object
+      properties:
+        url:
+          type: string
+          description: The URL of the webhook
+        numPending:
+          type: integer
+          description: Number of pending events in queue
+        lastSuccess:
+          type: string
+          format: date-time
+          description: Timestamp of last successful delivery
+        lastError:
+          type: string
+          format: date-time
+          description: Timestamp of last failed delivery
+        lastErrorMessage:
+          type: string
+          description: Message from last failed delivery
