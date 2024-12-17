@@ -8,7 +8,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/gouging"
-	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 )
 
 const (
@@ -166,11 +165,7 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64, period uint6
 	// calculate remaining host info fields
 	if !h.IsAnnounced() {
 		ub.NotAnnounced = true
-	} else if !h.Scanned ||
-		// NOTE: a v2 host might have been scanned before the v2 height so strictly
-		// speaking it is scanned but since it hasn't been scanned since, the
-		// settings aren't set so we treat it as not scanned
-		(h.IsV2() && h.V2Settings == (rhp4.HostSettings{})) {
+	} else if !h.Scanned {
 		ub.NotCompletingScan = true
 	} else {
 		// online check

@@ -898,6 +898,14 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 	// fill in v2 addresses
 	err = fillInV2Addresses(ctx, tx, hostIDs, func(i int, addrs []string) {
 		hosts[i].V2SiamuxAddresses = addrs
+
+		// NOTE: a v2 host might have been scanned before the v2 height so strictly
+		// speaking it is scanned but since it hasn't been scanned since, the
+		// settings aren't set so we treat it as not scanned
+		if hosts[i].IsV2() && hosts[i].V2Settings == (rhp.HostSettings{}) {
+			hosts[i].Scanned = false
+		}
+
 		i++
 	})
 	if err != nil {
@@ -2576,7 +2584,7 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.id, sla.health, sla.key, sla.min_shards, sli.offset, sli.length
+		SELECT sla.health, sla.key, sla.min_shards, sli.offset, sli.length
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
 		WHERE sli.db_object_id = ?
@@ -2589,9 +2597,8 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	slabSlices := object.SlabSlices{}
 	for rows.Next() {
-		var id int64
 		var ss object.SlabSlice
-		if err := rows.Scan(&id, &ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, &ss.Offset, &ss.Length); err != nil {
+		if err := rows.Scan(&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, &ss.Offset, &ss.Length); err != nil {
 			return api.Object{}, fmt.Errorf("failed to scan slab slice: %w", err)
 		}
 		slabSlices = append(slabSlices, ss)
