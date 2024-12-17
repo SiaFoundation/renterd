@@ -18,6 +18,7 @@ The following routes were added:
 - sectors
 - settings
 - slabbuffers
+- slabs
 - syncer
 - txpool
 - wallet
