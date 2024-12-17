@@ -2938,14 +2938,17 @@ func TestV1ToV2Transition(t *testing.T) {
 		cluster.MineBlocks(1)
 		time.Sleep(100 * time.Millisecond)
 	}
-	time.Sleep(time.Second)
 
 	// check that we have 1 archived contract for every contract we had before
-	archivedContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
-	tt.OK(err)
-	if len(archivedContracts) != nHosts-1 {
-		t.Fatalf("expected %v archived contracts, got %v", nHosts-1, len(archivedContracts))
-	}
+	var archivedContracts []api.ContractMetadata
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		archivedContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
+		tt.OK(err)
+		if len(archivedContracts) != nHosts-1 {
+			return fmt.Errorf("expected %v archived contracts, got %v", nHosts-1, len(archivedContracts))
+		}
+		return nil
+	})
 
 	// they should be on nHosts-1 unique hosts
 	usedHosts := make(map[types.PublicKey]struct{})
