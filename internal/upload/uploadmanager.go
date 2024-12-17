@@ -471,9 +471,6 @@ func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shardIndice
 
 	// upload the shards
 	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
-	if err != nil {
-		return err
-	}
 
 	// build sectors
 	var sectors []api.UploadedSector
@@ -483,13 +480,22 @@ func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shardIndice
 			Root:       sector.root,
 		})
 	}
+	if len(sectors) > 0 {
+		if err := mgr.os.UpdateSlab(ctx, s.EncryptionKey, sectors); err != nil {
+			return fmt.Errorf("couldn't update slab: %w", err)
+		}
+	}
+
+	// check error
+	if err != nil {
+		return err
+	}
 
 	// track stats
 	mgr.statsOverdrivePct.Track(overdrivePct)
 	mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
 
-	// update the slab
-	return mgr.os.UpdateSlab(ctx, s.EncryptionKey, sectors)
+	return nil
 }
 
 func (mgr *Manager) candidates(allowed map[types.PublicKey]struct{}) (candidates []*uploader.Uploader) {
@@ -672,6 +678,9 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	return uploadSpeed, overdrivePct
 }
 
+// uploadShards uploads the shards to the provided candidates. It returns an
+// error if it fails to upload all shards but len(sectors) will be > 0 if some
+// shards were uploaded successfully.
 func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
@@ -770,6 +779,13 @@ loop:
 		}
 	}
 
+	// collect the sectors
+	for _, sector := range slab.sectors {
+		if sector.isUploaded() {
+			sectors = append(sectors, sector.uploaded)
+		}
+	}
+
 	// calculate the upload speed
 	bytes := slab.numUploaded * rhpv2.SectorSize
 	ms := time.Since(start).Milliseconds()
@@ -791,10 +807,6 @@ loop:
 		return
 	}
 
-	// collect the sectors
-	for _, sector := range slab.sectors {
-		sectors = append(sectors, sector.uploaded)
-	}
 	return
 }
 

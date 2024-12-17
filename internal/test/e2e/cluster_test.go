@@ -2990,20 +2990,39 @@ func TestV1ToV2Transition(t *testing.T) {
 			rev, err := cluster.Bus.ContractRevision(context.Background(), c.ID)
 			tt.OK(err)
 			if rev.Size != rhpv4.SectorSize {
-				return fmt.Errorf("expected sector size to be %v, got %v", rhpv4.SectorSize, rev.Size)
+				return fmt.Errorf("expected revision size to be %v, got %v", rhpv4.SectorSize, rev.Size)
 			}
 			// check local metadata
 			if c.Size != rhpv4.SectorSize {
-				return fmt.Errorf("expected sector size to be %v, got %v", rhpv4.SectorSize, c.Size)
+				return fmt.Errorf("expected contract size to be %v, got %v", rhpv4.SectorSize, c.Size)
+			}
+			// one of the shards should be on this contract
+			var found bool
+			for _, shard := range slab.Shards {
+				for _, fcid := range shard.Contracts[c.HostKey] {
+					found = found || fcid == c.ID
+				}
+			}
+			if !found {
+				t.Fatal("expected contract to shard data")
 			}
 		}
 		return nil
 	})
 
-	// download file to make sure it's still there
-	buf := new(bytes.Buffer)
-	tt.OK(cluster.Worker.DownloadObject(context.Background(), buf, testBucket, "foo", api.DownloadObjectOptions{}))
-	if !bytes.Equal(data, buf.Bytes()) {
-		t.Fatal("data mismatch")
-	}
+	// download file to make sure it's still available
+	// NOTE: 1st try fails since the accounts appear not to be funded since the
+	// test host has separate account managers for rhp3 and rhp4
+	tt.FailAll(cluster.Worker.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, "foo", api.DownloadObjectOptions{}))
+
+	// subsequent tries succeed
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buf := new(bytes.Buffer)
+		if err := cluster.Worker.DownloadObject(context.Background(), buf, testBucket, "foo", api.DownloadObjectOptions{}); err != nil {
+			return err
+		} else if !bytes.Equal(data, buf.Bytes()) {
+			t.Fatal("data mismatch")
+		}
+		return nil
+	})
 }
