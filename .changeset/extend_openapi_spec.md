@@ -16,6 +16,7 @@ The following routes were added:
 - object
 - params
 - sectors
+- settings
 - slabbuffers
 - syncer
 - txpool

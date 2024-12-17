@@ -3109,6 +3109,168 @@ paths:
               schema:
                 type: string
 
+  /bus/settings/gouging:
+    get:
+      summary: Get gouging settings
+      description: Returns the current gouging settings.
+      responses:
+        "200":
+          description: Successfully retrieved gouging settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GougingSettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update gouging settings
+      description: Updates the gouging settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GougingSettings"
+      responses:
+        "200":
+          description: Successfully updated gouging settings
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/pinned:
+    get:
+      summary: Get pinned settings
+      description: Returns the current pinned settings.
+      responses:
+        "200":
+          description: Successfully retrieved pinned settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedSettings"
+    put:
+      summary: Update pinned settings
+      description: Updates the pinned settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinnedSettings"
+      responses:
+        "200":
+          description: Successfully updated pinned settings
+        "400":
+          description: Invalid settings
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                explorerDisabled:
+                  summary: Explorer disabled
+                  value: "explorer must be enabled for settings to be pinned"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/s3:
+    get:
+      summary: Get S3 settings
+      description: Returns the current S3 settings.
+      responses:
+        "200":
+          description: Successfully retrieved S3 settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/S3Settings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update S3 settings
+      description: Updates the S3 settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/S3Settings"
+      responses:
+        "200":
+          description: Successfully updated S3 settings
+        "400":
+          description: Invalid settings
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/upload:
+    get:
+      summary: Get upload settings
+      description: Returns the current upload settings.
+      responses:
+        "200":
+          description: Successfully retrieved upload settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update upload settings
+      description: Updates the upload settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadSettings"
+      responses:
+        "200":
+          description: Successfully updated upload settings
+        "400":
+          description: Invalid settings
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/slabbuffers:
     get:
       summary: Get slab buffers info
@@ -4873,6 +5035,16 @@ components:
             - $ref: "#/components/schemas/Currency"
             - description: The minimum max balance a host should allow us to fund an account with
 
+    GougingSettingsPins:
+      type: object
+      properties:
+        maxDownload:
+          $ref: "#/components/schemas/Pin"
+        maxStorage:
+          $ref: "#/components/schemas/Pin"
+        maxUpload:
+          $ref: "#/components/schemas/Pin"
+
     HostsConfig:
       type: object
       properties:
@@ -5201,6 +5373,29 @@ components:
         encryptionKey:
           $ref: "#/components/schemas/EncryptionKey"
 
+    Pin:
+      type: object
+      properties:
+        pinned:
+          type: boolean
+          description: Whether pin is enabled
+        value:
+          type: number
+          format: float64
+          description: The value of the underlying currency to which the setting is pinned
+
+    PinnedSettings:
+      type: object
+      properties:
+        currency:
+          $ref: "#/components/schemas/Currency"
+        threshold:
+          type: number
+          format: float64
+          description: A percentage between 0 and 1 that determines when the pinned settings are updated based on the exchange rate at the time
+        gougingSettingsPins:
+          $ref: "#/components/schemas/GougingSettingsPins"
+
     MultipartUploadID:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
@@ -5475,6 +5670,19 @@ components:
       description: The address of the syncer
       example: "118.92.232.145:9981"
 
+    S3Settings:
+      type: object
+      properties:
+        accessKeyID:
+          type: string
+          description: S3 access key ID
+        secretAccessKey:
+          type: string
+          description: S3 secret access key
+        disableAuth:
+          type: boolean
+          description: Whether to disable S3 authentication
+
     UploadedPackedSlab:
       type: object
       properties:
@@ -5494,6 +5702,25 @@ components:
           $ref: "#/components/schemas/FileContractID"
         root:
           $ref: "#/components/schemas/Hash256"
+
+    UploadSettings:
+      type: object
+      properties:
+        packing:
+          $ref: "#/components/schemas/UploadPackingSettings"
+        redundancy:
+          $ref: "#/components/schemas/RedundancySettings"
+
+    UploadPackingSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether upload packing is enabled
+        slabBufferMaxSizeSoft:
+              type: integer
+              format: int64
+              description: Maximum size for slab buffers
 
     WalletMetric:
       type: object
