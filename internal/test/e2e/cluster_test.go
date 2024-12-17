@@ -2981,6 +2981,7 @@ func TestV1ToV2Transition(t *testing.T) {
 		if object.Health != 1 {
 			return fmt.Errorf("expected health to be 1, got %v", object.Health)
 		}
+		slab := object.Slabs[0]
 
 		// check that the contracts now contain the data
 		activeContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
