@@ -14,6 +14,7 @@ The following routes were added:
 - multipart
 - objects
 - object
+- params
 - syncer
 - txpool
 - wallet
