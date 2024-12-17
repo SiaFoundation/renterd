@@ -3082,6 +3082,91 @@ paths:
               schema:
                 type: string
 
+  /bus/slabbuffers:
+    get:
+      summary: Get slab buffers info
+      description: Returns information about all slab buffers.
+      responses:
+        "200":
+          description: Successfully retrieved slab buffers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabBuffer"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabbuffer/done:
+    post:
+      summary: Mark packed slabs as uploaded
+      description: Marks the specified packed slabs as successfully uploaded.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slabs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/UploadedPackedSlab"
+      responses:
+        "200":
+          description: Successfully marked slabs as uploaded
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabbuffer/fetch:
+    post:
+      summary: Fetch packed slabs for upload
+      description: Returns packed slabs that are ready to be uploaded.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lockingDuration:
+                  allOf:
+                    - $ref: "#/components/schemas/DurationMS"
+                    - description: Duration in milliseconds to lock the slabs
+                minShards:
+                  type: integer
+                  format: uint8
+                  description: Minimum number of shards required
+                totalShards:
+                  type: integer
+                  format: uint8
+                  description: Total number of shards to split into
+                limit:
+                  type: integer
+                  description: Maximum number of packed slabs to return
+      responses:
+        "200":
+          description: Successfully retrieved packed slabs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PackedSlab"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/syncer/address:
     get:
       summary: Get the syncer's address
@@ -5075,6 +5160,20 @@ components:
         type: string
       description: User-defined metadata about an object provided through X-Sia-Meta- headers
 
+    PackedSlab:
+      type: object
+      properties:
+        bufferID:
+          type: integer
+          format: uint
+          description: ID of the buffer containing the slab
+        data:
+          type: string
+          format: binary
+          description: The slab data
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+
     MultipartUploadID:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
@@ -5284,6 +5383,27 @@ components:
       format: byte
       example: "4d3b2a1c9f8e7d6c5b4a3f2e1d0c9b8a"
 
+    SlabBuffer:
+      type: object
+      properties:
+        complete:
+          type: boolean
+          description: Whether the slab buffer is complete and ready to upload
+        filename:
+          type: string
+          description: Name of the buffer on disk
+        size:
+          type: integer
+          format: int64
+          description: Size of the buffer
+        maxSize:
+          type: integer
+          format: int64
+          description: Maximum size of the buffer
+        locked:
+          type: boolean
+          description: Whether the slab buffer is locked for uploading
+
     UploadID:
       type: string
       description: A 32-byte unique identifier represented as a hex string.
@@ -5327,6 +5447,26 @@ components:
       type: string
       description: The address of the syncer
       example: "118.92.232.145:9981"
+
+    UploadedPackedSlab:
+      type: object
+      properties:
+        bufferID:
+          type: integer
+          format: uint
+          description: ID of the buffer containing the slab
+        shards:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadedSector"
+
+    UploadedSector:
+      type: object
+      properties:
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        root:
+          $ref: "#/components/schemas/Hash256"
 
     WalletMetric:
       type: object

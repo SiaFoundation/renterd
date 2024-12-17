@@ -15,6 +15,7 @@ The following routes were added:
 - objects
 - object
 - params
+- slabbuffers
 - syncer
 - txpool
 - wallet
