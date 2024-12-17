@@ -9,6 +9,7 @@ The following routes were added:
 - contracts
 - contract
 - hosts
+- host
 - syncer
 - txpool
 - wallet

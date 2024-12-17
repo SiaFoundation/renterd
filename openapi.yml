@@ -2043,6 +2043,136 @@ paths:
               schema:
                 type: string
 
+  /bus/host/{hostkey}:
+    get:
+      summary: Get host details
+      description: Returns detailed information about a specific host
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      responses:
+        "200":
+          description: Host details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostInfo'
+        "404":
+          description: Host not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}/check:
+    put:
+      summary: Update host check
+      description: Updates host checks for a specific host
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HostChecks'
+      responses:
+        "200":
+          description: Host check updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}/resetlostsectors:
+    post:
+      summary: Reset lost sectors
+      description: Resets the lost sectors counter for a specific host
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      responses:
+        "200":
+          description: Lost sectors reset successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}/scan:
+    post:
+      summary: Scan host
+      description: Performs a scan of the host to check its settings and availability
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeout:
+                  allOf:
+                  - $ref: '#/components/schemas/DurationMS'
+                  - description: Scan timeout in milliseconds
+      responses:
+        "200":
+          description: Host scan results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ping:
+                    allOf:
+                      - $ref: '#/components/schemas/DurationMS'
+                      - description: Round trip time in milliseconds
+                  scanError:
+                    type: string
+                  settings:
+                    $ref: '#/components/schemas/HostSettings'
+                  priceTable:
+                    $ref: '#/components/schemas/HostPriceTable'
+                  v2Settings:
+                    $ref: '#/components/schemas/V2HostSettings'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Not connected to peers
+
   /bus/syncer/address:
     get:
       summary: Get the syncer's address
@@ -2976,6 +3106,7 @@ components:
         release:
           type: string
           description: Release tag of the host software
+          example: "hostd 1.0.0"
         walletAddress:
           $ref: "#/components/schemas/Address"
         acceptingContracts:
