@@ -448,12 +448,8 @@ func (a *Manager) refillAccount(ctx context.Context, contract api.ContractMetada
 }
 
 func (a *Account) Token() rhpv4.AccountToken {
-	t := rhpv4.AccountToken{
-		Account:    rhpv4.Account(a.key.PublicKey()),
-		ValidUntil: time.Now().Add(5 * time.Minute),
-	}
-	t.Signature = a.key.SignHash(t.SigHash())
-	return t
+	account := rhpv4.Account(a.key.PublicKey())
+	return account.Token(a.key, a.acc.HostKey)
 }
 
 // WithSync syncs an accounts balance with the bus. To do so, the account is
