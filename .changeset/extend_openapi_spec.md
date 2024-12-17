@@ -11,6 +11,7 @@ The following routes were added:
 - hosts
 - host
 - metric
+- multipart
 - syncer
 - txpool
 - wallet

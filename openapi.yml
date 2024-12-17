@@ -2339,6 +2339,368 @@ paths:
               schema:
                 type: string
 
+  /bus/multipart/create:
+    post:
+      summary: Create a multipart upload
+      description: Creates a new multipart upload and returns an upload ID.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object to upload
+                  example: "myDir/myFile"
+                  minLength: 1
+                mimeType:
+                  type: string
+                  description: The MIME type of the object
+                  example: "text/plain"
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+                disableClientSideEncryption:
+                  type: boolean
+                  description: Whether to disable client-side encryption
+                  default: false
+      responses:
+        "200":
+          description: Successfully created multipart upload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/abort:
+    post:
+      summary: Abort a multipart upload
+      description: Aborts an ongoing multipart upload and removes any uploaded parts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                  type: string
+                  description: The ID of the multipart upload to abort
+      responses:
+        "200":
+          description: Successfully aborted multipart upload
+        "404":
+          description: Upload not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/complete:
+    post:
+      summary: Complete a multipart upload
+      description: Completes a multipart upload by combining all uploaded parts into a single object.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      partNumber:
+                        type: integer
+                        description: The number of this part
+                      eTag:
+                        type: string
+                        description: The ETag of this part
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+      responses:
+        "200":
+          description: Successfully completed multipart upload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eTag:
+                    type: string
+                    description: The ETag of the completed object
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/part:
+    put:
+      summary: Upload a part of a multipart upload
+      description: Adds a part to an ongoing multipart upload.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                eTag:
+                  $ref: "#/components/schemas/ETag"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                  $ref: "#/components/schemas/UploadID"
+                partNumber:
+                  type: integer
+                  description: The number of this part (1-10000)
+                  minimum: 1
+                  maximum: 10000
+                slices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SlabSlice"
+      responses:
+        "200":
+          description: Successfully uploaded part
+        "400":
+          description: Invalid request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              example:
+                invalidPartNumber:
+                  summary: Invalid part number
+                  value: "partNumber must be between 1 and 10000"
+                requiredEtag:
+                  summary: Required ETag
+                  value: "eTag must be non-empty"
+                requiredUploadID:
+                  summary: Required upload ID
+                  value: "uploadID must be non-empty"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/upload/{id}:
+    get:
+      summary: Get multipart upload details
+      description: Returns details about an ongoing multipart upload.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The ID of the multipart upload
+      responses:
+        "200":
+          description: Successfully retrieved multipart upload details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bucket:
+                    $ref: "#/components/schemas/BucketName"
+                  encryptionKey:
+                    allOf:
+                      - $ref: "#/components/schemas/EncryptionKey"
+                      - description: The encryption key used for this upload
+                  key:
+                    type: string
+                    description: The key of the object
+                  uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+                  createdAt:
+                    type: string
+                    format: date-time
+                    description: When the upload was created
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/listuploads:
+    post:
+      summary: List multipart uploads
+      description: Lists all ongoing multipart uploads.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                prefix:
+                  type: string
+                  description: Filter uploads by key prefix
+                keyMarker:
+                  type: string
+                  description: Key to start listing from
+                uploadIDMarker:
+                  allOf:
+                    - $ref: "#/components/schemas/UploadID"
+                    - description: Upload ID to start listing from
+                limit:
+                  type: integer
+                  description: Maximum number of uploads to return
+      responses:
+        "200":
+          description: Successfully listed multipart uploads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more uploads to fetch
+                  nextMarker:
+                    type: string
+                    description: The key marker for the next page of results
+                  nextUploadIDMarker:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The upload ID marker for the next page of results
+                  uploads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bucket:
+                          type: string
+                          description: The name of the bucket
+                        encryptionKey:
+                          type: string
+                          description: The encryption key used for this upload
+                        key:
+                          type: string
+                          description: The key of the object
+                        uploadID:
+                          allOf:
+                            - $ref: "#/components/schemas/UploadID"
+                            - description: The ID of the multipart upload
+                        createdAt:
+                          type: string
+                          format: date-time
+                          description: When the upload was created
+
+  /bus/multipart/listparts:
+    post:
+      summary: List parts of a multipart upload
+      description: Lists all parts that have been uploaded for a specific multipart upload.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+                partNumberMarker:
+                  type: integer
+                  description: Part number to start listing from
+                limit:
+                  type: integer
+                  format: int64
+                  description: Maximum number of parts to return
+      responses:
+        "200":
+          description: Successfully listed multipart upload parts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more parts to fetch
+                  nextMarker:
+                    type: integer
+                    description: The part number marker for the next page of results
+                  parts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        partNumber:
+                          type: integer
+                          description: The number of this part
+                        lastModified:
+                          type: string
+                          format: date-time
+                          description: When this part was last modified
+                        eTag:
+                          allOf:
+                            - $ref: "#/components/schemas/ETag"
+                            - description: The ETag of this part
+                        size:
+                          type: integer
+                          format: int64
+                          description: The size of this part in bytes
+
   /bus/syncer/address:
     get:
       summary: Get the syncer's address
@@ -4224,6 +4586,58 @@ components:
           description: The total amount of memory available in bytes
           minimum: 1
 
+    MultipartUpload:
+      type: object
+      properties:
+        bucket:
+          type: string
+          description: The name of the bucket
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+        key:
+          type: string
+          description: The key of the object
+        uploadID:
+          allOf:
+            - $ref: "#/components/schemas/UploadID"
+            - description: The ID of the multipart upload
+        createdAt:
+          type: string
+          format: date-time
+          description: When the upload was created
+
+    MultipartListPartItem:
+      type: object
+      properties:
+        partNumber:
+          type: integer
+          description: The number of this part
+        lastModified:
+          type: string
+          format: date-time
+          description: When this part was last modified
+        eTag:
+          $ref: "#/components/schemas/ETag"
+        size:
+          type: integer
+          format: int64
+          description: The size of this part in bytes
+
+    MultipartCompletedPart:
+      type: object
+      properties:
+        partNumber:
+          type: integer
+          description: The number of this part
+        eTag:
+          $ref: "#/components/schemas/ETag"
+
+    ObjectUserMetadata:
+      type: object
+      additionalProperties:
+        type: string
+      description: User-defined metadata about an object provided through X-Sia-Meta- headers
+
     MultipartUploadID:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
@@ -4431,6 +4845,12 @@ components:
       format: byte
       example: "4d3b2a1c9f8e7d6c5b4a3f2e1d0c9b8a"
 
+    UploadID:
+      type: string
+      description: A 32-byte unique identifier represented as a hex string.
+      format: byte
+      example: "f1e2d3c4b5a697887776665544332211ffeeddccbbaa99887766554433221100"
+
     Slab:
       type: object
       description: A slab of data to migrate
@@ -4450,6 +4870,19 @@ components:
           minimum: 1
           maximum: 255
           description: The number of data shards the slab is split into
+
+    SlabSlice:
+      type: object
+      description: A contiguous region within a slab
+      properties:
+        slab:
+         $ref: "#/components/schemas/Slab"
+        offset:
+          type: integer
+          format: uint32
+        limit:
+          type: integer
+          format: uint32
 
     SyncerAddress:
       type: string
