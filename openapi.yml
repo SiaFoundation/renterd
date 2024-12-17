@@ -1232,7 +1232,7 @@ paths:
         "500":
           description: Internal server error
 
-  /contracts/all:
+  /bus/contracts/all:
     delete:
       summary: Archives all contracts
       responses:
@@ -1245,7 +1245,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/archive:
+  /bus/contracts/archive:
     post:
       summary: Archive contracts
       requestBody:
@@ -1269,7 +1269,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/form:
+  /bus/contracts/form:
     post:
       summary: Form a new contract
       requestBody:
@@ -1337,7 +1337,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/prunable:
+  /bus/contracts/prunable:
     get:
       summary: Get prunable contract data
       responses:
@@ -1363,7 +1363,7 @@ paths:
                     format: uint64
                     description: The total size of all contracts in bytes
 
-  /contracts/renewed/{id}:
+  /bus/contracts/renewed/{id}:
     get:
       summary: Get renewed contract
       parameters:
@@ -1386,7 +1386,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/spending:
+  /bus/contracts/spending:
     post:
       summary: Record contract spending
       requestBody:
@@ -1440,7 +1440,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}:
+  /bus/contract/{id}:
     get:
       summary: Get contract by ID
       parameters:
@@ -1481,7 +1481,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/acquire:
+  /bus/contract/{id}/acquire:
     post:
       summary: Acquire contract lock
       parameters:
@@ -1513,7 +1513,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContractLockID"
 
-  /contract/{id}/ancestors:
+  /bus/contract/{id}/ancestors:
     get:
       summary: Get contract ancestors
       parameters:
@@ -1544,7 +1544,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/broadcast:
+  /bus/contract/{id}/broadcast:
     post:
       summary: Broadcast contract's revision
       parameters:
@@ -1563,7 +1563,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/keepalive:
+  /bus/contract/{id}/keepalive:
     post:
       summary: Keep contract lock alive
       parameters:
@@ -1595,7 +1595,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/revision:
+  /bus/contract/{id}/revision:
     get:
       summary: Get latest contract revision
       parameters:
@@ -1624,7 +1624,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/prune:
+  /bus/contract/{id}/prune:
     post:
       summary: Prune contract data
       parameters:
@@ -1672,7 +1672,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/renew:
+  /bus/contract/{id}/renew:
     post:
       summary: Renew contract
       parameters:
@@ -1706,7 +1706,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContractMetadata"
 
-  /contract/{id}/release:
+  /bus/contract/{id}/release:
     post:
       summary: Release contract lock
       parameters:
@@ -1733,7 +1733,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/roots:
+  /bus/contract/{id}/roots:
     get:
       summary: Get contract sector roots
       parameters:
@@ -1752,7 +1752,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Hash256"
 
-  /contract/{id}/size:
+  /bus/contract/{id}/size:
     get:
       summary: Get contract size
       parameters:
@@ -1781,7 +1781,7 @@ paths:
               schema:
                 type: string
 
-  /contract/{id}/usability:
+  /bus/contract/{id}/usability:
     put:
       summary: Update contract usability
       parameters:
@@ -1811,6 +1811,231 @@ paths:
             text/plain:
               schema:
                 type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts:
+    get:
+      summary: Get usable hosts
+      description: Returns a list of hosts that pass the gouging checks
+      responses:
+        "200":
+          description: List of usable hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostInfo'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      summary: Search hosts using filters
+      description: Returns a filtered list of hosts based on specified criteria
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                usabilityMode:
+                  type: string
+                  enum:
+                    - usable
+                    - unusable
+                    - all
+                filterMode:
+                  type: string
+                  enum:
+                    - allowed
+                    - blocked
+                    - all
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: The number of hosts to skip
+                limit:
+                  type: integer
+                  minimum: -1
+                  default: -1
+                  description: The maximum number of hosts to return
+                addressContains:
+                  type: string
+                  description: The host's net address to search for
+                  example: "foo.com"
+                keyIn:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublicKey'
+                maxLastScan:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: List of filtered hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Host'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts/allowlist:
+    get:
+      summary: Get host allowlist
+      description: Returns the list of allowed host public keys
+      responses:
+        "200":
+          description: List of allowed host public keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicKey'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update host allowlist
+      description: Updates the list of allowed host public keys
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublicKey'
+                remove:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublicKey'
+                clear:
+                  type: boolean
+      responses:
+        "200":
+          description: Allowlist updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts/blocklist:
+    get:
+      summary: Get host blocklist
+      description: Returns the list of blocked host net addresses
+      responses:
+        "200":
+          description: List of blocked host net addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: ipv4
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update host blocklist
+      description: Updates the list of blocked host public keys
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add:
+                  type: array
+                  items:
+                    type: string
+                remove:
+                  type: array
+                  items:
+                    type: string
+                clear:
+                  type: boolean
+      responses:
+        "200":
+          description: Blocklist updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts/remove:
+    post:
+      summary: Remove offline hosts
+      description: Removes hosts that have been offline for the specified duration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxDowntimeHours:
+                  type: integer
+                maxConsecutiveScanFailures:
+                  type: integer
+      responses:
+        "200":
+          description: Number of hosts removed
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: uint64
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidMaxDowntime:
+                  summary: Invalid max downtime
+                  value: "maxDowntime must be non-zero"
         "500":
           description: Internal server error
           content:
@@ -2504,6 +2729,275 @@ components:
       pattern: ^[0-9a-fA-F]{64}$
       description: A 256-bit blake2b hash
 
+    HostPrices:
+      type: object
+      properties:
+        contractPrice:
+          $ref: "#/components/schemas/Currency"
+        collateral:
+          $ref: "#/components/schemas/Currency"
+        storagePrice:
+          $ref: "#/components/schemas/Currency"
+        ingressPrice:
+          $ref: "#/components/schemas/Currency"
+        egressPrice:
+          $ref: "#/components/schemas/Currency"
+        tipHeight:
+          type: integer
+          format: uint64
+          description: The height at which the prices were last updated
+        validUntil:
+          type: string
+          format: date-time
+        signature:
+          $ref: "#/components/schemas/Signature"
+
+    HostPriceTable:
+      type: object
+      description: A detailed price table containing cost and configuration values for a host.
+      properties:
+        uid:
+          allOf:
+            - $ref: "#/components/schemas/SettingsID"
+            - description: Unique specifier that identifies this price table.
+        validity:
+          description: Duration (in nanoseconds) for which the host guarantees these prices are valid.
+          type: integer
+          format: int64
+          example: 3600000000000 # 1 hour in nanoseconds
+        hostblockheight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The host's current block height.
+        updatepricetablecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to fetch a new price table from the host.
+        accountbalancecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to fetch the balance of an ephemeral account.
+        fundaccountcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to fund an ephemeral account on the host.
+        latestrevisioncost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to retrieve the latest revision of a contract.
+        subscriptionmemorycost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost of storing a byte of data for a subscription period.
+        subscriptionnotificationcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost of a single notification on top of bandwidth charges.
+        initbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost incurred when starting an MDM program.
+        memorytimecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte per time for the memory consumed by a program.
+        downloadbandwidthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte for download bandwidth.
+        uploadbandwidthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte for upload bandwidth.
+        dropsectorsbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost of performing a DropSectors instruction.
+        dropsectorsunitcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The unit cost per sector for performing a DropSectors instruction.
+        hassectorbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost for executing the HasSector command.
+        readbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost of performing a Read instruction.
+        readlengthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte read during a Read instruction.
+        renewcontractcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost for renewing a contract.
+        revisionbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost for performing a Revision command.
+        swapsectorcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost of swapping two full sectors by root.
+        writebasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost per write operation.
+        writelengthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte written during a Write instruction.
+        writestorecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte/block of additional storage.
+        txnfeeminrecommended:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The minimum recommended transaction fee.
+        txnfeemaxrecommended:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The maximum recommended transaction fee.
+        contractprice:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The additional fee charged by the host to form or renew a contract.
+        collateralcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte for the collateral promised by the host.
+        maxcollateral:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The maximum amount of collateral the host is willing to put into a contract.
+        maxduration:
+          description: Maximum duration (in blocks) for which the host is willing to form a contract.
+          type: integer
+          format: uint64
+          example: 14400 # ~100 days at 10-minute block time.
+        windowsize:
+          description: Minimum time (in blocks) requested for the renew window of a contract.
+          type: integer
+          format: uint64
+          example: 1000
+        registryentriesleft:
+          description: The remaining number of registry entries available on the host.
+          type: integer
+          format: uint64
+          example: 5000
+        registryentriestotal:
+          description: The total number of registry entries available on the host.
+          type: integer
+          format: uint64
+          example: 10000
+
+    HostSettings:
+      type: object
+      properties:
+        acceptingContracts:
+          type: boolean
+          description: Whether the host is accepting new contracts
+        maxDownloadBatchSize:
+          type: integer
+          format: uint64
+          description: Maximum allowed download batch size
+        maxDuration:
+          type: integer
+          format: uint64
+          description: Maximum allowed contract duration
+        maxReviseBatchSize:
+          type: integer
+          format: uint64
+          description: Maximum allowed revision batch size
+        netAddress:
+          type: string
+          description: Network address of the host
+        remainingStorage:
+          type: integer
+          format: uint64
+          description: Amount of storage the host has remaining
+        sectorSize:
+          type: integer
+          format: uint64
+          description: Size of a storage sector
+        totalStorage:
+          type: integer
+          format: uint64
+          description: Total amount of storage space
+        address:
+          $ref: "#/components/schemas/Address"
+        windowSize:
+          type: integer
+          format: uint64
+          description: Size of the proof window
+        collateral:
+          $ref: "#/components/schemas/Currency"
+        maxCollateral:
+          $ref: "#/components/schemas/Currency"
+        baseRPCPrice:
+          $ref: "#/components/schemas/Currency"
+        contractPrice:
+          $ref: "#/components/schemas/Currency"
+        downloadBandwidthPrice:
+          $ref: "#/components/schemas/Currency"
+        sectorAccessPrice:
+          $ref: "#/components/schemas/Currency"
+        storagePrice:
+          $ref: "#/components/schemas/Currency"
+        uploadBandwidthPrice:
+          $ref: "#/components/schemas/Currency"
+        ephemeralAccountExpiry:
+          type: integer
+          format: int64
+          description: Duration before an ephemeral account expires
+        maxEphemeralAccountBalance:
+          $ref: "#/components/schemas/Currency"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        version:
+          type: string
+          description: Version of the host software
+        release:
+          type: string
+          description: Release tag of the host software
+          example: "hostd 1.0.0"
+        siamuxPort:
+          type: string
+          description: Port used for siamux connections
+
+    HostV2Settings:
+      type: object
+      properties:
+        protocolVersion:
+          $ref: "#/components/schemas/SemVer"
+        release:
+          type: string
+          description: Release tag of the host software
+        walletAddress:
+          $ref: "#/components/schemas/Address"
+        acceptingContracts:
+          type: boolean
+          description: Whether the host is accepting new contracts
+        maxCollateral:
+          $ref: "#/components/schemas/Currency"
+        maxContractDuration:
+          type: integer
+          format: uint64
+          description: Maximum allowed contract duration
+        remainingStorage:
+          type: integer
+          format: uint64
+          description: Amount of storage the host has remaining
+        totalStorage:
+          type: integer
+          format: uint64
+          description: Total amount of storage space
+        prices:
+          $ref: "#/components/schemas/HostPrices"
+
     PublicKey:
       type: string
       pattern: "^ed25519:[0-9a-fA-F]{64}$"
@@ -3185,6 +3679,193 @@ components:
           type: string
           description: The minimum supported protocol version of a host to be considered good
 
+    Host:
+      type: object
+      properties:
+        knownSince:
+          type: string
+          format: date-time
+          description: The time the host was first seen
+        lastAnnouncement:
+          type: string
+          format: date-time
+          description: The time the host last announced itself
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        netAddress:
+          type: string
+          description: The address of the host
+          example: "foo.bar:1234"
+        priceTable:
+          $ref: "#/components/schemas/HostPriceTable"
+        settings:
+          $ref: "#/components/schemas/HostSettings"
+        v2Settings:
+          $ref: "#/components/schemas/HostV2Settings"
+        interactions:
+          $ref: "#/components/schemas/HostInteractions"
+        scanned:
+          type: boolean
+          description: Whether the host has been scanned
+        blocked:
+          type: boolean
+          description:  Whether the host is blocked
+        checks:
+          $ref: "#/components/schemas/HostChecks"
+        storedData:
+          type: integer
+          format: uint64
+          description: The amount of data stored on the host in bytes
+        v2SiamuxAddresses:
+          type: array
+          items:
+            type: string
+            description: The addresses of the host for the V2 protocol
+            example: "foo.bar:5678"
+
+    HostChecks:
+      type: object
+      properties:
+        gougingBreakdown:
+          $ref: '#/components/schemas/HostGougingBreakdown'
+        scoreBreakdown:
+          $ref: '#/components/schemas/HostScoreBreakdown'
+        usabilityBreakdown:
+          $ref: '#/components/schemas/HostUsabilityBreakdown'
+
+    HostGougingBreakdown:
+      type: object
+      properties:
+        downloadErr:
+          type: string
+          description: Error message related to download gouging checks.
+        gougingErr:
+          type: string
+          description: Error message related to general gouging checks.
+        pruneErr:
+          type: string
+          description: Error message related to pruning checks.
+        uploadErr:
+          type: string
+          description: Error message related to upload gouging checks.
+
+    HostInfo:
+      type: object
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        siamuxAddr:
+          type: string
+          description: The address of the host
+          example: "foo.bar:1234"
+        v2SiamuxAddresses:
+          type: array
+          items:
+            type: string
+            description: The addresses of the host for the V2 protocol
+            example: "foo.bar:5678"
+
+    HostInteractions:
+      type: object
+      properties:
+        totalScans:
+          type: integer
+          format: uint64
+          description: The total number of scans performed on the host.
+        lastScan:
+          type: string
+          format: date-time
+          description: Timestamp of the last scan performed.
+        lastScanSuccess:
+          type: boolean
+          description: Indicates whether the last scan was successful.
+        lostSectors:
+          type: integer
+          format: uint64
+          description: Number of sectors lost since the last reporting period.
+        secondToLastScanSuccess:
+          type: boolean
+          description: Indicates whether the second-to-last scan was successful.
+        uptime:
+          type: string
+          format: duration
+          description: Total uptime duration of the host.
+        downtime:
+          type: string
+          format: duration
+          description: Total downtime duration of the host.
+        successfulInteractions:
+          type: number
+          format: float
+          description: The number of successful interactions with the host.
+        failedInteractions:
+          type: number
+          format: float
+          description: The number of failed interactions with the host.
+
+    HostScoreBreakdown:
+      type: object
+      properties:
+        age:
+          type: number
+          format: float
+          description: Score contribution based on the host's age.
+        collateral:
+          type: number
+          format: float
+          description: Score contribution based on the host's collateral amount.
+        interactions:
+          type: number
+          format: float
+          description: Score contribution based on successful interactions.
+        storageRemaining:
+          type: number
+          format: float
+          description: Score contribution based on remaining storage capacity.
+        uptime:
+          type: number
+          format: float
+          description: Score contribution based on host uptime.
+        version:
+          type: number
+          format: float
+          description: Score contribution based on the host's software version.
+        prices:
+          type: number
+          format: float
+          description: Score contribution based on pricing metrics.
+
+    HostUsabilityBreakdown:
+      type: object
+      properties:
+        blocked:
+          type: boolean
+          description: Indicates if the host is blocked.
+        offline:
+          type: boolean
+          description: Indicates if the host is offline.
+        lowMaxDuration:
+          type: boolean
+          description: Indicates if the host has a low maximum contract duration.
+        lowScore:
+          type: boolean
+          description: Indicates if the host has a low score.
+        redundantIP:
+          type: boolean
+          description: Indicates if the host's IP address is redundant.
+        gouging:
+          type: boolean
+          description: Indicates if the host is gouging prices.
+        notAcceptingContracts:
+          type: boolean
+          description: Indicates if the host is not accepting new contracts.
+        notAnnounced:
+          type: boolean
+          description: Indicates if the host has not been announced on the network.
+        notCompletingScan:
+          type: boolean
+          description: Indicates if the host is failing to complete scans.
+
     MemoryStatus:
       type: object
       properties:
@@ -3386,6 +4067,24 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: The Merkle root of the sector
+
+    SemVer:
+      type: array
+      description: "Represents a semantic version as an array of three unsigned 8-bit integers: [major, minor, patch]"
+      minItems: 3
+      maxItems: 3
+      items:
+        type: integer
+        format: uint8
+        minimum: 0
+        maximum: 255
+      example: [1, 2, 3]
+
+    SettingsID:
+      type: string
+      description: A 16-byte unique identifier represented as a hex string.
+      format: byte
+      example: "4d3b2a1c9f8e7d6c5b4a3f2e1d0c9b8a"
 
     Slab:
       type: object
