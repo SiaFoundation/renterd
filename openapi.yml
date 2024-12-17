@@ -2932,6 +2932,7 @@ paths:
           schema:
             type: string
             example: "myDir/myFile"
+            pattern: ".*" # greedy match
           description: The key of the object to fetch
         - name: bucket
           in: query
@@ -2967,6 +2968,7 @@ paths:
           schema:
             type: string
             example: "myDir/myFile"
+            pattern: ".*" # greedy match
           description: The key of the object
       requestBody:
         content:
@@ -2999,6 +3001,7 @@ paths:
           schema:
             type: string
             example: "myDir/myFile"
+            pattern: ".*" # greedy match
           description: The key of the object to delete
         - name: bucket
           in: query
@@ -3010,6 +3013,70 @@ paths:
           description: Successfully deleted object
         "404":
           description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/params/gouging:
+    get:
+      summary: Get gouging parameters
+      description: Returns the current gouging parameters including consensus state, gouging settings, and redundancy settings.
+      responses:
+        "200":
+          description: Successfully retrieved gouging parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consensusState:
+                    type: object
+                    properties:
+                      blockHeight:
+                        $ref: "#/components/schemas/BlockHeight"
+                      lastBlockTime:
+                        type: string
+                        format: date-time
+                        description: Timestamp of the last block
+                      synced:
+                        type: boolean
+                        description: Whether consensus is synced
+                  gougingSettings:
+                    $ref: "#/components/schemas/GougingSettings"
+                  redundancySettings:
+                    $ref: "#/components/schemas/RedundancySettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/params/upload:
+    get:
+      summary: Get upload parameters
+      description: Returns parameters needed for uploads including consensus height, gouging parameters and upload packing status.
+      responses:
+        "200":
+          description: Successfully retrieved upload parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                allOf:
+                  - type: object
+                    properties:
+                      currentHeight:
+                        allOf:
+                          - $ref: "#/components/schemas/BlockHeight"
+                          - description: Current consensus height
+                      uploadPacking:
+                        type: boolean
+                        description: Whether upload packing is enabled
+                  - $ref: "#/components/schemas/GougingParams"
+        "500":
+          description: Internal server error
           content:
             text/plain:
               schema:
@@ -4644,6 +4711,16 @@ components:
           items:
             $ref: "#/components/schemas/Address"
 
+    GougingParams:
+      type: object
+      properties:
+        consensusState:
+          $ref: "#/components/schemas/ConsensusState"
+        gougingSettings:
+          $ref: "#/components/schemas/GougingSettings"
+        redundancySettings:
+          $ref: "#/components/schemas/RedundancySettings"
+
     GougingSettings:
       type: object
       properties:
@@ -5142,11 +5219,13 @@ components:
           minimum: 1
           format: int32
           description: The number of data shards a piece of an object gets erasure-coded into
+          default: 10
         totalShards:
           type: integer
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+          default: 30
 
     Revision:
       type: object
