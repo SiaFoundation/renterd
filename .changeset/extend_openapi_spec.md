@@ -22,5 +22,8 @@ The following routes were added:
 - state
 - stats
 - syncer
+- system
+- upload
 - txpool
 - wallet
+- webhooks
