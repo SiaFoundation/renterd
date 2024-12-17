@@ -12,6 +12,8 @@ The following routes were added:
 - host
 - metric
 - multipart
+- objects
+- object
 - syncer
 - txpool
 - wallet
