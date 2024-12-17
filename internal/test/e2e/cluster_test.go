@@ -2944,7 +2944,7 @@ func TestV1ToV2Transition(t *testing.T) {
 	archivedContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
 	tt.OK(err)
 	if len(archivedContracts) != nHosts-1 {
-		t.Fatalf("expected %v archived contracts, got %v", 2*(nHosts-1), len(archivedContracts))
+		t.Fatalf("expected %v archived contracts, got %v", nHosts-1, len(archivedContracts))
 	}
 
 	// they should be on nHosts-1 unique hosts
