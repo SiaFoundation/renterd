@@ -335,13 +335,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		})))
 
 	cm := opts.cm
-	network, genesis := testNetwork()
 	if cm == nil {
 		// create chain manager
+		network, genesis := testNetwork()
 		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
 		tt.OK(err)
 		cm = chain.NewManager(store, state)
 	}
+	network := cm.TipState().Network
+	genesis := types.Block{Timestamp: network.HardforkOak.GenesisTimestamp}
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
