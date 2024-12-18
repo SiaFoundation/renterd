@@ -522,7 +522,7 @@ func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
 	}
 
 	if orr.Prefix == "" {
-		jc.Error(errors.New("prefix cannot be empty"), http.StatusBadRequest)
+		jc.Error(errors.New("'prefix' parameter is required"), http.StatusBadRequest)
 		return
 	}
 

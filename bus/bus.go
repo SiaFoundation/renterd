@@ -406,7 +406,7 @@ func (b *Bus) Handler() http.Handler {
 
 		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
 		"GET    /consensus/network":            b.consensusNetworkHandler,
-		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
+		"GET    /consensus/siafundfee/:payout": b.consensusPayoutContractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
 		"PUT    /contracts":             b.contractsHandlerPUT,

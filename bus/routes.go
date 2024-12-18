@@ -1920,7 +1920,7 @@ func (b *Bus) broadcastAction(e webhooks.Event) {
 	}
 }
 
-func (b *Bus) contractTaxHandlerGET(jc jape.Context) {
+func (b *Bus) consensusPayoutContractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
 		return
@@ -2021,12 +2021,6 @@ func (b *Bus) webhookHandlerPost(jc jape.Context) {
 }
 
 func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
-	key := jc.PathParam("key")
-	if key == "" {
-		jc.Error(errors.New("unknown metric ''"), http.StatusBadRequest)
-		return
-	}
-
 	var cutoff time.Time
 	if jc.DecodeForm("cutoff", (*api.TimeRFC3339)(&cutoff)) != nil {
 		return
@@ -2035,10 +2029,7 @@ func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
 		return
 	}
 
-	err := b.store.PruneMetrics(jc.Request.Context(), key, cutoff)
-	if jc.Check("failed to prune metrics", err) != nil {
-		return
-	}
+	jc.Check("failed to prune metrics", b.store.PruneMetrics(jc.Request.Context(), jc.PathParam("key"), cutoff))
 }
 
 func (b *Bus) metricsHandlerPUT(jc jape.Context) {
