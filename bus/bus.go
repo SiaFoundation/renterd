@@ -794,6 +794,13 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
+	// cap v1 renewals to the v2 require height since the host won't allow us to
+	// form contracts beyond that
+	v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+	if endHeight >= v2ReqHeight {
+		endHeight = v2ReqHeight - 1
+	}
+
 	// fetch the revision
 	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, hs.SiamuxAddr())
 	if err != nil {

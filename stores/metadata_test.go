@@ -245,19 +245,7 @@ func TestObjectBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(*got.Object, want) {
-		t.Fatal("object mismatch", got.Object, want)
-	}
-
-	// update the sector to have a non-consecutive slab index
-	_, err = ss.DB().Exec(context.Background(), "UPDATE sectors SET slab_index = 100 WHERE slab_index = 1")
-	if err != nil {
-		t.Fatalf("failed to update sector: %v", err)
-	}
-
-	// fetch the object again and assert we receive an indication it was corrupted
-	_, err = ss.Object(context.Background(), testBucket, "/"+t.Name())
-	if !errors.Is(err, api.ErrObjectCorrupted) {
-		t.Fatal("unexpected err", err)
+		t.Fatal("object mismatch", cmp.Diff(*got.Object, want, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
 	// create an object without slabs
@@ -272,7 +260,7 @@ func TestObjectBasic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(*got2.Object, want2) {
-		t.Fatal("object mismatch", cmp.Diff(got2.Object, want2))
+		t.Fatal("object mismatch", cmp.Diff(*got2.Object, want2, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 }
 
@@ -2614,7 +2602,7 @@ func TestPartialSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(obj, *fetched.Object) {
-		t.Fatal("mismatch", cmp.Diff(obj, fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
+		t.Fatal("mismatch", cmp.Diff(obj, *fetched.Object, cmp.AllowUnexported(object.EncryptionKey{})))
 	}
 
 	// Add the second slab.
@@ -3633,6 +3621,63 @@ func TestUpdateSlabSanityChecks(t *testing.T) {
 	sectors = []api.UploadedSector{{ContractID: contracts[0].ID, Root: types.Hash256{6}}}
 	if err := ss.UpdateSlab(context.Background(), slab.EncryptionKey, sectors); !errors.Is(err, api.ErrUnknownSector) {
 		t.Fatal(err)
+	}
+}
+
+func TestSlabSectorOnHostButNotInContract(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create host and 2 contracts with it
+	hk := types.PublicKey{1}
+	err := ss.addTestHost(hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, contracts, err := ss.addTestContracts([]types.PublicKey{hk, hk})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare a slab - it has one shard that is pinned to contract 0.
+	shard := newTestShard(hk, contracts[0].ID, types.Hash256{1})
+	slab := object.Slab{
+		EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Shards:        []object.Sector{shard},
+		Health:        1,
+	}
+
+	// set slab.
+	_, err = ss.addTestObject("/"+t.Name(), object.Object{
+		Key:   object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+		Slabs: []object.SlabSlice{{Slab: slab}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rSlab, err := ss.Slab(context.Background(), slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(rSlab.Shards) != 1 {
+		t.Fatal("should have 1 shard", len(rSlab.Shards))
+	} else if fcids, exists := rSlab.Shards[0].Contracts[hk]; !exists || len(fcids) != 1 {
+		t.Fatalf("unexpected contracts %v, exists %v", fcids, exists)
+	}
+
+	// delete one of the contracts - this should cause the host to still be in
+	// the slab but the associated slice should be empty
+	if err := ss.ArchiveContract(context.Background(), contracts[0].ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	rSlab, err = ss.Slab(context.Background(), slab.EncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(rSlab.Shards) != 1 {
+		t.Fatal("should have 1 shard", len(rSlab.Shards))
+	} else if fcids, exists := rSlab.Shards[0].Contracts[hk]; !exists || len(fcids) != 0 {
+		t.Fatalf("unexpected contracts %v, exists %v", fcids, exists)
 	}
 }
 

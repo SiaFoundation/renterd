@@ -93,14 +93,14 @@ func TestGouging(t *testing.T) {
 		if err := h.UpdateSettings(settings); err != nil {
 			t.Fatal(err)
 		}
+
+		// scan the host
+		tt.OKAll(cluster.Bus.ScanHost(context.Background(), h.PublicKey(), time.Second))
 	}
+	time.Sleep(testWorkerCfg().CacheExpiry) // wait for cache to refresh
 
-	// make sure the price table expires so the worker is forced to fetch it
-	// again, this is necessary for the host to be considered price gouging
-	time.Sleep(defaultHostSettings.PriceTableValidity)
-
-	// download the data - should still work
-	tt.OKAll(w.DownloadObject(context.Background(), io.Discard, testBucket, path, api.DownloadObjectOptions{}))
+	// download the data - won't work since the hosts are not usable anymore
+	tt.FailAll(w.DownloadObject(context.Background(), io.Discard, testBucket, path, api.DownloadObjectOptions{}))
 
 	// try optimising gouging settings
 	resp, err := cluster.Autopilot.EvaluateConfig(context.Background(), test.AutopilotConfig, gs, test.RedundancySettings)

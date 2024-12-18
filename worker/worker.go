@@ -599,6 +599,9 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	if cfg.UploadMaxMemory == 0 {
 		return nil, errors.New("uploadMaxMemory cannot be 0")
 	}
+	if cfg.CacheExpiry == 0 {
+		return nil, errors.New("cache expiry cannot be 0")
+	}
 
 	a := alerts.WithOrigin(b, fmt.Sprintf("worker.%s", cfg.ID))
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -606,7 +609,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, l)
 	w := &Worker{
 		alerts:               a,
-		cache:                iworker.NewCache(b, l),
+		cache:                iworker.NewCache(b, cfg.CacheExpiry, l),
 		id:                   cfg.ID,
 		bus:                  b,
 		masterKey:            masterKey,

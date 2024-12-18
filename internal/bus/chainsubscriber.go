@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,6 +72,7 @@ type (
 
 	Wallet interface {
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}
@@ -433,8 +435,15 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 
 		// verify txn and broadcast it
 		_, err = s.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
-		if err != nil {
-			s.logger.Errorf("failed to broadcast contract expiration txn: %v", err)
+		if err != nil &&
+			(strings.Contains(err.Error(), "has already been resolved") ||
+				strings.Contains(err.Error(), "not present in the accumulator")) {
+			s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+			s.logger.With(zap.Error(err)).Debug("failed to broadcast contract expiration txn")
+			continue
+		} else if err != nil {
+			s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
+			s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 			continue
 		}
 		s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})

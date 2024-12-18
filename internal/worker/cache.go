@@ -12,14 +12,13 @@ import (
 )
 
 const (
-	cacheEntryExpiry = 5 * time.Minute
-
 	cacheKeyUsableHosts = "usablehosts"
 )
 
 type memoryCache struct {
-	items map[string]*cacheEntry
-	mu    sync.RWMutex
+	cacheEntryExpiry time.Duration
+	items            map[string]*cacheEntry
+	mu               sync.RWMutex
 }
 
 type cacheEntry struct {
@@ -27,9 +26,10 @@ type cacheEntry struct {
 	expiry time.Time
 }
 
-func newMemoryCache() *memoryCache {
+func newMemoryCache(expiry time.Duration) *memoryCache {
 	return &memoryCache{
-		items: make(map[string]*cacheEntry),
+		cacheEntryExpiry: expiry,
+		items:            make(map[string]*cacheEntry),
 	}
 }
 
@@ -59,7 +59,7 @@ func (c *memoryCache) Set(key string, value interface{}) {
 	defer c.mu.Unlock()
 	c.items[key] = &cacheEntry{
 		value:  value,
-		expiry: time.Now().Add(cacheEntryExpiry),
+		expiry: time.Now().Add(c.cacheEntryExpiry),
 	}
 }
 
@@ -79,12 +79,12 @@ type cache struct {
 	logger *zap.SugaredLogger
 }
 
-func NewCache(b Bus, logger *zap.Logger) WorkerCache {
+func NewCache(b Bus, expiry time.Duration, logger *zap.Logger) WorkerCache {
 	logger = logger.Named("workercache")
 	return &cache{
 		b: b,
 
-		cache:  newMemoryCache(),
+		cache:  newMemoryCache(expiry),
 		logger: logger.Sugar(),
 	}
 }

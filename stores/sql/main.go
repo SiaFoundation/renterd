@@ -192,20 +192,16 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
 
-	// delete host sectors that are no longer associated with any contract
+	// delete all host_sectors for every host that we don't have an active
+	// contract with anymore
 	_, err = tx.Exec(ctx, `DELETE FROM host_sectors
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM contract_sectors
-    WHERE contract_sectors.db_sector_id = host_sectors.db_sector_id
-)
-OR NOT EXISTS (
-    SELECT 1
-    FROM contracts
-    INNER JOIN hosts ON contracts.host_id = hosts.id
-    WHERE contracts.archival_reason IS NULL
-    AND hosts.id = host_sectors.db_host_id
-)`)
+		WHERE NOT EXISTS (
+		  SELECT 1
+		  FROM contracts
+		  INNER JOIN hosts ON contracts.host_id = hosts.id
+		  WHERE contracts.archival_reason IS NULL
+		  AND hosts.id = host_sectors.db_host_id
+		)`)
 	if err != nil {
 		return fmt.Errorf("failed to delete host_sectors: %w", err)
 	}
@@ -506,19 +502,24 @@ func DeleteBucket(ctx context.Context, tx sql.Tx, bucket string) error {
 }
 
 func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root types.Hash256) (int, error) {
+	// fetch sector id
+	var sectorID int64
+	if err := tx.QueryRow(ctx, "SELECT s.id FROM sectors s WHERE s.root = ?", Hash256(root)).
+		Scan(&sectorID); errors.Is(err, dsql.ErrNoRows) {
+		return 0, nil
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to fetch sector id: %w", err)
+	}
+
 	// remove potential links between the host's contracts and the sector
 	res, err := tx.Exec(ctx, `
 		DELETE FROM contract_sectors
-		WHERE db_sector_id = (
-			SELECT s.id
-			FROM sectors s
-			WHERE root = ?
-		) AND db_contract_id IN (
+		WHERE db_sector_id = ? AND db_contract_id IN (
 			SELECT c.id
 			FROM contracts c
 			WHERE c.host_key = ?
 		)
-	`, Hash256(root), PublicKey(hk))
+	`, sectorID, PublicKey(hk))
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete contract sectors: %w", err)
 	}
@@ -552,6 +553,13 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	if err != nil {
 		return 0, fmt.Errorf("failed to update lost sectors: %w", err)
 	}
+
+	// remove sector from host_sectors
+	_, err = tx.Exec(ctx, "DELETE FROM host_sectors WHERE db_sector_id = ?", sectorID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete host sector: %w", err)
+	}
+
 	return int(deletedSectors), nil
 }
 
@@ -890,6 +898,14 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 	// fill in v2 addresses
 	err = fillInV2Addresses(ctx, tx, hostIDs, func(i int, addrs []string) {
 		hosts[i].V2SiamuxAddresses = addrs
+
+		// NOTE: a v2 host might have been scanned before the v2 height so strictly
+		// speaking it is scanned but since it hasn't been scanned since, the
+		// settings aren't set so we treat it as not scanned
+		if hosts[i].IsV2() && hosts[i].V2Settings == (rhp.HostSettings{}) {
+			hosts[i].Scanned = false
+		}
+
 		i++
 	})
 	if err != nil {
@@ -1627,7 +1643,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
 		settings = CASE WHEN ? THEN ? ELSE settings END,
-		v2_settings = CASE WHEN ? THEN ? ELSE settings END,
+		v2_settings = CASE WHEN ? THEN ? ELSE v2_settings END,
 		price_table = CASE WHEN ? THEN ? ELSE price_table END,
 		price_table_expiry = CASE WHEN ? THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
@@ -1843,7 +1859,44 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 	}
 	defer stmt.Close()
 
+	// fetch hosts for each sector
+	hostStmt, err := tx.Prepare(ctx, `
+		SELECT h.public_key
+		FROM host_sectors hs
+		INNER JOIN hosts h ON h.id = hs.db_host_id
+		WHERE hs.db_sector_id = ?
+	`)
+	if err != nil {
+		return object.Slab{}, fmt.Errorf("failed to prepare statement to fetch hosts: %w", err)
+	}
+	defer hostStmt.Close()
+
 	for i, sectorID := range sectorIDs {
+		slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
+
+		// hosts
+		rows, err = hostStmt.Query(ctx, sectorID)
+		if err != nil {
+			return object.Slab{}, fmt.Errorf("failed to fetch hosts: %w", err)
+		}
+		if err := func() error {
+			defer rows.Close()
+
+			for rows.Next() {
+				var pk types.PublicKey
+				if err := rows.Scan((*PublicKey)(&pk)); err != nil {
+					return fmt.Errorf("failed to scan host: %w", err)
+				}
+				if _, exists := slab.Shards[i].Contracts[pk]; !exists {
+					slab.Shards[i].Contracts[pk] = []types.FileContractID{}
+				}
+			}
+			return nil
+		}(); err != nil {
+			return object.Slab{}, err
+		}
+
+		// contracts
 		rows, err := stmt.Query(ctx, sectorID)
 		if err != nil {
 			return object.Slab{}, fmt.Errorf("failed to fetch contracts: %w", err)
@@ -1851,14 +1904,18 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 		if err := func() error {
 			defer rows.Close()
 
-			slab.Shards[i].Contracts = make(map[types.PublicKey][]types.FileContractID)
 			for rows.Next() {
 				var pk types.PublicKey
 				var fcid types.FileContractID
 				if err := rows.Scan((*PublicKey)(&pk), (*FileContractID)(&fcid)); err != nil {
 					return fmt.Errorf("failed to scan contract: %w", err)
 				}
-				slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
+				if _, exists := slab.Shards[i].Contracts[pk]; !exists {
+					slab.Shards[i].Contracts[pk] = []types.FileContractID{}
+				}
+				if fcid != (types.FileContractID{}) {
+					slab.Shards[i].Contracts[pk] = append(slab.Shards[i].Contracts[pk], fcid)
+				}
 			}
 			return nil
 		}(); err != nil {
@@ -2180,10 +2237,10 @@ EXISTS (
 	h.settings,
 	h.v2_settings
 	FROM hosts h
-	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL
+	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL AND c.usability = ?
 	INNER JOIN host_checks hc on hc.db_host_id = h.id
 	WHERE %s
-	GROUP by h.id`, strings.Join(whereExprs, " AND ")))
+	GROUP by h.id`, strings.Join(whereExprs, " AND ")), contractUsabilityGood)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch hosts: %w", err)
 	}
@@ -2527,81 +2584,32 @@ func Object(ctx context.Context, tx Tx, bucket, key string) (api.Object, error) 
 
 	// fetch slab slices
 	rows, err = tx.Query(ctx, `
-		SELECT sla.db_buffered_slab_id IS NOT NULL, sli.object_index, sli.offset, sli.length, sla.health, sla.key, sla.min_shards, COALESCE(sec.slab_index, 0), COALESCE(sec.root, ?), COALESCE(c.fcid, ?), COALESCE(c.host_key, ?)
+		SELECT sla.health, sla.key, sla.min_shards, sli.offset, sli.length
 		FROM slices sli
 		INNER JOIN slabs sla ON sli.db_slab_id = sla.id
-		LEFT JOIN sectors sec ON sec.db_slab_id = sla.id
-		LEFT JOIN contract_sectors csec ON csec.db_sector_id = sec.id
-		LEFT JOIN contracts c ON c.id = csec.db_contract_id
 		WHERE sli.db_object_id = ?
-		ORDER BY sli.object_index ASC, sec.slab_index ASC
-	`, Hash256{}, FileContractID{}, PublicKey{}, objID)
+		ORDER BY sli.object_index ASC
+	`, objID)
 	if err != nil {
 		return api.Object{}, fmt.Errorf("failed to fetch slabs: %w", err)
 	}
 	defer rows.Close()
 
 	slabSlices := object.SlabSlices{}
-	var current *object.SlabSlice
-	var currObjIdx, currSlaIdx int64
 	for rows.Next() {
-		var bufferedSlab bool
-		var objectIndex int64
-		var slabIndex int64
 		var ss object.SlabSlice
-		var sector object.Sector
-		var fcid types.FileContractID
-		var hk types.PublicKey
-		if err := rows.Scan(&bufferedSlab, // whether the slab is buffered
-			&objectIndex, &ss.Offset, &ss.Length, // slice info
-			&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, // slab info
-			&slabIndex, (*Hash256)(&sector.Root), // sector info
-			(*PublicKey)(&fcid), // contract info
-			(*PublicKey)(&hk),   // host info
-		); err != nil {
+		if err := rows.Scan(&ss.Health, (*EncryptionKey)(&ss.EncryptionKey), &ss.MinShards, &ss.Offset, &ss.Length); err != nil {
 			return api.Object{}, fmt.Errorf("failed to scan slab slice: %w", err)
 		}
-
-		// sanity check object for corruption
-		isFirst := current == nil && objectIndex == 1 && slabIndex == 1
-		isBuffered := bufferedSlab && objectIndex == currObjIdx+1 && slabIndex == 0
-		isNewSlab := isFirst || isBuffered || (current != nil && objectIndex == currObjIdx+1 && slabIndex == 1)
-		isNewShard := isNewSlab || (objectIndex == currObjIdx && slabIndex == currSlaIdx+1)
-		isNewContract := isNewShard || (objectIndex == currObjIdx && slabIndex == currSlaIdx)
-		if !isFirst && !isBuffered && !isNewSlab && !isNewShard && !isNewContract {
-			return api.Object{}, fmt.Errorf("%w: object index %d, slab index %d, current object index %d, current slab index %d", api.ErrObjectCorrupted, objectIndex, slabIndex, currObjIdx, currSlaIdx)
-		}
-
-		// update indices
-		currObjIdx = objectIndex
-		currSlaIdx = slabIndex
-
-		if isNewSlab {
-			if current != nil {
-				slabSlices = append(slabSlices, *current)
-			}
-			current = &ss
-		}
-
-		// if the slab is buffered there are no sectors/contracts to add
-		if bufferedSlab {
-			continue
-		}
-
-		if isNewShard {
-			current.Shards = append(current.Shards, sector)
-		}
-		if isNewContract {
-			if current.Shards[len(current.Shards)-1].Contracts == nil {
-				current.Shards[len(current.Shards)-1].Contracts = make(map[types.PublicKey][]types.FileContractID)
-			}
-			current.Shards[len(current.Shards)-1].Contracts[hk] = append(current.Shards[len(current.Shards)-1].Contracts[hk], fcid)
-		}
+		slabSlices = append(slabSlices, ss)
 	}
 
-	// add last slab slice
-	if current != nil {
-		slabSlices = append(slabSlices, *current)
+	// fill in the shards
+	for i := range slabSlices {
+		slabSlices[i].Slab, err = Slab(ctx, tx, slabSlices[i].EncryptionKey)
+		if err != nil {
+			return api.Object{}, fmt.Errorf("failed to fetch slab: %w", err)
+		}
 	}
 
 	return api.Object{

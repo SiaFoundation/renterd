@@ -636,7 +636,7 @@ func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
 		settings := defaultHostSettings
 		settings.NetAddress = host.rhp4Listener.Addr().(*net.TCPAddr).IP.String()
-		if err := host.settings.UpdateSettings(settings); err != nil {
+		if err := host.UpdateSettings(settings); err != nil {
 			return err
 		}
 		if err := host.settings.Announce(); err != nil {
@@ -1000,6 +1000,7 @@ func testDBCfg() dbConfig {
 func testWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   10 * time.Millisecond,
+		CacheExpiry:              100 * time.Millisecond,
 		ID:                       "worker",
 		BusFlushInterval:         testBusFlushInterval,
 		DownloadOverdriveTimeout: 500 * time.Millisecond,

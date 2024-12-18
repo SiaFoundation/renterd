@@ -2602,7 +2602,7 @@ func TestDownloadAllHosts(t *testing.T) {
 	// block the new host but unblock the old one
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			toBlock := []string{host.settings.Settings().NetAddress, host.RHPv4Addr()}
+			toBlock := []string{host.RHPv2Addr(), host.RHPv4Addr()}
 			tt.OK(b.UpdateHostBlocklist(context.Background(), toBlock, randomHost, false))
 		}
 	}
@@ -2615,6 +2615,7 @@ func TestDownloadAllHosts(t *testing.T) {
 			tt.OK(host.UpdateSettings(settings))
 		}
 	}
+	time.Sleep(testWorkerCfg().CacheExpiry) // expire cache
 
 	// download the object
 	dst = new(bytes.Buffer)
@@ -2833,6 +2834,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 
 	// mine until the contract is expired
 	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight)
+	cluster.sync()
 
 	expectedBalance := wallet.Confirmed.Add(contract.InitialRenterFunds).Sub(fee.Mul64(ibus.ContractResolutionTxnWeight))
 	cluster.tt.Retry(10, time.Second, func() error {
@@ -2911,5 +2913,177 @@ func TestResyncAccounts(t *testing.T) {
 	// eventually succeed since accounts will be scheduled for a sync
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		return w.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, path, api.DownloadObjectOptions{})
+	})
+}
+
+func TestV1ToV2Transition(t *testing.T) {
+	// create a chain manager with a custom network that starts before the v2
+	// allow height
+	network, genesis := testNetwork()
+	network.HardforkV2.AllowHeight = 100
+	network.HardforkV2.RequireHeight = 200 // 100 blocks after the allow height
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := chain.NewManager(store, state)
+
+	// custom autopilot config
+	apCfg := test.AutopilotConfig
+	apCfg.Contracts.Amount = 2
+	apCfg.Contracts.Period = 1000 // make sure we handle trying to form contracts with a proof height after the v2 require height
+	apCfg.Contracts.RenewWindow = 50
+
+	// create a test cluster
+	nHosts := 3
+	cluster := newTestCluster(t, testClusterOptions{
+		autopilotConfig: &apCfg,
+		hosts:           0, // add hosts manually later
+		cm:              cm,
+		uploadPacking:   false, // disable to make sure we don't accidentally serve data from disk
+	})
+	defer cluster.Shutdown()
+	tt := cluster.tt
+
+	// add hosts and wait for contracts to form
+	cluster.AddHosts(nHosts)
+
+	// make sure we are still before the v2 allow height
+	if cm.Tip().Height >= network.HardforkV2.AllowHeight {
+		t.Fatal("should be before the v2 allow height")
+	}
+
+	// we should have 2 v1 contracts
+	var contracts []api.ContractMetadata
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		contracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
+		tt.OK(err)
+		if len(contracts) != nHosts-1 {
+			return fmt.Errorf("expected %v contracts, got %v", nHosts-1, len(contracts))
+		}
+		return nil
+	})
+	contractHosts := make(map[types.PublicKey]struct{})
+	for _, c := range contracts {
+		if c.V2 {
+			t.Fatal("should not have formed v2 contracts")
+		} else if c.EndHeight() != network.HardforkV2.RequireHeight-1 {
+			t.Fatalf("expected proof height to be %v, got %v", network.HardforkV2.RequireHeight-1, c.EndHeight())
+		}
+		contractHosts[c.HostKey] = struct{}{}
+	}
+
+	// sanity check number of hosts just to be safe
+	if len(contractHosts) != nHosts-1 {
+		t.Fatalf("expected %v unique hosts, got %v", nHosts-1, len(contractHosts))
+	}
+
+	// upload some data
+	data := frand.Bytes(100)
+	tt.OKAll(cluster.Worker.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{
+		MinShards:   1,
+		TotalShards: nHosts - 1,
+	}))
+
+	// mine until we reach the v2 allowheight
+	cluster.MineBlocks(network.HardforkV2.AllowHeight - cm.Tip().Height)
+
+	// slowly mine a few more blocks to allow renter to react
+	for i := 0; i < 5; i++ {
+		cluster.MineBlocks(1)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// check that we have 1 archived contract for every contract we had before
+	var archivedContracts []api.ContractMetadata
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		archivedContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
+		tt.OK(err)
+		if len(archivedContracts) != nHosts-1 {
+			return fmt.Errorf("expected %v archived contracts, got %v", nHosts-1, len(archivedContracts))
+		}
+		return nil
+	})
+
+	// they should be on nHosts-1 unique hosts
+	usedHosts := make(map[types.PublicKey]struct{})
+	for _, c := range archivedContracts {
+		if c.ArchivalReason != "migrated to v2" {
+			t.Fatalf("expected archival reason to be 'migrated to v2', got %v", c.ArchivalReason)
+		}
+		usedHosts[c.HostKey] = struct{}{}
+	}
+	if len(usedHosts) != nHosts-1 {
+		t.Fatalf("expected %v unique hosts, got %v", nHosts-1, len(usedHosts))
+	}
+
+	// we should have the same number of active contracts
+	activeContracts, err := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
+	tt.OK(err)
+	if len(activeContracts) != nHosts-1 {
+		t.Fatalf("expected %v active contracts, got %v", nHosts-1, len(activeContracts))
+	}
+
+	// they should be on the same hosts as before
+	for _, c := range activeContracts {
+		if _, ok := usedHosts[c.HostKey]; !ok {
+			t.Fatal("host not found in used hosts")
+		} else if !c.V2 {
+			t.Fatal("expected contract to be v2, got v1", c.ID, c.ArchivalReason)
+		}
+		delete(usedHosts, c.HostKey)
+	}
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		// check health is 1
+		object, err := cluster.Bus.Object(context.Background(), testBucket, "foo", api.GetObjectOptions{})
+		tt.OK(err)
+		if object.Health != 1 {
+			return fmt.Errorf("expected health to be 1, got %v", object.Health)
+		}
+		slab := object.Slabs[0]
+
+		// check that the contracts now contain the data
+		activeContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
+		tt.OK(err)
+		for _, c := range activeContracts {
+			// check revision
+			rev, err := cluster.Bus.ContractRevision(context.Background(), c.ID)
+			tt.OK(err)
+			if rev.Size != rhpv4.SectorSize {
+				return fmt.Errorf("expected revision size to be %v, got %v", rhpv4.SectorSize, rev.Size)
+			}
+			// check local metadata
+			if c.Size != rhpv4.SectorSize {
+				return fmt.Errorf("expected contract size to be %v, got %v", rhpv4.SectorSize, c.Size)
+			}
+			// one of the shards should be on this contract
+			var found bool
+			for _, shard := range slab.Shards {
+				for _, fcid := range shard.Contracts[c.HostKey] {
+					found = found || fcid == c.ID
+				}
+			}
+			if !found {
+				t.Fatal("expected contract to shard data")
+			}
+		}
+		return nil
+	})
+
+	// download file to make sure it's still available
+	// NOTE: 1st try fails since the accounts appear not to be funded since the
+	// test host has separate account managers for rhp3 and rhp4
+	tt.FailAll(cluster.Worker.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, "foo", api.DownloadObjectOptions{}))
+
+	// subsequent tries succeed
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		buf := new(bytes.Buffer)
+		if err := cluster.Worker.DownloadObject(context.Background(), buf, testBucket, "foo", api.DownloadObjectOptions{}); err != nil {
+			return err
+		} else if !bytes.Equal(data, buf.Bytes()) {
+			t.Fatal("data mismatch")
+		}
+		return nil
 	})
 }

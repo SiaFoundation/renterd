@@ -124,6 +124,7 @@ type (
 		UploadMaxMemory               uint64        `yaml:"uploadMaxMemory,omitempty"`
 		UploadMaxOverdrive            uint64        `yaml:"uploadMaxOverdrive,omitempty"`
 		AllowUnauthenticatedDownloads bool          `yaml:"allowUnauthenticatedDownloads,omitempty"`
+		CacheExpiry                   time.Duration `yaml:"cacheExpiry,omitempty"`
 	}
 
 	// Autopilot contains the configuration for an autopilot.
