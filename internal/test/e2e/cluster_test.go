@@ -2932,7 +2932,7 @@ func TestV1ToV2Transition(t *testing.T) {
 	apCfg := test.AutopilotConfig
 	apCfg.Contracts.Amount = 2
 	apCfg.Contracts.Period = 1000 // make sure we handle trying to form contracts with a proof height after the v2 require height
-	apCfg.Contracts.RenewWindow = 50
+	apCfg.Contracts.RenewWindow = 1
 
 	// create a test cluster
 	nHosts := 3
