@@ -415,38 +415,42 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 		s.logger.Errorf("failed to get expired file contract elements: %v", err)
 		return
 	}
-	for _, fce := range expiredFCEs {
-		txn := types.V2Transaction{
-			MinerFee: s.cm.RecommendedFee().Mul64(ContractResolutionTxnWeight),
-			FileContractResolutions: []types.V2FileContractResolution{
-				{
-					Parent:     fce,
-					Resolution: &types.V2FileContractExpiration{},
-				},
-			},
-		}
-		// fund and sign txn
-		basis, toSign, err := s.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
-		if err != nil {
-			s.logger.Errorf("failed to fund contract expiration txn: %v", err)
-			continue
-		}
-		s.wallet.SignV2Inputs(&txn, toSign)
 
-		// verify txn and broadcast it
-		_, err = s.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
-		if err != nil &&
-			(strings.Contains(err.Error(), "has already been resolved") ||
-				strings.Contains(err.Error(), "not present in the accumulator")) {
-			s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
-			s.logger.With(zap.Error(err)).Debug("failed to broadcast contract expiration txn")
-			continue
-		} else if err != nil {
-			s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
-			s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
-			continue
-		}
-		s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
+	for _, fce := range expiredFCEs {
+		go func(fce types.V2FileContractElement) {
+			txn := types.V2Transaction{
+				MinerFee: s.cm.RecommendedFee().Mul64(ContractResolutionTxnWeight),
+				FileContractResolutions: []types.V2FileContractResolution{
+					{
+						Parent:     fce,
+						Resolution: &types.V2FileContractExpiration{},
+					},
+				},
+			}
+
+			// fund and sign txn
+			basis, toSign, err := s.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
+			if err != nil {
+				s.logger.Errorf("failed to fund contract expiration txn: %v", err)
+				return
+			}
+			s.wallet.SignV2Inputs(&txn, toSign)
+
+			// verify txn and broadcast it
+			_, err = s.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
+			if err != nil &&
+				(strings.Contains(err.Error(), "has already been resolved") ||
+					strings.Contains(err.Error(), "not present in the accumulator")) {
+				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+				s.logger.With(zap.Error(err)).Debug("failed to broadcast contract expiration txn")
+				return
+			} else if err != nil {
+				s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
+				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+				return
+			}
+			s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
+		}(fce)
 	}
 }
 
