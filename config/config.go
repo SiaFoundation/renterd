@@ -115,7 +115,7 @@ type (
 	Worker struct {
 		Enabled                       bool          `yaml:"enabled,omitempty"`
 		ID                            string        `yaml:"id,omitempty"`
-		AccountsRefillInterval        time.Duration `yaml:"accountsRefillInterval,omitempty"`
+		AccountRefillInterval         time.Duration `yaml:"accountRefillInterval,omitempty"`
 		BusFlushInterval              time.Duration `yaml:"busFlushInterval,omitempty"`
 		DownloadOverdriveTimeout      time.Duration `yaml:"downloadOverdriveTimeout,omitempty"`
 		UploadOverdriveTimeout        time.Duration `yaml:"uploadOverdriveTimeout,omitempty"`

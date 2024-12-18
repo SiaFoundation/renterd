@@ -155,7 +155,7 @@ func (w *testWorker) UsableHosts() []api.HostInfo {
 
 func newTestWorkerCfg() config.Worker {
 	return config.Worker{
-		AccountsRefillInterval:   time.Second,
+		AccountRefillInterval:    time.Second,
 		ID:                       "test",
 		BusFlushInterval:         time.Second,
 		DownloadOverdriveTimeout: time.Second,

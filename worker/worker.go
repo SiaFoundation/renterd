@@ -620,7 +620,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		shutdownCtxCancel:    shutdownCancel,
 	}
 
-	if err := w.initAccounts(cfg.AccountsRefillInterval); err != nil {
+	if err := w.initAccounts(cfg.AccountRefillInterval); err != nil {
 		return nil, fmt.Errorf("failed to initialize accounts; %w", err)
 	}
 

@@ -90,11 +90,10 @@ func defaultConfig() config.Config {
 			SlabBufferCompletionThreshold: 1 << 12,
 		},
 		Worker: config.Worker{
-			Enabled: true,
-
-			ID:                     "",
-			AccountsRefillInterval: defaultAccountRefillInterval,
-			BusFlushInterval:       5 * time.Second,
+			Enabled:               true,
+			ID:                    "",
+			AccountRefillInterval: defaultAccountRefillInterval,
+			BusFlushInterval:      5 * time.Second,
 
 			DownloadMaxOverdrive:     5,
 			DownloadOverdriveTimeout: 3 * time.Second,
@@ -281,7 +280,7 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.Int64Var(&cfg.Bus.SlabBufferCompletionThreshold, "bus.slabBufferCompletionThreshold", cfg.Bus.SlabBufferCompletionThreshold, "Threshold for slab buffer upload (overrides with RENTERD_BUS_SLAB_BUFFER_COMPLETION_THRESHOLD)")
 
 	// worker
-	flag.DurationVar(&cfg.Worker.AccountsRefillInterval, "worker.accountRefillInterval", cfg.Worker.AccountsRefillInterval, "Interval for refilling workers' account balances")
+	flag.DurationVar(&cfg.Worker.AccountRefillInterval, "worker.accountRefillInterval", cfg.Worker.AccountRefillInterval, "Interval for refilling workers' account balances")
 	flag.DurationVar(&cfg.Worker.BusFlushInterval, "worker.busFlushInterval", cfg.Worker.BusFlushInterval, "Interval for flushing data to bus")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxMemory, "worker.downloadMaxMemory", cfg.Worker.DownloadMaxMemory, "Max amount of RAM the worker allocates for slabs when downloading (overrides with RENTERD_WORKER_DOWNLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.DownloadMaxOverdrive, "worker.downloadMaxOverdrive", cfg.Worker.DownloadMaxOverdrive, "Max overdrive workers for downloads")
