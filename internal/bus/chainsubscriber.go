@@ -439,9 +439,10 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 			(strings.Contains(err.Error(), "has already been resolved") ||
 				strings.Contains(err.Error(), "not present in the accumulator")) {
 			s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+			s.logger.With(zap.Error(err)).Debug("failed to broadcast contract expiration txn")
 			continue
 		} else if err != nil {
-			s.logger.Errorf("failed to broadcast contract expiration txn: %v", err)
+			s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
 			s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 			continue
 		}
