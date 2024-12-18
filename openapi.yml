@@ -1232,7 +1232,7 @@ paths:
         "500":
           description: Internal server error
 
-  /contracts/all:
+  /bus/contracts/all:
     delete:
       summary: Archives all contracts
       responses:
@@ -1245,7 +1245,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/archive:
+  /bus/contracts/archive:
     post:
       summary: Archive contracts
       requestBody:
@@ -1269,7 +1269,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/form:
+  /bus/contracts/form:
     post:
       summary: Form a new contract
       requestBody:
@@ -1337,7 +1337,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/prunable:
+  /bus/contracts/prunable:
     get:
       summary: Get prunable contract data
       responses:
@@ -1353,20 +1353,7 @@ paths:
                     type: array
                     description: A list of prunable contracts with their size information.
                     items:
-                      type: object
-                      description: Contains the ID and size information of a prunable contract.
-                      properties:
-                        id:
-                          $ref: "#/components/schemas/FileContractID"
-                        prunable:
-                          type: integer
-                          format: uint64
-                          description: The amount of prunable data in bytes.
-                        size:
-                          type: integer
-                          format: uint64
-                          description: The size of the contract in bytes
-                          example:
+                      $ref: "#/components/schemas/ContractSize"
                   totalPrunable:
                     type: integer
                     format: uint64
@@ -1376,7 +1363,7 @@ paths:
                     format: uint64
                     description: The total size of all contracts in bytes
 
-  /contracts/renewed/{id}:
+  /bus/contracts/renewed/{id}:
     get:
       summary: Get renewed contract
       parameters:
@@ -1399,7 +1386,7 @@ paths:
               schema:
                 type: string
 
-  /contracts/spending:
+  /bus/contracts/spending:
     post:
       summary: Record contract spending
       requestBody:
@@ -1446,6 +1433,2139 @@ paths:
       responses:
         "200":
           description: Spending recorded successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}:
+    get:
+      summary: Get contract by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+    delete:
+      summary: Archive contract with archival reason 'removed'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract archived successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/acquire:
+    post:
+      summary: Acquire contract lock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type:
+                object
+              properties:
+                duration:
+                  allOf:
+                   - $ref: "#/components/schemas/DurationMS"
+                   - description: The duration of the lock in milliseconds
+                priority:
+                  type: integer
+                  format: int
+                  example: 80
+      responses:
+        "200":
+          description: Contract lock acquired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractLockID"
+
+  /bus/contract/{id}/ancestors:
+    get:
+      summary: Get contract ancestors
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+        - name: minstartheight
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: uint64
+      responses:
+        "200":
+          description: Contract ancestors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/broadcast:
+    post:
+      summary: Broadcast contract's revision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract's revision broadcasted successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/keepalive:
+    post:
+      summary: Keep contract lock alive
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type:
+                object
+              properties:
+                duration:
+                  allOf:
+                    - $ref: "#/components/schemas/DurationMS"
+                    - description: The amount of miliseconds to extend the lock by
+                lockID:
+                  $ref: "#/components/schemas/ContractLockID"
+      responses:
+        "200":
+          description: Contract lock keepalive successful
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/revision:
+    get:
+      summary: Get latest contract revision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Latest contract revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "400":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/prune:
+    post:
+      summary: Prune contract data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeout:
+                  $ref: "#/components/schemas/DurationMS"
+
+      responses:
+        "200":
+          description: Contract pruned successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  size:
+                    type: integer
+                    format: uint64
+                    description: The size of the pruned contract in bytes
+                  pruned:
+                    type: integer
+                    format: uint64
+                    description: The number of bytes pruned
+                  remaining:
+                    type: integer
+                    format: uint64
+                    description: The number of prunable bytes remaining
+                  error:
+                    type: string
+                    description: An error message if the prune failed
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/renew:
+    post:
+      summary: Renew contract
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endHeight:
+                  allOf:
+                    - $ref: "#/components/schemas/BlockHeight"
+                    - description: The height at which the contract will expire
+                expectedNewStorage:
+                  type: integer
+                  format: uint64
+                minNewCollateral:
+                  $ref: "#/components/schemas/Currency"
+                renterFunds:
+                  $ref: "#/components/schemas/Currency"
+      responses:
+        "200":
+          description: Contract renewed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractMetadata"
+
+  /bus/contract/{id}/release:
+    post:
+      summary: Release contract lock
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lockID:
+                  $ref: "#/components/schemas/ContractLockID"
+      responses:
+        "200":
+          description: Contract lock released successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/roots:
+    get:
+      summary: Get contract sector roots
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract sector roots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Hash256"
+
+  /bus/contract/{id}/size:
+    get:
+      summary: Get contract size
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      responses:
+        "200":
+          description: Contract size information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractSize"
+        "400":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/contract/{id}/usability:
+    put:
+      summary: Update contract usability
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+              enum: [good, bad]
+      responses:
+        "200":
+          description: Contract usability updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Contract not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts:
+    get:
+      summary: Get usable hosts
+      description: Returns a list of hosts that pass the gouging checks
+      responses:
+        "200":
+          description: List of usable hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HostInfo'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    post:
+      summary: Search hosts using filters
+      description: Returns a filtered list of hosts based on specified criteria
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                usabilityMode:
+                  type: string
+                  enum:
+                    - usable
+                    - unusable
+                    - all
+                filterMode:
+                  type: string
+                  enum:
+                    - allowed
+                    - blocked
+                    - all
+                offset:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: The number of hosts to skip
+                limit:
+                  type: integer
+                  minimum: -1
+                  default: -1
+                  description: The maximum number of hosts to return
+                addressContains:
+                  type: string
+                  description: The host's net address to search for
+                  example: "foo.com"
+                keyIn:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublicKey'
+                maxLastScan:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: List of filtered hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Host'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts/allowlist:
+    get:
+      summary: Get host allowlist
+      description: Returns the list of allowed host public keys
+      responses:
+        "200":
+          description: List of allowed host public keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicKey'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update host allowlist
+      description: Updates the list of allowed host public keys
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublicKey'
+                remove:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PublicKey'
+                clear:
+                  type: boolean
+      responses:
+        "200":
+          description: Allowlist updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts/blocklist:
+    get:
+      summary: Get host blocklist
+      description: Returns the list of blocked host net addresses
+      responses:
+        "200":
+          description: List of blocked host net addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: ipv4
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update host blocklist
+      description: Updates the list of blocked host public keys
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add:
+                  type: array
+                  items:
+                    type: string
+                remove:
+                  type: array
+                  items:
+                    type: string
+                clear:
+                  type: boolean
+      responses:
+        "200":
+          description: Blocklist updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/hosts/remove:
+    post:
+      summary: Remove offline hosts
+      description: Removes hosts that have been offline for the specified duration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxDowntimeHours:
+                  type: integer
+                maxConsecutiveScanFailures:
+                  type: integer
+      responses:
+        "200":
+          description: Number of hosts removed
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: uint64
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidMaxDowntime:
+                  summary: Invalid max downtime
+                  value: "maxDowntime must be non-zero"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}:
+    get:
+      summary: Get host details
+      description: Returns detailed information about a specific host
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      responses:
+        "200":
+          description: Host details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostInfo'
+        "404":
+          description: Host not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}/check:
+    put:
+      summary: Update host check
+      description: Updates host checks for a specific host
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HostChecks'
+      responses:
+        "200":
+          description: Host check updated successfully
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}/resetlostsectors:
+    post:
+      summary: Reset lost sectors
+      description: Resets the lost sectors counter for a specific host
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      responses:
+        "200":
+          description: Lost sectors reset successfully
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/host/{hostkey}/scan:
+    post:
+      summary: Scan host
+      description: Performs a scan of the host to check its settings and availability
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: '#/components/schemas/PublicKey'
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeout:
+                  allOf:
+                  - $ref: '#/components/schemas/DurationMS'
+                  - description: Scan timeout in milliseconds
+      responses:
+        "200":
+          description: Host scan results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ping:
+                    allOf:
+                      - $ref: '#/components/schemas/DurationMS'
+                      - description: Round trip time in milliseconds
+                  scanError:
+                    type: string
+                  settings:
+                    $ref: '#/components/schemas/HostSettings'
+                  priceTable:
+                    $ref: '#/components/schemas/HostPriceTable'
+                  v2Settings:
+                    $ref: '#/components/schemas/HostV2Settings'
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+        "503":
+          description: Not connected to peers
+
+  /bus/metric/{key}:
+    get:
+      summary: Get metrics
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [contract, contractprune, performance, wallet]
+          description: The type of metric to fetch
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Start time for the metrics query
+        - name: n
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Number of intervals to fetch
+        - name: interval
+          in: query
+          required: true
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/DurationMS'
+              - description: Interval duration in milliseconds
+        - name: contractid
+          in: query
+          schema:
+            $ref: "#/components/schemas/FileContractID"
+        - name: hostkey
+          in: query
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+        - name: hostversion
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Successfully retrieved metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  oneOf:
+                    - $ref: "#/components/schemas/ContractMetric"
+                    - $ref: "#/components/schemas/ContractPruneMetric"
+                    - $ref: "#/components/schemas/WalletMetric"
+        "400":
+          description: Invalid parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidN:
+                  summary: Invalid 'n' value
+                  value: "'n' has to be greater than zero"
+                requiredInterval:
+                  summary: Missing value for parameter 'interval'
+                  value: "parameter 'interval' is required"
+                requiredN:
+                  summary: Missing value for parameter 'n'
+                  value: "parameter 'n' is required"
+                requiredStart:
+                  summary: Missing value for parameter 'start'
+                  value: "parameter 'start' is required"
+                unknownMetric:
+                  summary: Unknown metric key
+                  value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Record metrics
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [contract, contractprune, performance, wallet]
+          description: The type of metric to record
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metrics:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ContractPruneMetric"
+      responses:
+        "200":
+          description: Successfully recorded metrics
+        "400":
+          description: Invalid metric key or request body
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidKey:unknownMetric:
+                  summary: Unknown metric key
+                  value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    delete:
+      summary: Delete metrics
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [contract, contractprune, performance, wallet]
+          description: The type of metric to delete
+        - name: cutoff
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Delete metrics older than this timestamp
+      responses:
+        "200":
+          description: Successfully deleted metrics
+        "400":
+          description: Invalid parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                requiredCutoff:
+                  summary: Missing value for parameter 'cutoff'
+                  value: "parameter 'cutoff' is required"
+                requiredMetric:
+                  summary: Missing value for parameter 'key'
+                  value: "parameter 'key' is required"
+                unknownMetric:
+                  summary: Unknown metric key
+                  value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/create:
+    post:
+      summary: Create a multipart upload
+      description: Creates a new multipart upload and returns an upload ID.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object to upload
+                  example: "myDir/myFile"
+                  minLength: 1
+                mimeType:
+                  type: string
+                  description: The MIME type of the object
+                  example: "text/plain"
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+                disableClientSideEncryption:
+                  type: boolean
+                  description: Whether to disable client-side encryption
+                  default: false
+      responses:
+        "200":
+          description: Successfully created multipart upload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/abort:
+    post:
+      summary: Abort a multipart upload
+      description: Aborts an ongoing multipart upload and removes any uploaded parts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                  type: string
+                  description: The ID of the multipart upload to abort
+      responses:
+        "200":
+          description: Successfully aborted multipart upload
+        "404":
+          description: Upload not found
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/complete:
+    post:
+      summary: Complete a multipart upload
+      description: Completes a multipart upload by combining all uploaded parts into a single object.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+                parts:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/MultipartCompletedPart"
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+      responses:
+        "200":
+          description: Successfully completed multipart upload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eTag:
+                    type: string
+                    description: The ETag of the completed object
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/part:
+    put:
+      summary: Upload a part of a multipart upload
+      description: Adds a part to an ongoing multipart upload.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                eTag:
+                  $ref: "#/components/schemas/ETag"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                  $ref: "#/components/schemas/UploadID"
+                partNumber:
+                  type: integer
+                  description: The number of this part (1-10000)
+                  minimum: 1
+                  maximum: 10000
+                slices:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SlabSlice"
+      responses:
+        "200":
+          description: Successfully uploaded part
+        "400":
+          description: Invalid request parameters
+          content:
+            text/plain:
+              schema:
+                type: string
+              example:
+                invalidPartNumber:
+                  summary: Invalid part number
+                  value: "partNumber must be between 1 and 10000"
+                requiredEtag:
+                  summary: Required ETag
+                  value: "eTag must be non-empty"
+                requiredUploadID:
+                  summary: Required upload ID
+                  value: "uploadID must be non-empty"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/upload/{id}:
+    get:
+      summary: Get multipart upload details
+      description: Returns details about an ongoing multipart upload.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The ID of the multipart upload
+      responses:
+        "200":
+          description: Successfully retrieved multipart upload details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bucket:
+                    $ref: "#/components/schemas/BucketName"
+                  encryptionKey:
+                    allOf:
+                      - $ref: "#/components/schemas/EncryptionKey"
+                      - description: The encryption key used for this upload
+                  key:
+                    type: string
+                    description: The key of the object
+                  uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+                  createdAt:
+                    type: string
+                    format: date-time
+                    description: When the upload was created
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/multipart/listuploads:
+    post:
+      summary: List multipart uploads
+      description: Lists all ongoing multipart uploads.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                prefix:
+                  type: string
+                  description: Filter uploads by key prefix
+                keyMarker:
+                  type: string
+                  description: Key to start listing from
+                uploadIDMarker:
+                  allOf:
+                    - $ref: "#/components/schemas/UploadID"
+                    - description: Upload ID to start listing from
+                limit:
+                  type: integer
+                  description: Maximum number of uploads to return
+      responses:
+        "200":
+          description: Successfully listed multipart uploads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more uploads to fetch
+                  nextMarker:
+                    type: string
+                    description: The key marker for the next page of results
+                  nextUploadIDMarker:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The upload ID marker for the next page of results
+                  uploads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bucket:
+                          type: string
+                          description: The name of the bucket
+                        encryptionKey:
+                          type: string
+                          description: The encryption key used for this upload
+                        key:
+                          type: string
+                          description: The key of the object
+                        uploadID:
+                          allOf:
+                            - $ref: "#/components/schemas/UploadID"
+                            - description: The ID of the multipart upload
+                        createdAt:
+                          type: string
+                          format: date-time
+                          description: When the upload was created
+
+  /bus/multipart/listparts:
+    post:
+      summary: List parts of a multipart upload
+      description: Lists all parts that have been uploaded for a specific multipart upload.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                key:
+                  type: string
+                  description: The key of the object
+                  example: "myDir/myFile"
+                  minLength: 1
+                uploadID:
+                    allOf:
+                      - $ref: "#/components/schemas/UploadID"
+                      - description: The ID of the multipart upload
+                partNumberMarker:
+                  type: integer
+                  description: Part number to start listing from
+                limit:
+                  type: integer
+                  format: int64
+                  description: Maximum number of parts to return
+      responses:
+        "200":
+          description: Successfully listed multipart upload parts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more parts to fetch
+                  nextMarker:
+                    type: integer
+                    description: The part number marker for the next page of results
+                  parts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MultipartListPartItem"
+
+  /bus/objects/{prefix}:
+    get:
+      summary: List objects
+      description: Lists objects with the specified prefix.
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/"
+            pattern: ".*" # greedy match
+          description: The prefix to filter objects by
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+        - name: delimiter
+          in: query
+          schema:
+            type: string
+            description: Path delimiter ("/" or empty)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: -1
+            description: Maximum number of objects to return
+        - name: marker
+          in: query
+          schema:
+            type: string
+            description: Key to start listing from
+        - name: sortby
+          in: query
+          schema:
+            type: string
+            description: Field to sort results by
+        - name: sortdir
+          in: query
+          schema:
+            type: string
+            description: Sort direction (asc/desc)
+        - name: substring
+          in: query
+          schema:
+            type: string
+            description: Filter objects by substring
+        - name: slabencryptionkey
+          in: query
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/EncryptionKey"
+              - description: Encryption key for slabs
+      responses:
+        "200":
+          description: Successfully listed objects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  objects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+                  hasMore:
+                    type: boolean
+                    description: Whether there are more objects to fetch
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                unsupportedDelimiter:
+                  summary: Unsupported delimiter
+                  value: "delimiter must be '/' or empty"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/objects/copy:
+    post:
+      summary: Copy object
+      description: Copies an object from one location to another.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sourceBucket:
+                  $ref: "#/components/schemas/BucketName"
+                destinationBucket:
+                  $ref: "#/components/schemas/BucketName"
+                sourceKey:
+                  type: string
+                  description: The key of the source object
+                destinationKey:
+                  type: string
+                  description: The key for the destination object
+                mimeType:
+                  type: string
+                  description: The MIME type for the copied object
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+      responses:
+        "200":
+          description: Successfully copied object
+          headers:
+            Last-Modified:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectMetadata"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/objects/remove:
+    post:
+      summary: Remove objects by prefix
+      description: Removes all objects with the specified prefix.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                prefix:
+                  type: string
+                  description: The prefix of objects to remove
+                  minLength: 1
+      responses:
+        "200":
+          description: Successfully removed objects
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                requiredBucket:
+                  summary: Missing value for parameter 'bucket'
+                  value: "parameter 'bucket' is required"
+                requiredPrefix:
+                  summary: Missing value for parameter 'prefix'
+                  value: "prefix cannot be empty"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/objects/rename:
+    post:
+      summary: Rename objects
+      description: Renames a single object or multiple objects with a prefix.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                from:
+                  type: string
+                  description: Source path/prefix
+                to:
+                  type: string
+                  description: Destination path/prefix
+                mode:
+                  type: string
+                  enum: [single, multi]
+                  description: Whether to rename a single object or multiple objects
+                force:
+                  type: boolean
+                  description: Whether to overwrite existing objects
+      responses:
+        "200":
+          description: Successfully renamed objects
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                requiredBucket:
+                  summary: Missing value for parameter 'bucket'
+                  value: "parameter 'bucket' is required"
+                invalidMode:
+                  summary: Invalid mode
+                  value: "mode must be 'single' or 'multi'"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/object/{key}:
+    get:
+      summary: Get object
+      description: Returns an object's metadata or full object data.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            pattern: ".*" # greedy match
+          description: The key of the object to fetch
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+        - name: onlymetadata
+          in: query
+          required: false
+          schema:
+            type: boolean
+            description: If true, only returns object metadata without data
+      responses:
+        "200":
+          description: Successfully retrieved object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Store object
+      description: Stores or updates an object.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            pattern: ".*" # greedy match
+          description: The key of the object
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket:
+                  $ref: "#/components/schemas/BucketName"
+                eTag:
+                  type: string
+                  description: The ETag of the object
+                mimeType:
+                  type: string
+                  description: The MIME type of the object
+                metadata:
+                  $ref: "#/components/schemas/ObjectUserMetadata"
+                object:
+                  $ref: "#/components/schemas/Object"
+      responses:
+        "200":
+          description: Successfully stored object
+    delete:
+      summary: Delete object
+      description: Deletes an object from the bucket.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "myDir/myFile"
+            pattern: ".*" # greedy match
+          description: The key of the object to delete
+        - name: bucket
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+      responses:
+        "200":
+          description: Successfully deleted object
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/params/gouging:
+    get:
+      summary: Get gouging parameters
+      description: Returns the current gouging parameters including consensus state, gouging settings, and redundancy settings.
+      responses:
+        "200":
+          description: Successfully retrieved gouging parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consensusState:
+                    type: object
+                    properties:
+                      blockHeight:
+                        $ref: "#/components/schemas/BlockHeight"
+                      lastBlockTime:
+                        type: string
+                        format: date-time
+                        description: Timestamp of the last block
+                      synced:
+                        type: boolean
+                        description: Whether consensus is synced
+                  gougingSettings:
+                    $ref: "#/components/schemas/GougingSettings"
+                  redundancySettings:
+                    $ref: "#/components/schemas/RedundancySettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/params/upload:
+    get:
+      summary: Get upload parameters
+      description: Returns parameters needed for uploads including consensus height, gouging parameters and upload packing status.
+      responses:
+        "200":
+          description: Successfully retrieved upload parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                allOf:
+                  - type: object
+                    properties:
+                      currentHeight:
+                        allOf:
+                          - $ref: "#/components/schemas/BlockHeight"
+                          - description: Current consensus height
+                      uploadPacking:
+                        type: boolean
+                        description: Whether upload packing is enabled
+                  - $ref: "#/components/schemas/GougingParams"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/sectors/{hostkey}/{root}:
+    delete:
+      summary: Delete host sector
+      description: Marks a sector as lost for a specific host.
+      parameters:
+        - name: hostkey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+          description: The host's public key
+        - name: root
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+          description: The Merkle root of the sector
+      responses:
+        "200":
+          description: Successfully marked sector as lost
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/gouging:
+    get:
+      summary: Get gouging settings
+      description: Returns the current gouging settings.
+      responses:
+        "200":
+          description: Successfully retrieved gouging settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GougingSettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update gouging settings
+      description: Updates the gouging settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GougingSettings"
+      responses:
+        "200":
+          description: Successfully updated gouging settings
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/pinned:
+    get:
+      summary: Get pinned settings
+      description: Returns the current pinned settings.
+      responses:
+        "200":
+          description: Successfully retrieved pinned settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedSettings"
+    put:
+      summary: Update pinned settings
+      description: Updates the pinned settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinnedSettings"
+      responses:
+        "200":
+          description: Successfully updated pinned settings
+        "400":
+          description: Invalid settings
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                explorerDisabled:
+                  summary: Explorer disabled
+                  value: "explorer must be enabled for settings to be pinned"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/s3:
+    get:
+      summary: Get S3 settings
+      description: Returns the current S3 settings.
+      responses:
+        "200":
+          description: Successfully retrieved S3 settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/S3Settings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update S3 settings
+      description: Updates the S3 settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/S3Settings"
+      responses:
+        "200":
+          description: Successfully updated S3 settings
+        "400":
+          description: Invalid settings
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/settings/upload:
+    get:
+      summary: Get upload settings
+      description: Returns the current upload settings.
+      responses:
+        "200":
+          description: Successfully retrieved upload settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadSettings"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update upload settings
+      description: Updates the upload settings.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadSettings"
+      responses:
+        "200":
+          description: Successfully updated upload settings
+        "400":
+          description: Invalid settings
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabbuffers:
+    get:
+      summary: Get slab buffers info
+      description: Returns information about all slab buffers.
+      responses:
+        "200":
+          description: Successfully retrieved slab buffers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabBuffer"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabbuffer/done:
+    post:
+      summary: Mark packed slabs as uploaded
+      description: Marks the specified packed slabs as successfully uploaded.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slabs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/UploadedPackedSlab"
+      responses:
+        "200":
+          description: Successfully marked slabs as uploaded
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabbuffer/fetch:
+    post:
+      summary: Fetch packed slabs for upload
+      description: Returns packed slabs that are ready to be uploaded.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lockingDuration:
+                  allOf:
+                    - $ref: "#/components/schemas/DurationMS"
+                    - description: Duration in milliseconds to lock the slabs
+                minShards:
+                  type: integer
+                  format: uint8
+                  description: Minimum number of shards required
+                totalShards:
+                  type: integer
+                  format: uint8
+                  description: Total number of shards to split into
+                limit:
+                  type: integer
+                  description: Maximum number of packed slabs to return
+      responses:
+        "200":
+          description: Successfully retrieved packed slabs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PackedSlab"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/migration:
+    post:
+      summary: Get slabs for migration
+      description: Returns slabs that need to be migrated based on health cutoff.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                healthCutoff:
+                  type: number
+                  format: float64
+                  description: The health cutoff at which slabs are returned for migration
+                limit:
+                  type: integer
+                  description: Maximum number of slabs to return
+      responses:
+        "200":
+          description: Successfully retrieved slabs for migration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        encryptionKey:
+                          $ref: "#/components/schemas/EncryptionKey"
+                        health:
+                          type: number
+                          format: float64
+                          description: Current health of the slab
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/partial/{key}:
+    get:
+      summary: Get partial slab
+      description: Retrieves a portion of a slab's data.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/EncryptionKey"
+        - name: offset
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            description: Offset within the slab
+        - name: length
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            description: Number of bytes to retrieve
+      responses:
+        "200":
+          description: Successfully retrieved partial slab data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidLimit:
+                  summary: Invalid limit example
+                  value: "limit must be greater than or equal to -1"
+                invalidOffset:
+                  summary: Invalid offset example
+                  value: "offset must be greater than or equal to 0"
+        "404":
+          description: Slab not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/partial:
+    post:
+      summary: Add partial slab
+      description: Adds data to a partial slab.
+      parameters:
+        - name: minshards
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            description: Minimum number of shards required
+        - name: totalshards
+          in: query
+          required: true
+          schema:
+            type: integer
+            description: Total number of shards
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Successfully added partial slab
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SlabSlice"
+                  slabBufferMaxSizeSoftReached:
+                    type: boolean
+                    description: Whether the slab buffer soft limit was reached
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidRedundancy:
+                  summary: Invalid redundancy parameters
+                  value: "minShards must be positive and totalShards must be greater than minShards"
+                invalidTotalShards:
+                  summary: Invalid total shards
+                  value: "totalShards must be less than or equal to 255"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slabs/refreshhealth:
+    post:
+      summary: Refresh slab health
+      description: Recalculates health for all slabs.
+      responses:
+        "200":
+          description: Successfully refreshed slab health
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/slab/{key}:
+    get:
+      summary: Get slab
+      description: Returns information about a specific slab.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/EncryptionKey"
+      responses:
+        "200":
+          description: Successfully retrieved slab
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Slab"
+        "404":
+          description: Slab not found
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+    put:
+      summary: Update slab
+      description: Updates the sectors for a slab.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/EncryptionKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  contractID:
+                    $ref: "#/components/schemas/FileContractID"
+                  root:
+                    $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Successfully updated slab
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Slab not found
         "500":
           description: Internal server error
           content:
@@ -1500,6 +3620,132 @@ paths:
                 items:
                   $ref: "#/components/schemas/SyncerAddress"
 
+  /bus/system/sqlite3/backup:
+    post:
+      summary: Backup SQLite database
+      description: Creates a backup of the specified SQLite database.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                database:
+                  type: string
+                  enum: [main, metrics]
+                  description: Which database to backup
+                path:
+                  type: string
+                  description: Path where to save the backup
+      responses:
+        "200":
+          description: Successfully created backup
+        "400":
+          description: Invalid database specified
+        "404":
+          description: Backup not supported
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/state:
+    get:
+      summary: Get bus state
+      description: Returns the current state of the bus including version, build info, and explorer status.
+      responses:
+        "200":
+          description: Successfully retrieved bus state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  startTime:
+                    type: string
+                    format: date-time
+                    description: When the bus was started
+                  version:
+                    type: string
+                    description: Version of renterd
+                  commit:
+                    type: string
+                    description: Git commit hash of the build
+                  os:
+                    type: string
+                    description: Operating system
+                  buildTime:
+                    type: string
+                    format: date-time
+                    description: When this version was built
+                  explorer:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: Whether the explorer is enabled
+                      url:
+                        type: string
+                        description: Base URL of the explorer
+                  network:
+                    type: string
+                    description: Name of the network (mainnet/testnet)
+
+  /bus/stats/objects:
+    get:
+      summary: Get object statistics
+      description: Returns statistics about objects in a bucket.
+      parameters:
+        - name: bucket
+          in: query
+          schema:
+            $ref: "#/components/schemas/BucketName"
+          description: Optional bucket to get stats for
+      responses:
+        "200":
+          description: Successfully retrieved object statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  numObjects:
+                    type: integer
+                    format: uint64
+                    description: Number of objects
+                  numUnfinishedObjects:
+                    type: integer
+                    format: uint64
+                    description: Number of unfinished objects
+                  minHealth:
+                    type: number
+                    format: float64
+                    description: Minimum health of all objects
+                  totalObjectsSize:
+                    type: integer
+                    format: uint64
+                    description: Size of all objects
+                  totalUnfinishedObjectsSize:
+                    type: integer
+                    format: uint64
+                    description: Size of all unfinished objects
+                  totalSectorsSize:
+                    type: integer
+                    format: uint64
+                    description: Uploaded size of all objects
+                  totalUploadedSize:
+                    type: integer
+                    format: uint64
+                    description: Uploaded size of all objects including redundant sectors
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /bus/txpool/recommendedfee:
     get:
       summary: Get recommended fee
@@ -1550,6 +3796,59 @@ paths:
       responses:
         "200":
           description: Successfully broadcast transaction
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/upload/{id}:
+    post:
+      summary: Track upload
+      description: Starts tracking an upload with the given ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UploadID"
+      responses:
+        "200":
+          description: Successfully started tracking upload
+    delete:
+      summary: Finish upload
+      description: Marks an upload as finished and stops tracking it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UploadID"
+      responses:
+        "200":
+          description: Successfully finished upload
+
+  /bus/upload/{id}/sector:
+    post:
+      summary: Add sectors to upload
+      description: Adds sector roots to a tracked upload.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/UploadID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Successfully added sectors
         "500":
           description: Internal server error
           content:
@@ -1747,6 +4046,80 @@ paths:
             text/plain:
               schema:
                 type: string
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/webhooks:
+    get:
+      summary: Get webhooks
+      description: Returns all registered webhooks and their queue information.
+      responses:
+        "200":
+          description: Successfully retrieved webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queues:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookQueueInfo"
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Webhook"
+    post:
+      summary: Register webhook
+      description: Registers a new webhook.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Webhook"
+      responses:
+        "200":
+          description: Successfully registered webhook
+        "500":
+          description: Failed to register webhook
+
+  /webhooks/action:
+    post:
+      summary: Broadcast webhook action
+      description: Broadcasts a webhook event to registered webhooks.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+      responses:
+        "200":
+          description: Successfully broadcast action
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /bus/webhook/delete:
+    post:
+      summary: Delete webhook
+      description: Deletes a registered webhook.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Webhook"
+      responses:
+        "200":
+          description: Successfully deleted webhook
+        "404":
+          description: Webhook not found
         "500":
           description: Internal server error
           content:
@@ -2138,6 +4511,276 @@ components:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
       description: A 256-bit blake2b hash
+
+    HostPrices:
+      type: object
+      properties:
+        contractPrice:
+          $ref: "#/components/schemas/Currency"
+        collateral:
+          $ref: "#/components/schemas/Currency"
+        storagePrice:
+          $ref: "#/components/schemas/Currency"
+        ingressPrice:
+          $ref: "#/components/schemas/Currency"
+        egressPrice:
+          $ref: "#/components/schemas/Currency"
+        tipHeight:
+          type: integer
+          format: uint64
+          description: The height at which the prices were last updated
+        validUntil:
+          type: string
+          format: date-time
+        signature:
+          $ref: "#/components/schemas/Signature"
+
+    HostPriceTable:
+      type: object
+      description: A detailed price table containing cost and configuration values for a host.
+      properties:
+        uid:
+          allOf:
+            - $ref: "#/components/schemas/SettingsID"
+            - description: Unique specifier that identifies this price table.
+        validity:
+          description: Duration (in nanoseconds) for which the host guarantees these prices are valid.
+          type: integer
+          format: int64
+          example: 3600000000000 # 1 hour in nanoseconds
+        hostblockheight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The host's current block height.
+        updatepricetablecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to fetch a new price table from the host.
+        accountbalancecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to fetch the balance of an ephemeral account.
+        fundaccountcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to fund an ephemeral account on the host.
+        latestrevisioncost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost to retrieve the latest revision of a contract.
+        subscriptionmemorycost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost of storing a byte of data for a subscription period.
+        subscriptionnotificationcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost of a single notification on top of bandwidth charges.
+        initbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost incurred when starting an MDM program.
+        memorytimecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte per time for the memory consumed by a program.
+        downloadbandwidthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte for download bandwidth.
+        uploadbandwidthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte for upload bandwidth.
+        dropsectorsbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost of performing a DropSectors instruction.
+        dropsectorsunitcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The unit cost per sector for performing a DropSectors instruction.
+        hassectorbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost for executing the HasSector command.
+        readbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost of performing a Read instruction.
+        readlengthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte read during a Read instruction.
+        renewcontractcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost for renewing a contract.
+        revisionbasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost for performing a Revision command.
+        swapsectorcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost of swapping two full sectors by root.
+        writebasecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The base cost per write operation.
+        writelengthcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte written during a Write instruction.
+        writestorecost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte/block of additional storage.
+        txnfeeminrecommended:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The minimum recommended transaction fee.
+        txnfeemaxrecommended:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The maximum recommended transaction fee.
+        contractprice:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The additional fee charged by the host to form or renew a contract.
+        collateralcost:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The cost per byte for the collateral promised by the host.
+        maxcollateral:
+          allOf:
+            - $ref: '#/components/schemas/Currency'
+            - description: The maximum amount of collateral the host is willing to put into a contract.
+        maxduration:
+          description: Maximum duration (in blocks) for which the host is willing to form a contract.
+          type: integer
+          format: uint64
+          example: 14400 # ~100 days at 10-minute block time.
+        windowsize:
+          description: Minimum time (in blocks) requested for the renew window of a contract.
+          type: integer
+          format: uint64
+          example: 1000
+        registryentriesleft:
+          description: The remaining number of registry entries available on the host.
+          type: integer
+          format: uint64
+          example: 5000
+        registryentriestotal:
+          description: The total number of registry entries available on the host.
+          type: integer
+          format: uint64
+          example: 10000
+
+    HostSettings:
+      type: object
+      properties:
+        acceptingContracts:
+          type: boolean
+          description: Whether the host is accepting new contracts
+        maxDownloadBatchSize:
+          type: integer
+          format: uint64
+          description: Maximum allowed download batch size
+        maxDuration:
+          type: integer
+          format: uint64
+          description: Maximum allowed contract duration
+        maxReviseBatchSize:
+          type: integer
+          format: uint64
+          description: Maximum allowed revision batch size
+        netAddress:
+          type: string
+          description: Network address of the host
+        remainingStorage:
+          type: integer
+          format: uint64
+          description: Amount of storage the host has remaining
+        sectorSize:
+          type: integer
+          format: uint64
+          description: Size of a storage sector
+        totalStorage:
+          type: integer
+          format: uint64
+          description: Total amount of storage space
+        address:
+          $ref: "#/components/schemas/Address"
+        windowSize:
+          type: integer
+          format: uint64
+          description: Size of the proof window
+        collateral:
+          $ref: "#/components/schemas/Currency"
+        maxCollateral:
+          $ref: "#/components/schemas/Currency"
+        baseRPCPrice:
+          $ref: "#/components/schemas/Currency"
+        contractPrice:
+          $ref: "#/components/schemas/Currency"
+        downloadBandwidthPrice:
+          $ref: "#/components/schemas/Currency"
+        sectorAccessPrice:
+          $ref: "#/components/schemas/Currency"
+        storagePrice:
+          $ref: "#/components/schemas/Currency"
+        uploadBandwidthPrice:
+          $ref: "#/components/schemas/Currency"
+        ephemeralAccountExpiry:
+          type: integer
+          format: int64
+          description: Duration before an ephemeral account expires
+        maxEphemeralAccountBalance:
+          $ref: "#/components/schemas/Currency"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        version:
+          type: string
+          description: Version of the host software
+        release:
+          type: string
+          description: Release tag of the host software
+          example: "hostd 1.0.0"
+        siamuxPort:
+          type: string
+          description: Port used for siamux connections
+
+    HostV2Settings:
+      type: object
+      properties:
+        protocolVersion:
+          $ref: "#/components/schemas/SemVer"
+        release:
+          type: string
+          description: Release tag of the host software
+          example: "hostd 1.0.0"
+        walletAddress:
+          $ref: "#/components/schemas/Address"
+        acceptingContracts:
+          type: boolean
+          description: Whether the host is accepting new contracts
+        maxCollateral:
+          $ref: "#/components/schemas/Currency"
+        maxContractDuration:
+          type: integer
+          format: uint64
+          description: Maximum allowed contract duration
+        remainingStorage:
+          type: integer
+          format: uint64
+          description: Amount of storage the host has remaining
+        totalStorage:
+          type: integer
+          format: uint64
+          description: Total amount of storage space
+        prices:
+          $ref: "#/components/schemas/HostPrices"
 
     PublicKey:
       type: string
@@ -2646,6 +5289,63 @@ components:
           type: boolean
           description: Whether the node is synced with the network
 
+    ContractLockID:
+      type: object
+      properties:
+        lockID:
+          type: integer
+          format: uint64
+          description: The ID of the lock
+          example: 12
+
+    ContractMetric:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        hostKey:
+          $ref: "#/components/schemas/PublicKey"
+        remainingCollateral:
+          $ref: "#/components/schemas/Currency"
+        remainingFunds:
+          $ref: "#/components/schemas/Currency"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        deleteSpending:
+          $ref: "#/components/schemas/Currency"
+        fundAccountSpending:
+          $ref: "#/components/schemas/Currency"
+        sectorRootsSpending:
+          $ref: "#/components/schemas/Currency"
+        uploadSpending:
+          $ref: "#/components/schemas/Currency"
+
+    ContractPruneMetric:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        hostKey:
+          $ref: "#/components/schemas/PublicKey"
+        hostVersion:
+          type: string
+        pruned:
+          type: integer
+          format: uint64
+        remaining:
+          type: integer
+          format: uint64
+        duration:
+          type: integer
+          format: int64
+          description: Duration in nanoseconds
+
     ContractsConfig:
       type: object
       properties:
@@ -2684,6 +5384,24 @@ components:
           description: Whether to automatically prune deleted data from contracts
           default: false
 
+    ContractSize:
+      type: object
+      properties:
+        prunable:
+          type: integer
+          format: uint64
+          description: The amount of data that can be pruned from a contract
+        size:
+          type: integer
+          format: uint64
+          description: The total size of a contract
+
+    DurationMS:
+      type: integer
+      format: int64
+      description: A duration in milliseconds
+      example: 30000
+
     EncryptionKey:
       type: string
       pattern: ^(key|skey):[0-9a-fA-F]{64}$
@@ -2693,6 +5411,7 @@ components:
       type: string
       pattern: '^(W/)?".*?"$'
       description: An ETag representing a resource
+      example: "W/\"33a64df551425fcc55e4d42a148795d9f25f89d4\""
 
     Event:
       type: object
@@ -2736,6 +5455,16 @@ components:
           items:
             $ref: "#/components/schemas/Address"
 
+    GougingParams:
+      type: object
+      properties:
+        consensusState:
+          $ref: "#/components/schemas/ConsensusState"
+        gougingSettings:
+          $ref: "#/components/schemas/GougingSettings"
+        redundancySettings:
+          $ref: "#/components/schemas/RedundancySettings"
+
     GougingSettings:
       type: object
       properties:
@@ -2776,6 +5505,16 @@ components:
             - $ref: "#/components/schemas/Currency"
             - description: The minimum max balance a host should allow us to fund an account with
 
+    GougingSettingsPins:
+      type: object
+      properties:
+        maxDownload:
+          $ref: "#/components/schemas/Pin"
+        maxStorage:
+          $ref: "#/components/schemas/Pin"
+        maxUpload:
+          $ref: "#/components/schemas/Pin"
+
     HostsConfig:
       type: object
       properties:
@@ -2793,6 +5532,193 @@ components:
           type: string
           description: The minimum supported protocol version of a host to be considered good
 
+    Host:
+      type: object
+      properties:
+        knownSince:
+          type: string
+          format: date-time
+          description: The time the host was first seen
+        lastAnnouncement:
+          type: string
+          format: date-time
+          description: The time the host last announced itself
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        netAddress:
+          type: string
+          description: The address of the host
+          example: "foo.bar:1234"
+        priceTable:
+          $ref: "#/components/schemas/HostPriceTable"
+        settings:
+          $ref: "#/components/schemas/HostSettings"
+        v2Settings:
+          $ref: "#/components/schemas/HostV2Settings"
+        interactions:
+          $ref: "#/components/schemas/HostInteractions"
+        scanned:
+          type: boolean
+          description: Whether the host has been scanned
+        blocked:
+          type: boolean
+          description:  Whether the host is blocked
+        checks:
+          $ref: "#/components/schemas/HostChecks"
+        storedData:
+          type: integer
+          format: uint64
+          description: The amount of data stored on the host in bytes
+        v2SiamuxAddresses:
+          type: array
+          items:
+            type: string
+            description: The addresses of the host for the V2 protocol
+            example: "foo.bar:5678"
+
+    HostChecks:
+      type: object
+      properties:
+        gougingBreakdown:
+          $ref: '#/components/schemas/HostGougingBreakdown'
+        scoreBreakdown:
+          $ref: '#/components/schemas/HostScoreBreakdown'
+        usabilityBreakdown:
+          $ref: '#/components/schemas/HostUsabilityBreakdown'
+
+    HostGougingBreakdown:
+      type: object
+      properties:
+        downloadErr:
+          type: string
+          description: Error message related to download gouging checks.
+        gougingErr:
+          type: string
+          description: Error message related to general gouging checks.
+        pruneErr:
+          type: string
+          description: Error message related to pruning checks.
+        uploadErr:
+          type: string
+          description: Error message related to upload gouging checks.
+
+    HostInfo:
+      type: object
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        siamuxAddr:
+          type: string
+          description: The address of the host
+          example: "foo.bar:1234"
+        v2SiamuxAddresses:
+          type: array
+          items:
+            type: string
+            description: The addresses of the host for the V2 protocol
+            example: "foo.bar:5678"
+
+    HostInteractions:
+      type: object
+      properties:
+        totalScans:
+          type: integer
+          format: uint64
+          description: The total number of scans performed on the host.
+        lastScan:
+          type: string
+          format: date-time
+          description: Timestamp of the last scan performed.
+        lastScanSuccess:
+          type: boolean
+          description: Indicates whether the last scan was successful.
+        lostSectors:
+          type: integer
+          format: uint64
+          description: Number of sectors lost since the last reporting period.
+        secondToLastScanSuccess:
+          type: boolean
+          description: Indicates whether the second-to-last scan was successful.
+        uptime:
+          type: string
+          format: duration
+          description: Total uptime duration of the host.
+        downtime:
+          type: string
+          format: duration
+          description: Total downtime duration of the host.
+        successfulInteractions:
+          type: number
+          format: float
+          description: The number of successful interactions with the host.
+        failedInteractions:
+          type: number
+          format: float
+          description: The number of failed interactions with the host.
+
+    HostScoreBreakdown:
+      type: object
+      properties:
+        age:
+          type: number
+          format: float
+          description: Score contribution based on the host's age.
+        collateral:
+          type: number
+          format: float
+          description: Score contribution based on the host's collateral amount.
+        interactions:
+          type: number
+          format: float
+          description: Score contribution based on successful interactions.
+        storageRemaining:
+          type: number
+          format: float
+          description: Score contribution based on remaining storage capacity.
+        uptime:
+          type: number
+          format: float
+          description: Score contribution based on host uptime.
+        version:
+          type: number
+          format: float
+          description: Score contribution based on the host's software version.
+        prices:
+          type: number
+          format: float
+          description: Score contribution based on pricing metrics.
+
+    HostUsabilityBreakdown:
+      type: object
+      properties:
+        blocked:
+          type: boolean
+          description: Indicates if the host is blocked.
+        offline:
+          type: boolean
+          description: Indicates if the host is offline.
+        lowMaxDuration:
+          type: boolean
+          description: Indicates if the host has a low maximum contract duration.
+        lowScore:
+          type: boolean
+          description: Indicates if the host has a low score.
+        redundantIP:
+          type: boolean
+          description: Indicates if the host's IP address is redundant.
+        gouging:
+          type: boolean
+          description: Indicates if the host is gouging prices.
+        notAcceptingContracts:
+          type: boolean
+          description: Indicates if the host is not accepting new contracts.
+        notAnnounced:
+          type: boolean
+          description: Indicates if the host has not been announced on the network.
+        notCompletingScan:
+          type: boolean
+          description: Indicates if the host is failing to complete scans.
+
     MemoryStatus:
       type: object
       properties:
@@ -2805,6 +5731,140 @@ components:
           format: uint64
           description: The total amount of memory available in bytes
           minimum: 1
+
+    MultipartUpload:
+      type: object
+      properties:
+        bucket:
+          type: string
+          description: The name of the bucket
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+        key:
+          type: string
+          description: The key of the object
+        uploadID:
+          allOf:
+            - $ref: "#/components/schemas/UploadID"
+            - description: The ID of the multipart upload
+        createdAt:
+          type: string
+          format: date-time
+          description: When the upload was created
+
+    MultipartListPartItem:
+      type: object
+      properties:
+        partNumber:
+          type: integer
+          description: The number of this part
+        lastModified:
+          type: string
+          format: date-time
+          description: When this part was last modified
+        eTag:
+          $ref: "#/components/schemas/ETag"
+        size:
+          type: integer
+          format: int64
+          description: The size of this part in bytes
+
+    MultipartCompletedPart:
+      type: object
+      properties:
+        partNumber:
+          type: integer
+          description: The number of this part
+        eTag:
+          $ref: "#/components/schemas/ETag"
+
+    Object:
+      type: object
+      allOf:
+        - type: object
+          properties:
+            metadata:
+              $ref: "#/components/schemas/ObjectUserMetadata"
+        - $ref: "#/components/schemas/ObjectMetadata"
+        - type: object
+          properties:
+            encryptionKey:
+              $ref: "#/components/schemas/EncryptionKey"
+            slabs:
+              type: array
+              items:
+                $ref: "#/components/schemas/SlabSlice"
+
+    ObjectMetadata:
+      type: object
+      properties:
+        bucket:
+          $ref: "#/components/schemas/BucketName"
+        etag:
+          allOf:
+            - $ref: "#/components/schemas/ETag"
+            - description: The ETag of the object
+        health:
+          type: number
+          format: float
+          description: The health of the object
+        modTime:
+          type: string
+          format: date-time
+          description: When the object was last modified
+        key:
+          type: string
+          description: The key of the object
+        size:
+          type: integer
+          format: int64
+          description: The size of the object in bytes
+        mimeType:
+          type: string
+          description: The MIME type of the object
+
+    ObjectUserMetadata:
+      type: object
+      additionalProperties:
+        type: string
+      description: User-defined metadata about an object provided through X-Sia-Meta- headers
+
+    PackedSlab:
+      type: object
+      properties:
+        bufferID:
+          type: integer
+          format: uint
+          description: ID of the buffer containing the slab
+        data:
+          type: string
+          format: binary
+          description: The slab data
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+
+    Pin:
+      type: object
+      properties:
+        pinned:
+          type: boolean
+          description: Whether pin is enabled
+        value:
+          type: number
+          format: float64
+          description: The value of the underlying currency to which the setting is pinned
+
+    PinnedSettings:
+      type: object
+      properties:
+        currency:
+          $ref: "#/components/schemas/Currency"
+        threshold:
+          type: number
+          format: float64
+          description: A percentage between 0 and 1 that determines when the pinned settings are updated based on the exchange rate at the time
+        gougingSettingsPins:
+          $ref: "#/components/schemas/GougingSettingsPins"
 
     MultipartUploadID:
       type: string
@@ -2950,11 +6010,29 @@ components:
           minimum: 1
           format: int32
           description: The number of data shards a piece of an object gets erasure-coded into
+          default: 10
         totalShards:
           type: integer
           minimum: 2
           format: int32
           description: The number of total data shards a piece of an object gets erasure-coded into
+          default: 30
+
+    Revision:
+      type: object
+      properties:
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        missedHostValue:
+          $ref: "#/components/schemas/Currency"
+        renterFunds:
+          $ref: "#/components/schemas/Currency"
+        revisionNumber:
+          $ref: "#/components/schemas/RevisionNumber"
+        size:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes
 
     RevisionNumber:
       type: integer
@@ -2962,22 +6040,50 @@ components:
       description: The revision number of the contract
       example: 246
 
-    Sector:
+    SemVer:
+      type: array
+      description: "Represents a semantic version as an array of three unsigned 8-bit integers: [major, minor, patch]"
+      minItems: 3
+      maxItems: 3
+      items:
+        type: integer
+        format: uint8
+        minimum: 0
+        maximum: 255
+      example: [1, 2, 3]
+
+    SettingsID:
+      type: string
+      description: A 16-byte unique identifier represented as a hex string.
+      format: byte
+      example: "4d3b2a1c9f8e7d6c5b4a3f2e1d0c9b8a"
+
+    SlabBuffer:
       type: object
-      description: Description of an uploaded sector
       properties:
-        contracts:
-          description: The contracts that the sector is uploaded to
-          type: object
-          additionalProperties:
-            description: The contracts' IDs
-            type: array
-            items:
-              $ref: "#/components/schemas/FileContractID"
-        root:
-          allOf:
-            - $ref: "#/components/schemas/Hash256"
-            - description: The Merkle root of the sector
+        complete:
+          type: boolean
+          description: Whether the slab buffer is complete and ready to upload
+        filename:
+          type: string
+          description: Name of the buffer on disk
+        size:
+          type: integer
+          format: int64
+          description: Size of the buffer
+        maxSize:
+          type: integer
+          format: int64
+          description: Maximum size of the buffer
+        locked:
+          type: boolean
+          description: Whether the slab buffer is locked for uploading
+
+    UploadID:
+      type: string
+      description: A 32-byte unique identifier represented as a hex string.
+      format: byte
+      example: "f1e2d3c4b5a697887776665544332211ffeeddccbbaa99887766554433221100"
 
     Slab:
       type: object
@@ -2999,7 +6105,150 @@ components:
           maximum: 255
           description: The number of data shards the slab is split into
 
+    SlabSlice:
+      type: object
+      description: A contiguous region within a slab
+      properties:
+        slab:
+         $ref: "#/components/schemas/Slab"
+        offset:
+          type: integer
+          format: uint32
+        limit:
+          type: integer
+          format: uint32
+
     SyncerAddress:
       type: string
       description: The address of the syncer
       example: "118.92.232.145:9981"
+
+    S3Settings:
+      type: object
+      properties:
+        accessKeyID:
+          type: string
+          description: S3 access key ID
+        secretAccessKey:
+          type: string
+          description: S3 secret access key
+        disableAuth:
+          type: boolean
+          description: Whether to disable S3 authentication
+
+    UploadedPackedSlab:
+      type: object
+      properties:
+        bufferID:
+          type: integer
+          format: uint
+          description: ID of the buffer containing the slab
+        shards:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadedSector"
+
+    UploadedSector:
+      type: object
+      properties:
+        contractID:
+          $ref: "#/components/schemas/FileContractID"
+        root:
+          $ref: "#/components/schemas/Hash256"
+
+    UploadSettings:
+      type: object
+      properties:
+        packing:
+          $ref: "#/components/schemas/UploadPackingSettings"
+        redundancy:
+          $ref: "#/components/schemas/RedundancySettings"
+
+    UploadPackingSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether upload packing is enabled
+        slabBufferMaxSizeSoft:
+              type: integer
+              format: int64
+              description: Maximum size for slab buffers
+
+    WalletMetric:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        confirmed:
+          $ref: "#/components/schemas/Currency"
+        spendable:
+          $ref: "#/components/schemas/Currency"
+        unconfirmed:
+          $ref: "#/components/schemas/Currency"
+        immature:
+          $ref: "#/components/schemas/Currency"
+
+    Webhook:
+      type: object
+      properties:
+        module:
+          type: string
+          description: The module this webhook belongs to
+          enum:
+            - alerts
+        event:
+          type: string
+          description: The event type this webhook listens for
+          enum:
+            - dismiss
+            - register
+        url:
+          type: string
+          description: The URL to send webhook events to
+          example: "https://foo.com:8000/api/events"
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom headers to include in webhook requests
+
+    WebhookEvent:
+      type: object
+      properties:
+        module:
+          type: string
+          description: The module that triggered the event
+          enum:
+            - alerts
+        event:
+          type: string
+          description: The type of event that occurred
+          enum:
+            - dismiss
+            - register
+        data:
+          type: object
+          description: Event-specific data payload
+
+    WebhookQueueInfo:
+      type: object
+      properties:
+        url:
+          type: string
+          description: The URL of the webhook
+        numPending:
+          type: integer
+          description: Number of pending events in queue
+        lastSuccess:
+          type: string
+          format: date-time
+          description: Timestamp of last successful delivery
+        lastError:
+          type: string
+          format: date-time
+          description: Timestamp of last failed delivery
+        lastErrorMessage:
+          type: string
+          description: Message from last failed delivery

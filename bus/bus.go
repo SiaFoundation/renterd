@@ -409,14 +409,15 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
-		"PUT    /contracts":              b.contractsHandlerPUT,
-		"GET    /contracts":              b.contractsHandlerGET,
-		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
-		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
-		"POST   /contracts/form":         b.contractsFormHandler,
-		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
-		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
-		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
+		"PUT    /contracts":             b.contractsHandlerPUT,
+		"GET    /contracts":             b.contractsHandlerGET,
+		"DELETE /contracts/all":         b.contractsAllHandlerDELETE,
+		"POST   /contracts/archive":     b.contractsArchiveHandlerPOST,
+		"POST   /contracts/form":        b.contractsFormHandler,
+		"GET    /contracts/prunable":    b.contractsPrunableDataHandlerGET,
+		"GET    /contracts/renewed/:id": b.contractsRenewedIDHandlerGET,
+		"POST   /contracts/spending":    b.contractsSpendingHandlerPOST,
+
 		"GET    /contract/:id":           b.contractIDHandlerGET,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
@@ -431,13 +432,14 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
 		"PUT    /contract/:id/usability": b.contractUsabilityHandlerPUT,
 
-		"GET    /hosts":                          b.hostsHandlerGET,
-		"POST   /hosts":                          b.hostsHandlerPOST,
-		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
+		"GET    /hosts":           b.hostsHandlerGET,
+		"POST   /hosts":           b.hostsHandlerPOST,
+		"GET    /hosts/allowlist": b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist": b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist": b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist": b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/remove":    b.hostsRemoveHandlerPOST,
+
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
 		"PUT    /host/:hostkey/check":            b.hostsCheckHandlerPUT,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
@@ -455,22 +457,19 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
-		"GET    /object/*key":     b.objectHandlerGET,
-		"PUT    /object/*key":     b.objectHandlerPUT,
-		"DELETE /object/*key":     b.objectHandlerDELETE,
 		"GET    /objects/*prefix": b.objectsHandlerGET,
 		"POST   /objects/copy":    b.objectsCopyHandlerPOST,
 		"POST   /objects/remove":  b.objectsRemoveHandlerPOST,
 		"POST   /objects/rename":  b.objectsRenameHandlerPOST,
 
+		"GET    /object/*key": b.objectHandlerGET,
+		"PUT    /object/*key": b.objectHandlerPUT,
+		"DELETE /object/*key": b.objectHandlerDELETE,
+
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
 
-		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
-		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
-		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-
-		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
+		"DELETE /sectors/:hostkey/:root": b.sectorsHostRootHandlerDELETE,
 
 		"GET    /settings/gouging": b.settingsGougingHandlerGET,
 		"PUT    /settings/gouging": b.settingsGougingHandlerPUT,
@@ -481,6 +480,10 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /settings/upload":  b.settingsUploadHandlerGET,
 		"PUT    /settings/upload":  b.settingsUploadHandlerPUT,
 
+		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
+		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
+		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
+
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
@@ -488,7 +491,8 @@ func (b *Bus) Handler() http.Handler {
 		"GET    /slab/:key":           b.slabHandlerGET,
 		"PUT    /slab/:key":           b.slabHandlerPUT,
 
-		"GET    /state":         b.stateHandlerGET,
+		"GET    /state": b.stateHandlerGET,
+
 		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"GET    /syncer/address": b.syncerAddrHandler,

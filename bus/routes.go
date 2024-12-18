@@ -1511,7 +1511,7 @@ func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
 func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	var hk types.PublicKey
 	var root types.Hash256
-	if jc.DecodeParam("hk", &hk) != nil {
+	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	} else if jc.DecodeParam("root", &root) != nil {
 		return
@@ -1584,13 +1584,16 @@ func (b *Bus) slabsRefreshHealthHandlerPOST(jc jape.Context) {
 
 func (b *Bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
-	if jc.Decode(&msr) == nil {
-		if slabs, err := b.store.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
-			jc.Encode(api.UnhealthySlabsResponse{
-				Slabs: slabs,
-			})
-		}
+	if jc.Decode(&msr) != nil {
+		return
 	}
+
+	slabs, err := b.store.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.Limit)
+	if jc.Check("couldn't fetch slabs for migration", err) != nil {
+		return
+	}
+
+	jc.Encode(api.UnhealthySlabsResponse{Slabs: slabs})
 }
 
 func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
@@ -2018,9 +2021,9 @@ func (b *Bus) webhookHandlerPost(jc jape.Context) {
 }
 
 func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
-	metric := jc.PathParam("key")
-	if metric == "" {
-		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
+	key := jc.PathParam("key")
+	if key == "" {
+		jc.Error(errors.New("unknown metric ''"), http.StatusBadRequest)
 		return
 	}
 
@@ -2032,7 +2035,7 @@ func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
 		return
 	}
 
-	err := b.store.PruneMetrics(jc.Request.Context(), metric, cutoff)
+	err := b.store.PruneMetrics(jc.Request.Context(), key, cutoff)
 	if jc.Check("failed to prune metrics", err) != nil {
 		return
 	}
@@ -2043,7 +2046,7 @@ func (b *Bus) metricsHandlerPUT(jc jape.Context) {
 
 	key := jc.PathParam("key")
 	if key != api.MetricContractPrune {
-		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
 
