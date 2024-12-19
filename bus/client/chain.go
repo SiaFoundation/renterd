@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 )
@@ -20,7 +21,7 @@ func (c *Client) BroadcastTransaction(ctx context.Context, txns []types.Transact
 }
 
 // ConsensusNetwork returns information about the consensus network.
-func (c *Client) ConsensusNetwork(ctx context.Context) (resp api.ConsensusNetwork, err error) {
+func (c *Client) ConsensusNetwork(ctx context.Context) (resp consensus.Network, err error) {
 	err = c.c.WithContext(ctx).GET("/consensus/network", &resp)
 	return
 }

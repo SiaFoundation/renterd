@@ -43,10 +43,9 @@ func ContractMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, 
 			(*Unsigned64)(&cm.RemainingFunds.Lo), (*Unsigned64)(&cm.RemainingFunds.Hi),
 			&placeHolderRevisionNumber,
 			(*Unsigned64)(&cm.UploadSpending.Lo), (*Unsigned64)(&cm.UploadSpending.Hi),
-			(*Unsigned64)(&cm.DownloadSpending.Lo), (*Unsigned64)(&cm.DownloadSpending.Hi),
 			(*Unsigned64)(&cm.FundAccountSpending.Lo), (*Unsigned64)(&cm.FundAccountSpending.Hi),
 			(*Unsigned64)(&cm.DeleteSpending.Lo), (*Unsigned64)(&cm.DeleteSpending.Hi),
-			(*Unsigned64)(&cm.ListSpending.Lo), (*Unsigned64)(&cm.ListSpending.Hi),
+			(*Unsigned64)(&cm.SectorRootsSpending.Lo), (*Unsigned64)(&cm.SectorRootsSpending.Hi),
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to scan contract metric: %w", err)
@@ -100,50 +99,6 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 	})
 }
 
-func ContractSetChurnMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetChurnMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			&m.Name,
-			(*FileContractID)(&m.ContractID),
-			&m.Direction,
-			&m.Reason,
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set churn metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
-func ContractSetMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
-	return queryPeriods(ctx, tx, start, n, interval, opts, func(rows *sql.LoggedRows) (m api.ContractSetMetric, err error) {
-		var placeHolder int64
-		var placeHolderTime time.Time
-		var timestamp UnixTimeMS
-		err = rows.Scan(
-			&placeHolder,
-			&placeHolderTime,
-			&timestamp,
-			&m.Name,
-			&m.Contracts,
-		)
-		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
-			return
-		}
-		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
-		return
-	})
-}
-
 func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Time) error {
 	if metric == "" {
 		return errors.New("metric must be set")
@@ -155,10 +110,6 @@ func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Tim
 	switch metric {
 	case api.MetricContractPrune:
 		table = "contract_prunes"
-	case api.MetricContractSet:
-		table = "contract_sets"
-	case api.MetricContractSetChurn:
-		table = "contract_sets_churn"
 	case api.MetricContract:
 		table = "contracts"
 	case api.MetricPerformance:
@@ -173,7 +124,7 @@ func PruneMetrics(ctx context.Context, tx sql.Tx, metric string, cutoff time.Tim
 }
 
 func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, download_spending_lo, download_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, list_spending_lo, list_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contracts (created_at, timestamp, fcid, host, remaining_collateral_lo, remaining_collateral_hi, remaining_funds_lo, remaining_funds_hi, revision_number, upload_spending_lo, upload_spending_hi, fund_account_spending_lo, fund_account_spending_hi, delete_spending_lo, delete_spending_hi, sector_roots_spending_lo, sector_roots_spending_hi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract metric: %w", err)
 	}
@@ -209,14 +160,12 @@ func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.Contrac
 			Unsigned64(metric.RevisionNumber),
 			Unsigned64(metric.UploadSpending.Lo),
 			Unsigned64(metric.UploadSpending.Hi),
-			Unsigned64(metric.DownloadSpending.Lo),
-			Unsigned64(metric.DownloadSpending.Hi),
 			Unsigned64(metric.FundAccountSpending.Lo),
 			Unsigned64(metric.FundAccountSpending.Hi),
 			Unsigned64(metric.DeleteSpending.Lo),
 			Unsigned64(metric.DeleteSpending.Hi),
-			Unsigned64(metric.ListSpending.Lo),
-			Unsigned64(metric.ListSpending.Hi),
+			Unsigned64(metric.SectorRootsSpending.Lo),
+			Unsigned64(metric.SectorRootsSpending.Hi),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert contract metric: %w", err)
@@ -254,60 +203,6 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 			return fmt.Errorf("failed to get rows affected: %w", err)
 		} else if n == 0 {
 			return fmt.Errorf("failed to insert contract prune metric: no rows affected")
-		}
-	}
-
-	return nil
-}
-
-func RecordContractSetChurnMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractSetChurnMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sets_churn (created_at, timestamp, name, fc_id, direction, reason) VALUES (?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract set churn metric: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, metric := range metrics {
-		res, err := insertStmt.Exec(ctx,
-			time.Now().UTC(),
-			UnixTimeMS(metric.Timestamp),
-			metric.Name,
-			FileContractID(metric.ContractID),
-			metric.Direction,
-			metric.Reason,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract set churn metric: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert contract set churn metric: no rows affected")
-		}
-	}
-
-	return nil
-}
-
-func RecordContractSetMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractSetMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_sets (created_at, timestamp, name, contracts) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert contract set metric: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, metric := range metrics {
-		res, err := insertStmt.Exec(ctx,
-			time.Now().UTC(),
-			UnixTimeMS(metric.Timestamp),
-			metric.Name,
-			metric.Contracts,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert contract set metric: %w", err)
-		} else if n, err := res.RowsAffected(); err != nil {
-			return fmt.Errorf("failed to get rows affected: %w", err)
-		} else if n == 0 {
-			return fmt.Errorf("failed to insert contract set metric: no rows affected")
 		}
 	}
 
@@ -361,7 +256,7 @@ func WalletMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uint64, in
 			(*Unsigned64)(&m.Immature.Lo), (*Unsigned64)(&m.Immature.Hi),
 		)
 		if err != nil {
-			err = fmt.Errorf("failed to scan contract set metric: %w", err)
+			err = fmt.Errorf("failed to scan wallet metric: %w", err)
 			return
 		}
 		m.Timestamp = api.TimeRFC3339(normaliseTimestamp(start, interval, timestamp))
@@ -407,26 +302,6 @@ func queryPeriods[T any](ctx context.Context, tx sql.Tx, start time.Time, n uint
 		if opts.HostVersion != "" {
 			query += " AND host_version = ?"
 			params = append(params, opts.HostVersion)
-		}
-	case api.ContractSetChurnMetricsQueryOpts:
-		table = "contract_sets_churn"
-		if opts.Name != "" {
-			query += " AND name = ?"
-			params = append(params, opts.Name)
-		}
-		if opts.Direction != "" {
-			query += " AND direction = ?"
-			params = append(params, opts.Direction)
-		}
-		if opts.Reason != "" {
-			query += " AND reason = ?"
-			params = append(params, opts.Reason)
-		}
-	case api.ContractSetMetricsQueryOpts:
-		table = "contract_sets"
-		if opts.Name != "" {
-			query += " AND name = ?"
-			params = append(params, opts.Name)
 		}
 	case api.PerformanceMetricsQueryOpts:
 		table = "performance"
@@ -555,10 +430,9 @@ func aggregateMetrics(x, y api.ContractMetric) (out api.ContractMetric) {
 	out.RemainingCollateral, _ = out.RemainingCollateral.AddWithOverflow(y.RemainingCollateral)
 	out.RemainingFunds, _ = out.RemainingFunds.AddWithOverflow(y.RemainingFunds)
 	out.UploadSpending, _ = out.UploadSpending.AddWithOverflow(y.UploadSpending)
-	out.DownloadSpending, _ = out.DownloadSpending.AddWithOverflow(y.DownloadSpending)
 	out.FundAccountSpending, _ = out.FundAccountSpending.AddWithOverflow(y.FundAccountSpending)
 	out.DeleteSpending, _ = out.DeleteSpending.AddWithOverflow(y.DeleteSpending)
-	out.ListSpending, _ = out.ListSpending.AddWithOverflow(y.ListSpending)
+	out.SectorRootsSpending, _ = out.SectorRootsSpending.AddWithOverflow(y.SectorRootsSpending)
 	return
 }
 

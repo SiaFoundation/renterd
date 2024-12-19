@@ -1,0 +1,1 @@
+UPDATE settings SET value=JSON_REMOVE(value, '$.migrationSurchargeMultiplier') WHERE `key`="gouging";

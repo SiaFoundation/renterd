@@ -117,11 +117,11 @@ func (b *authenticatedBackend) permsFromCtx(ctx context.Context, bucket string) 
 }
 
 func (b *authenticatedBackend) reloadV4Keys(ctx context.Context) error {
-	as, err := b.backend.b.S3AuthenticationSettings(ctx)
+	s3, err := b.backend.b.S3Settings(ctx)
 	if err != nil {
 		return err
 	}
-	signature.ReloadKeys(as.V4Keypairs)
+	signature.ReloadKeys(s3.Authentication.V4Keypairs)
 	return nil
 }
 

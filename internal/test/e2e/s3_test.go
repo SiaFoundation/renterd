@@ -28,10 +28,6 @@ var (
 )
 
 func TestS3Basic(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	start := time.Now()
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -40,7 +36,7 @@ func TestS3Basic(t *testing.T) {
 
 	// delete default bucket before testing.
 	tt := cluster.tt
-	if err := cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName); err != nil {
+	if err := cluster.Bus.DeleteBucket(context.Background(), testBucket); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,8 +74,10 @@ func TestS3Basic(t *testing.T) {
 	tt.OK(err)
 	if busObject.Object == nil {
 		t.Fatal("expected object to exist")
-	} else if api.FormatETag(busObject.Object.ETag) != uploadInfo.etag {
-		t.Fatalf("expected ETag %v, got %v", uploadInfo.etag, busObject.Object.ETag)
+	} else if api.FormatETag(busObject.ETag) != *&uploadInfo.etag {
+		t.Fatalf("expected ETag %v, got %v", uploadInfo.etag, busObject.ETag)
+	} else if api.FormatETag(busObject.ETag) != uploadInfo.etag {
+		t.Fatalf("expected ETag %v, got %v", uploadInfo.etag, busObject.ETag)
 	}
 
 	_, err = cluster.S3.PutObject("nonexistent", objPath, bytes.NewReader(data), putObjectOptions{})
@@ -167,10 +165,6 @@ func TestS3Basic(t *testing.T) {
 }
 
 func TestS3ObjectMetadata(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// create cluster
 	opts := testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -188,7 +182,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// add object to the bucket
-	_, err := cluster.S3.PutObject(api.DefaultBucketName, t.Name(), bytes.NewReader([]byte(t.Name())), putObjectOptions{metadata: metadata})
+	_, err := cluster.S3.PutObject(testBucket, t.Name(), bytes.NewReader([]byte(t.Name())), putObjectOptions{metadata: metadata})
 	tt.OK(err)
 
 	// create helper to assert metadata is present
@@ -202,25 +196,25 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}
 
 	// perform GET request
-	obj, err := cluster.S3.GetObject(api.DefaultBucketName, t.Name(), getObjectOptions{})
+	obj, err := cluster.S3.GetObject(testBucket, t.Name(), getObjectOptions{})
 	tt.OK(err)
 	assertMetadata(metadata, obj.metadata)
 
 	// assert metadata is set on HEAD request
-	get, err := cluster.S3.HeadObject(api.DefaultBucketName, t.Name())
+	get, err := cluster.S3.HeadObject(testBucket, t.Name())
 	tt.OK(err)
 	assertMetadata(metadata, get.metadata)
 
 	// perform HEAD request
-	head, err := cluster.S3.HeadObject(api.DefaultBucketName, t.Name())
+	head, err := cluster.S3.HeadObject(testBucket, t.Name())
 	tt.OK(err)
 	assertMetadata(metadata, head.metadata)
 
 	// perform metadata update (same src/dst copy)
 	metadata["Baz"] = "updated"
 	_, err = cluster.S3.CopyObject(
-		api.DefaultBucketName,
-		api.DefaultBucketName,
+		testBucket,
+		testBucket,
 		t.Name(),
 		t.Name(),
 		putObjectOptions{metadata: metadata},
@@ -228,15 +222,15 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 
 	// perform HEAD request
-	head, err = cluster.S3.HeadObject(api.DefaultBucketName, t.Name())
+	head, err = cluster.S3.HeadObject(testBucket, t.Name())
 	tt.OK(err)
 	assertMetadata(metadata, head.metadata)
 
 	// perform copy
 	metadata["Baz"] = "copied"
 	_, err = cluster.S3.CopyObject(
-		api.DefaultBucketName,
-		api.DefaultBucketName,
+		testBucket,
+		testBucket,
 		t.Name(),
 		t.Name()+"copied",
 		putObjectOptions{
@@ -246,18 +240,18 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 
 	// perform HEAD request
-	head, err = cluster.S3.HeadObject(api.DefaultBucketName, t.Name()+"copied")
+	head, err = cluster.S3.HeadObject(testBucket, t.Name()+"copied")
 	tt.OK(err)
 	assertMetadata(metadata, metadata)
 
 	// assert the original object's metadata is unchanged
 	metadata["Baz"] = "updated"
-	head, err = cluster.S3.HeadObject(api.DefaultBucketName, t.Name())
+	head, err = cluster.S3.HeadObject(testBucket, t.Name())
 	tt.OK(err)
 	assertMetadata(metadata, metadata)
 
 	// upload a file using multipart upload
-	uid, err := cluster.S3.NewMultipartUpload(api.DefaultBucketName, "multi", putObjectOptions{
+	uid, err := cluster.S3.NewMultipartUpload(testBucket, "multi", putObjectOptions{
 		metadata: map[string]string{
 			"New": "1",
 		},
@@ -265,9 +259,9 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 	data := frand.Bytes(3)
 
-	part, err := cluster.S3.PutObjectPart(api.DefaultBucketName, "foo", uid, 1, bytes.NewReader(data), putObjectPartOptions{})
+	part, err := cluster.S3.PutObjectPart(testBucket, "foo", uid, 1, bytes.NewReader(data), putObjectPartOptions{})
 	tt.OK(err)
-	_, err = cluster.S3.CompleteMultipartUpload(api.DefaultBucketName, "multi", uid, []completePart{
+	_, err = cluster.S3.CompleteMultipartUpload(testBucket, "multi", uid, []completePart{
 		{
 			partNumber: 1,
 			etag:       part.etag,
@@ -276,7 +270,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	tt.OK(err)
 
 	// check metadata
-	head, err = cluster.S3.HeadObject(api.DefaultBucketName, "multi")
+	head, err = cluster.S3.HeadObject(testBucket, "multi")
 	tt.OK(err)
 	assertMetadata(map[string]string{
 		"New": "1",
@@ -284,17 +278,13 @@ func TestS3ObjectMetadata(t *testing.T) {
 }
 
 func TestS3Authentication(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
 	assertAuth := func(c *s3aws.S3, shouldWork bool) {
 		t.Helper()
-		bucket := api.DefaultBucketName
+		bucket := testBucket
 		_, err := c.ListObjectsV2(&s3aws.ListObjectsV2Input{
 			Bucket: &bucket,
 		})
@@ -329,12 +319,12 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Authenticated, true)
 
 	// Update the policy of the bucket to allow public read access.
-	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
+	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), testBucket, api.BucketPolicy{
 		PublicReadAccess: true,
 	}))
 
 	// Check that the policy was updated.
-	b, err := cluster.Bus.Bucket(context.Background(), api.DefaultBucketName)
+	b, err := cluster.Bus.Bucket(context.Background(), testBucket)
 	tt.OK(err)
 	if b.Policy.PublicReadAccess != true {
 		t.Fatal("expected public read access")
@@ -344,12 +334,12 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Unauthenticated, true)
 
 	// Update the policy again to disable access.
-	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), api.DefaultBucketName, api.BucketPolicy{
+	tt.OK(cluster.Bus.UpdateBucketPolicy(context.Background(), testBucket, api.BucketPolicy{
 		PublicReadAccess: false,
 	}))
 
 	// Check that the policy was updated.
-	b, err = cluster.Bus.Bucket(context.Background(), api.DefaultBucketName)
+	b, err = cluster.Bus.Bucket(context.Background(), testBucket)
 	tt.OK(err)
 	if b.Policy.PublicReadAccess == true {
 		t.Fatal("expected no public read access")
@@ -521,10 +511,6 @@ func TestS3List(t *testing.T) {
 }
 
 func TestS3MultipartUploads(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -544,7 +530,7 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// Start another one in the default bucket. This should not show up when
 	// listing the uploads in the 'multipart' bucket.
-	tt.OKAll(cluster.S3.NewMultipartUpload(api.DefaultBucketName, "foo", putObjectOptions{}))
+	tt.OKAll(cluster.S3.NewMultipartUpload(testBucket, "foo", putObjectOptions{}))
 
 	// List uploads
 	uploads, err := cluster.S3.ListMultipartUploads("multipart")
@@ -557,7 +543,7 @@ func TestS3MultipartUploads(t *testing.T) {
 
 	// delete default bucket for the remainder of the test. This makes sure we
 	// can delete the bucket even though it contains a multipart upload.
-	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
+	tt.OK(cluster.Bus.DeleteBucket(context.Background(), testBucket))
 
 	// Add 3 parts out of order to make sure the object is reconstructed
 	// correctly.
@@ -664,10 +650,6 @@ func TestS3MultipartUploads(t *testing.T) {
 // it, the following call to 'pruneSlabs' would fail. That's because it didn't
 // account for references of multipart uploads when deleting slabs.
 func TestS3MultipartPruneSlabs(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -678,7 +660,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	tt := cluster.tt
 
 	// delete default bucket before testing.
-	tt.OK(cluster.Bus.DeleteBucket(context.Background(), api.DefaultBucketName))
+	tt.OK(cluster.Bus.DeleteBucket(context.Background(), testBucket))
 
 	// Create bucket.
 	tt.OK(cluster.S3.CreateBucket(bucket))
@@ -716,10 +698,6 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 }
 
 func TestS3SpecialChars(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -730,13 +708,13 @@ func TestS3SpecialChars(t *testing.T) {
 	// manually create the 'a/' object as a directory. It should also be
 	// possible to call StatObject on it without errors.
 	objectKey := "foo/höst (1).log"
-	tt.OKAll(cluster.S3.PutObject(api.DefaultBucketName, objectKey, bytes.NewReader([]byte("bar")), putObjectOptions{}))
-	so, err := cluster.S3.HeadObject(api.DefaultBucketName, objectKey)
+	tt.OKAll(cluster.S3.PutObject(testBucket, objectKey, bytes.NewReader([]byte("bar")), putObjectOptions{}))
+	so, err := cluster.S3.HeadObject(testBucket, objectKey)
 	tt.OK(err)
 	if so.key != objectKey {
 		t.Fatal("unexpected key:", so.key)
 	}
-	lor, err := cluster.S3.ListObjects(api.DefaultBucketName, listObjectsOptions{prefix: "foo/"})
+	lor, err := cluster.S3.ListObjects(testBucket, listObjectsOptions{prefix: "foo/"})
 	tt.OK(err)
 	for _, res := range lor.contents {
 		if res.key != objectKey {
@@ -745,12 +723,12 @@ func TestS3SpecialChars(t *testing.T) {
 	}
 
 	// delete it and verify its gone.
-	tt.OK(cluster.S3.DeleteObject(api.DefaultBucketName, objectKey))
-	so, err = cluster.S3.HeadObject(api.DefaultBucketName, objectKey)
+	tt.OK(cluster.S3.DeleteObject(testBucket, objectKey))
+	so, err = cluster.S3.HeadObject(testBucket, objectKey)
 	if err == nil {
 		t.Fatal("shouldn't exist", err)
 	}
-	lor, err = cluster.S3.ListObjects(api.DefaultBucketName, listObjectsOptions{prefix: "foo/"})
+	lor, err = cluster.S3.ListObjects(testBucket, listObjectsOptions{prefix: "foo/"})
 	for _, res := range lor.contents {
 		tt.OK(err)
 		if res.key == objectKey {
@@ -760,10 +738,6 @@ func TestS3SpecialChars(t *testing.T) {
 }
 
 func TestS3SettingsValidate(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 
@@ -810,9 +784,11 @@ func TestS3SettingsValidate(t *testing.T) {
 		},
 	}
 	for i, test := range tests {
-		err := cluster.Bus.UpdateSetting(context.Background(), api.SettingS3Authentication, api.S3AuthenticationSettings{
-			V4Keypairs: map[string]string{
-				test.id: test.key,
+		err := cluster.Bus.UpdateS3Settings(context.Background(), api.S3Settings{
+			Authentication: api.S3AuthenticationSettings{
+				V4Keypairs: map[string]string{
+					test.id: test.key,
+				},
 			},
 		})
 		if err != nil && !test.shouldFail {

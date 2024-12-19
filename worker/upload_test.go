@@ -11,20 +11,21 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/upload"
 	"go.sia.tech/renterd/object"
 	"lukechampine.com/frand"
 )
 
 var (
 	testBucket             = "testbucket"
-	testContractSet        = "testcontractset"
 	testRedundancySettings = api.RedundancySettings{MinShards: 2, TotalShards: 6}
 )
 
 func TestUpload(t *testing.T) {
 	// create test worker
-	w := newTestWorker(t)
+	w := newTestWorker(t, newTestWorkerCfg())
 
 	// add hosts to worker
 	w.AddHosts(testRedundancySettings.TotalShards * 2)
@@ -41,7 +42,7 @@ func TestUpload(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +55,15 @@ func TestUpload(t *testing.T) {
 
 	// build used hosts
 	used := make(map[types.PublicKey]struct{})
-	for _, shard := range o.Object.Object.Slabs[0].Shards {
-		used[shard.LatestHost] = struct{}{}
+	for _, shard := range o.Object.Slabs[0].Shards {
+		for hk := range shard.Contracts {
+			used[hk] = struct{}{}
+		}
 	}
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -69,24 +72,34 @@ func TestUpload(t *testing.T) {
 
 	// filter contracts to have (at most) min shards used contracts
 	var n int
-	var filtered []api.ContractMetadata
-	for _, md := range w.Contracts() {
+	var filtered []api.HostInfo
+	for _, h := range w.UploadHosts() {
 		// add unused contracts
-		if _, used := used[md.HostKey]; !used {
-			filtered = append(filtered, md)
+		host, err := w.bus.Host(context.Background(), h.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, used := used[h.PublicKey]; !used {
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  h.PublicKey,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
+			})
 			continue
 		}
 
 		// add min shards used contracts
-		if n < int(params.rs.MinShards) {
-			filtered = append(filtered, md)
+		if n < int(params.RS.MinShards) {
+			filtered = append(filtered, api.HostInfo{
+				PublicKey:  h.PublicKey,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
+			})
 			n++
 		}
 	}
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), filtered)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), filtered)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -94,8 +107,8 @@ func TestUpload(t *testing.T) {
 	}
 
 	// filter out one contract - expect download to fail
-	for i, md := range filtered {
-		if _, used := used[md.HostKey]; used {
+	for i, h := range filtered {
+		if _, used := used[h.PublicKey]; used {
 			filtered = append(filtered[:i], filtered[i+1:]...)
 			break
 		}
@@ -103,14 +116,14 @@ func TestUpload(t *testing.T) {
 
 	// download the data again and assert it fails
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), filtered)
-	if !errors.Is(err, errDownloadNotEnoughHosts) {
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), filtered)
+	if !errors.Is(err, download.ErrDownloadNotEnoughHosts) {
 		t.Fatal("expected not enough hosts error", err)
 	}
 
 	// try and upload into a bucket that does not exist
-	params.bucket = "doesnotexist"
-	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	params.Bucket = "doesnotexist"
+	_, _, err = ul.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
 	if !errors.Is(err, api.ErrBucketNotFound) {
 		t.Fatal("expected bucket not found error", err)
 	}
@@ -118,15 +131,15 @@ func TestUpload(t *testing.T) {
 	// upload data using a cancelled context - assert we don't hang
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err = ul.Upload(ctx, bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
-	if err == nil || !errors.Is(err, errUploadInterrupted) {
+	_, _, err = ul.Upload(ctx, bytes.NewReader(data), w.UploadHosts(), params)
+	if err == nil || !errors.Is(err, upload.ErrUploadCancelled) {
 		t.Fatal(err)
 	}
 }
 
 func TestUploadPackedSlab(t *testing.T) {
 	// create test worker
-	w := newTestWorker(t)
+	w := newTestWorker(t, newTestWorkerCfg())
 
 	// add hosts to worker
 	w.AddHosts(testRedundancySettings.TotalShards)
@@ -139,21 +152,19 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// create upload params
 	params := testParameters(t.Name())
-	params.packing = true
-	opts := testOpts()
-	opts = append(opts, WithPacking(true))
+	params.Packing = true
 
 	// create test data
 	data := frand.Bytes(128)
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert our object store contains a partial slab
-	if len(os.partials) != 1 {
+	if os.NumPartials() != 1 {
 		t.Fatal("expected 1 partial slab")
 	}
 
@@ -165,7 +176,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -173,7 +184,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	}
 
 	// fetch packed slabs for upload
-	pss, err := os.PackedSlabsForUpload(context.Background(), time.Minute, uint8(params.rs.MinShards), uint8(params.rs.TotalShards), testContractSet, 1)
+	pss, err := os.PackedSlabsForUpload(context.Background(), time.Minute, uint8(params.RS.MinShards), uint8(params.RS.TotalShards), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(pss) != 1 {
@@ -182,14 +193,14 @@ func TestUploadPackedSlab(t *testing.T) {
 	ps := pss[0]
 
 	// upload the packed slab
-	mem := mm.AcquireMemory(context.Background(), params.rs.SlabSize())
-	err = ul.UploadPackedSlab(context.Background(), params.rs, ps, mem, w.Contracts(), 0, lockingPriorityUpload)
+	mem := mm.AcquireMemory(context.Background(), params.RS.SlabSize())
+	err = ul.UploadPackedSlab(context.Background(), params.RS, ps, mem, w.UploadHosts(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert our object store contains zero partial slabs
-	if len(os.partials) != 0 {
+	if os.NumPartials() != 0 {
 		t.Fatal("expected no partial slabs")
 	}
 
@@ -201,7 +212,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 	// download the data again and assert it matches
 	buf.Reset()
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -211,9 +222,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	// define a helper that counts packed slabs
 	packedSlabsCount := func() int {
 		t.Helper()
-		os.mu.Lock()
-		cnt := len(os.partials)
-		os.mu.Unlock()
+		cnt := os.NumPartials()
 		return cnt
 	}
 
@@ -221,8 +230,8 @@ func TestUploadPackedSlab(t *testing.T) {
 	var c int
 	uploadBytes := func(n int) {
 		t.Helper()
-		params.path = fmt.Sprintf("%s_%d", t.Name(), c)
-		_, err := w.upload(context.Background(), params.bucket, params.path, testRedundancySettings, bytes.NewReader(frand.Bytes(n)), w.Contracts(), opts...)
+		params.Key = fmt.Sprintf("%s_%d", t.Name(), c)
+		_, err := w.upload(context.Background(), params.Bucket, params.Key, testRedundancySettings, bytes.NewReader(frand.Bytes(n)), w.UploadHosts(), upload.WithPacking(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -233,7 +242,7 @@ func TestUploadPackedSlab(t *testing.T) {
 	w.BlockAsyncPackedSlabUploads(params)
 
 	// configure max buffer size
-	os.setSlabBufferMaxSizeSoft(128)
+	os.SetSlabBufferMaxSizeSoft(128)
 
 	// upload 2x64 bytes using the worker and assert we still have two packed
 	// slabs (buffer limit not reached)
@@ -267,7 +276,7 @@ func TestUploadPackedSlab(t *testing.T) {
 
 func TestMigrateLostSector(t *testing.T) {
 	// create test worker
-	w := newTestWorker(t)
+	w := newTestWorker(t, newTestWorkerCfg())
 
 	// add hosts to worker
 	w.AddHosts(testRedundancySettings.TotalShards * 2)
@@ -285,7 +294,7 @@ func TestMigrateLostSector(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,19 +303,25 @@ func TestMigrateLostSector(t *testing.T) {
 	o, err := os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(o.Object.Object.Slabs) != 1 {
+	} else if len(o.Object.Slabs) != 1 {
 		t.Fatal("expected 1 slab")
 	}
-	slab := o.Object.Object.Slabs[0]
+	slab := o.Object.Slabs[0]
 
 	// build usedHosts hosts
 	usedHosts := make(map[types.PublicKey]struct{})
 	for _, shard := range slab.Shards {
-		usedHosts[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			usedHosts[hk] = struct{}{}
+		}
 	}
 
 	// assume the host of the first shard lost its sector
-	badHost := slab.Shards[0].LatestHost
+	var badHost types.PublicKey
+	for hk := range slab.Shards[0].Contracts {
+		badHost = hk
+		break
+	}
 	badContract := slab.Shards[0].Contracts[badHost][0]
 	err = os.DeleteHostSector(context.Background(), badHost, slab.Shards[0].Root)
 	if err != nil {
@@ -314,29 +329,35 @@ func TestMigrateLostSector(t *testing.T) {
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, err := dl.DownloadSlab(context.Background(), slab.Slab, w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// encrypt the shards
-	o.Object.Object.Slabs[0].Slab.Encrypt(shards)
+	o.Object.Slabs[0].Slab.Encrypt(shards)
 
 	// filter it down to the shards we need to migrate
 	shards = shards[:1]
 
-	// recreate upload contracts
-	contracts := make([]api.ContractMetadata, 0)
-	for _, c := range w.Contracts() {
-		_, used := usedHosts[c.HostKey]
-		if !used && c.HostKey != badHost {
-			contracts = append(contracts, c)
+	// recreate upload hosts
+	hosts := make([]upload.HostInfo, 0)
+	for _, h := range w.UploadHosts() {
+		_, used := usedHosts[h.PublicKey]
+		if !used && h.PublicKey != badHost {
+			hosts = append(hosts, h)
 		}
+	}
+
+	// re-grab the slab
+	o, err = os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// migrate the shard away from the bad host
 	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Object.Slabs[0].Slab, []int{0}, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, hosts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,17 +366,20 @@ func TestMigrateLostSector(t *testing.T) {
 	o, err = os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(o.Object.Object.Slabs) != 1 {
+	} else if len(o.Object.Slabs) != 1 {
 		t.Fatal("expected 1 slab")
 	}
-	slab = o.Object.Object.Slabs[0]
+	slab = o.Object.Slabs[0]
 
 	// assert the bad shard is on a good host now
 	shard := slab.Shards[0]
-	if shard.LatestHost == badHost {
-		t.Fatal("latest host is bad")
-	} else if len(shard.Contracts) != 1 {
+	if len(shard.Contracts) != 1 {
 		t.Fatal("expected 1 contract")
+	}
+	for hk := range shard.Contracts {
+		if hk == badHost {
+			t.Fatal("shard is on bad host")
+		}
 	}
 	for _, fcids := range shard.Contracts {
 		for _, fcid := range fcids {
@@ -368,7 +392,7 @@ func TestMigrateLostSector(t *testing.T) {
 
 func TestUploadShards(t *testing.T) {
 	// create test worker
-	w := newTestWorker(t)
+	w := newTestWorker(t, newTestWorkerCfg())
 
 	// add hosts to worker
 	w.AddHosts(testRedundancySettings.TotalShards * 2)
@@ -386,7 +410,7 @@ func TestUploadShards(t *testing.T) {
 	params := testParameters(t.Name())
 
 	// upload data
-	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,15 +419,17 @@ func TestUploadShards(t *testing.T) {
 	o, err := os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(o.Object.Object.Slabs) != 1 {
+	} else if len(o.Object.Slabs) != 1 {
 		t.Fatal("expected 1 slab")
 	}
-	slab := o.Object.Object.Slabs[0]
+	slab := o.Object.Slabs[0]
 
 	// build usedHosts hosts
 	usedHosts := make(map[types.PublicKey]struct{})
 	for _, shard := range slab.Shards {
-		usedHosts[shard.LatestHost] = struct{}{}
+		for hk := range shard.Contracts {
+			usedHosts[hk] = struct{}{}
+		}
 	}
 
 	// mark odd shards as bad
@@ -412,18 +438,20 @@ func TestUploadShards(t *testing.T) {
 	for i, shard := range slab.Shards {
 		if i%2 != 0 {
 			badIndices = append(badIndices, i)
-			badHosts[shard.LatestHost] = struct{}{}
+			for hk := range shard.Contracts {
+				badHosts[hk] = struct{}{}
+			}
 		}
 	}
 
 	// download the slab
-	shards, _, err := dl.DownloadSlab(context.Background(), slab.Slab, w.Contracts())
+	shards, err := dl.DownloadSlab(context.Background(), slab.Slab, w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// encrypt the shards
-	o.Object.Object.Slabs[0].Slab.Encrypt(shards)
+	o.Object.Slabs[0].Slab.Encrypt(shards)
 
 	// filter it down to the shards we need to migrate
 	for i, si := range badIndices {
@@ -431,19 +459,19 @@ func TestUploadShards(t *testing.T) {
 	}
 	shards = shards[:len(badIndices)]
 
-	// recreate upload contracts
-	contracts := make([]api.ContractMetadata, 0)
-	for _, c := range w.Contracts() {
-		_, used := usedHosts[c.HostKey]
-		_, bad := badHosts[c.HostKey]
+	// recreate upload hosts
+	hosts := make([]upload.HostInfo, 0)
+	for _, h := range w.UploadHosts() {
+		_, used := usedHosts[h.PublicKey]
+		_, bad := badHosts[h.PublicKey]
 		if !used && !bad {
-			contracts = append(contracts, c)
+			hosts = append(hosts, h)
 		}
 	}
 
 	// migrate those shards away from bad hosts
 	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Object.Slabs[0].Slab, badIndices, shards, testContractSet, contracts, 0, lockingPriorityUpload, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, hosts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,34 +480,51 @@ func TestUploadShards(t *testing.T) {
 	o, err = os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
 	if err != nil {
 		t.Fatal(err)
-	} else if len(o.Object.Object.Slabs) != 1 {
+	} else if len(o.Object.Slabs) != 1 {
 		t.Fatal("expected 1 slab")
 	}
-	slab = o.Object.Object.Slabs[0]
+	slab = o.Object.Slabs[0]
 
-	// assert none of the shards are on bad hosts
+	// assert every shard that was on a bad host was migrated
 	for i, shard := range slab.Shards {
 		if i%2 == 0 && len(shard.Contracts) != 1 {
 			t.Fatalf("expected 1 contract, got %v", len(shard.Contracts))
 		} else if i%2 != 0 && len(shard.Contracts) != 2 {
 			t.Fatalf("expected 2 contracts, got %v", len(shard.Contracts))
 		}
-		if _, bad := badHosts[shard.LatestHost]; bad {
-			t.Fatal("shard is on bad host", shard.LatestHost)
+		var bc, gc int
+		for hk := range shard.Contracts {
+			if _, bad := badHosts[hk]; bad {
+				bc++
+			} else {
+				gc++
+			}
+		}
+		if i%2 == 0 && bc != 0 && gc != 1 {
+			t.Fatal("expected shard to be one 1 good host")
+		} else if i%2 != 0 && bc != 1 && gc != 1 {
+			t.Fatal("expected shard to be on 1 bad host and 1 good host")
 		}
 	}
 
 	// create download contracts
-	contracts = contracts[:0]
-	for _, c := range w.Contracts() {
-		if _, bad := badHosts[c.HostKey]; !bad {
-			contracts = append(contracts, c)
+	var infos []api.HostInfo
+	for _, h := range w.UploadHosts() {
+		if _, bad := badHosts[h.PublicKey]; !bad {
+			host, err := w.bus.Host(context.Background(), h.PublicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			infos = append(infos, api.HostInfo{
+				PublicKey:  h.PublicKey,
+				SiamuxAddr: host.Settings.SiamuxAddr(),
+			})
 		}
 	}
 
 	// download the data and assert it matches
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), contracts)
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), infos)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -487,98 +532,41 @@ func TestUploadShards(t *testing.T) {
 	}
 }
 
-func TestRefreshUploaders(t *testing.T) {
+func TestUploadSingleSectorSlowHosts(t *testing.T) {
 	// create test worker
-	w := newTestWorker(t)
+	cfg := newTestWorkerCfg()
+	slowHosts := 5
+	cfg.UploadMaxOverdrive = uint64(slowHosts)
+	cfg.UploadOverdriveTimeout = time.Second
+
+	w := newTestWorker(t, cfg)
 
 	// add hosts to worker
-	w.AddHosts(testRedundancySettings.TotalShards)
-
-	// convenience variables
-	ul := w.uploadManager
-	cs := w.cs
-	hm := w.hm
-	bh := uint64(1)
-
-	// refresh uploaders
-	contracts := w.Contracts()
-	ul.refreshUploaders(contracts, bh)
-
-	// assert we have the expected number of uploaders
-	if len(ul.uploaders) != len(contracts) {
-		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), len(contracts))
+	minShards := 10
+	totalShards := 30
+	hosts := w.AddHosts(totalShards + slowHosts)
+	for i := 0; i < slowHosts; i++ {
+		hosts[i].uploadDelay = time.Hour
 	}
 
-	// renew the first contract
-	c1 := contracts[0]
-	c1Renewed := w.RenewContract(c1.HostKey)
+	// create test data
+	data := frand.Bytes(rhpv2.SectorSize * minShards)
 
-	// remove the host from the second contract
-	c2 := contracts[1]
-	delete(hm.hosts, c2.HostKey)
-	delete(cs.contracts, c2.ID)
+	// create upload params
+	params := testParameters(t.Name())
+	params.RS.MinShards = minShards
+	params.RS.TotalShards = totalShards
 
-	// add a new host/contract
-	hNew := w.AddHost()
-
-	// refresh uploaders
-	contracts = w.Contracts()
-	ul.refreshUploaders(contracts, bh)
-
-	// assert we added and renewed exactly one uploader
-	var added, renewed int
-	for _, ul := range ul.uploaders {
-		switch ul.ContractID() {
-		case hNew.metadata.ID:
-			added++
-		case c1Renewed.metadata.ID:
-			renewed++
-		default:
-		}
-	}
-	if added != 1 {
-		t.Fatalf("expected 1 added uploader, got %v", added)
-	} else if renewed != 1 {
-		t.Fatalf("expected 1 renewed uploader, got %v", renewed)
-	}
-
-	// assert we have one more uploader than we used to
-	if len(ul.uploaders) != len(contracts)+1 {
-		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), len(contracts)+1)
-	}
-
-	// manually add a request to the queue of one of the uploaders we're about to expire
-	responseChan := make(chan sectorUploadResp, 1)
-	for _, ul := range ul.uploaders {
-		if ul.fcid == hNew.metadata.ID {
-			ul.mu.Lock()
-			ul.queue = append(ul.queue, &sectorUploadReq{responseChan: responseChan, sector: &sectorUpload{ctx: context.Background()}})
-			ul.mu.Unlock()
-			break
-		}
-	}
-
-	// refresh uploaders, use blockheight that expires most uploaders
-	bh = c1.WindowEnd
-	contracts = w.Contracts()
-	ul.refreshUploaders(contracts, bh)
-
-	// assert we only have one uploader left
-	if len(ul.uploaders) != 1 {
-		t.Fatalf("unexpected number of uploaders, %v != %v", len(ul.uploaders), 1)
-	}
-
-	// assert all queued requests failed with an error indicating the underlying
-	// contract expired
-	res := <-responseChan
-	if !errors.Is(res.err, errContractExpired) {
-		t.Fatal("expected contract expired error", res.err)
+	// upload data
+	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestUploadRegression(t *testing.T) {
 	// create test worker
-	w := newTestWorker(t)
+	w := newTestWorker(t, newTestWorkerCfg())
 
 	// add hosts to worker
 	w.AddHosts(testRedundancySettings.TotalShards)
@@ -599,8 +587,8 @@ func TestUploadRegression(t *testing.T) {
 	// upload data
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err := w.upload(ctx, params.bucket, params.path, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
-	if !errors.Is(err, errUploadInterrupted) {
+	_, err := w.upload(ctx, params.Bucket, params.Key, testRedundancySettings, bytes.NewReader(data), w.UploadHosts())
+	if !errors.Is(err, upload.ErrUploadCancelled) {
 		t.Fatal(err)
 	}
 
@@ -608,7 +596,7 @@ func TestUploadRegression(t *testing.T) {
 	unblock()
 
 	// upload data
-	_, err = w.upload(context.Background(), params.bucket, params.path, testRedundancySettings, bytes.NewReader(data), w.Contracts(), testOpts()...)
+	_, err = w.upload(context.Background(), params.Bucket, params.Key, testRedundancySettings, bytes.NewReader(data), w.UploadHosts())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -621,7 +609,7 @@ func TestUploadRegression(t *testing.T) {
 
 	// download data for good measure
 	var buf bytes.Buffer
-	err = dl.DownloadObject(context.Background(), &buf, *o.Object.Object, 0, uint64(o.Object.Size), w.Contracts())
+	err = dl.DownloadObject(context.Background(), &buf, *o.Object, 0, uint64(o.Size), w.UsableHosts())
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, buf.Bytes()) {
@@ -629,52 +617,14 @@ func TestUploadRegression(t *testing.T) {
 	}
 }
 
-func TestUploadSingleSectorSlowHosts(t *testing.T) {
-	// create test worker
-	w := newTestWorker(t)
+func testParameters(key string) upload.Parameters {
+	return upload.Parameters{
+		Bucket: testBucket,
+		Key:    key,
 
-	// add hosts to worker
-	minShards := 10
-	totalShards := 30
-	slowHosts := 5
-	w.uploadManager.maxOverdrive = uint64(slowHosts)
-	w.uploadManager.overdriveTimeout = time.Second
-	hosts := w.AddHosts(totalShards + slowHosts)
+		EC:               object.GenerateEncryptionKey(object.EncryptionKeyTypeBasic), // random key
+		EncryptionOffset: 0,                                                           // from the beginning
 
-	for i := 0; i < slowHosts; i++ {
-		hosts[i].uploadDelay = time.Hour
-	}
-
-	// create test data
-	data := frand.Bytes(rhpv2.SectorSize * minShards)
-
-	// create upload params
-	params := testParameters(t.Name())
-	params.rs.MinShards = minShards
-	params.rs.TotalShards = totalShards
-
-	// upload data
-	_, _, err := w.uploadManager.Upload(context.Background(), bytes.NewReader(data), w.Contracts(), params, lockingPriorityUpload)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func testParameters(path string) uploadParameters {
-	return uploadParameters{
-		bucket: testBucket,
-		path:   path,
-
-		ec:               object.GenerateEncryptionKey(), // random key
-		encryptionOffset: 0,                              // from the beginning
-
-		contractSet: testContractSet,
-		rs:          testRedundancySettings,
-	}
-}
-
-func testOpts() []UploadOption {
-	return []UploadOption{
-		WithContractSet(testContractSet),
+		RS: testRedundancySettings,
 	}
 }

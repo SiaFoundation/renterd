@@ -20,10 +20,10 @@ func (c *Client) ContractMetrics(ctx context.Context, start time.Time, n uint64,
 	values.Set("n", fmt.Sprint(n))
 	values.Set("interval", api.DurationMS(interval).String())
 	if opts.ContractID != (types.FileContractID{}) {
-		values.Set("contractID", opts.ContractID.String())
+		values.Set("contractid", opts.ContractID.String())
 	}
 	if opts.HostKey != (types.PublicKey{}) {
-		values.Set("hostKey", opts.HostKey.String())
+		values.Set("hostkey", opts.HostKey.String())
 	}
 
 	var resp []api.ContractMetric
@@ -42,52 +42,14 @@ func (c *Client) ContractPruneMetrics(ctx context.Context, start time.Time, n ui
 		values.Set("fcid", opts.ContractID.String())
 	}
 	if opts.HostKey != (types.PublicKey{}) {
-		values.Set("hostKey", opts.HostKey.String())
+		values.Set("hostkey", opts.HostKey.String())
 	}
 	if opts.HostVersion != "" {
-		values.Set("hostVersion", opts.HostVersion)
+		values.Set("hostversion", opts.HostVersion)
 	}
 
 	var resp []api.ContractPruneMetric
 	if err := c.metric(ctx, api.MetricContractPrune, values, &resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (c *Client) ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error) {
-	values := url.Values{}
-	values.Set("start", api.TimeRFC3339(start).String())
-	values.Set("n", fmt.Sprint(n))
-	values.Set("interval", api.DurationMS(interval).String())
-	if opts.Name != "" {
-		values.Set("name", opts.Name)
-	}
-	if opts.Direction != "" {
-		values.Set("direction", string(opts.Direction))
-	}
-	if opts.Reason != "" {
-		values.Set("reason", string(opts.Reason))
-	}
-
-	var resp []api.ContractSetChurnMetric
-	if err := c.metric(ctx, api.MetricContractSetChurn, values, &resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (c *Client) ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error) {
-	values := url.Values{}
-	values.Set("start", api.TimeRFC3339(start).String())
-	values.Set("n", fmt.Sprint(n))
-	values.Set("interval", api.DurationMS(interval).String())
-	if opts.Name != "" {
-		values.Set("name", opts.Name)
-	}
-
-	var resp []api.ContractSetMetric
-	if err := c.metric(ctx, api.MetricContractSet, values, &resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -104,10 +66,6 @@ func (c *Client) WalletMetrics(ctx context.Context, start time.Time, n uint64, i
 		return nil, err
 	}
 	return resp, nil
-}
-
-func (c *Client) RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error {
-	return c.recordMetric(ctx, api.MetricContractSetChurn, api.ContractSetChurnMetricRequestPUT{Metrics: metrics})
 }
 
 func (c *Client) RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error {

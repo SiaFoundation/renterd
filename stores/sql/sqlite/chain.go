@@ -25,9 +25,10 @@ var (
 )
 
 type chainUpdateTx struct {
-	ctx context.Context
-	tx  isql.Tx
-	l   *zap.SugaredLogger
+	ctx   context.Context
+	tx    isql.Tx
+	l     *zap.SugaredLogger
+	known map[types.FileContractID]bool // map to prevent rare duplicate selects
 }
 
 func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
@@ -47,9 +48,9 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 			if res, err := deleteSpentStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete spent output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
-				return fmt.Errorf("failed to get rows affected: %w", err)
+				return fmt.Errorf("failed to delete spent output: %w", err)
 			} else if n != 1 {
-				return fmt.Errorf("failed to delete spent output: no rows affected")
+				return fmt.Errorf("failed to delete spent output: %w", ssql.ErrOutputNotFound)
 			}
 		}
 	}
@@ -89,6 +90,14 @@ func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent [
 
 		// insert new events
 		for _, e := range events {
+			if e.Index != index {
+				return fmt.Errorf("%w, event index %v != applied index %v", ssql.ErrIndexMissmatch, e.Index, index)
+			} else if e.ID == (types.Hash256{}) {
+				return fmt.Errorf("event id is required")
+			} else if e.Timestamp.IsZero() {
+				return fmt.Errorf("event timestamp is required")
+			}
+
 			c.l.Debugw(fmt.Sprintf("create event %v", e.ID), "height", index.Height, "block_id", index.ID)
 			data, err := json.Marshal(e.Data)
 			if err != nil {
@@ -135,9 +144,9 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 			if res, err := deleteRemovedStmt.Exec(c.ctx, ssql.Hash256(e.ID)); err != nil {
 				return fmt.Errorf("failed to delete removed output: %w", err)
 			} else if n, err := res.RowsAffected(); err != nil {
-				return fmt.Errorf("failed to get rows affected: %w", err)
+				return fmt.Errorf("failed to delete removed output: %w", err)
 			} else if n != 1 {
-				return fmt.Errorf("failed to delete removed output: no rows affected")
+				return fmt.Errorf("failed to delete removed output: %w", ssql.ErrOutputNotFound)
 			}
 		}
 	}
@@ -172,7 +181,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
 	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return fmt.Errorf("failed to delete events: %w", err)
 	} else if n > 0 {
 		c.l.Debugw(fmt.Sprintf("removed %d events", n), "height", index.Height, "block_id", index.ID)
 	}
@@ -183,42 +192,97 @@ func (c chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
 	return ssql.UpdateChainIndex(c.ctx, c.tx, index, c.l)
 }
 
-func (c chainUpdateTx) UpdateContract(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
-	return ssql.UpdateContract(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
-}
-
 func (c chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
 	return ssql.UpdateContractProofHeight(c.ctx, c.tx, fcid, proofHeight, c.l)
+}
+
+func (c chainUpdateTx) UpdateContractRevision(fcid types.FileContractID, revisionHeight, revisionNumber, size uint64) error {
+	return ssql.UpdateContractRevision(c.ctx, c.tx, fcid, revisionHeight, revisionNumber, size, c.l)
 }
 
 func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.ContractState) error {
 	return ssql.UpdateContractState(c.ctx, c.tx, fcid, state, c.l)
 }
 
+func (c chainUpdateTx) ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error) {
+	return ssql.ExpiredFileContractElements(c.ctx, c.tx, bh)
+}
+
+func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error) {
+	return ssql.FileContractElement(c.ctx, c.tx, fcid)
+}
+
+func (c chainUpdateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
+	if relevant, ok := c.known[fcid]; ok {
+		return relevant, nil
+	}
+
+	known, err := ssql.IsKnownContract(c.ctx, c.tx, fcid)
+	if err != nil {
+		return false, err
+	}
+	c.known[fcid] = known
+	return known, nil
+}
+
+func (c chainUpdateTx) PruneFileContractElements(threshold uint64) error {
+	return ssql.PruneFileContractElements(c.ctx, c.tx, threshold)
+}
+
+func (c chainUpdateTx) RecordContractRenewal(oldFCID, newFCID types.FileContractID) error {
+	return ssql.RecordContractRenewal(c.ctx, c.tx, oldFCID, newFCID)
+}
+
+func (c chainUpdateTx) UpdateFileContractElements(fces []types.V2FileContractElement) error {
+	contractIDStmt, err := c.tx.Prepare(c.ctx, "SELECT c.id FROM contracts c WHERE c.fcid = ?")
+	if err != nil {
+		return err
+	}
+	defer contractIDStmt.Close()
+
+	insertStmt, err := c.tx.Prepare(c.ctx, `
+INSERT INTO contract_elements (created_at, db_contract_id, contract, leaf_index, merkle_proof)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(db_contract_id) DO UPDATE SET
+	contract = excluded.contract
+`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, fce := range fces {
+		var contractID int64
+		err = contractIDStmt.QueryRow(c.ctx, ssql.Hash256(fce.ID)).Scan(&contractID)
+		if errors.Is(err, dsql.ErrNoRows) {
+			return fmt.Errorf("%w: %v", api.ErrContractNotFound, fce.ID)
+		} else if err != nil {
+			return err
+		}
+		_, err = insertStmt.Exec(c.ctx, time.Now(), contractID, ssql.V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, ssql.MerkleProof{Hashes: fce.StateElement.MerkleProof})
+		if err != nil {
+			return fmt.Errorf("failed to insert file contract element: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c chainUpdateTx) UpdateFileContractElementProofs(updater wallet.ProofUpdater) error {
+	return ssql.UpdateFileContractElementProofs(c.ctx, c.tx, updater)
+}
+
 func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return ssql.UpdateFailedContracts(c.ctx, c.tx, blockHeight, c.l)
 }
 
-func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
-	c.l.Debugw("update host", "hk", hk, "netaddress", ha.NetAddress)
-
-	// create the announcement
-	if _, err := c.tx.Exec(c.ctx,
-		"INSERT OR IGNORE INTO host_announcements (created_at,host_key, block_height, block_id, net_address) VALUES (?, ?, ?, ?, ?)",
-		time.Now().UTC(),
-		ssql.PublicKey(hk),
-		bh,
-		blockID.String(),
-		ha.NetAddress,
-	); err != nil {
-		return fmt.Errorf("failed to insert host announcement: %w", err)
-	}
+func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
+	c.l.Debugw("update host", "hk", hk, "netaddress", v1Addr)
 
 	// create the host
 	var hostID int64
 	if err := c.tx.QueryRow(c.ctx, `
-	INSERT INTO hosts (created_at, public_key, settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO hosts (created_at, public_key, settings, v2_settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(public_key) DO UPDATE SET
 		last_announcement = EXCLUDED.last_announcement,
 		net_address = EXCLUDED.net_address
@@ -226,6 +290,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
 		ssql.HostSettings{},
+		ssql.V2HostSettings{},
 		ssql.PriceTable{},
 		0,
 		0,
@@ -240,13 +305,13 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 		0,
 		0,
 		ts.UTC(),
-		ha.NetAddress,
+		v1Addr,
 	).Scan(&hostID); err != nil {
 		if errors.Is(err, dsql.ErrNoRows) {
 			err = c.tx.QueryRow(c.ctx,
 				"UPDATE hosts SET last_announcement = ?, net_address = ? WHERE public_key = ? RETURNING id",
 				ts.UTC(),
-				ha.NetAddress,
+				v1Addr,
 				ssql.PublicKey(hk),
 			).Scan(&hostID)
 			if err != nil {
@@ -254,6 +319,24 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 			}
 		} else {
 			return fmt.Errorf("failed to insert host: %w", err)
+		}
+	}
+
+	// delete previous addresses
+	if _, err := c.tx.Exec(c.ctx, "DELETE FROM host_addresses WHERE db_host_id = ?", hostID); err != nil {
+		return fmt.Errorf("failed to remove previous announcments: %w", err)
+	}
+
+	// insert new addresses
+	for _, ha := range v2Ha {
+		if _, err := c.tx.Exec(c.ctx,
+			"INSERT INTO host_addresses (created_at, db_host_id, net_address, protocol) VALUES (?, ?, ?, ?)",
+			time.Now().UTC(),
+			hostID,
+			ha.Address,
+			ssql.ChainProtocol(ha.Protocol),
+		); err != nil {
+			return fmt.Errorf("failed to insert host announcement: %w", err)
 		}
 	}
 
@@ -287,10 +370,17 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	}
 
 	// update blocklist
-	values := []string{ha.NetAddress}
-	host, _, err := net.SplitHostPort(ha.NetAddress)
-	if err == nil {
-		values = append(values, host)
+	var values []string
+	addAddr := func(addr string) {
+		values = append(values, addr)
+		host, _, err := net.SplitHostPort(addr)
+		if err == nil {
+			values = append(values, host)
+		}
+	}
+	addAddr(v1Addr)
+	for _, ha := range v2Ha {
+		addAddr(ha.Address)
 	}
 
 	rows, err = c.tx.Query(c.ctx, "SELECT id, entry FROM host_blocklist_entries")
@@ -342,6 +432,6 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, ha chain.HostAnnouncement,
 	return nil
 }
 
-func (c chainUpdateTx) UpdateWalletSiacoinElementProofs(pu wallet.ProofUpdater) error {
-	return ssql.UpdateWalletSiacoinElementProofs(c.ctx, c.tx, pu)
+func (c chainUpdateTx) UpdateWalletSiacoinElementProofs(updater wallet.ProofUpdater) error {
+	return ssql.UpdateWalletSiacoinElementProofs(c.ctx, c.tx, updater)
 }

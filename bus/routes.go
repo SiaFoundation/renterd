@@ -14,16 +14,20 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-
+	rhp4utils "go.sia.tech/coreutils/rhp/v4"
 	ibus "go.sia.tech/renterd/internal/bus"
+	"go.sia.tech/renterd/internal/prometheus"
+	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
+	"go.sia.tech/renterd/stores/sql"
+
 	"go.sia.tech/renterd/internal/gouging"
-	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
@@ -35,24 +39,24 @@ import (
 	"go.uber.org/zap"
 )
 
-func (b *Bus) fetchSetting(ctx context.Context, key string, value interface{}) error {
-	if val, err := b.ss.Setting(ctx, key); err != nil {
-		return fmt.Errorf("could not get contract set settings: %w", err)
-	} else if err := json.Unmarshal([]byte(val), &value); err != nil {
-		b.logger.Panicf("failed to unmarshal %v settings '%s': %v", key, val, err)
-	}
-	return nil
-}
-
 func (b *Bus) accountsFundHandler(jc jape.Context) {
 	var req api.AccountsFundRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
 
-	// contract metadata
-	cm, err := b.ms.Contract(jc.Request.Context(), req.ContractID)
-	if jc.Check("failed to fetch contract metadata", err) != nil {
+	// fetch contract
+	cm, err := b.store.Contract(jc.Request.Context(), req.ContractID)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch contract metadata", err) != nil {
+		return
+	}
+
+	// fetch host
+	host, err := b.store.Host(jc.Request.Context(), cm.HostKey)
+	if jc.Check("failed to fetch host for contract", err) != nil {
 		return
 	}
 
@@ -65,47 +69,86 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
-	// latest revision
-	rev, err := b.rhp3.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, cm.SiamuxAddr)
-	if jc.Check("failed to fetch contract revision", err) != nil {
-		return
-	}
+	var deposit types.Currency
+	var spending api.ContractSpendingRecord
+	if b.isPassedV2AllowHeight() {
+		// latest revision
+		rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.V2SiamuxAddr(), req.ContractID)
+		if jc.Check("failed to fetch contract revision", err) != nil {
+			return
+		}
+		// cap the deposit by what's left in the contract
+		renterFunds := rev.RenterOutput.Value
+		if renterFunds.IsZero() {
+			jc.Error(errors.New("contract is out of funds"), http.StatusBadRequest)
+			return
+		} else if req.Amount.Cmp(renterFunds) > 0 {
+			req.Amount = renterFunds
+		}
+		deposit = req.Amount
+		// fund the account
+		signer := ibus.NewFormContractSigner(b.w, rk)
+		res, err := b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
+			{
+				Account: rhpv4.Account(req.AccountID),
+				Amount:  deposit,
+			},
+		})
+		if jc.Check("failed to fund v2 account", err) != nil {
+			return
+		}
 
-	// ensure we have at least 2H in the contract to cover the costs
-	if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
-		jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
-		return
-	}
+		rev = res.Revision
+		spending = api.ContractSpendingRecord{
+			ContractSpending: api.ContractSpending{
+				FundAccount: deposit,
+			},
+			ContractID:     req.ContractID,
+			RevisionNumber: rev.RevisionNumber,
+			Size:           rev.Filesize,
 
-	// price table
-	pt, err := b.rhp3.PriceTable(jc.Request.Context(), cm.HostKey, cm.SiamuxAddr, rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
-	if jc.Check("failed to fetch price table", err) != nil {
-		return
-	}
+			MissedHostPayout:  rev.MissedHostValue,
+			ValidRenterPayout: rev.RenterOutput.Value,
+		}
+	} else {
+		// latest revision
+		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, host.Settings.SiamuxAddr())
+		if jc.Check("failed to fetch contract revision", err) != nil {
+			return
+		}
 
-	// check only the FundAccountCost
-	if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
-		jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
-		return
-	}
+		// ensure we have at least 2H in the contract to cover the costs
+		if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
+			jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
+			return
+		}
 
-	// cap the deposit by what's left in the contract
-	deposit := req.Amount
-	cost := pt.FundAccountCost
-	availableFunds := rev.ValidRenterPayout().Sub(cost)
-	if deposit.Cmp(availableFunds) > 0 {
-		deposit = availableFunds
-	}
+		// price table
+		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, host.Settings.SiamuxAddr(), rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
+		if jc.Check("failed to fetch price table", err) != nil {
+			return
+		}
 
-	// fund the account
-	err = b.rhp3.FundAccount(jc.Request.Context(), &rev, cm.HostKey, cm.SiamuxAddr, deposit, req.AccountID, pt.HostPriceTable, rk)
-	if jc.Check("failed to fund account", err) != nil {
-		return
-	}
+		// check only the FundAccountCost
+		if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
+			jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
+			return
+		}
 
-	// record spending
-	err = b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
-		{
+		// cap the deposit by what's left in the contract
+		deposit = req.Amount
+		cost := pt.FundAccountCost
+		availableFunds := rev.ValidRenterPayout().Sub(cost)
+		if deposit.Cmp(availableFunds) > 0 {
+			deposit = availableFunds
+		}
+
+		// fund the account
+		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, host.Settings.SiamuxAddr(), deposit, req.AccountID, pt.HostPriceTable, rk)
+		if jc.Check("failed to fund account", err) != nil {
+			return
+		}
+		spending = api.ContractSpendingRecord{
 			ContractSpending: api.ContractSpending{
 				FundAccount: deposit.Add(cost),
 			},
@@ -115,7 +158,12 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 
 			MissedHostPayout:  rev.MissedHostPayout(),
 			ValidRenterPayout: rev.ValidRenterPayout(),
-		},
+		}
+	}
+
+	// record spending
+	err = b.store.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+		spending,
 	})
 	if err != nil {
 		b.logger.Error("failed to record contract spending", zap.Error(err))
@@ -136,19 +184,14 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 	}
 
 	if block.V2 == nil {
-		b.s.BroadcastHeader(gateway.BlockHeader{
-			ParentID:   block.ParentID,
-			Nonce:      block.Nonce,
-			Timestamp:  block.Timestamp,
-			MerkleRoot: block.MerkleRoot(),
-		})
+		b.s.BroadcastHeader(block.Header())
 	} else {
 		b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))
 	}
 }
 
 func (b *Bus) syncerAddrHandler(jc jape.Context) {
-	jc.Encode(b.s.Addr())
+	api.WriteResponse(jc, api.SyncerAddrResp(b.s.Addr()))
 }
 
 func (b *Bus) syncerPeersHandler(jc jape.Context) {
@@ -156,7 +199,7 @@ func (b *Bus) syncerPeersHandler(jc jape.Context) {
 	for _, p := range b.s.Peers() {
 		peers = append(peers, p.String())
 	}
-	jc.Encode(peers)
+	api.WriteResponse(jc, api.SyncerPeersResp(peers))
 }
 
 func (b *Bus) syncerConnectHandler(jc jape.Context) {
@@ -172,21 +215,39 @@ func (b *Bus) consensusStateHandler(jc jape.Context) {
 	if jc.Check("couldn't fetch consensus state", err) != nil {
 		return
 	}
-	jc.Encode(cs)
+	api.WriteResponse(jc, cs)
 }
 
 func (b *Bus) consensusNetworkHandler(jc jape.Context) {
-	jc.Encode(api.ConsensusNetwork{
-		Name: b.cm.TipState().Network.Name,
-	})
+	jc.Encode(b.cm.TipState().Network)
+}
+
+func (b *Bus) postSystemSQLite3BackupHandler(jc jape.Context) {
+	var req api.BackupRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	switch req.Database {
+	case "main", "metrics":
+	default:
+		jc.Error(fmt.Errorf("%w: valid values are 'main' and 'metrics'", api.ErrInvalidDatabase), http.StatusBadRequest)
+		return
+	}
+	err := b.store.Backup(jc.Request.Context(), req.Database, req.Path)
+	if errors.Is(err, api.ErrBackupNotSupported) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to backup", err) != nil {
+		return
+	}
 }
 
 func (b *Bus) txpoolFeeHandler(jc jape.Context) {
-	jc.Encode(b.cm.RecommendedFee())
+	api.WriteResponse(jc, api.TxPoolFeeResp{Currency: b.cm.RecommendedFee()})
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
-	jc.Encode(b.cm.PoolTransactions())
+	api.WriteResponse(jc, api.TxPoolTxResp(b.cm.PoolTransactions()))
 }
 
 func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
@@ -204,35 +265,47 @@ func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 }
 
 func (b *Bus) bucketsHandlerGET(jc jape.Context) {
-	resp, err := b.ms.ListBuckets(jc.Request.Context())
+	resp, err := b.store.Buckets(jc.Request.Context())
 	if jc.Check("couldn't list buckets", err) != nil {
 		return
 	}
-	jc.Encode(resp)
+	api.WriteResponse(jc, prometheus.Slice(resp))
 }
 
 func (b *Bus) bucketsHandlerPOST(jc jape.Context) {
-	var bucket api.BucketCreateRequest
-	if jc.Decode(&bucket) != nil {
+	var req api.BucketCreateRequest
+	if jc.Decode(&req) != nil {
 		return
-	} else if bucket.Name == "" {
-		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
-		return
-	} else if jc.Check("failed to create bucket", b.ms.CreateBucket(jc.Request.Context(), bucket.Name, bucket.Policy)) != nil {
+	} else if err := req.Validate(); err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
+
+	err := b.store.CreateBucket(jc.Request.Context(), req.Name, req.Policy)
+	if errors.Is(err, api.ErrBucketExists) {
+		jc.Error(err, http.StatusConflict)
+		return
+	}
+	jc.Check("failed to create bucket", err)
 }
 
 func (b *Bus) bucketsHandlerPolicyPUT(jc jape.Context) {
 	var req api.BucketUpdatePolicyRequest
 	if jc.Decode(&req) != nil {
 		return
-	} else if bucket := jc.PathParam("name"); bucket == "" {
+	}
+	bucket := jc.PathParam("name")
+	if bucket == "" {
 		jc.Error(errors.New("no bucket name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to create bucket", b.ms.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)) != nil {
+	}
+
+	err := b.store.UpdateBucketPolicy(jc.Request.Context(), bucket, req.Policy)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
 		return
 	}
+	jc.Check("failed to create bucket", err)
 }
 
 func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
@@ -242,9 +315,18 @@ func (b *Bus) bucketHandlerDELETE(jc jape.Context) {
 	} else if name == "" {
 		jc.Error(errors.New("no name provided"), http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to delete bucket", b.ms.DeleteBucket(jc.Request.Context(), name)) != nil {
+	}
+
+	err := b.store.DeleteBucket(jc.Request.Context(), name)
+	if errors.Is(err, api.ErrBucketNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrBucketNotEmpty) {
+		jc.Error(err, http.StatusConflict)
 		return
 	}
+
+	jc.Check("failed to delete bucket", err)
 }
 
 func (b *Bus) bucketHandlerGET(jc jape.Context) {
@@ -255,7 +337,7 @@ func (b *Bus) bucketHandlerGET(jc jape.Context) {
 		jc.Error(errors.New("parameter 'name' is required"), http.StatusBadRequest)
 		return
 	}
-	bucket, err := b.ms.Bucket(jc.Request.Context(), name)
+	bucket, err := b.store.Bucket(jc.Request.Context(), name)
 	if errors.Is(err, api.ErrBucketNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -272,145 +354,44 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
-	tip := b.w.Tip()
-	jc.Encode(api.WalletResponse{
-		ScanHeight:  tip.Height,
-		Address:     address,
-		Confirmed:   balance.Confirmed,
-		Spendable:   balance.Spendable,
-		Unconfirmed: balance.Unconfirmed,
-		Immature:    balance.Immature,
+	api.WriteResponse(jc, api.WalletResponse{
+		Balance:    balance,
+		Address:    address,
+		ScanHeight: b.w.Tip().Height,
 	})
 }
 
-func (b *Bus) walletTransactionsHandler(jc jape.Context) {
-	offset := 0
+func (b *Bus) walletEventsHandler(jc jape.Context) {
+	var offset int
+	if jc.DecodeForm("offset", &offset) != nil {
+		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
+	}
+
 	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil ||
-		jc.DecodeForm("limit", &limit) != nil {
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
 		return
 	}
 
-	// TODO: deprecate these parameters when moving to v2.0.0
-	var before, since time.Time
-	if jc.DecodeForm("before", (*api.TimeRFC3339)(&before)) != nil ||
-		jc.DecodeForm("since", (*api.TimeRFC3339)(&since)) != nil {
+	events, err := b.w.Events(offset, limit)
+	if jc.Check("couldn't load events", err) != nil {
 		return
 	}
-
-	// convertToTransaction converts wallet event data to a Transaction.
-	convertToTransaction := func(kind string, data wallet.EventData) (txn types.Transaction, ok bool) {
-		ok = true
-		switch kind {
-		case wallet.EventTypeMinerPayout,
-			wallet.EventTypeFoundationSubsidy,
-			wallet.EventTypeSiafundClaim:
-			payout, _ := data.(wallet.EventPayout)
-			txn = types.Transaction{SiacoinOutputs: []types.SiacoinOutput{payout.SiacoinElement.SiacoinOutput}}
-		case wallet.EventTypeV1Transaction:
-			v1Txn, _ := data.(wallet.EventV1Transaction)
-			txn = types.Transaction(v1Txn.Transaction)
-		case wallet.EventTypeV1ContractResolution:
-			fce, _ := data.(wallet.EventV1ContractResolution)
-			txn = types.Transaction{
-				FileContracts:  []types.FileContract{fce.Parent.FileContract},
-				SiacoinOutputs: []types.SiacoinOutput{fce.SiacoinElement.SiacoinOutput},
-			}
-		default:
-			ok = false
-		}
-		return
+	relevant := []types.Address{b.w.Address()}
+	for i := range events {
+		// NOTE: add the wallet's address to every event. Theoretically,
+		// this information should be persisted next to the event but
+		// using a SingleAddress the address should always be set because
+		// only relevant events are persisted and because the wallet only
+		// has one address.
+		events[i].Relevant = relevant
 	}
-
-	// convertToTransactions converts wallet events to API transactions.
-	convertToTransactions := func(events []wallet.Event) []api.Transaction {
-		var transactions []api.Transaction
-		for _, e := range events {
-			if txn, ok := convertToTransaction(e.Type, e.Data); ok {
-				transactions = append(transactions, api.Transaction{
-					Raw:       txn,
-					Index:     e.Index,
-					ID:        types.TransactionID(e.ID),
-					Inflow:    e.SiacoinInflow(),
-					Outflow:   e.SiacoinOutflow(),
-					Timestamp: e.Timestamp,
-				})
-			}
-		}
-		return transactions
-	}
-
-	if before.IsZero() && since.IsZero() {
-		events, err := b.w.Events(offset, limit)
-		if jc.Check("couldn't load transactions", err) == nil {
-			jc.Encode(convertToTransactions(events))
-		}
-		return
-	}
-
-	// TODO: remove this when 'before' and 'since' are deprecated, until then we
-	// fetch all transactions and paginate manually if either is specified
-	events, err := b.w.Events(0, -1)
-	if jc.Check("couldn't load transactions", err) != nil {
-		return
-	}
-	filtered := events[:0]
-	for _, txn := range events {
-		if (before.IsZero() || txn.Timestamp.Before(before)) &&
-			(since.IsZero() || txn.Timestamp.After(since)) {
-			filtered = append(filtered, txn)
-		}
-	}
-	events = filtered
-	if limit == 0 || limit == -1 {
-		jc.Encode(convertToTransactions(events[offset:]))
-	} else {
-		jc.Encode(convertToTransactions(events[offset : offset+limit]))
-	}
-}
-
-func (b *Bus) walletOutputsHandler(jc jape.Context) {
-	utxos, err := b.w.SpendableOutputs()
-	if jc.Check("couldn't load outputs", err) == nil {
-		// convert to siacoin elements
-		elements := make([]api.SiacoinElement, len(utxos))
-		for i, sce := range utxos {
-			elements[i] = api.SiacoinElement{
-				ID: sce.ID,
-				SiacoinOutput: types.SiacoinOutput{
-					Value:   sce.SiacoinOutput.Value,
-					Address: sce.SiacoinOutput.Address,
-				},
-				MaturityHeight: sce.MaturityHeight,
-			}
-		}
-		jc.Encode(elements)
-	}
-}
-
-func (b *Bus) walletFundHandler(jc jape.Context) {
-	var wfr api.WalletFundRequest
-	if jc.Decode(&wfr) != nil {
-		return
-	}
-	txn := wfr.Transaction
-
-	if len(txn.MinerFees) == 0 {
-		// if no fees are specified, we add some
-		fee := b.cm.RecommendedFee().Mul64(b.cm.TipState().TransactionWeight(txn))
-		txn.MinerFees = []types.Currency{fee}
-	}
-
-	toSign, err := b.w.FundTransaction(&txn, wfr.Amount.Add(txn.MinerFees[0]), wfr.UseUnconfirmedTxns)
-	if jc.Check("couldn't fund transaction", err) != nil {
-		return
-	}
-
-	jc.Encode(api.WalletFundResponse{
-		Transaction: txn,
-		ToSign:      toSign,
-		DependsOn:   b.cm.UnconfirmedParents(txn),
-	})
+	jc.Encode(events)
 }
 
 func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
@@ -488,15 +469,6 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 	}
 }
 
-func (b *Bus) walletSignHandler(jc jape.Context) {
-	var wsr api.WalletSignRequest
-	if jc.Decode(&wsr) != nil {
-		return
-	}
-	b.w.SignTransaction(&wsr.Transaction, wsr.ToSign, wsr.CoveredFields)
-	jc.Encode(wsr.Transaction)
-}
-
 func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	var wfr api.WalletRedistributeRequest
 	if jc.Decode(&wfr) != nil {
@@ -507,10 +479,27 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		return
 	}
 
+	spendableOutputs, err := b.w.SpendableOutputs()
+	if jc.Check("couldn't fetch spendable outputs", err) != nil {
+		return
+	}
+	var available int
+	for _, so := range spendableOutputs {
+		if so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0 {
+			available++
+		}
+	}
+	if available >= wfr.Outputs {
+		b.logger.Debugf("no wallet maintenance needed, plenty of outputs available (%v>=%v)", available, wfr.Outputs)
+		jc.Encode([]types.TransactionID{})
+		return
+	}
+	wantedOutputs := wfr.Outputs - available
+
 	var ids []types.TransactionID
 	if state := b.cm.TipState(); state.Index.Height < state.Network.HardforkV2.AllowHeight {
 		// v1 redistribution
-		txns, toSign, err := b.w.Redistribute(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		txns, toSign, err := b.w.Redistribute(wantedOutputs, wfr.Amount, b.cm.RecommendedFee())
 		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 			return
 		}
@@ -532,7 +521,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 	} else {
 		// v2 redistribution
-		txns, toSign, err := b.w.RedistributeV2(wfr.Outputs, wfr.Amount, b.cm.RecommendedFee())
+		txns, toSign, err := b.w.RedistributeV2(wantedOutputs, wfr.Amount, b.cm.RecommendedFee())
 		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 			return
 		}
@@ -557,69 +546,95 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	jc.Encode(ids)
 }
 
-func (b *Bus) walletDiscardHandler(jc jape.Context) {
-	var txn types.Transaction
-	if jc.Decode(&txn) == nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-	}
-}
-
 func (b *Bus) walletPendingHandler(jc jape.Context) {
-	isRelevant := func(txn types.Transaction) bool {
-		addr := b.w.Address()
-		for _, sci := range txn.SiacoinInputs {
-			if sci.UnlockConditions.UnlockHash() == addr {
-				return true
-			}
-		}
-		for _, sco := range txn.SiacoinOutputs {
-			if sco.Address == addr {
-				return true
-			}
-		}
-		return false
+	events, err := b.w.UnconfirmedEvents()
+	if jc.Check("couldn't fetch unconfirmed events", err) != nil {
+		return
 	}
-
-	txns := b.cm.PoolTransactions()
-	relevant := txns[:0]
-	for _, txn := range txns {
-		if isRelevant(txn) {
-			relevant = append(relevant, txn)
-		}
-	}
-	jc.Encode(relevant)
+	jc.Encode(events)
 }
 
-func (b *Bus) hostsHandlerGETDeprecated(jc jape.Context) {
-	offset := 0
-	limit := -1
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil {
+func (b *Bus) hostsHandlerGET(jc jape.Context) {
+	hosts, err := b.store.UsableHosts(jc.Request.Context())
+	if jc.Check("couldn't fetch hosts", err) != nil {
 		return
 	}
 
-	// fetch hosts
-	hosts, err := b.hs.SearchHosts(jc.Request.Context(), "", api.HostFilterModeAllowed, api.UsabilityFilterModeAll, "", nil, offset, limit)
-	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
+	gp, err := b.gougingParams(jc.Request.Context())
+	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	bh := b.cm.TipState().Index.Height
+
+	var infos []api.HostInfo
+	for _, h := range hosts {
+		// ignore height
+		h.V2HS.HostSettings.Prices.TipHeight = bh
+		h.PT.HostBlockHeight = bh
+		if (len(h.V2SiamuxAddresses) > 0 && !gc.CheckV2(h.V2HS).Gouging()) ||
+			(len(h.V2SiamuxAddresses) == 0 && !gc.CheckV1(&h.HS, &h.PT).Gouging()) {
+			infos = append(infos, h.HostInfo)
+		}
+	}
+	jc.Encode(infos)
 }
 
-func (b *Bus) searchHostsHandlerPOST(jc jape.Context) {
-	var req api.SearchHostsRequest
+func (b *Bus) hostsHandlerPOST(jc jape.Context) {
+	var req api.HostsRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
 
-	// TODO: on the next major release:
-	// - properly default search params (currently no defaults are set)
-	// - properly validate and return 400 (currently validation is done in autopilot and the store)
+	// validate the usability mode
+	switch req.UsabilityMode {
+	case api.UsabilityFilterModeUsable:
+	case api.UsabilityFilterModeUnusable:
+	case api.UsabilityFilterModeAll:
+	case "":
+		req.UsabilityMode = api.UsabilityFilterModeAll
+	default:
+		jc.Error(fmt.Errorf("invalid usability mode: '%v', options are 'usable', 'unusable' or an empty string for no filter", req.UsabilityMode), http.StatusBadRequest)
+		return
+	}
 
-	hosts, err := b.hs.SearchHosts(jc.Request.Context(), req.AutopilotID, req.FilterMode, req.UsabilityMode, req.AddressContains, req.KeyIn, req.Offset, req.Limit)
+	// validate the filter mode
+	switch req.FilterMode {
+	case api.HostFilterModeAllowed:
+	case api.HostFilterModeBlocked:
+	case api.HostFilterModeAll:
+	case "":
+		req.FilterMode = api.HostFilterModeAllowed
+	default:
+		jc.Error(fmt.Errorf("invalid filter mode: '%v', options are 'allowed', 'blocked' or an empty string for 'allowed' filter", req.FilterMode), http.StatusBadRequest)
+		return
+	}
+
+	// validate the offset and limit
+	if req.Offset < 0 {
+		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
+		return
+	}
+	if req.Limit < 0 && req.Limit != -1 {
+		jc.Error(errors.New("limit must be non-negative or equal to -1 to indicate no limit"), http.StatusBadRequest)
+		return
+	} else if req.Limit == 0 {
+		req.Limit = -1
+	}
+
+	hosts, err := b.store.Hosts(jc.Request.Context(), api.HostOptions{
+		FilterMode:      req.FilterMode,
+		UsabilityMode:   req.UsabilityMode,
+		AddressContains: req.AddressContains,
+		KeyIn:           req.KeyIn,
+		Offset:          req.Offset,
+		Limit:           req.Limit,
+		MaxLastScan:     req.MaxLastScan,
+	})
 	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", req.Offset, req.Offset+req.Limit), err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	api.WriteResponse(jc, prometheus.Slice(hosts))
 }
 
 func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
@@ -635,25 +650,11 @@ func (b *Bus) hostsRemoveHandlerPOST(jc jape.Context) {
 		jc.Error(errors.New("maxConsecutiveScanFailures must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	removed, err := b.hs.RemoveOfflineHosts(jc.Request.Context(), hrr.MaxConsecutiveScanFailures, time.Duration(hrr.MaxDowntimeHours))
+	removed, err := b.store.RemoveOfflineHosts(jc.Request.Context(), hrr.MaxConsecutiveScanFailures, time.Duration(hrr.MaxDowntimeHours))
 	if jc.Check("couldn't remove offline hosts", err) != nil {
 		return
 	}
 	jc.Encode(removed)
-}
-
-func (b *Bus) hostsScanningHandlerGET(jc jape.Context) {
-	offset := 0
-	limit := -1
-	maxLastScan := time.Now()
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("lastScan", (*api.TimeRFC3339)(&maxLastScan)) != nil {
-		return
-	}
-	hosts, err := b.hs.HostsForScanning(jc.Request.Context(), maxLastScan, offset, limit)
-	if jc.Check(fmt.Sprintf("couldn't fetch hosts %d-%d", offset, offset+limit), err) != nil {
-		return
-	}
-	jc.Encode(hosts)
 }
 
 func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
@@ -661,10 +662,60 @@ func (b *Bus) hostsPubkeyHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	host, err := b.hs.Host(jc.Request.Context(), hostKey)
-	if jc.Check("couldn't load host", err) == nil {
+	host, err := b.store.Host(jc.Request.Context(), hostKey)
+	if errors.Is(err, api.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("couldn't load host", err) == nil {
 		jc.Encode(host)
 	}
+}
+
+func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
+	// only scan hosts if we are online
+	if len(b.s.Peers()) == 0 {
+		jc.Error(errors.New("not connected to the internet"), http.StatusServiceUnavailable)
+		return
+	}
+
+	// decode the request
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	var rsr api.HostScanRequest
+	if jc.Decode(&rsr) != nil {
+		return
+	}
+
+	// fetch host
+	h, err := b.store.Host(jc.Request.Context(), hk)
+	if jc.Check("failed to fetch host", err) != nil {
+		return
+	}
+
+	// scan host, prefer v2
+	var pt rhpv3.HostPriceTable
+	var settings rhpv2.HostSettings
+	var ping time.Duration
+	var v2Settings rhp4.HostSettings
+	if h.V2SiamuxAddr() != "" {
+		v2Settings, ping, err = b.scanHostV2(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.V2SiamuxAddr())
+	} else {
+		settings, pt, ping, err = b.scanHostV1(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
+	}
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
+	jc.Encode(api.HostScanResponse{
+		Ping:       api.DurationMS(ping),
+		PriceTable: pt,
+		ScanError:  errStr,
+		Settings:   settings,
+		V2Settings: v2Settings,
+	})
 }
 
 func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
@@ -672,28 +723,8 @@ func (b *Bus) hostsResetLostSectorsPOST(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
-	err := b.hs.ResetLostSectors(jc.Request.Context(), hostKey)
+	err := b.store.ResetLostSectors(jc.Request.Context(), hostKey)
 	if jc.Check("couldn't reset lost sectors", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
-	var req api.HostsScanRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if jc.Check("failed to record scans", b.hs.RecordHostScans(jc.Request.Context(), req.Scans)) != nil {
-		return
-	}
-}
-
-func (b *Bus) hostsPricetableHandlerPOST(jc jape.Context) {
-	var req api.HostsPriceTablesRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-	if jc.Check("failed to record interactions", b.hs.RecordPriceTables(jc.Request.Context(), req.PriceTableUpdates)) != nil {
 		return
 	}
 }
@@ -703,15 +734,15 @@ func (b *Bus) contractsSpendingHandlerPOST(jc jape.Context) {
 	if jc.Decode(&records) != nil {
 		return
 	}
-	if jc.Check("failed to record spending metrics for contract", b.ms.RecordContractSpending(jc.Request.Context(), records)) != nil {
+	if jc.Check("failed to record spending metrics for contract", b.store.RecordContractSpending(jc.Request.Context(), records)) != nil {
 		return
 	}
 }
 
 func (b *Bus) hostsAllowlistHandlerGET(jc jape.Context) {
-	allowlist, err := b.hs.HostAllowlist(jc.Request.Context())
+	allowlist, err := b.store.HostAllowlist(jc.Request.Context())
 	if jc.Check("couldn't load allowlist", err) == nil {
-		jc.Encode(allowlist)
+		api.WriteResponse(jc, api.AllowListResp(allowlist))
 	}
 }
 
@@ -722,16 +753,16 @@ func (b *Bus) hostsAllowlistHandlerPUT(jc jape.Context) {
 		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
 			jc.Error(errors.New("cannot add or remove entries while clearing the allowlist"), http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't update allowlist entries", b.hs.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
+		} else if jc.Check("couldn't update allowlist entries", b.store.UpdateHostAllowlistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
 }
 
 func (b *Bus) hostsBlocklistHandlerGET(jc jape.Context) {
-	blocklist, err := b.hs.HostBlocklist(jc.Request.Context())
+	blocklist, err := b.store.HostBlocklist(jc.Request.Context())
 	if jc.Check("couldn't load blocklist", err) == nil {
-		jc.Encode(blocklist)
+		api.WriteResponse(jc, api.BlockListResp(blocklist))
 	}
 }
 
@@ -742,22 +773,33 @@ func (b *Bus) hostsBlocklistHandlerPUT(jc jape.Context) {
 		if len(req.Add)+len(req.Remove) > 0 && req.Clear {
 			jc.Error(errors.New("cannot add or remove entries while clearing the blocklist"), http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't update blocklist entries", b.hs.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
+		} else if jc.Check("couldn't update blocklist entries", b.store.UpdateHostBlocklistEntries(ctx, req.Add, req.Remove, req.Clear)) != nil {
 			return
 		}
 	}
 }
 
 func (b *Bus) contractsHandlerGET(jc jape.Context) {
-	var cs string
-	if jc.DecodeForm("contractset", &cs) != nil {
+	filterMode := api.ContractFilterModeActive
+	if jc.DecodeForm("filtermode", &filterMode) != nil {
 		return
 	}
-	contracts, err := b.ms.Contracts(jc.Request.Context(), api.ContractsOpts{
-		ContractSet: cs,
+
+	switch filterMode {
+	case api.ContractFilterModeAll:
+	case api.ContractFilterModeActive:
+	case api.ContractFilterModeArchived:
+	case api.ContractFilterModeGood:
+	default:
+		jc.Error(fmt.Errorf("invalid filter mode '%v', must be one of [active, archived, all, good]", filterMode), http.StatusBadRequest)
+		return
+	}
+
+	contracts, err := b.store.Contracts(jc.Request.Context(), api.ContractsOpts{
+		FilterMode: filterMode,
 	})
 	if jc.Check("couldn't load contracts", err) == nil {
-		jc.Encode(contracts)
+		api.WriteResponse(jc, prometheus.Slice(contracts))
 	}
 }
 
@@ -767,7 +809,7 @@ func (b *Bus) contractsRenewedIDHandlerGET(jc jape.Context) {
 		return
 	}
 
-	md, err := b.ms.RenewedContract(jc.Request.Context(), id)
+	md, err := b.store.RenewedContract(jc.Request.Context(), id)
 	if jc.Check("faild to fetch renewed contract", err) == nil {
 		jc.Encode(md)
 	}
@@ -779,55 +821,7 @@ func (b *Bus) contractsArchiveHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	if jc.Check("failed to archive contracts", b.ms.ArchiveContracts(jc.Request.Context(), toArchive)) == nil {
-		for fcid, reason := range toArchive {
-			b.broadcastAction(webhooks.Event{
-				Module: api.ModuleContract,
-				Event:  api.EventArchive,
-				Payload: api.EventContractArchive{
-					ContractID: fcid,
-					Reason:     reason,
-					Timestamp:  time.Now().UTC(),
-				},
-			})
-		}
-	}
-}
-
-func (b *Bus) contractsSetsHandlerGET(jc jape.Context) {
-	sets, err := b.ms.ContractSets(jc.Request.Context())
-	if jc.Check("couldn't fetch contract sets", err) == nil {
-		jc.Encode(sets)
-	}
-}
-
-func (b *Bus) contractsSetHandlerPUT(jc jape.Context) {
-	var req api.ContractSetUpdateRequest
-	if set := jc.PathParam("set"); set == "" {
-		jc.Error(errors.New("path parameter 'set' can not be empty"), http.StatusBadRequest)
-		return
-	} else if jc.Decode(&req) != nil {
-		return
-	} else if jc.Check("could not add contracts to set", b.ms.UpdateContractSet(jc.Request.Context(), set, req.ToAdd, req.ToRemove)) != nil {
-		return
-	} else {
-		b.broadcastAction(webhooks.Event{
-			Module: api.ModuleContractSet,
-			Event:  api.EventUpdate,
-			Payload: api.EventContractSetUpdate{
-				Name:      set,
-				ToAdd:     req.ToAdd,
-				ToRemove:  req.ToRemove,
-				Timestamp: time.Now().UTC(),
-			},
-		})
-	}
-}
-
-func (b *Bus) contractsSetHandlerDELETE(jc jape.Context) {
-	if set := jc.PathParam("set"); set != "" {
-		jc.Check("could not remove contract set", b.ms.RemoveContractSet(jc.Request.Context(), set))
-	}
+	jc.Check("failed to archive contracts", b.store.ArchiveContracts(jc.Request.Context(), toArchive))
 }
 
 func (b *Bus) contractAcquireHandlerPOST(jc jape.Context) {
@@ -865,6 +859,50 @@ func (b *Bus) contractKeepaliveHandlerPOST(jc jape.Context) {
 	}
 }
 
+func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
+	var fcid types.FileContractID
+	if jc.DecodeParam("id", &fcid) != nil {
+		return
+	}
+	contract, err := b.store.Contract(jc.Request.Context(), fcid)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch contract", err) != nil {
+		return
+	}
+	host, err := b.store.Host(jc.Request.Context(), contract.HostKey)
+	if jc.Check("failed to fetch host for contract", err) != nil {
+		return
+	}
+
+	if host.IsV2() {
+		revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.V2SiamuxAddr(), fcid)
+		if jc.Check("failed to fetch revision", err) != nil {
+			return
+		}
+		jc.Encode(api.Revision{
+			ContractID:      fcid,
+			MissedHostValue: revision.MissedHostValue,
+			RenterFunds:     revision.RenterOutput.Value,
+			RevisionNumber:  revision.RevisionNumber,
+			Size:            revision.Filesize,
+		})
+	} else {
+		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, host.Settings.SiamuxAddr())
+		if jc.Check("failed to fetch revision", err) != nil {
+			return
+		}
+		jc.Encode(api.Revision{
+			ContractID:      fcid,
+			MissedHostValue: revision.MissedHostPayout(),
+			RenterFunds:     revision.ValidRenterPayout(),
+			RevisionNumber:  revision.RevisionNumber,
+			Size:            revision.Filesize,
+		})
+	}
+}
+
 func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	ctx := jc.Request.Context()
 
@@ -885,7 +923,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	if jc.Check("couldn't fetch gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
 	// apply timeout
 	pruneCtx := ctx
@@ -907,7 +945,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}()
 
 	// fetch the contract from the bus
-	c, err := b.ms.Contract(ctx, fcid)
+	c, err := b.store.Contract(ctx, fcid)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -915,69 +953,34 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 		return
 	}
 
+	// fetch the corresponding host
+	host, err := b.store.Host(ctx, c.HostKey)
+	if jc.Check("failed to fetch host for pruning", err) != nil {
+		return
+	}
+
 	// build map of uploading sectors
 	pending := make(map[types.Hash256]struct{})
-	for _, root := range b.sectors.Sectors(fcid) {
+	for _, root := range b.sectors.Sectors() {
 		pending[root] = struct{}{}
 	}
 
 	// prune the contract
-	rev, spending, pruned, remaining, err := b.rhp2.PruneContract(pruneCtx, b.deriveRenterKey(c.HostKey), gc, c.HostIP, c.HostKey, fcid, c.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
-		indices, err := b.ms.PrunableContractRoots(ctx, fcid, roots)
-		if err != nil {
-			return nil, err
-		} else if len(indices) > len(roots) {
-			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
-		}
-
-		filtered := indices[:0]
-		for _, index := range indices {
-			_, ok := pending[roots[index]]
-			if !ok {
-				filtered = append(filtered, index)
-			}
-		}
-		indices = filtered
-		return indices, nil
-	})
-
-	if errors.Is(err, rhp2.ErrNoSectorsToPrune) {
-		err = nil // ignore error
-	} else if !errors.Is(err, context.Canceled) {
-		if jc.Check("couldn't prune contract", err) != nil {
-			return
-		}
+	rk := b.masterKey.DeriveContractKey(c.HostKey)
+	var res api.ContractPruneResponse
+	if b.isPassedV2AllowHeight() {
+		res, err = b.pruneContractV2(pruneCtx, rk, c, host.V2SiamuxAddr(), gc, pending)
+	} else {
+		res, err = b.pruneContractV1(pruneCtx, rk, c, host.NetAddress, gc, pending)
 	}
-
-	// record spending
-	if !spending.Total().IsZero() {
-		b.ms.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
-			{
-				ContractSpending: spending,
-				ContractID:       fcid,
-				RevisionNumber:   rev.RevisionNumber,
-				Size:             rev.Filesize,
-
-				MissedHostPayout:  rev.MissedHostPayout(),
-				ValidRenterPayout: rev.ValidRenterPayout(),
-			},
-		})
-	}
-
-	// return response
-	res := api.ContractPruneResponse{
-		ContractSize: rev.Filesize,
-		Pruned:       pruned,
-		Remaining:    remaining,
-	}
-	if err != nil {
-		res.Error = err.Error()
+	if jc.Check("failed to prune contract", err) != nil {
+		return
 	}
 	jc.Encode(res)
 }
 
 func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
-	sizes, err := b.ms.ContractSizes(jc.Request.Context())
+	sizes, err := b.store.ContractSizes(jc.Request.Context())
 	if jc.Check("failed to fetch contract sizes", err) != nil {
 		return
 	}
@@ -988,16 +991,6 @@ func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 
 	// build the response
 	for fcid, size := range sizes {
-		// adjust the amount of prunable data with the pending uploads, due to
-		// how we record contract spending a contract's size might already
-		// include pending sectors
-		pending := b.sectors.Pending(fcid)
-		if pending > size.Prunable {
-			size.Prunable = 0
-		} else {
-			size.Prunable -= pending
-		}
-
 		contracts = append(contracts, api.ContractPrunableData{
 			ID:           fcid,
 			ContractSize: size,
@@ -1014,7 +1007,7 @@ func (b *Bus) contractsPrunableDataHandlerGET(jc jape.Context) {
 		return contracts[i].Prunable > contracts[j].Prunable
 	})
 
-	jc.Encode(api.ContractsPrunableDataResponse{
+	api.WriteResponse(jc, api.ContractsPrunableDataResponse{
 		Contracts:     contracts,
 		TotalPrunable: totalPrunable,
 		TotalSize:     totalSize,
@@ -1027,25 +1020,37 @@ func (b *Bus) contractSizeHandlerGET(jc jape.Context) {
 		return
 	}
 
-	size, err := b.ms.ContractSize(jc.Request.Context(), id)
+	size, err := b.store.ContractSize(jc.Request.Context(), id)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to fetch contract size", err) != nil {
 		return
 	}
+	jc.Encode(size)
+}
 
-	// adjust the amount of prunable data with the pending uploads, due to how
-	// we record contract spending a contract's size might already include
-	// pending sectors
-	pending := b.sectors.Pending(id)
-	if pending > size.Prunable {
-		size.Prunable = 0
-	} else {
-		size.Prunable -= pending
+func (b *Bus) contractUsabilityHandlerPUT(jc jape.Context) {
+	var id types.FileContractID
+	if jc.DecodeParam("id", &id) != nil {
+		return
 	}
 
-	jc.Encode(size)
+	var usability string
+	if jc.Decode(&usability) != nil {
+		return
+	}
+
+	err := b.store.UpdateContractUsability(jc.Request.Context(), id, usability)
+	if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, sql.ErrInvalidContractUsability) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update contract usability", err)
 }
 
 func (b *Bus) contractReleaseHandlerPOST(jc jape.Context) {
@@ -1067,30 +1072,21 @@ func (b *Bus) contractIDHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	c, err := b.ms.Contract(jc.Request.Context(), id)
+	c, err := b.store.Contract(jc.Request.Context(), id)
 	if jc.Check("couldn't load contract", err) == nil {
 		jc.Encode(c)
 	}
 }
 
-func (b *Bus) contractIDHandlerPOST(jc jape.Context) {
-	var id types.FileContractID
-	var req api.ContractAddRequest
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
-		return
-	} else if req.Contract.ID() != id {
-		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
-		return
-	} else if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
+func (b *Bus) contractsHandlerPUT(jc jape.Context) {
+	// decode request
+	var c api.ContractMetadata
+	if jc.Decode(&c) != nil {
 		return
 	}
 
-	a, err := b.addContract(jc.Request.Context(), req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
-	}
-	jc.Encode(a)
+	// upsert the contract
+	jc.Check("failed to add contract", b.store.PutContract(jc.Request.Context(), c))
 }
 
 func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
@@ -1113,19 +1109,17 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	// validate the request
 	if rrr.EndHeight == 0 {
 		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.ExpectedNewStorage == 0 {
 		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
-	} else if rrr.MaxFundAmount.IsZero() {
-		http.Error(jc.ResponseWriter, "MaxFundAmount can not be zero", http.StatusBadRequest)
-	} else if rrr.MinNewCollateral.IsZero() {
-		http.Error(jc.ResponseWriter, "MinNewCollateral can not be zero", http.StatusBadRequest)
+		return
 	} else if rrr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
 	}
 
 	// fetch the contract
-	c, err := b.ms.Contract(ctx, fcid)
+	c, err := b.store.Contract(ctx, fcid)
 	if errors.Is(err, api.ErrContractNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1134,7 +1128,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	}
 
 	// fetch the host
-	h, err := b.hs.Host(ctx, c.HostKey)
+	h, err := b.store.Host(ctx, c.HostKey)
 	if jc.Check("couldn't fetch host", err) != nil {
 		return
 	}
@@ -1148,54 +1142,37 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	// send V2 transaction if we're passed the V2 hardfork allow height
-	var newRevision rhpv2.ContractRevision
-	var contractPrice, fundAmount types.Currency
+	// acquire contract lock indefinitely and defer the release
+	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
+	if jc.Check("failed to acquire contract for renewal", err) != nil {
+		return
+	}
+	defer func() {
+		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
+			b.logger.Error("failed to release contract lock", zap.Error(err))
+		}
+	}()
+
+	// use RHP4 if we're passed the V2 hardfork allow height
+	var contract api.ContractMetadata
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 	} else {
-		newRevision, contractPrice, fundAmount, err = b.renewContract(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.MaxFundAmount, rrr.EndHeight, rrr.ExpectedNewStorage)
+		contract, err = b.renewContractV1(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
 			jc.Error(err, http.StatusBadRequest)
 			return
-		} else if jc.Check("couldn't renew contract", err) != nil {
-			return
 		}
 	}
-
-	// add renewal contract to store
-	metadata, err := b.addRenewedContract(ctx, fcid, newRevision, contractPrice, fundAmount, cs.Index.Height, api.ContractStatePending)
-	if jc.Check("couldn't store contract", err) != nil {
+	if jc.Check("couldn't renew/refresh contract", err) != nil {
 		return
 	}
 
-	// send the response
-	jc.Encode(metadata)
-}
-
-func (b *Bus) contractIDRenewedHandlerPOST(jc jape.Context) {
-	var id types.FileContractID
-	var req api.ContractRenewedRequest
-	if jc.DecodeParam("id", &id) != nil || jc.Decode(&req) != nil {
-		return
+	// add the renewal
+	metadata, err := b.addRenewal(ctx, contract)
+	if jc.Check("couldn't add renewal", err) == nil {
+		jc.Encode(metadata)
 	}
-	if req.Contract.ID() != id {
-		http.Error(jc.ResponseWriter, "contract ID mismatch", http.StatusBadRequest)
-		return
-	}
-	if req.TotalCost.IsZero() {
-		http.Error(jc.ResponseWriter, "TotalCost can not be zero", http.StatusBadRequest)
-		return
-	}
-	if req.State == "" {
-		req.State = api.ContractStatePending
-	}
-	r, err := b.addRenewedContract(jc.Request.Context(), req.RenewedFrom, req.Contract, req.ContractPrice, req.TotalCost, req.StartHeight, req.State)
-	if jc.Check("couldn't store contract", err) != nil {
-		return
-	}
-
-	jc.Encode(r)
 }
 
 func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
@@ -1204,12 +1181,9 @@ func (b *Bus) contractIDRootsHandlerGET(jc jape.Context) {
 		return
 	}
 
-	roots, err := b.ms.ContractRoots(jc.Request.Context(), id)
+	roots, err := b.store.ContractRoots(jc.Request.Context(), id)
 	if jc.Check("couldn't fetch contract sectors", err) == nil {
-		jc.Encode(api.ContractRootsResponse{
-			Roots:     roots,
-			Uploading: b.sectors.Sectors(id),
-		})
+		jc.Encode(roots)
 	}
 }
 
@@ -1218,45 +1192,23 @@ func (b *Bus) contractIDHandlerDELETE(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	jc.Check("couldn't remove contract", b.ms.ArchiveContract(jc.Request.Context(), id, api.ContractArchivalReasonRemoved))
+	jc.Check("couldn't remove contract", b.store.ArchiveContract(jc.Request.Context(), id, api.ContractArchivalReasonRemoved))
 }
 
 func (b *Bus) contractsAllHandlerDELETE(jc jape.Context) {
-	jc.Check("couldn't remove contracts", b.ms.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
+	jc.Check("couldn't remove contracts", b.store.ArchiveAllContracts(jc.Request.Context(), api.ContractArchivalReasonRemoved))
 }
 
-func (b *Bus) searchObjectsHandlerGET(jc jape.Context) {
-	offset := 0
-	limit := -1
-	var key string
-	if jc.DecodeForm("offset", &offset) != nil || jc.DecodeForm("limit", &limit) != nil || jc.DecodeForm("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
+func (b *Bus) objectHandlerGET(jc jape.Context) {
+	key := jc.PathParam("key")
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
-	}
-	keys, err := b.ms.SearchObjects(jc.Request.Context(), bucket, key, offset, limit)
-	if jc.Check("couldn't list objects", err) != nil {
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
-	jc.Encode(keys)
-}
 
-func (b *Bus) objectsHandlerGET(jc jape.Context) {
-	var ignoreDelim bool
-	if jc.DecodeForm("ignoreDelim", &ignoreDelim) != nil {
-		return
-	}
-	path := jc.PathParam("path")
-	if strings.HasSuffix(path, "/") && !ignoreDelim {
-		b.objectEntriesHandlerGET(jc, path)
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
 	var onlymetadata bool
 	if jc.DecodeForm("onlymetadata", &onlymetadata) != nil {
 		return
@@ -1264,10 +1216,11 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 
 	var o api.Object
 	var err error
+
 	if onlymetadata {
-		o, err = b.ms.ObjectMetadata(jc.Request.Context(), bucket, path)
+		o, err = b.store.ObjectMetadata(jc.Request.Context(), bucket, key)
 	} else {
-		o, err = b.ms.Object(jc.Request.Context(), bucket, path)
+		o, err = b.store.Object(jc.Request.Context(), bucket, key)
 	}
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
@@ -1275,61 +1228,58 @@ func (b *Bus) objectsHandlerGET(jc jape.Context) {
 	} else if jc.Check("couldn't load object", err) != nil {
 		return
 	}
-	jc.Encode(api.ObjectsResponse{Object: &o})
+	jc.Encode(o)
 }
 
-func (b *Bus) objectEntriesHandlerGET(jc jape.Context, path string) {
-	bucket := api.DefaultBucketName
+func (b *Bus) objectsHandlerGET(jc jape.Context) {
+	var bucket, marker, delim, sortBy, sortDir, substring string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
 	}
 
-	var prefix string
-	if jc.DecodeForm("prefix", &prefix) != nil {
-		return
-	}
-
-	var sortBy string
-	if jc.DecodeForm("sortBy", &sortBy) != nil {
-		return
-	}
-
-	var sortDir string
-	if jc.DecodeForm("sortDir", &sortDir) != nil {
-		return
-	}
-
-	var marker string
-	if jc.DecodeForm("marker", &marker) != nil {
-		return
-	}
-
-	var offset int
-	if jc.DecodeForm("offset", &offset) != nil {
+	if jc.DecodeForm("delimiter", &delim) != nil {
 		return
 	}
 	limit := -1
 	if jc.DecodeForm("limit", &limit) != nil {
 		return
 	}
-
-	// look for object entries
-	entries, hasMore, err := b.ms.ObjectEntries(jc.Request.Context(), bucket, path, prefix, sortBy, sortDir, marker, offset, limit)
-	if jc.Check("couldn't list object entries", err) != nil {
+	if jc.DecodeForm("marker", &marker) != nil {
+		return
+	}
+	if jc.DecodeForm("sortby", &sortBy) != nil {
+		return
+	}
+	if jc.DecodeForm("sortdir", &sortDir) != nil {
+		return
+	}
+	if jc.DecodeForm("substring", &substring) != nil {
+		return
+	}
+	var slabEncryptionKey object.EncryptionKey
+	if jc.DecodeForm("slabencryptionkey", &slabEncryptionKey) != nil {
 		return
 	}
 
-	jc.Encode(api.ObjectsResponse{Entries: entries, HasMore: hasMore})
+	resp, err := b.store.Objects(jc.Request.Context(), bucket, jc.PathParam("prefix"), substring, delim, sortBy, sortDir, marker, limit, slabEncryptionKey)
+	if errors.Is(err, api.ErrUnsupportedDelimiter) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to query objects", err) != nil {
+		return
+	}
+	api.WriteResponse(jc, resp)
 }
 
-func (b *Bus) objectsHandlerPUT(jc jape.Context) {
+func (b *Bus) objectHandlerPUT(jc jape.Context) {
 	var aor api.AddObjectRequest
 	if jc.Decode(&aor) != nil {
 		return
 	} else if aor.Bucket == "" {
-		aor.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
-	jc.Check("couldn't store object", b.ms.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("path"), aor.ContractSet, aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
+	jc.Check("couldn't store object", b.store.UpdateObject(jc.Request.Context(), aor.Bucket, jc.PathParam("key"), aor.ETag, aor.MimeType, aor.Metadata, aor.Object))
 }
 
 func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
@@ -1337,7 +1287,7 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	}
-	om, err := b.ms.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourcePath, orr.DestinationPath, orr.MimeType, orr.Metadata)
+	om, err := b.store.CopyObject(jc.Request.Context(), orr.SourceBucket, orr.DestinationBucket, orr.SourceKey, orr.DestinationKey, orr.MimeType, orr.Metadata)
 	if jc.Check("couldn't copy object", err) != nil {
 		return
 	}
@@ -1347,22 +1297,21 @@ func (b *Bus) objectsCopyHandlerPOST(jc jape.Context) {
 	jc.Encode(om)
 }
 
-func (b *Bus) objectsListHandlerPOST(jc jape.Context) {
-	var req api.ObjectsListRequest
-	if jc.Decode(&req) != nil {
+func (b *Bus) objectsRemoveHandlerPOST(jc jape.Context) {
+	var orr api.ObjectsRemoveRequest
+	if jc.Decode(&orr) != nil {
+		return
+	} else if orr.Bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	}
-	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
-	}
-	resp, err := b.ms.ListObjects(jc.Request.Context(), req.Bucket, req.Prefix, req.SortBy, req.SortDir, req.Marker, req.Limit)
-	if errors.Is(err, api.ErrMarkerNotFound) {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	} else if jc.Check("couldn't list objects", err) != nil {
+
+	if orr.Prefix == "" {
+		jc.Error(errors.New("prefix cannot be empty"), http.StatusBadRequest)
 		return
 	}
-	jc.Encode(resp)
+
+	jc.Check("failed to remove objects", b.store.RemoveObjects(jc.Request.Context(), orr.Bucket, orr.Prefix))
 }
 
 func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
@@ -1370,7 +1319,8 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 	if jc.Decode(&orr) != nil {
 		return
 	} else if orr.Bucket == "" {
-		orr.Bucket = api.DefaultBucketName
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
 	if orr.Mode == api.ObjectsRenameModeSingle {
 		// Single object rename.
@@ -1378,7 +1328,7 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename dirs with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename object", b.ms.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
+		jc.Check("couldn't rename object", b.store.RenameObject(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
 		return
 	} else if orr.Mode == api.ObjectsRenameModeMulti {
 		// Multi object rename.
@@ -1386,7 +1336,7 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 			jc.Error(fmt.Errorf("can't rename file with mode %v", orr.Mode), http.StatusBadRequest)
 			return
 		}
-		jc.Check("couldn't rename objects", b.ms.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
+		jc.Check("couldn't rename objects", b.store.RenameObjects(jc.Request.Context(), orr.Bucket, orr.From, orr.To, orr.Force))
 		return
 	} else {
 		// Invalid mode.
@@ -1395,21 +1345,15 @@ func (b *Bus) objectsRenameHandlerPOST(jc jape.Context) {
 	}
 }
 
-func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
-	var batch bool
-	if jc.DecodeForm("batch", &batch) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
+func (b *Bus) objectHandlerDELETE(jc jape.Context) {
+	var bucket string
 	if jc.DecodeForm("bucket", &bucket) != nil {
 		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
 	}
-	var err error
-	if batch {
-		err = b.ms.RemoveObjects(jc.Request.Context(), bucket, jc.PathParam("path"))
-	} else {
-		err = b.ms.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("path"))
-	}
+	err := b.store.RemoveObject(jc.Request.Context(), bucket, jc.PathParam("key"))
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1418,11 +1362,11 @@ func (b *Bus) objectsHandlerDELETE(jc jape.Context) {
 }
 
 func (b *Bus) slabbuffersHandlerGET(jc jape.Context) {
-	buffers, err := b.ms.SlabBuffers(jc.Request.Context())
+	buffers, err := b.store.SlabBuffers(jc.Request.Context())
 	if jc.Check("couldn't get slab buffers info", err) != nil {
 		return
 	}
-	jc.Encode(buffers)
+	api.WriteResponse(jc, api.SlabBuffersResp(buffers))
 }
 
 func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
@@ -1430,7 +1374,7 @@ func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
 	if jc.DecodeForm("bucket", &opts.Bucket) != nil {
 		return
 	}
-	info, err := b.ms.ObjectsStats(jc.Request.Context(), opts)
+	info, err := b.store.ObjectsStats(jc.Request.Context(), opts)
 	if jc.Check("couldn't get objects stats", err) != nil {
 		return
 	}
@@ -1450,11 +1394,7 @@ func (b *Bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
 		jc.Error(fmt.Errorf("locking_duration must be non-zero"), http.StatusBadRequest)
 		return
 	}
-	if psrg.ContractSet == "" {
-		jc.Error(fmt.Errorf("contract_set must be non-empty"), http.StatusBadRequest)
-		return
-	}
-	slabs, err := b.ms.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.ContractSet, psrg.Limit)
+	slabs, err := b.store.PackedSlabsForUpload(jc.Request.Context(), time.Duration(psrg.LockingDuration), psrg.MinShards, psrg.TotalShards, psrg.Limit)
 	if jc.Check("couldn't get packed slabs", err) != nil {
 		return
 	}
@@ -1466,18 +1406,113 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 	if jc.Decode(&psrp) != nil {
 		return
 	}
-	jc.Check("failed to mark packed slab(s) as uploaded", b.ms.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs))
+	jc.Check("failed to mark packed slab(s) as uploaded", b.store.MarkPackedSlabsUploaded(jc.Request.Context(), psrp.Slabs))
+}
+
+func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
+	gs, err := b.gougingSettings(jc.Request.Context())
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(gs)
+}
+
+func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
+	var gs api.GougingSettings
+	if jc.Decode(&gs) != nil {
+		return
+	}
+	if err := gs.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if jc.Check("failed to update gouging settings", b.store.UpdateGougingSettings(jc.Request.Context(), gs)) == nil {
+		b.pinMgr.TriggerUpdate()
+	}
+}
+
+func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
+	ps, err := b.pinnedSettings(jc.Request.Context())
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(ps)
+}
+
+func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
+	var ps api.PinnedSettings
+	if jc.Decode(&ps) != nil {
+		return
+	}
+	if err := ps.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update pinned settings, error: %v", err), http.StatusBadRequest)
+		return
+	} else if ps.Enabled() && !b.explorer.Enabled() {
+		jc.Error(fmt.Errorf("can't enable price pinning, %w", api.ErrExplorerDisabled), http.StatusBadRequest)
+		return
+	}
+
+	if jc.Check("failed to update pinned settings", b.store.UpdatePinnedSettings(jc.Request.Context(), ps)) == nil {
+		b.pinMgr.TriggerUpdate()
+	}
+}
+
+func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
+	us, err := b.uploadSettings(jc.Request.Context())
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(us)
+}
+
+func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
+	var us api.UploadSettings
+	if jc.Decode(&us) != nil {
+		return
+	}
+	if err := us.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update upload settings, error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update upload settings", b.store.UpdateUploadSettings(jc.Request.Context(), us))
+}
+
+func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
+	s3s, err := b.s3Settings(jc.Request.Context())
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(s3s)
+}
+
+func (b *Bus) settingsS3HandlerPUT(jc jape.Context) {
+	var s3s api.S3Settings
+	if jc.Decode(&s3s) != nil {
+		return
+	}
+	if err := s3s.Validate(); err != nil {
+		jc.Error(fmt.Errorf("couldn't update S3 settings, error: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update S3 settings", b.store.UpdateS3Settings(jc.Request.Context(), s3s))
 }
 
 func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	var hk types.PublicKey
 	var root types.Hash256
-	if jc.DecodeParam("hk", &hk) != nil {
+	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	} else if jc.DecodeParam("root", &root) != nil {
 		return
 	}
-	n, err := b.ms.DeleteHostSector(jc.Request.Context(), hk, root)
+	n, err := b.store.DeleteHostSector(jc.Request.Context(), hk, root)
 	if jc.Check("failed to mark sector as lost", err) != nil {
 		return
 	} else if n > 0 {
@@ -1485,28 +1520,12 @@ func (b *Bus) sectorsHostRootHandlerDELETE(jc jape.Context) {
 	}
 }
 
-func (b *Bus) slabObjectsHandlerGET(jc jape.Context) {
-	var key object.EncryptionKey
-	if jc.DecodeParam("key", &key) != nil {
-		return
-	}
-	bucket := api.DefaultBucketName
-	if jc.DecodeForm("bucket", &bucket) != nil {
-		return
-	}
-	objects, err := b.ms.ObjectsBySlabKey(jc.Request.Context(), bucket, key)
-	if jc.Check("failed to retrieve objects by slab", err) != nil {
-		return
-	}
-	jc.Encode(objects)
-}
-
 func (b *Bus) slabHandlerGET(jc jape.Context) {
 	var key object.EncryptionKey
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
-	slab, err := b.ms.Slab(jc.Request.Context(), key)
+	slab, err := b.store.Slab(jc.Request.Context(), key)
 	if errors.Is(err, api.ErrSlabNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1518,25 +1537,59 @@ func (b *Bus) slabHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) slabHandlerPUT(jc jape.Context) {
-	var usr api.UpdateSlabRequest
-	if jc.Decode(&usr) == nil {
-		jc.Check("couldn't update slab", b.ms.UpdateSlab(jc.Request.Context(), usr.Slab, usr.ContractSet))
+	var key object.EncryptionKey
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	var sectors []api.UploadedSector
+	if jc.Decode(&sectors) != nil {
+		return
+	}
+
+	// validate the sectors
+	for _, s := range sectors {
+		if s.Root == (types.Hash256{}) {
+			jc.Error(errors.New("root can not be empty"), http.StatusBadRequest)
+			return
+		} else if s.ContractID == (types.FileContractID{}) {
+			jc.Error(errors.New("contractID can not be empty"), http.StatusBadRequest)
+			return
+		}
+	}
+
+	err := b.store.UpdateSlab(jc.Request.Context(), key, sectors)
+	if errors.Is(err, api.ErrSlabNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, api.ErrUnknownSector) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, api.ErrContractNotFound) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(fmt.Errorf("%v: %w", "couldn't update slab", err), http.StatusInternalServerError)
+		return
 	}
 }
 
 func (b *Bus) slabsRefreshHealthHandlerPOST(jc jape.Context) {
-	jc.Check("failed to recompute health", b.ms.RefreshHealth(jc.Request.Context()))
+	jc.Check("failed to recompute health", b.store.RefreshHealth(jc.Request.Context()))
 }
 
 func (b *Bus) slabsMigrationHandlerPOST(jc jape.Context) {
 	var msr api.MigrationSlabsRequest
-	if jc.Decode(&msr) == nil {
-		if slabs, err := b.ms.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.ContractSet, msr.Limit); jc.Check("couldn't fetch slabs for migration", err) == nil {
-			jc.Encode(api.UnhealthySlabsResponse{
-				Slabs: slabs,
-			})
-		}
+	if jc.Decode(&msr) != nil {
+		return
 	}
+
+	slabs, err := b.store.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.Limit)
+	if jc.Check("couldn't fetch slabs for migration", err) != nil {
+		return
+	}
+
+	jc.Encode(api.UnhealthySlabsResponse{Slabs: slabs})
 }
 
 func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
@@ -1546,19 +1599,24 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
+
 	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
+	} else if offset < 0 {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
+		return
 	}
+
 	var length int
 	if jc.DecodeForm("length", &length) != nil {
 		return
-	}
-	if length <= 0 || offset < 0 {
-		jc.Error(fmt.Errorf("length must be positive and offset must be non-negative"), http.StatusBadRequest)
+	} else if length <= 0 {
+		jc.Error(api.ErrInvalidLength, http.StatusBadRequest)
 		return
 	}
-	data, err := b.ms.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
+
+	data, err := b.store.FetchPartialSlab(jc.Request.Context(), key, uint32(offset), uint32(length))
 	if errors.Is(err, api.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -1571,15 +1629,11 @@ func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {
 
 func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	var minShards int
-	if jc.DecodeForm("minShards", &minShards) != nil {
+	if jc.DecodeForm("minshards", &minShards) != nil {
 		return
 	}
 	var totalShards int
-	if jc.DecodeForm("totalShards", &totalShards) != nil {
-		return
-	}
-	var contractSet string
-	if jc.DecodeForm("contractSet", &contractSet) != nil {
+	if jc.DecodeForm("totalshards", &totalShards) != nil {
 		return
 	}
 	if minShards <= 0 || totalShards <= minShards {
@@ -1590,177 +1644,73 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 		jc.Error(fmt.Errorf("totalShards must be less than or equal to %d", math.MaxUint8), http.StatusBadRequest)
 		return
 	}
-	if contractSet == "" {
-		jc.Error(errors.New("parameter 'contractSet' is required"), http.StatusBadRequest)
-		return
-	}
 	data, err := io.ReadAll(jc.Request.Body)
 	if jc.Check("failed to read request body", err) != nil {
 		return
 	}
-	slabs, bufferSize, err := b.ms.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards), contractSet)
+	slabs, bufferSize, err := b.store.AddPartialSlab(jc.Request.Context(), data, uint8(minShards), uint8(totalShards))
 	if jc.Check("failed to add partial slab", err) != nil {
 		return
 	}
-	var pus api.UploadPackingSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
+	us, err := b.uploadSettings(jc.Request.Context())
+	if err != nil {
 		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
 		return
 	}
 	jc.Encode(api.AddPartialSlabResponse{
 		Slabs:                        slabs,
-		SlabBufferMaxSizeSoftReached: bufferSize >= pus.SlabBufferMaxSizeSoft,
+		SlabBufferMaxSizeSoftReached: bufferSize >= us.Packing.SlabBufferMaxSizeSoft,
 	})
 }
 
-func (b *Bus) settingsHandlerGET(jc jape.Context) {
-	if settings, err := b.ss.Settings(jc.Request.Context()); jc.Check("couldn't load settings", err) == nil {
-		jc.Encode(settings)
+func (b *Bus) autopilotHandlerGET(jc jape.Context) {
+	ap, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch autopilot config", err) != nil {
+		return
 	}
+	jc.Encode(ap)
 }
 
-func (b *Bus) settingKeyHandlerGET(jc jape.Context) {
-	jc.Custom(nil, (any)(nil))
-
-	key := jc.PathParam("key")
-	if key == "" {
-		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
+func (b *Bus) autopilotHandlerPUT(jc jape.Context) {
+	// decode request
+	var req api.UpdateAutopilotRequest
+	if jc.Decode(&req) != nil {
+		return
+	} else if req == (api.UpdateAutopilotRequest{}) {
+		jc.Error(errors.New("request body is empty"), http.StatusBadRequest)
 		return
 	}
 
-	setting, err := b.ss.Setting(jc.Request.Context(), jc.PathParam("key"))
-	if errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
-		return
-	}
-	resp := []byte(setting)
-
-	// populate autopilots of price pinning settings with defaults for better DX
-	if key == api.SettingPricePinning {
-		var pps api.PricePinSettings
-		err = json.Unmarshal([]byte(setting), &pps)
-		if jc.Check("failed to unmarshal price pinning settings", err) != nil {
-			return
-		} else if pps.Autopilots == nil {
-			pps.Autopilots = make(map[string]api.AutopilotPins)
-		}
-		// populate the Autopilots map with the current autopilots
-		aps, err := b.as.Autopilots(jc.Request.Context())
-		if jc.Check("failed to fetch autopilots", err) != nil {
-			return
-		}
-		for _, ap := range aps {
-			if _, exists := pps.Autopilots[ap.ID]; !exists {
-				pps.Autopilots[ap.ID] = api.AutopilotPins{}
-			}
-		}
-		// encode the settings back
-		resp, err = json.Marshal(pps)
-		if jc.Check("failed to marshal price pinning settings", err) != nil {
-			return
-		}
-	}
-	jc.ResponseWriter.Header().Set("Content-Type", "application/json")
-	jc.ResponseWriter.Write(resp)
-}
-
-func (b *Bus) settingKeyHandlerPUT(jc jape.Context) {
-	key := jc.PathParam("key")
-	if key == "" {
-		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
+	// fetch current config
+	cfg, err := b.store.AutopilotConfig(jc.Request.Context())
+	if jc.Check("failed to fetch current configuration", err) != nil {
 		return
 	}
 
-	var value interface{}
-	if jc.Decode(&value) != nil {
-		return
-	}
-
-	data, err := json.Marshal(value)
-	if err != nil {
-		jc.Error(fmt.Errorf("couldn't marshal the given value, error: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	switch key {
-	case api.SettingGouging:
-		var gs api.GougingSettings
-		if err := json.Unmarshal(data, &gs); err != nil {
-			jc.Error(fmt.Errorf("couldn't update gouging settings, invalid request body, %t", value), http.StatusBadRequest)
-			return
-		} else if err := gs.Validate(); err != nil {
-			jc.Error(fmt.Errorf("couldn't update gouging settings, error: %v", err), http.StatusBadRequest)
+	// update the contracts config
+	if req.Contracts != nil {
+		if err := req.Contracts.Validate(); err != nil {
+			jc.Error(fmt.Errorf("failed to update autopilot, contracts config is invalid: %w", err), http.StatusBadRequest)
 			return
 		}
-		b.pinMgr.TriggerUpdate()
-	case api.SettingRedundancy:
-		var rs api.RedundancySettings
-		if err := json.Unmarshal(data, &rs); err != nil {
-			jc.Error(fmt.Errorf("couldn't update redundancy settings, invalid request body"), http.StatusBadRequest)
-			return
-		} else if err := rs.Validate(); err != nil {
-			jc.Error(fmt.Errorf("couldn't update redundancy settings, error: %v", err), http.StatusBadRequest)
-			return
-		}
-	case api.SettingS3Authentication:
-		var s3as api.S3AuthenticationSettings
-		if err := json.Unmarshal(data, &s3as); err != nil {
-			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, invalid request body"), http.StatusBadRequest)
-			return
-		} else if err := s3as.Validate(); err != nil {
-			jc.Error(fmt.Errorf("couldn't update s3 authentication settings, error: %v", err), http.StatusBadRequest)
-			return
-		}
-	case api.SettingPricePinning:
-		var pps api.PricePinSettings
-		if err := json.Unmarshal(data, &pps); err != nil {
-			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid request body"), http.StatusBadRequest)
-			return
-		} else if err := pps.Validate(); err != nil {
-			jc.Error(fmt.Errorf("couldn't update price pinning settings, invalid settings, error: %v", err), http.StatusBadRequest)
-			return
-		} else if pps.Enabled {
-			if _, err := ibus.NewForexClient(pps.ForexEndpointURL).SiacoinExchangeRate(jc.Request.Context(), pps.Currency); err != nil {
-				jc.Error(fmt.Errorf("couldn't update price pinning settings, forex API unreachable,error: %v", err), http.StatusBadRequest)
-				return
-			}
-		}
-		b.pinMgr.TriggerUpdate()
+		cfg.Contracts = *req.Contracts
 	}
 
-	if jc.Check("could not update setting", b.ss.UpdateSetting(jc.Request.Context(), key, string(data))) == nil {
-		b.broadcastAction(webhooks.Event{
-			Module: api.ModuleSetting,
-			Event:  api.EventUpdate,
-			Payload: api.EventSettingUpdate{
-				Key:       key,
-				Update:    value,
-				Timestamp: time.Now().UTC(),
-			},
-		})
-	}
-}
-
-func (b *Bus) settingKeyHandlerDELETE(jc jape.Context) {
-	key := jc.PathParam("key")
-	if key == "" {
-		jc.Error(errors.New("path parameter 'key' can not be empty"), http.StatusBadRequest)
-		return
+	// update the hosts config
+	if req.Hosts != nil {
+		if err := req.Hosts.Validate(); err != nil {
+			jc.Error(fmt.Errorf("failed to update autopilot, hosts config is invalid: %w", err), http.StatusBadRequest)
+			return
+		}
+		cfg.Hosts = *req.Hosts
 	}
 
-	if jc.Check("could not delete setting", b.ss.DeleteSetting(jc.Request.Context(), key)) == nil {
-		b.broadcastAction(webhooks.Event{
-			Module: api.ModuleSetting,
-			Event:  api.EventDelete,
-			Payload: api.EventSettingDelete{
-				Key:       key,
-				Timestamp: time.Now().UTC(),
-			},
-		})
+	// enable/disable the autopilot
+	if req.Enabled != nil {
+		cfg.Enabled = *req.Enabled
 	}
+
+	jc.Check("failed to update autopilot config", b.store.UpdateAutopilotConfig(jc.Request.Context(), cfg))
 }
 
 func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
@@ -1769,10 +1719,10 @@ func (b *Bus) contractIDAncestorsHandler(jc jape.Context) {
 		return
 	}
 	var minStartHeight uint64
-	if jc.DecodeForm("minStartHeight", &minStartHeight) != nil {
+	if jc.DecodeForm("minstartheight", &minStartHeight) != nil {
 		return
 	}
-	ancestors, err := b.ms.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
+	ancestors, err := b.store.AncestorContracts(jc.Request.Context(), fcid, uint64(minStartHeight))
 	if jc.Check("failed to fetch ancestor contracts", err) != nil {
 		return
 	}
@@ -1797,29 +1747,15 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	var contractSet string
-	var css api.ContractSetSetting
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingContractSet, &css); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(fmt.Errorf("could not get contract set settings: %w", err), http.StatusInternalServerError)
+	us, err := b.uploadSettings(jc.Request.Context())
+	if jc.Check("could not get upload settings", err) != nil {
 		return
-	} else if err == nil {
-		contractSet = css.Default
 	}
 
-	var uploadPacking bool
-	var pus api.UploadPackingSettings
-	if err := b.fetchSetting(jc.Request.Context(), api.SettingUploadPacking, &pus); err != nil && !errors.Is(err, api.ErrSettingNotFound) {
-		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
-		return
-	} else if err == nil {
-		uploadPacking = pus.Enabled
-	}
-
-	jc.Encode(api.UploadParams{
-		ContractSet:   contractSet,
+	api.WriteResponse(jc, api.UploadParams{
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
-		UploadPacking: uploadPacking,
+		UploadPacking: us.Packing.Enabled,
 	})
 }
 
@@ -1847,22 +1783,18 @@ func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	jc.Encode(gp)
+	api.WriteResponse(jc, gp)
 }
 
 func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
+	gs, err := b.gougingSettings(ctx)
+	if err != nil {
 		return api.GougingParams{}, err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		b.logger.Panicf("failed to unmarshal gouging settings '%s': %v", gss, err)
 	}
 
-	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
+	us, err := b.uploadSettings(ctx)
+	if err != nil {
 		return api.GougingParams{}, err
-	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		b.logger.Panicf("failed to unmarshal redundancy settings '%s': %v", rss, err)
 	}
 
 	cs, err := b.consensusState(ctx)
@@ -1873,36 +1805,32 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	return api.GougingParams{
 		ConsensusState:     cs,
 		GougingSettings:    gs,
-		RedundancySettings: rs,
-		TransactionFee:     b.cm.RecommendedFee(),
+		RedundancySettings: us.Redundancy,
 	}, nil
 }
 
-func (b *Bus) handleGETAlertsDeprecated(jc jape.Context) {
-	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{Offset: 0, Limit: -1})
-	if jc.Check("failed to fetch alerts", err) != nil {
-		return
-	}
-	jc.Encode(ar.Alerts)
-}
-
 func (b *Bus) handleGETAlerts(jc jape.Context) {
-	if jc.Request.FormValue("offset") == "" && jc.Request.FormValue("limit") == "" {
-		b.handleGETAlertsDeprecated(jc)
+	var severity alerts.Severity
+	if jc.DecodeForm("severity", &severity) != nil {
 		return
 	}
-	offset, limit := 0, -1
-	var severity alerts.Severity
+
+	var offset int
 	if jc.DecodeForm("offset", &offset) != nil {
 		return
-	} else if jc.DecodeForm("limit", &limit) != nil {
-		return
 	} else if offset < 0 {
-		jc.Error(errors.New("offset must be non-negative"), http.StatusBadRequest)
-		return
-	} else if jc.DecodeForm("severity", &severity) != nil {
+		jc.Error(api.ErrInvalidOffset, http.StatusBadRequest)
 		return
 	}
+
+	limit := -1
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < -1 {
+		jc.Error(api.ErrInvalidLimit, http.StatusBadRequest)
+		return
+	}
+
 	ar, err := b.alertMgr.Alerts(jc.Request.Context(), alerts.AlertsOpts{
 		Offset:   offset,
 		Limit:    limit,
@@ -1911,7 +1839,7 @@ func (b *Bus) handleGETAlerts(jc jape.Context) {
 	if jc.Check("failed to fetch alerts", err) != nil {
 		return
 	}
-	jc.Encode(ar)
+	api.WriteResponse(jc, ar)
 }
 
 func (b *Bus) handlePOSTAlertsDismiss(jc jape.Context) {
@@ -1935,7 +1863,7 @@ func (b *Bus) accountsHandlerGET(jc jape.Context) {
 	if jc.DecodeForm("owner", &owner) != nil {
 		return
 	}
-	accounts, err := b.accounts.Accounts(jc.Request.Context(), owner)
+	accounts, err := b.store.Accounts(jc.Request.Context(), owner)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -1954,74 +1882,21 @@ func (b *Bus) accountsHandlerPOST(jc jape.Context) {
 			return
 		}
 	}
-	if b.accounts.SaveAccounts(jc.Request.Context(), req.Accounts) != nil {
-		return
-	}
+	jc.Check("failed to save accounts", b.store.SaveAccounts(jc.Request.Context(), req.Accounts))
 }
 
-func (b *Bus) autopilotsListHandlerGET(jc jape.Context) {
-	if autopilots, err := b.as.Autopilots(jc.Request.Context()); jc.Check("failed to fetch autopilots", err) == nil {
-		jc.Encode(autopilots)
-	}
-}
-
-func (b *Bus) autopilotsHandlerGET(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-	ap, err := b.as.Autopilot(jc.Request.Context(), id)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	}
-	if jc.Check("couldn't load object", err) != nil {
-		return
-	}
-
-	jc.Encode(ap)
-}
-
-func (b *Bus) autopilotsHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
-
-	var ap api.Autopilot
-	if jc.Decode(&ap) != nil {
-		return
-	}
-
-	if ap.ID != id {
-		jc.Error(errors.New("id in path and body don't match"), http.StatusBadRequest)
-		return
-	}
-
-	if jc.Check("failed to update autopilot", b.as.UpdateAutopilot(jc.Request.Context(), ap)) == nil {
-		b.pinMgr.TriggerUpdate()
-	}
-}
-
-func (b *Bus) autopilotHostCheckHandlerPUT(jc jape.Context) {
-	var id string
-	if jc.DecodeParam("id", &id) != nil {
-		return
-	}
+func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
 	var hk types.PublicKey
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	var hc api.HostCheck
+	var hc api.HostChecks
 	if jc.Check("failed to decode host check", jc.Decode(&hc)) != nil {
 		return
 	}
 
-	err := b.hs.UpdateHostCheck(jc.Request.Context(), id, hk, hc)
-	if errors.Is(err, api.ErrAutopilotNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to update host", err) != nil {
+	err := b.store.UpdateHostCheck(jc.Request.Context(), hk, hc)
+	if jc.Check("failed to update host check", err) != nil {
 		return
 	}
 }
@@ -2036,7 +1911,7 @@ func (b *Bus) broadcastAction(e webhooks.Event) {
 	}
 }
 
-func (b *Bus) contractTaxHandlerGET(jc jape.Context) {
+func (b *Bus) consensusPayoutContractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
 		return
@@ -2046,13 +1921,17 @@ func (b *Bus) contractTaxHandlerGET(jc jape.Context) {
 }
 
 func (b *Bus) stateHandlerGET(jc jape.Context) {
-	jc.Encode(api.BusStateResponse{
+	api.WriteResponse(jc, api.BusStateResponse{
 		StartTime: api.TimeRFC3339(b.startTime),
 		BuildState: api.BuildState{
 			Version:   build.Version(),
 			Commit:    build.Commit(),
 			OS:        runtime.GOOS,
 			BuildTime: api.TimeRFC3339(build.BuildTime()),
+		},
+		Explorer: api.ExplorerState{
+			Enabled: b.explorer.Enabled(),
+			URL:     b.explorer.BaseURL(),
 		},
 		Network: b.cm.TipState().Network.Name,
 	})
@@ -2070,11 +1949,11 @@ func (b *Bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	var req api.UploadSectorRequest
-	if jc.Decode(&req) != nil {
+	var roots []types.Hash256
+	if jc.Decode(&roots) != nil {
 		return
 	}
-	jc.Check("failed to add sector", b.sectors.AddSector(id, req.ContractID, req.Root))
+	jc.Check("failed to add sectors", b.sectors.AddSectors(id, roots...))
 }
 
 func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {
@@ -2133,12 +2012,6 @@ func (b *Bus) webhookHandlerPost(jc jape.Context) {
 }
 
 func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
-	metric := jc.PathParam("key")
-	if metric == "" {
-		jc.Error(errors.New("parameter 'metric' is required"), http.StatusBadRequest)
-		return
-	}
-
 	var cutoff time.Time
 	if jc.DecodeForm("cutoff", (*api.TimeRFC3339)(&cutoff)) != nil {
 		return
@@ -2147,39 +2020,26 @@ func (b *Bus) metricsHandlerDELETE(jc jape.Context) {
 		return
 	}
 
-	err := b.mtrcs.PruneMetrics(jc.Request.Context(), metric, cutoff)
-	if jc.Check("failed to prune metrics", err) != nil {
-		return
-	}
+	jc.Check("failed to prune metrics", b.store.PruneMetrics(jc.Request.Context(), jc.PathParam("key"), cutoff))
 }
 
 func (b *Bus) metricsHandlerPUT(jc jape.Context) {
 	jc.Custom((*interface{})(nil), nil)
 
 	key := jc.PathParam("key")
-	switch key {
-	case api.MetricContractPrune:
-		// TODO: jape hack - remove once jape can handle decoding multiple different request types
-		var req api.ContractPruneMetricRequestPUT
-		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
-			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
-			return
-		} else if jc.Check("failed to record contract prune metric", b.mtrcs.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
-	case api.MetricContractSetChurn:
-		// TODO: jape hack - remove once jape can handle decoding multiple different request types
-		var req api.ContractSetChurnMetricRequestPUT
-		if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
-			jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
-			return
-		} else if jc.Check("failed to record contract churn metric", b.mtrcs.RecordContractSetChurnMetric(jc.Request.Context(), req.Metrics...)) != nil {
-			return
-		}
-	default:
-		jc.Error(fmt.Errorf("unknown metric key '%s'", key), http.StatusBadRequest)
+	if key != api.MetricContractPrune {
+		jc.Error(fmt.Errorf("unknown metric '%s'", key), http.StatusBadRequest)
 		return
 	}
+
+	// TODO: jape hack - remove once jape can handle decoding multiple different request types
+	var req api.ContractPruneMetricRequestPUT
+	if err := json.NewDecoder(jc.Request.Body).Decode(&req); err != nil {
+		jc.Error(fmt.Errorf("couldn't decode request type (%T): %w", req, err), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to record contract prune metric", b.store.RecordContractPruneMetric(jc.Request.Context(), req.Metrics...))
 }
 
 func (b *Bus) metricsHandlerGET(jc jape.Context) {
@@ -2219,35 +2079,19 @@ func (b *Bus) metricsHandlerGET(jc jape.Context) {
 	switch key {
 	case api.MetricContract:
 		var opts api.ContractMetricsQueryOpts
-		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractid", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostkey", &opts.HostKey) != nil {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
 	case api.MetricContractPrune:
 		var opts api.ContractPruneMetricsQueryOpts
-		if jc.DecodeForm("contractID", &opts.ContractID) != nil {
+		if jc.DecodeForm("contractid", &opts.ContractID) != nil {
 			return
-		} else if jc.DecodeForm("hostKey", &opts.HostKey) != nil {
+		} else if jc.DecodeForm("hostkey", &opts.HostKey) != nil {
 			return
-		} else if jc.DecodeForm("hostVersion", &opts.HostVersion) != nil {
-			return
-		}
-		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
-	case api.MetricContractSet:
-		var opts api.ContractSetMetricsQueryOpts
-		if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		}
-		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
-	case api.MetricContractSetChurn:
-		var opts api.ContractSetChurnMetricsQueryOpts
-		if jc.DecodeForm("name", &opts.Name) != nil {
-			return
-		} else if jc.DecodeForm("direction", &opts.Direction) != nil {
-			return
-		} else if jc.DecodeForm("reason", &opts.Reason) != nil {
+		} else if jc.DecodeForm("hostversion", &opts.HostVersion) != nil {
 			return
 		}
 		metrics, err = b.metrics(jc.Request.Context(), key, start, n, interval, opts)
@@ -2270,15 +2114,11 @@ func (b *Bus) metricsHandlerGET(jc jape.Context) {
 func (b *Bus) metrics(ctx context.Context, key string, start time.Time, n uint64, interval time.Duration, opts interface{}) (interface{}, error) {
 	switch key {
 	case api.MetricContract:
-		return b.mtrcs.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
+		return b.store.ContractMetrics(ctx, start, n, interval, opts.(api.ContractMetricsQueryOpts))
 	case api.MetricContractPrune:
-		return b.mtrcs.ContractPruneMetrics(ctx, start, n, interval, opts.(api.ContractPruneMetricsQueryOpts))
-	case api.MetricContractSet:
-		return b.mtrcs.ContractSetMetrics(ctx, start, n, interval, opts.(api.ContractSetMetricsQueryOpts))
-	case api.MetricContractSetChurn:
-		return b.mtrcs.ContractSetChurnMetrics(ctx, start, n, interval, opts.(api.ContractSetChurnMetricsQueryOpts))
+		return b.store.ContractPruneMetrics(ctx, start, n, interval, opts.(api.ContractPruneMetricsQueryOpts))
 	case api.MetricWallet:
-		return b.mtrcs.WalletMetrics(ctx, start, n, interval, opts.(api.WalletMetricsQueryOpts))
+		return b.store.WalletMetrics(ctx, start, n, interval, opts.(api.WalletMetricsQueryOpts))
 	}
 	return nil, fmt.Errorf("unknown metric '%s'", key)
 }
@@ -2290,15 +2130,13 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 	}
 
 	var key object.EncryptionKey
-	if req.GenerateKey {
-		key = object.GenerateEncryptionKey()
-	} else if req.Key == nil {
+	if req.DisableClientSideEncryption {
 		key = object.NoOpKey
 	} else {
-		key = *req.Key
+		key = object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	}
 
-	resp, err := b.ms.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, key, req.MimeType, req.Metadata)
+	resp, err := b.store.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, key, req.MimeType, req.Metadata)
 	if jc.Check("failed to create multipart upload", err) != nil {
 		return
 	}
@@ -2310,7 +2148,7 @@ func (b *Bus) multipartHandlerAbortPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	err := b.ms.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID)
+	err := b.store.AbortMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, req.UploadID)
 	if jc.Check("failed to abort multipart upload", err) != nil {
 		return
 	}
@@ -2321,7 +2159,7 @@ func (b *Bus) multipartHandlerCompletePOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.Parts, api.CompleteMultipartOptions{
+	resp, err := b.store.CompleteMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, req.UploadID, req.Parts, api.CompleteMultipartOptions{
 		Metadata: req.Metadata,
 	})
 	if jc.Check("failed to complete multipart upload", err) != nil {
@@ -2336,9 +2174,7 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		return
 	}
 	if req.Bucket == "" {
-		req.Bucket = api.DefaultBucketName
-	} else if req.ContractSet == "" {
-		jc.Error(errors.New("contract_set must be non-empty"), http.StatusBadRequest)
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
 		return
 	} else if req.ETag == "" {
 		jc.Error(errors.New("etag must be non-empty"), http.StatusBadRequest)
@@ -2350,14 +2186,14 @@ func (b *Bus) multipartHandlerUploadPartPUT(jc jape.Context) {
 		jc.Error(errors.New("upload_id must be non-empty"), http.StatusBadRequest)
 		return
 	}
-	err := b.ms.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Path, req.ContractSet, req.ETag, req.UploadID, req.PartNumber, req.Slices)
+	err := b.store.AddMultipartPart(jc.Request.Context(), req.Bucket, req.Key, req.ETag, req.UploadID, req.PartNumber, req.Slices)
 	if jc.Check("failed to upload part", err) != nil {
 		return
 	}
 }
 
 func (b *Bus) multipartHandlerUploadGET(jc jape.Context) {
-	resp, err := b.ms.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
+	resp, err := b.store.MultipartUpload(jc.Request.Context(), jc.PathParam("id"))
 	if jc.Check("failed to get multipart upload", err) != nil {
 		return
 	}
@@ -2369,7 +2205,7 @@ func (b *Bus) multipartHandlerListUploadsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.PathMarker, req.UploadIDMarker, req.Limit)
+	resp, err := b.store.MultipartUploads(jc.Request.Context(), req.Bucket, req.Prefix, req.KeyMarker, req.UploadIDMarker, req.Limit)
 	if jc.Check("failed to list multipart uploads", err) != nil {
 		return
 	}
@@ -2381,7 +2217,7 @@ func (b *Bus) multipartHandlerListPartsPOST(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	resp, err := b.ms.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Path, req.UploadID, req.PartNumberMarker, int64(req.Limit))
+	resp, err := b.store.MultipartUploadParts(jc.Request.Context(), req.Bucket, req.Key, req.UploadID, req.PartNumberMarker, int64(req.Limit))
 	if jc.Check("failed to list multipart upload parts", err) != nil {
 		return
 	}
@@ -2409,9 +2245,6 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	} else if rfr.HostCollateral.IsZero() {
 		http.Error(jc.ResponseWriter, "HostCollateral can not be zero", http.StatusBadRequest)
 		return
-	} else if rfr.HostIP == "" {
-		http.Error(jc.ResponseWriter, "HostIP must be provided", http.StatusBadRequest)
-		return
 	} else if rfr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
@@ -2420,31 +2253,73 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 		return
 	}
 
+	// fetch host to form a contract with to get its netaddress
+	h, err := b.store.Host(jc.Request.Context(), rfr.HostKey)
+	if errors.Is(err, api.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to fetch host for contract formation", err) != nil {
+		return
+	}
+
 	// fetch gouging parameters
 	gp, err := b.gougingParams(ctx)
 	if jc.Check("could not get gouging parameters", err) != nil {
 		return
 	}
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
-	// fetch host settings
-	settings, err := b.rhp2.Settings(ctx, rfr.HostKey, rfr.HostIP)
-	if jc.Check("couldn't fetch host settings", err) != nil {
-		return
-	}
-
-	// check gouging
-	breakdown := gc.CheckSettings(settings)
-	if breakdown.Gouging() {
-		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
-		return
-	}
-
-	// send V2 transaction if we're passed the V2 hardfork allow height
-	var contract rhpv2.ContractRevision
+	// use RHP4 if we're passed the V2 hardfork allow height
+	var contract api.ContractMetadata
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		// fetch host settings
+		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
+		if jc.Check("couldn't fetch host settings", err) != nil {
+			return
+		}
+
+		// check gouging
+		breakdown := gc.CheckV2(settings)
+		if breakdown.Gouging() {
+			jc.Error(fmt.Errorf("failed to form v2 contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+			return
+		}
+		contract, err = b.formContractV2(
+			ctx,
+			rfr.HostKey,
+			h.V2SiamuxAddr(),
+			settings.WalletAddress,
+			rfr.RenterAddress,
+			settings.Prices,
+			rfr.RenterFunds,
+			rfr.HostCollateral,
+			rfr.EndHeight,
+		)
+		if jc.Check("couldn't form v2 contract", err) != nil {
+			return
+		}
 	} else {
+		// fetch host settings
+		settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, h.NetAddress)
+		if jc.Check("couldn't fetch host settings", err) != nil {
+			return
+		}
+
+		// cap v1 formations to the v2 require height since the host won't allow
+		// us to form contracts beyond that
+		v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+		if rfr.EndHeight >= v2ReqHeight {
+			rfr.EndHeight = v2ReqHeight - 1
+		}
+
+		// check gouging
+		breakdown := gc.CheckSettings(settings)
+		if breakdown.Gouging() {
+			jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+			return
+		}
+
+		// form contract
 		contract, err = b.formContract(
 			ctx,
 			settings,
@@ -2452,7 +2327,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 			rfr.RenterFunds,
 			rfr.HostCollateral,
 			rfr.HostKey,
-			rfr.HostIP,
+			h.NetAddress,
 			rfr.EndHeight,
 		)
 		if jc.Check("couldn't form contract", err) != nil {
@@ -2460,16 +2335,9 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 		}
 	}
 
-	// store the contract
-	metadata, err := b.addContract(
-		ctx,
-		contract,
-		contract.Revision.MissedHostPayout().Sub(rfr.HostCollateral),
-		rfr.RenterFunds,
-		b.cm.Tip().Height,
-		api.ContractStatePending,
-	)
-	if jc.Check("couldn't store contract", err) != nil {
+	// add the contract
+	metadata, err := b.addContract(ctx, contract)
+	if jc.Check("couldn't add contract", err) != nil {
 		return
 	}
 

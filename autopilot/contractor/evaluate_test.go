@@ -40,15 +40,13 @@ func TestOptimiseGougingSetting(t *testing.T) {
 			LastAnnouncement: time.Unix(0, 0),
 			Scanned:          true,
 			Blocked:          false,
-			Checks:           nil,
 		})
 	}
 
 	// prepare settings that result in all hosts being usable
 	cfg := api.AutopilotConfig{
 		Contracts: api.ContractsConfig{
-			Allowance: types.Siacoins(100000),
-			Amount:    10,
+			Amount: 10,
 		},
 	}
 	cs := api.ConsensusState{
@@ -56,7 +54,6 @@ func TestOptimiseGougingSetting(t *testing.T) {
 		LastBlockTime: api.TimeNow(),
 		Synced:        true,
 	}
-	fee := types.ZeroCurrency
 	rs := api.RedundancySettings{MinShards: 10, TotalShards: 30}
 	gs := api.GougingSettings{
 		MaxRPCPrice:           types.Siacoins(1),
@@ -70,7 +67,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	// confirm all hosts are usable
 	assertUsable := func(n int) {
 		t.Helper()
-		nUsable := countUsableHosts(cfg, cs, fee, 0, rs, gs, hosts)
+		nUsable := countUsableHosts(cfg, cs, 0, rs, gs, hosts)
 		if nUsable != uint64(n) {
 			t.Fatalf("expected %v usable hosts, got %v", len(hosts), nUsable)
 		}
@@ -82,7 +79,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 		hosts[i].Settings.StoragePrice = types.Siacoins(uint32(i + 1))
 	}
 	assertUsable(1)
-	if !optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, fee, 0, rs, hosts) {
+	if !optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, 0, rs, hosts) {
 		t.Fatal("optimising failed")
 	}
 	assertUsable(len(hosts))
@@ -94,7 +91,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	// hosts
 	hosts[0].Settings.StoragePrice = types.Siacoins(100000)
 	assertUsable(9)
-	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, fee, 0, rs, hosts) {
+	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, 0, rs, hosts) {
 		t.Fatal("optimising succeeded")
 	}
 	if gs.MaxStoragePrice.ExactString() != "41631744000000000000000000000" { // ~41.63 KS
@@ -107,7 +104,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	}
 	gs.MaxStoragePrice = types.MaxCurrency.Sub(types.Siacoins(1))
 	assertUsable(0)
-	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, fee, 0, rs, hosts) {
+	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, 0, rs, hosts) {
 		t.Fatal("optimising succeeded")
 	}
 	if gs.MaxStoragePrice.ExactString() != "340282366920937463463374607431768211455" { // ~340.3 TS

@@ -10,76 +10,73 @@ import (
 )
 
 // AddObject stores the provided object under the given path.
-func (c *Client) AddObject(ctx context.Context, bucket, path, contractSet string, o object.Object, opts api.AddObjectOptions) (err error) {
-	path = api.ObjectPathEscape(path)
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/objects/%s", path), api.AddObjectRequest{
-		Bucket:      bucket,
-		ContractSet: contractSet,
-		Object:      o,
-		ETag:        opts.ETag,
-		MimeType:    opts.MimeType,
-		Metadata:    opts.Metadata,
+func (c *Client) AddObject(ctx context.Context, bucket, path string, o object.Object, opts api.AddObjectOptions) (err error) {
+	path = api.ObjectKeyEscape(path)
+	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/object/%s", path), api.AddObjectRequest{
+		Bucket:   bucket,
+		Object:   o,
+		ETag:     opts.ETag,
+		MimeType: opts.MimeType,
+		Metadata: opts.Metadata,
 	})
 	return
 }
 
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
-func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
+func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
 	err = c.c.WithContext(ctx).POST("/objects/copy", api.CopyObjectsRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
-		SourcePath:        srcPath,
-		DestinationPath:   dstPath,
+		SourceKey:         srcKey,
+		DestinationKey:    dstKey,
 		MimeType:          opts.MimeType,
 		Metadata:          opts.Metadata,
 	}, &om)
 	return
 }
 
-// DeleteObject either deletes the object at the given path or if batch=true
-// deletes all objects that start with the given path.
-func (c *Client) DeleteObject(ctx context.Context, bucket, path string, opts api.DeleteObjectOptions) (err error) {
+// DeleteObject deletes the object with given key.
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string) (err error) {
+	values := url.Values{}
+	values.Set("bucket", bucket)
+
+	key = api.ObjectKeyEscape(key)
+	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/object/%s?"+values.Encode(), key))
+	return
+}
+
+// RemoveObjects removes objects with given prefix.
+func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err error) {
+	err = c.c.WithContext(ctx).POST("/objects/remove", api.ObjectsRemoveRequest{
+		Bucket: bucket,
+		Prefix: prefix,
+	}, nil)
+	return
+}
+
+// Object returns the object at given key.
+func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObjectOptions) (res api.Object, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = api.ObjectPathEscape(path)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/objects/%s?"+values.Encode(), path))
+	key = api.ObjectKeyEscape(key)
+	key += "?" + values.Encode()
+
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", key), &res)
 	return
 }
 
-// ListOBjects lists objects in the given bucket.
-func (c *Client) ListObjects(ctx context.Context, bucket string, opts api.ListObjectOptions) (resp api.ObjectsListResponse, err error) {
-	err = c.c.WithContext(ctx).POST("/objects/list", api.ObjectsListRequest{
-		Bucket:  bucket,
-		Limit:   opts.Limit,
-		Prefix:  opts.Prefix,
-		Marker:  opts.Marker,
-		SortBy:  opts.SortBy,
-		SortDir: opts.SortDir,
-	}, &resp)
-	return
-}
-
-// Objects returns the object at given path.
-func (c *Client) Object(ctx context.Context, bucket, path string, opts api.GetObjectOptions) (res api.ObjectsResponse, err error) {
+// Objects lists objects in the given bucket.
+func (c *Client) Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error) {
 	values := url.Values{}
-	values.Set("bucket", bucket)
 	opts.Apply(values)
 
-	path = api.ObjectPathEscape(path)
-	path += "?" + values.Encode()
+	prefix = api.ObjectKeyEscape(prefix)
+	prefix += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", path), &res)
-	return
-}
-
-// ObjectsBySlabKey returns all objects that reference a given slab.
-func (c *Client) ObjectsBySlabKey(ctx context.Context, bucket string, key object.EncryptionKey) (objects []api.ObjectMetadata, err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%v/objects?"+values.Encode(), key), &objects)
+	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", prefix), &resp)
 	return
 }
 
@@ -101,16 +98,6 @@ func (c *Client) RenameObject(ctx context.Context, bucket, from, to string, forc
 // RenameObjects renames all objects with the prefix 'from' to the prefix 'to'.
 func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string, force bool) (err error) {
 	return c.renameObjects(ctx, bucket, from, to, api.ObjectsRenameModeMulti, force)
-}
-
-// SearchObjects returns all objects that contains a sub-string in their key.
-func (c *Client) SearchObjects(ctx context.Context, bucket string, opts api.SearchObjectOptions) (entries []api.ObjectMetadata, err error) {
-	values := url.Values{}
-	values.Set("bucket", bucket)
-	opts.Apply(values)
-
-	err = c.c.WithContext(ctx).GET("/search/objects?"+values.Encode(), &entries)
-	return
 }
 
 func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string, force bool) (err error) {

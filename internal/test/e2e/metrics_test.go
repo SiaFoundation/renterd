@@ -15,10 +15,6 @@ import (
 )
 
 func TestMetrics(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
 	// register start time
 	start := time.Now()
 
@@ -28,8 +24,8 @@ func TestMetrics(t *testing.T) {
 
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:             test.RedundancySettings.TotalShards,
-		autopilotSettings: &apCfg,
+		hosts:           test.RedundancySettings.TotalShards,
+		autopilotConfig: &apCfg,
 	})
 	defer cluster.Shutdown()
 
@@ -40,10 +36,11 @@ func TestMetrics(t *testing.T) {
 
 	// upload, download, delete
 	data := frand.Bytes(rhpv2.SectorSize)
-	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), api.DefaultBucketName, "foo", api.UploadObjectOptions{}))
-	tt.OK(w.DownloadObject(context.Background(), io.Discard, api.DefaultBucketName, "foo", api.DownloadObjectOptions{}))
-	tt.OK(w.DeleteObject(context.Background(), api.DefaultBucketName, "foo", api.DeleteObjectOptions{}))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{}))
+	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "foo", api.DownloadObjectOptions{}))
+	tt.OK(w.DeleteObject(context.Background(), testBucket, "foo"))
 
+	// assert we have various  metrics
 	tt.Retry(30, time.Second, func() (err error) {
 		defer func() {
 			if err != nil {
@@ -65,20 +62,6 @@ func TestMetrics(t *testing.T) {
 			return errors.New("no contract prune metrics")
 		}
 
-		// check contract set metrics
-		csm, err := b.ContractSetMetrics(context.Background(), start, 10, time.Minute, api.ContractSetMetricsQueryOpts{})
-		tt.OK(err)
-		if len(csm) == 0 {
-			return errors.New("no contract set metrics")
-		}
-
-		// check contract set metrics
-		cscm, err := b.ContractSetChurnMetrics(context.Background(), start, 10, time.Minute, api.ContractSetChurnMetricsQueryOpts{})
-		tt.OK(err)
-		if len(cscm) == 0 {
-			return errors.New("no contract set churn metrics")
-		}
-
 		// check wallet metrics
 		wm, err := b.WalletMetrics(context.Background(), start, 10, time.Minute, api.WalletMetricsQueryOpts{})
 		tt.OK(err)
@@ -87,4 +70,13 @@ func TestMetrics(t *testing.T) {
 		}
 		return nil
 	})
+
+	// assert pruning works
+	if err := cluster.Bus.PruneMetrics(context.Background(), api.MetricContract, time.Now()); err != nil {
+		t.Fatal(err)
+	} else if cMetrics, err := cluster.Bus.ContractMetrics(context.Background(), start, api.MetricMaxIntervals, time.Second, api.ContractMetricsQueryOpts{}); err != nil {
+		t.Fatal(err)
+	} else if len(cMetrics) > 0 {
+		t.Fatalf("expected 0 metrics, got %v", len(cMetrics))
+	}
 }

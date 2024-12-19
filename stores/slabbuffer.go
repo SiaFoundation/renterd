@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -38,7 +37,7 @@ type SlabBuffer struct {
 	syncErr     error
 }
 
-type bufferGroupID [6]byte
+type bufferGroupID [2]byte
 
 type SlabBufferManager struct {
 	alerts                          alerts.Alerter
@@ -59,9 +58,12 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 		return nil, fmt.Errorf("invalid slabBufferCompletionThreshold %v", slabBufferCompletionThreshold)
 	}
 
-	// load existing buffers
-	buffers, orphans, err := db.LoadSlabBuffers(ctx)
-	if err != nil {
+	var buffers []sql.LoadedSlabBuffer
+	var orphans []string
+	if err := db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+		buffers, orphans, err = tx.LoadSlabBuffers(ctx)
+		return
+	}); err != nil {
 		return nil, fmt.Errorf("failed to load slab buffers: %w", err)
 	}
 
@@ -113,7 +115,7 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 			size:     buffer.Size,
 		}
 		// Add the buffer to the manager.
-		gid := bufferGID(buffer.MinShards, buffer.TotalShards, uint32(buffer.ContractSetID))
+		gid := bufferGID(buffer.MinShards, buffer.TotalShards)
 		if sb.size >= int64(sb.maxSize-slabBufferCompletionThreshold) {
 			mgr.completeBuffers[gid] = append(mgr.completeBuffers[gid], sb)
 		} else {
@@ -124,11 +126,10 @@ func newSlabBufferManager(ctx context.Context, a alerts.Alerter, db sql.Database
 	return mgr, nil
 }
 
-func bufferGID(minShards, totalShards uint8, contractSet uint32) bufferGroupID {
+func bufferGID(minShards, totalShards uint8) bufferGroupID {
 	var bgid bufferGroupID
 	bgid[0] = minShards
 	bgid[1] = totalShards
-	binary.LittleEndian.PutUint32(bgid[2:], contractSet)
 	return bgid
 }
 
@@ -147,16 +148,8 @@ func (mgr *SlabBufferManager) Close() error {
 	return errors.Join(errs...)
 }
 
-func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) ([]object.SlabSlice, int64, error) {
-	var set int64
-	err := mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		set, err = tx.ContractSetID(ctx, contractSet)
-		return err
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	gid := bufferGID(minShards, totalShards, uint32(set))
+func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (_ []object.SlabSlice, _ int64, err error) {
+	gid := bufferGID(minShards, totalShards)
 
 	// Sanity check input.
 	slabSize := bufferedSlabSize(minShards)
@@ -196,8 +189,8 @@ func (mgr *SlabBufferManager) AddPartialSlab(ctx context.Context, data []byte, m
 	// If there is still data left, create a new buffer.
 	if len(data) > 0 {
 		var sb *SlabBuffer
-		err = mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-			sb, err = createSlabBuffer(ctx, tx, uint(set), mgr.dir, minShards, totalShards)
+		err := mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+			sb, err = createSlabBuffer(ctx, tx, mgr.dir, minShards, totalShards)
 			return err
 		})
 		if err != nil {
@@ -280,12 +273,11 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 		buffer.mu.Lock()
 		defer buffer.mu.Unlock()
 		return api.SlabBuffer{
-			ContractSet: "", // filled in by caller
-			Complete:    complete,
-			Filename:    buffer.filename,
-			Size:        buffer.size,
-			MaxSize:     buffer.maxSize,
-			Locked:      time.Now().Before(buffer.lockedUntil),
+			Complete: complete,
+			Filename: buffer.filename,
+			Size:     buffer.size,
+			MaxSize:  buffer.maxSize,
+			Locked:   time.Now().Before(buffer.lockedUntil),
 		}
 	}
 	for _, buffer := range completeBuffers {
@@ -297,20 +289,11 @@ func (mgr *SlabBufferManager) SlabBuffers() (sbs []api.SlabBuffer) {
 	return sbs
 }
 
-func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, contractSet string, limit int) (slabs []api.PackedSlab, _ error) {
-	var set int64
-	err := mgr.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
-		set, err = tx.ContractSetID(ctx, contractSet)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
+func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) (slabs []api.PackedSlab, _ error) {
 	// Deep copy complete buffers. We don't want to block the manager while we
 	// perform disk I/O.
 	mgr.mu.Lock()
-	buffers := append([]*SlabBuffer{}, mgr.completeBuffers[bufferGID(minShards, totalShards, uint32(set))]...)
+	buffers := append([]*SlabBuffer{}, mgr.completeBuffers[bufferGID(minShards, totalShards)]...)
 	mgr.mu.Unlock()
 
 	for _, buffer := range buffers {
@@ -334,9 +317,9 @@ func (mgr *SlabBufferManager) SlabsForUpload(ctx context.Context, lockingDuratio
 			return nil, err
 		}
 		slabs = append(slabs, api.PackedSlab{
-			BufferID: buffer.dbID,
-			Data:     data,
-			Key:      buffer.slabKey,
+			BufferID:      buffer.dbID,
+			Data:          data,
+			EncryptionKey: buffer.slabKey,
 		})
 		if len(slabs) == limit {
 			break
@@ -464,25 +447,25 @@ func (mgr *SlabBufferManager) markBufferComplete(buffer *SlabBuffer, gid bufferG
 	return nil
 }
 
-func bufferFilename(contractSetID uint, minShards, totalShards uint8) string {
+func bufferFilename(minShards, totalShards uint8) string {
 	identifier := frand.Entropy256()
-	return fmt.Sprintf("%v-%v-%v-%v", contractSetID, minShards, totalShards, hex.EncodeToString(identifier[:]))
+	return fmt.Sprintf("%v-%v-%v", minShards, totalShards, hex.EncodeToString(identifier[:]))
 }
 
 func bufferedSlabSize(minShards uint8) int {
 	return int(rhpv2.SectorSize) * int(minShards)
 }
 
-func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, contractSetID uint, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
+func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {
 	// Create a new buffer and slab.
-	fileName := bufferFilename(contractSetID, minShards, totalShards)
+	fileName := bufferFilename(minShards, totalShards)
 	file, err := os.Create(filepath.Join(dir, fileName))
 	if err != nil {
 		return nil, err
 	}
 
-	ec := object.GenerateEncryptionKey()
-	bufferedSlabID, err := tx.InsertBufferedSlab(ctx, fileName, int64(contractSetID), ec, minShards, totalShards)
+	ec := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
+	bufferedSlabID, err := tx.InsertBufferedSlab(ctx, fileName, ec, minShards, totalShards)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert buffered slab: %w", err)
 	}
