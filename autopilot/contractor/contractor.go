@@ -198,7 +198,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	}
 
 	// shouldn't go below the minimum immediately so we add some buffer
-	minCollateral := MinCollateral.Mul64(2)
+	minCollateral := MinCollateral.Mul64(2).Add(contractPrice)
 	if hostCollateral.Cmp(minCollateral) < 0 {
 		hostCollateral = minCollateral
 	}
@@ -255,14 +255,17 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	}
 
 	var expectedNewStorage uint64
+	var contractPrice types.Currency
 	if host.IsV2() {
+		contractPrice = host.V2Settings.Prices.ContractPrice
 		expectedNewStorage = renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
 	} else {
+		contractPrice = host.PriceTable.ContractPrice
 		expectedNewStorage = renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
 	}
 
 	// a refresh should always result in a contract that has enough collateral
-	minNewCollateral := MinCollateral.Mul64(2)
+	minNewCollateral := MinCollateral.Mul64(2).Add(contractPrice)
 
 	// renew the contract
 	renewal, err := c.bus.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral, expectedNewStorage)
@@ -1041,7 +1044,9 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 		return fmt.Errorf("failed to fetch consensus state: %w", err)
 	}
 	for _, h := range scoredHosts {
-		h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
+		// ignore HostBlockHeight
+		h.host.PriceTable.HostBlockHeight = cs.BlockHeight
+		h.host.V2Settings.Prices.TipHeight = cs.BlockHeight
 		hc := checkHost(ctx.GougingChecker(cs), h, minScore, ctx.Period())
 		if err := bus.UpdateHostCheck(ctx, h.host.PublicKey, *hc); err != nil {
 			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)

@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -36,73 +35,6 @@ const (
 	blocksPerDay   = 144
 	blocksPerMonth = blocksPerDay * 30
 )
-
-type ephemeralPeerStore struct {
-	peers map[string]syncer.PeerInfo
-	bans  map[string]time.Time
-	mu    sync.Mutex
-}
-
-func (eps *ephemeralPeerStore) AddPeer(addr string) error {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	eps.peers[addr] = syncer.PeerInfo{Address: addr}
-	return nil
-}
-
-func (eps *ephemeralPeerStore) Peers() ([]syncer.PeerInfo, error) {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	var peers []syncer.PeerInfo
-	for _, peer := range eps.peers {
-		peers = append(peers, peer)
-	}
-	return peers, nil
-}
-
-func (eps *ephemeralPeerStore) PeerInfo(addr string) (syncer.PeerInfo, error) {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	peer, ok := eps.peers[addr]
-	if !ok {
-		return syncer.PeerInfo{}, syncer.ErrPeerNotFound
-	}
-	return peer, nil
-}
-
-func (eps *ephemeralPeerStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	peer, ok := eps.peers[addr]
-	if !ok {
-		return syncer.ErrPeerNotFound
-	}
-	fn(&peer)
-	eps.peers[addr] = peer
-	return nil
-}
-
-func (eps *ephemeralPeerStore) Ban(addr string, duration time.Duration, reason string) error {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	eps.bans[addr] = time.Now().Add(duration)
-	return nil
-}
-
-// Banned returns true, nil if the peer is banned.
-func (eps *ephemeralPeerStore) Banned(addr string) (bool, error) {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	t, ok := eps.bans[addr]
-	return ok && time.Now().Before(t), nil
-}
-
-func newEphemeralPeerStore() syncer.PeerStore {
-	return &ephemeralPeerStore{
-		peers: make(map[string]syncer.PeerInfo),
-		bans:  make(map[string]time.Time),
-	}
-}
 
 // A Host is an ephemeral host that can be used for testing.
 type Host struct {
@@ -235,7 +167,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	if err != nil {
 		return nil, fmt.Errorf("failed to create syncer listener: %w", err)
 	}
-	s := syncer.New(l, cm, newEphemeralPeerStore(), gateway.Header{
+	s := syncer.New(l, cm, testutil.NewEphemeralPeerStore(), gateway.Header{
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),

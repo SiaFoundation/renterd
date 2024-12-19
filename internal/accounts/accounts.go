@@ -341,7 +341,9 @@ func (a *Manager) refillAccounts() {
 
 	// fetch all usable hosts
 	hosts, err := a.hs.UsableHosts(a.shutdownCtx)
-	if err != nil {
+	if utils.IsErr(err, context.Canceled) {
+		return
+	} else if err != nil {
 		a.logger.Errorw(fmt.Sprintf("failed to fetch usable hosts for refill: %v", err))
 		return
 	}
