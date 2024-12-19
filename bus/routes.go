@@ -565,9 +565,13 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 		return
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	bh := b.cm.TipState().Index.Height
 
 	var infos []api.HostInfo
 	for _, h := range hosts {
+		// ignore height
+		h.V2HS.HostSettings.Prices.TipHeight = bh
+		h.PT.HostBlockHeight = bh
 		if (len(h.V2SiamuxAddresses) > 0 && !gc.CheckV2(h.V2HS).Gouging()) ||
 			(len(h.V2SiamuxAddresses) == 0 && !gc.CheckV1(&h.HS, &h.PT).Gouging()) {
 			infos = append(infos, h.HostInfo)
