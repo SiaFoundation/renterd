@@ -3428,6 +3428,7 @@ func TestDeleteHostSector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	hk1FCIDs, hk2FCIDs := fcids[:2], fcids[2:]
 
 	// create a healthy slab with one sector that is uploaded to all contracts.
 	root := types.Hash256{1, 2, 3}
@@ -3437,7 +3438,8 @@ func TestDeleteHostSector(t *testing.T) {
 		Shards: []object.Sector{
 			{
 				Contracts: map[types.PublicKey][]types.FileContractID{
-					hk1: fcids,
+					hk1: hk1FCIDs,
+					hk2: hk2FCIDs,
 				},
 				Root: root,
 			},
