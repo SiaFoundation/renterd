@@ -193,8 +193,9 @@ type testClusterOptions struct {
 	hosts                int
 	logger               *zap.Logger
 	uploadPacking        bool
-	skipSettingAutopilot bool
 	skipRunningAutopilot bool
+	skipSettingAutopilot bool
+	skipUpdatingSettings bool
 	walletKey            *types.PrivateKey
 
 	autopilotCfg    *config.Autopilot
@@ -474,9 +475,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	}
 
 	// Update the bus settings.
-	tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
-	tt.OK(busClient.UpdateUploadSettings(ctx, us))
-	tt.OK(busClient.UpdateS3Settings(ctx, s3))
+	if !opts.skipUpdatingSettings {
+		tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
+		tt.OK(busClient.UpdateUploadSettings(ctx, us))
+		tt.OK(busClient.UpdateS3Settings(ctx, s3))
+	}
 
 	// Fund the bus.
 	if funding {
