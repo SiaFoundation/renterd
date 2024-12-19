@@ -3436,8 +3436,10 @@ func TestDeleteHostSector(t *testing.T) {
 		MinShards:     1,
 		Shards: []object.Sector{
 			{
-				Contracts: map[types.PublicKey][]types.FileContractID{hk1: fcids},
-				Root:      root,
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					hk1: fcids,
+				},
+				Root: root,
 			},
 		},
 	})
@@ -3445,6 +3447,11 @@ func TestDeleteHostSector(t *testing.T) {
 	// Make sure 4 contractSector entries exist.
 	if n := ss.Count("contract_sectors"); n != 4 {
 		t.Fatal("expected 4 contract-sector links", n)
+	}
+
+	// Make sure 2 hostSector entries exist.
+	if n := ss.Count("host_sectors"); n != 2 {
+		t.Fatal("expected 2 host-sector links", n)
 	}
 
 	// Prune the sector from hk1.
@@ -3457,6 +3464,11 @@ func TestDeleteHostSector(t *testing.T) {
 	// Make sure 2 contractSector entries exist.
 	if n := ss.Count("contract_sectors"); n != 2 {
 		t.Fatal("expected 2 contract-sector links", n)
+	}
+
+	// Make sure 1 hostSector entry exists.
+	if n := ss.Count("host_sectors"); n != 1 {
+		t.Fatal("expected 1 host-sector link", n)
 	}
 
 	// Find the slab. It should have an invalid health.
