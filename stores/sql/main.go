@@ -2486,7 +2486,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	defer hostSectorStmt.Close()
 
 	// insert shards
-	for i := range slab.Shards {
+	for i, sector := range slab.Shards {
 		// insert shard
 		res, err := sectorStmt.Exec(ctx, slabID, i+1, slab.Shards[i].Root[:])
 		if err != nil {
@@ -2497,20 +2497,19 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 			return "", fmt.Errorf("failed to get sector id: %w", err)
 		}
 
+		uc, ok := usedContracts[sector.ContractID]
+		if !ok {
+			continue
+		}
+
 		// insert contract sector links
-		for _, sector := range slab.Shards {
-			uc, ok := usedContracts[sector.ContractID]
-			if !ok {
-				continue
-			}
+		if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
+			return "", fmt.Errorf("failed to insert contract sector: %w", err)
+		}
 
-			if _, err := contractSectorStmt.Exec(ctx, uc.ID, sectorID); err != nil {
-				return "", fmt.Errorf("failed to insert contract sector: %w", err)
-			}
-
-			if _, err := hostSectorStmt.Exec(ctx, uc.HostID, sectorID); err != nil {
-				return "", fmt.Errorf("failed to insert host sector: %w", err)
-			}
+		// insert host sector link
+		if _, err := hostSectorStmt.Exec(ctx, uc.HostID, sectorID); err != nil {
+			return "", fmt.Errorf("failed to insert host sector: %w", err)
 		}
 	}
 	return bufferFileName, nil
