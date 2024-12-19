@@ -1044,7 +1044,9 @@ func performHostChecks(ctx *mCtx, bus Bus, logger *zap.SugaredLogger) error {
 		return fmt.Errorf("failed to fetch consensus state: %w", err)
 	}
 	for _, h := range scoredHosts {
-		h.host.PriceTable.HostBlockHeight = cs.BlockHeight // ignore HostBlockHeight
+		// ignore HostBlockHeight
+		h.host.PriceTable.HostBlockHeight = cs.BlockHeight
+		h.host.V2Settings.Prices.TipHeight = cs.BlockHeight
 		hc := checkHost(ctx.GougingChecker(cs), h, minScore, ctx.Period())
 		if err := bus.UpdateHostCheck(ctx, h.host.PublicKey, *hc); err != nil {
 			return fmt.Errorf("failed to update host check for host %v: %w", h.host.PublicKey, err)

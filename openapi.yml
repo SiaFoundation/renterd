@@ -1,8 +1,16 @@
 openapi: "3.0.0"
 info:
-  title: Autopilot API
+  title: Renterd API
   version: 2.0.0
-  description: API for managing Autopilot configuration and related operations.
+  description: API that caters to both casual users seeking straightforward data storage and developers requiring a robust API for building apps on Sia
+
+tags:
+  - name: autopilot
+    description: Autopilot configuration and operations
+  - name: worker
+    description: Worker operations and status
+  - name: bus
+    description: Bus operations and management
 
 paths:
   #############################
@@ -12,6 +20,8 @@ paths:
   #############################
   /autopilot/config/evaluate:
     post:
+      tags:
+        - autopilot
       summary: Evaluate autopilot configuration
       description: Evaluates the provided autopilot configuration and returns some information about the hosts that would be considered usable using that configuration. If possible, it also returns a recommendation for a better configuration that would allow for forming contracts with more hosts.
       requestBody:
@@ -27,18 +37,6 @@ paths:
                 redundancySettings:
                   $ref: "#/components/schemas/RedundancySettings"
       responses:
-        "400":
-          description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
-        "500":
-          description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
         "200":
           description: The evaluated autopilot configuration
           content:
@@ -98,9 +96,27 @@ paths:
                         description: Number of hosts that haven't been successfully scanned yet
                   recommendation:
                     $ref: "#/components/schemas/ConfigRecommendation"
+        "400":
+          description: Malformed request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                missingRequiredFields:
+                  summary: Missing required fields
+                  value: "missing required fields in configuration, amount must be set"
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /autopilot/state:
     get:
+      tags:
+        - autopilot
       summary: Get the autopilot state
       description: Returns the current state of the autopilot, including migration, pruning, and scanning status.
       responses:
@@ -148,6 +164,8 @@ paths:
 
   /autopilot/trigger:
     post:
+      tags:
+        - autopilot
       summary: Wake up autopilot
       description: Triggers the autopilot to start an iteration of contract maintenance and host scanning.
       requestBody:
@@ -161,12 +179,6 @@ paths:
                   description: If true, the autopilot force a new batch of host scans even if it recently scanned the hosts.
                   default: false
       responses:
-        "400":
-          description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "200":
           description: Successfully attempted to trigger the autopilot
           content:
@@ -177,14 +189,34 @@ paths:
                   triggered:
                     type: boolean
                     description: Indicates whether the request triggered a new iteration of the maintenance loop. If maintenance was already ongoing, this will be false.
+        "400":
+          description: Malformed request
 
   #############################
   #
   # Worker routes
   #
   #############################
+  /worker/accounts:
+    get:
+      tags:
+        - worker
+      summary: Get all worker accounts
+      description: Returns all accounts the worker maintains with hosts for payment.
+      responses:
+        "200":
+          description: Successfully retrieved worker accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+
   /worker/account/{hostkey}:
     get:
+      tags:
+        - worker
       summary: Get a worker account
       description: Returns the account the worker maintains with the specified host for payment.
       parameters:
@@ -202,22 +234,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Account"
 
-  /worker/accounts:
-    get:
-      summary: Get all worker accounts
-      description: Returns all accounts the worker maintains with hosts for payment.
-      responses:
-        "200":
-          description: Successfully retrieved worker accounts
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Account"
-
-  /worker/{id}/resetdrift:
+  /worker/account/{id}/resetdrift:
     post:
+      tags:
+        - worker
       summary: Reset drift for a worker's account
       description: Resets the drift for the specified account to 0.
       parameters:
@@ -235,9 +255,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Account"
+        "404":
+          description: The account was not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "account doesn't exist"
 
   /worker/memory:
     get:
+      tags:
+        - worker
       summary: Get overview of worker's memory usage.
       description: Returns the memory usage of the worker for both uploads and downloads.
       responses:
@@ -259,6 +288,8 @@ paths:
 
   /worker/multipart/{key}:
     put:
+      tags:
+        - worker
       summary: Upload a part of an ongoing multipart upload
       description: Upload a single part of an ongoing multipart upload. Parts can be uploaded in parallel and then combined afterwards.
       parameters:
@@ -268,11 +299,10 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             minLength: 1
         - name: bucket
           description: The name of the bucket the multipart upload belongs to
-          example: "myBucket"
           in: query
           required: true
           schema:
@@ -332,26 +362,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/ETag"
         "400":
-          description: Invalid combination of request parameters
-          content:
-            text/plain:
-              schema:
-                type: string
+          description: Malformed request
         "404":
           description: Bucket or upload weren't found
-          content:
-            text/plain:
-              schema:
-                type: string
         "503":
           description: Consensus isn't synced
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /worker/object/{key}:
     get:
+      tags:
+        - worker
       summary: Download an object
       description: Downloads an object from the Sia network.
       parameters:
@@ -361,11 +381,10 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             minLength: 1
         - name: bucket
           description: The name of the bucket the object belongs to
-          example: "myBucket"
           in: query
           required: true
           schema:
@@ -430,6 +449,8 @@ paths:
                 type: string
                 example: "failed to fetch object metadata"
     put:
+      tags:
+        - worker
       summary: Upload an object
       description: Uploads an object to the Sia network.
       parameters:
@@ -439,11 +460,10 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             minLength: 1
         - name: bucket
           description: The name of the bucket the object belongs to
-          example: "myBucket"
           in: query
           required: true
           schema:
@@ -487,24 +507,14 @@ paths:
                 $ref: "#/components/schemas/ETag"
         "400":
           description: Invalid combination of request parameters
-          content:
-            text/plain:
-              schema:
-                type: string
         "404":
           description: Bucket not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "503":
           description: Consensus isn't synced
-          content:
-            text/plain:
-              schema:
-                type: string
     delete:
-      summary: Deletes an object
+      tags:
+        - worker
+      summary: Delete an object
       description: Deletes an object from the local database. The object is not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
       parameters:
         - name: key
@@ -513,7 +523,7 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             minLength: 1
         - name: bucket
           description: The name of the bucket the object belongs to
@@ -527,13 +537,11 @@ paths:
           description: Successfully deleted object
         "404":
           description: Object not found
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /worker/objects/remove:
     post:
+      tags:
+        - worker
       summary: Delete a batch of objects with a given prefix
       description: Deletes all objects with the provided prefix from the local database. The objects are not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
       requestBody:
@@ -548,33 +556,34 @@ paths:
                     - description: The name of the bucket the objects belong to
                 prefix:
                   type: string
-                  example: "myDir/"
+                  example: "folder/"
                   minLength: 1
                   description: The prefix of the objects to delete
       responses:
         "200":
           description: Successfully removed objects
         "400":
-          description: Missing prefix or bucket
+          description: Malformed request
           content:
             text/plain:
               schema:
                 type: string
+              examples:
+                missingBucket:
+                  summary: Missing bucket field example
+                  value: "'bucket' parameter is required"
+                missingPrefix:
+                  summary: Missing prefix field example
+                  value: "'prefix' parameter is required"
         "404":
           description: Object not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /worker/state:
     get:
+      tags:
+        - worker
       summary: Get the worker's state.
       description: Returns general information about the work.
       responses:
@@ -597,11 +606,13 @@ paths:
 
   /worker/stats/downloads:
     get:
-      summary: Get download stats
-      description: Returns the download stats of the worker.
+      tags:
+        - worker
+      summary: Get download statistics
+      description: Returns the download statistics of the worker.
       responses:
         "200":
-          description: Successfully retrieved download stats
+          description: Successfully retrieved download statistics
           content:
             application/json:
               schema:
@@ -622,7 +633,7 @@ paths:
                   numDownloaders:
                     type: integer
                     format: uint64
-                    description: The number of total downloaders
+                    description: The total number of downloaders
                   downloadersStats:
                     type: array
                     items:
@@ -639,11 +650,13 @@ paths:
 
   /worker/stats/uploads:
     get:
-      summary: Get upload stats
-      description: Returns the upload stats of the worker.
+      tags:
+        - worker
+      summary: Get upload statistics
+      description: Returns the upload statistics of the worker.
       responses:
         "200":
-          description: Successfully retrieved upload stats
+          description: Successfully retrieved upload statistics
           content:
             application/json:
               schema:
@@ -664,7 +677,7 @@ paths:
                   numUploaders:
                     type: integer
                     format: uint64
-                    description: The number of total uploaders
+                    description: The total number of uploaders
                   uploadersStats:
                     type: array
                     items:
@@ -686,18 +699,31 @@ paths:
   #############################
   /bus/accounts:
     get:
-      summary: Get all ephemeral accounts
-      description: Returns all known ephemeral accounts.
+      tags:
+        - bus
+      summary: Get all accounts
+      parameters:
+        - name: owner
+          in: query
+          required: false
+          schema:
+            type: string
+          description: The owner of the account
+      description: Returns all accounts.
       responses:
         "200":
-          description: Successfully retrieved ephemeral accounts
+          description: Successfully retrieved accounts
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Account"
+        "500":
+          description: Internal server error
     post:
+      tags:
+        - bus
       summary: Save accounts
       description: Saves the provided accounts to the database.
       requestBody:
@@ -725,14 +751,12 @@ paths:
                   value: "account is missing a valid 'owner' field"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/accounts/fund:
     post:
-      summary: Fund account
+      tags:
+        - bus
+      summary: Fund an account
       description: Funds the specified account with the provided amount.
       requestBody:
         content:
@@ -766,25 +790,15 @@ paths:
                       - description: The amount that was deposited into the account
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "404":
           description: Contract not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/alerts:
     get:
+      tags:
+        - bus
       summary: Get all alerts
       description: Returns all currently registered alerts.
       parameters:
@@ -851,13 +865,11 @@ paths:
                   value: "offset must be greater than or equal to 0"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/alerts/dismiss:
     post:
+      tags:
+        - bus
       summary: Dismiss alerts
       description: Dismisses the specified alerts.
       requestBody:
@@ -872,13 +884,11 @@ paths:
           description: Successfully dismissed alerts
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/alerts/register:
     post:
+      tags:
+        - bus
       summary: Register an alert
       description: Registers a new alert.
       requestBody:
@@ -894,13 +904,11 @@ paths:
           description: Successfully registered alert
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/autopilot:
     get:
+      tags:
+        - bus
       summary: Get autopilot configuration
       description: Returns the current autopilot configuration.
       responses:
@@ -912,11 +920,9 @@ paths:
                 $ref: "#/components/schemas/AutopilotConfig"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update autopilot configuration
       description: Updates the autopilot configuration.
       requestBody:
@@ -937,19 +943,13 @@ paths:
           description: Successfully updated autopilot configuration
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/buckets:
     get:
+      tags:
+        - bus
       summary: Get all buckets
       description: Returns all known buckets.
       responses:
@@ -963,11 +963,9 @@ paths:
                   $ref: "#/components/schemas/Bucket"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     post:
+      tags:
+        - bus
       summary: Create bucket
       description: Create a new bucket.
       requestBody:
@@ -1002,13 +1000,11 @@ paths:
                   value: "bucket already exists"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/bucket/{name}/policy:
     put:
+      tags:
+        - bus
       summary: Update bucket policy
       description: Updates the policy of the specified bucket.
       parameters:
@@ -1045,13 +1041,11 @@ paths:
                   value: "bucket name is required"
         "404":
           description: Bucket not found
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/bucket/{name}:
     get:
+      tags:
+        - bus
       summary: Get bucket
       description: Returns the specified bucket.
       parameters:
@@ -1070,11 +1064,9 @@ paths:
                 $ref: "#/components/schemas/BucketName"
         "404":
           description: Bucket not found
-          content:
-            text/plain:
-              schema:
-                type: string
     delete:
+      tags:
+        - bus
       summary: Delete bucket
       description: Deletes the specified bucket.
       parameters:
@@ -1099,25 +1091,15 @@ paths:
                   value: "bucket name is required"
         "404":
           description: Bucket not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "409":
           description: Bucket not empty
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/consensus/acceptblock:
     post:
+      tags:
+        - bus
       summary: Accept block
       description: Accepts a block from the consensus set.
       requestBody:
@@ -1130,13 +1112,11 @@ paths:
           description: Successfully accepted block
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/consensus/network:
     get:
+      tags:
+        - bus
       summary: Get network details
       description: Returns various details about the network.
       responses:
@@ -1149,6 +1129,8 @@ paths:
 
   /bus/consensus/siafundfee/{payout}:
     get:
+      tags:
+        - bus
       summary: Get siafund fee
       description: Returns the siafund fee for the specified payout.
       parameters:
@@ -1167,13 +1149,11 @@ paths:
                 $ref: "#/components/schemas/Currency"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/consensus/state:
     get:
+      tags:
+        - bus
       summary: Get consensus state
       description: Returns the current consensus state.
       responses:
@@ -1183,9 +1163,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConsensusState"
+        "500":
+          description: Internal server error
 
   /bus/contracts:
     get:
+      tags:
+        - bus
       summary: Get all contracts
       parameters:
         - name: filtermode
@@ -1215,11 +1199,9 @@ paths:
                   value: "invalid filter mode 'bad', must be one of [active, archived, all, good]"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Add a contract
       requestBody:
         content:
@@ -1234,19 +1216,19 @@ paths:
 
   /bus/contracts/all:
     delete:
+      tags:
+        - bus
       summary: Archives all contracts
       responses:
         "200":
           description: All contracts where archived successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contracts/archive:
     post:
+      tags:
+        - bus
       summary: Archive contracts
       requestBody:
         content:
@@ -1264,13 +1246,11 @@ paths:
           description: Contracts archived successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contracts/form:
     post:
+      tags:
+        - bus
       summary: Form a new contract
       requestBody:
         content:
@@ -1332,13 +1312,11 @@ paths:
           description: Host not found
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contracts/prunable:
     get:
+      tags:
+        - bus
       summary: Get prunable contract data
       responses:
         "200":
@@ -1365,6 +1343,8 @@ paths:
 
   /bus/contracts/renewed/{id}:
     get:
+      tags:
+        - bus
       summary: Get renewed contract
       parameters:
         - name: id
@@ -1381,13 +1361,11 @@ paths:
                 $ref: "#/components/schemas/ContractMetadata"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contracts/spending:
     post:
+      tags:
+        - bus
       summary: Record contract spending
       requestBody:
         content:
@@ -1435,13 +1413,11 @@ paths:
           description: Spending recorded successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}:
     get:
+      tags:
+        - bus
       summary: Get contract by ID
       parameters:
         - name: id
@@ -1458,12 +1434,10 @@ paths:
                 $ref: "#/components/schemas/ContractMetadata"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
     delete:
+      tags:
+        - bus
       summary: Archive contract with archival reason 'removed'
       parameters:
         - name: id
@@ -1476,13 +1450,11 @@ paths:
           description: Contract archived successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/acquire:
     post:
+      tags:
+        - bus
       summary: Acquire contract lock
       parameters:
         - name: id
@@ -1515,6 +1487,8 @@ paths:
 
   /bus/contract/{id}/ancestors:
     get:
+      tags:
+        - bus
       summary: Get contract ancestors
       parameters:
         - name: id
@@ -1539,13 +1513,11 @@ paths:
                   $ref: "#/components/schemas/ContractMetadata"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/broadcast:
     post:
+      tags:
+        - bus
       summary: Broadcast contract's revision
       parameters:
         - name: id
@@ -1558,13 +1530,11 @@ paths:
           description: Contract's revision broadcasted successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/keepalive:
     post:
+      tags:
+        - bus
       summary: Keep contract lock alive
       parameters:
         - name: id
@@ -1590,13 +1560,11 @@ paths:
           description: Contract lock keepalive successful
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/revision:
     get:
+      tags:
+        - bus
       summary: Get latest contract revision
       parameters:
         - name: id
@@ -1611,21 +1579,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Revision"
-        "400":
+        "404":
           description: Contract not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/prune:
     post:
+      tags:
+        - bus
       summary: Prune contract data
       parameters:
         - name: id
@@ -1667,13 +1629,11 @@ paths:
                     description: An error message if the prune failed
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/renew:
     post:
+      tags:
+        - bus
       summary: Renew contract
       parameters:
         - name: id
@@ -1708,6 +1668,8 @@ paths:
 
   /bus/contract/{id}/release:
     post:
+      tags:
+        - bus
       summary: Release contract lock
       parameters:
         - name: id
@@ -1728,13 +1690,11 @@ paths:
           description: Contract lock released successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/roots:
     get:
+      tags:
+        - bus
       summary: Get contract sector roots
       parameters:
         - name: id
@@ -1754,6 +1714,8 @@ paths:
 
   /bus/contract/{id}/size:
     get:
+      tags:
+        - bus
       summary: Get contract size
       parameters:
         - name: id
@@ -1770,19 +1732,13 @@ paths:
                 $ref: "#/components/schemas/ContractSize"
         "400":
           description: Contract not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/contract/{id}/usability:
     put:
+      tags:
+        - bus
       summary: Update contract usability
       parameters:
         - name: id
@@ -1801,25 +1757,15 @@ paths:
           description: Contract usability updated successfully
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "404":
           description: Contract not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/hosts:
     get:
+      tags:
+        - bus
       summary: Get usable hosts
       description: Returns a list of hosts that pass the gouging checks
       responses:
@@ -1833,11 +1779,9 @@ paths:
                   $ref: '#/components/schemas/HostInfo'
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     post:
+      tags:
+        - bus
       summary: Search hosts using filters
       description: Returns a filtered list of hosts based on specified criteria
       requestBody:
@@ -1890,13 +1834,11 @@ paths:
                   $ref: '#/components/schemas/Host'
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/hosts/allowlist:
     get:
+      tags:
+        - bus
       summary: Get host allowlist
       description: Returns the list of allowed host public keys
       responses:
@@ -1910,11 +1852,9 @@ paths:
                   $ref: '#/components/schemas/PublicKey'
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update host allowlist
       description: Updates the list of allowed host public keys
       requestBody:
@@ -1938,19 +1878,13 @@ paths:
           description: Allowlist updated successfully
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/hosts/blocklist:
     get:
+      tags:
+        - bus
       summary: Get host blocklist
       description: Returns the list of blocked host net addresses
       responses:
@@ -1965,11 +1899,9 @@ paths:
                   format: ipv4
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update host blocklist
       description: Updates the list of blocked host public keys
       requestBody:
@@ -1993,19 +1925,13 @@ paths:
           description: Blocklist updated successfully
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/hosts/remove:
     post:
+      tags:
+        - bus
       summary: Remove offline hosts
       description: Removes hosts that have been offline for the specified duration
       requestBody:
@@ -2038,13 +1964,11 @@ paths:
                   value: "maxDowntime must be non-zero"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/host/{hostkey}:
     get:
+      tags:
+        - bus
       summary: Get host details
       description: Returns detailed information about a specific host
       parameters:
@@ -2065,13 +1989,11 @@ paths:
           description: Host not found
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/host/{hostkey}/check:
     put:
+      tags:
+        - bus
       summary: Update host check
       description: Updates host checks for a specific host
       parameters:
@@ -2091,19 +2013,13 @@ paths:
           description: Host check updated successfully
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/host/{hostkey}/resetlostsectors:
     post:
+      tags:
+        - bus
       summary: Reset lost sectors
       description: Resets the lost sectors counter for a specific host
       parameters:
@@ -2118,13 +2034,11 @@ paths:
           description: Lost sectors reset successfully
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/host/{hostkey}/scan:
     post:
+      tags:
+        - bus
       summary: Scan host
       description: Performs a scan of the host to check its settings and availability
       parameters:
@@ -2166,15 +2080,13 @@ paths:
                     $ref: '#/components/schemas/HostV2Settings'
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
         "503":
           description: Not connected to peers
 
   /bus/metric/{key}:
     get:
+      tags:
+        - bus
       summary: Get metrics
       parameters:
         - name: key
@@ -2253,11 +2165,9 @@ paths:
                   value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Record metrics
       parameters:
         - name: key
@@ -2292,11 +2202,9 @@ paths:
                   value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     delete:
+      tags:
+        - bus
       summary: Delete metrics
       parameters:
         - name: key
@@ -2334,13 +2242,11 @@ paths:
                   value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/multipart/create:
     post:
+      tags:
+        - bus
       summary: Create a multipart upload
       description: Creates a new multipart upload and returns an upload ID.
       requestBody:
@@ -2354,7 +2260,7 @@ paths:
                 key:
                   type: string
                   description: The key of the object to upload
-                  example: "myDir/myFile"
+                  example: "folder/file"
                   minLength: 1
                 mimeType:
                   type: string
@@ -2380,13 +2286,11 @@ paths:
                       - description: The ID of the multipart upload
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/multipart/abort:
     post:
+      tags:
+        - bus
       summary: Abort a multipart upload
       description: Aborts an ongoing multipart upload and removes any uploaded parts.
       requestBody:
@@ -2400,7 +2304,7 @@ paths:
                 key:
                   type: string
                   description: The key of the object
-                  example: "myDir/myFile"
+                  example: "folder/file"
                   minLength: 1
                 uploadID:
                   type: string
@@ -2410,19 +2314,13 @@ paths:
           description: Successfully aborted multipart upload
         "404":
           description: Upload not found
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/multipart/complete:
     post:
+      tags:
+        - bus
       summary: Complete a multipart upload
       description: Completes a multipart upload by combining all uploaded parts into a single object.
       requestBody:
@@ -2436,7 +2334,7 @@ paths:
                 key:
                   type: string
                   description: The key of the object
-                  example: "myDir/myFile"
+                  example: "folder/file"
                   minLength: 1
                 uploadID:
                     allOf:
@@ -2461,13 +2359,11 @@ paths:
                     description: The ETag of the completed object
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/multipart/part:
     put:
+      tags:
+        - bus
       summary: Upload a part of a multipart upload
       description: Adds a part to an ongoing multipart upload.
       requestBody:
@@ -2483,7 +2379,7 @@ paths:
                 key:
                   type: string
                   description: The key of the object
-                  example: "myDir/myFile"
+                  example: "folder/file"
                   minLength: 1
                 uploadID:
                   $ref: "#/components/schemas/UploadID"
@@ -2517,13 +2413,11 @@ paths:
                   value: "uploadID must be non-empty"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/multipart/upload/{id}:
     get:
+      tags:
+        - bus
       summary: Get multipart upload details
       description: Returns details about an ongoing multipart upload.
       parameters:
@@ -2560,13 +2454,11 @@ paths:
                     description: When the upload was created
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/multipart/listuploads:
     post:
+      tags:
+        - bus
       summary: List multipart uploads
       description: Lists all ongoing multipart uploads.
       requestBody:
@@ -2633,6 +2525,8 @@ paths:
 
   /bus/multipart/listparts:
     post:
+      tags:
+        - bus
       summary: List parts of a multipart upload
       description: Lists all parts that have been uploaded for a specific multipart upload.
       requestBody:
@@ -2646,7 +2540,7 @@ paths:
                 key:
                   type: string
                   description: The key of the object
-                  example: "myDir/myFile"
+                  example: "folder/file"
                   minLength: 1
                 uploadID:
                     allOf:
@@ -2677,9 +2571,13 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/MultipartListPartItem"
+        "500":
+          description: Internal server error
 
   /bus/objects/{prefix}:
     get:
+      tags:
+        - bus
       summary: List objects
       description: Lists objects with the specified prefix.
       parameters:
@@ -2688,7 +2586,7 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/"
+            example: "folder/"
             pattern: ".*" # greedy match
           description: The prefix to filter objects by
         - name: bucket
@@ -2760,13 +2658,11 @@ paths:
                   value: "delimiter must be '/' or empty"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/objects/copy:
     post:
+      tags:
+        - bus
       summary: Copy object
       description: Copies an object from one location to another.
       requestBody:
@@ -2806,13 +2702,11 @@ paths:
                 $ref: "#/components/schemas/ObjectMetadata"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/objects/remove:
     post:
+      tags:
+        - bus
       summary: Remove objects by prefix
       description: Removes all objects with the specified prefix.
       requestBody:
@@ -2845,13 +2739,11 @@ paths:
                   value: "prefix cannot be empty"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/objects/rename:
     post:
+      tags:
+        - bus
       summary: Rename objects
       description: Renames a single object or multiple objects with a prefix.
       requestBody:
@@ -2893,13 +2785,11 @@ paths:
                   value: "mode must be 'single' or 'multi'"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/object/{key}:
     get:
+      tags:
+        - bus
       summary: Get object
       description: Returns an object's metadata or full object data.
       parameters:
@@ -2908,7 +2798,7 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             pattern: ".*" # greedy match
           description: The key of the object to fetch
         - name: bucket
@@ -2931,11 +2821,11 @@ paths:
                 $ref: "#/components/schemas/Object"
         "404":
           description: Object not found
-          content:
-            text/plain:
-              schema:
-                type: string
+        "500":
+          description: Internal server error
     put:
+      tags:
+        - bus
       summary: Store object
       description: Stores or updates an object.
       parameters:
@@ -2944,7 +2834,7 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             pattern: ".*" # greedy match
           description: The key of the object
       requestBody:
@@ -2968,7 +2858,13 @@ paths:
       responses:
         "200":
           description: Successfully stored object
+        "400":
+          description: Malformed request
+        "500":
+          description: Internal server error
     delete:
+      tags:
+        - bus
       summary: Delete object
       description: Deletes an object from the bucket.
       parameters:
@@ -2977,7 +2873,7 @@ paths:
           required: true
           schema:
             type: string
-            example: "myDir/myFile"
+            example: "folder/file"
             pattern: ".*" # greedy match
           description: The key of the object to delete
         - name: bucket
@@ -2990,13 +2886,13 @@ paths:
           description: Successfully deleted object
         "404":
           description: Object not found
-          content:
-            text/plain:
-              schema:
-                type: string
+        "500":
+          description: Internal server error
 
   /bus/params/gouging:
     get:
+      tags:
+        - bus
       summary: Get gouging parameters
       description: Returns the current gouging parameters including consensus state, gouging settings, and redundancy settings.
       responses:
@@ -3025,13 +2921,11 @@ paths:
                     $ref: "#/components/schemas/RedundancySettings"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/params/upload:
     get:
+      tags:
+        - bus
       summary: Get upload parameters
       description: Returns parameters needed for uploads including consensus height, gouging parameters and upload packing status.
       responses:
@@ -3054,13 +2948,11 @@ paths:
                   - $ref: "#/components/schemas/GougingParams"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/sectors/{hostkey}/{root}:
     delete:
+      tags:
+        - bus
       summary: Delete host sector
       description: Marks a sector as lost for a specific host.
       parameters:
@@ -3081,13 +2973,11 @@ paths:
           description: Successfully marked sector as lost
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/settings/gouging:
     get:
+      tags:
+        - bus
       summary: Get gouging settings
       description: Returns the current gouging settings.
       responses:
@@ -3099,11 +2989,9 @@ paths:
                 $ref: "#/components/schemas/GougingSettings"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update gouging settings
       description: Updates the gouging settings.
       requestBody:
@@ -3116,19 +3004,13 @@ paths:
           description: Successfully updated gouging settings
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/settings/pinned:
     get:
+      tags:
+        - bus
       summary: Get pinned settings
       description: Returns the current pinned settings.
       responses:
@@ -3139,6 +3021,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PinnedSettings"
     put:
+      tags:
+        - bus
       summary: Update pinned settings
       description: Updates the pinned settings.
       requestBody:
@@ -3161,13 +3045,11 @@ paths:
                   value: "explorer must be enabled for settings to be pinned"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/settings/s3:
     get:
+      tags:
+        - bus
       summary: Get S3 settings
       description: Returns the current S3 settings.
       responses:
@@ -3179,11 +3061,9 @@ paths:
                 $ref: "#/components/schemas/S3Settings"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update S3 settings
       description: Updates the S3 settings.
       requestBody:
@@ -3195,20 +3075,14 @@ paths:
         "200":
           description: Successfully updated S3 settings
         "400":
-          description: Invalid settings
-          content:
-            text/plain:
-              schema:
-                type: string
+          description: Malformed request
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/settings/upload:
     get:
+      tags:
+        - bus
       summary: Get upload settings
       description: Returns the current upload settings.
       responses:
@@ -3220,11 +3094,9 @@ paths:
                 $ref: "#/components/schemas/UploadSettings"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update upload settings
       description: Updates the upload settings.
       requestBody:
@@ -3236,20 +3108,14 @@ paths:
         "200":
           description: Successfully updated upload settings
         "400":
-          description: Invalid settings
-          content:
-            text/plain:
-              schema:
-                type: string
+          description: Malformed request
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabbuffers:
     get:
+      tags:
+        - bus
       summary: Get slab buffers info
       description: Returns information about all slab buffers.
       responses:
@@ -3263,13 +3129,11 @@ paths:
                   $ref: "#/components/schemas/SlabBuffer"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabbuffer/done:
     post:
+      tags:
+        - bus
       summary: Mark packed slabs as uploaded
       description: Marks the specified packed slabs as successfully uploaded.
       requestBody:
@@ -3287,13 +3151,11 @@ paths:
           description: Successfully marked slabs as uploaded
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabbuffer/fetch:
     post:
+      tags:
+        - bus
       summary: Fetch packed slabs for upload
       description: Returns packed slabs that are ready to be uploaded.
       requestBody:
@@ -3328,13 +3190,11 @@ paths:
                   $ref: "#/components/schemas/PackedSlab"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabs/migration:
     post:
+      tags:
+        - bus
       summary: Get slabs for migration
       description: Returns slabs that need to be migrated based on health cutoff.
       requestBody:
@@ -3371,19 +3231,13 @@ paths:
                           description: Current health of the slab
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabs/partial/{key}:
     get:
+      tags:
+        - bus
       summary: Get partial slab
       description: Retrieves a portion of a slab's data.
       parameters:
@@ -3431,13 +3285,11 @@ paths:
           description: Slab not found
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabs/partial:
     post:
+      tags:
+        - bus
       summary: Add partial slab
       description: Adds data to a partial slab.
       parameters:
@@ -3490,13 +3342,11 @@ paths:
                   value: "totalShards must be less than or equal to 255"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slabs/refreshhealth:
     post:
+      tags:
+        - bus
       summary: Refresh slab health
       description: Recalculates health for all slabs.
       responses:
@@ -3504,13 +3354,11 @@ paths:
           description: Successfully refreshed slab health
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/slab/{key}:
     get:
+      tags:
+        - bus
       summary: Get slab
       description: Returns information about a specific slab.
       parameters:
@@ -3530,11 +3378,9 @@ paths:
           description: Slab not found
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
     put:
+      tags:
+        - bus
       summary: Update slab
       description: Updates the sectors for a slab.
       parameters:
@@ -3560,21 +3406,15 @@ paths:
           description: Successfully updated slab
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "404":
           description: Slab not found
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/syncer/address:
     get:
+      tags:
+        - bus
       summary: Get the syncer's address
       description: Returns the address of the syncer.
       responses:
@@ -3587,6 +3427,8 @@ paths:
 
   /bus/syncer/connect:
     post:
+      tags:
+        - bus
       summary: Connect to a syncer
       description: Connects to the specified syncer.
       requestBody:
@@ -3601,13 +3443,11 @@ paths:
           description: Successfully connected to syncer
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/syncer/peers:
     get:
+      tags:
+        - bus
       summary: Get syncer peers
       description: Returns the syncer's peers.
       responses:
@@ -3622,6 +3462,8 @@ paths:
 
   /bus/system/sqlite3/backup:
     post:
+      tags:
+        - bus
       summary: Backup SQLite database
       description: Creates a backup of the specified SQLite database.
       requestBody:
@@ -3646,13 +3488,11 @@ paths:
           description: Backup not supported
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/state:
     get:
+      tags:
+        - bus
       summary: Get bus state
       description: Returns the current state of the bus including version, build info, and explorer status.
       responses:
@@ -3695,6 +3535,8 @@ paths:
 
   /bus/stats/objects:
     get:
+      tags:
+        - bus
       summary: Get object statistics
       description: Returns statistics about objects in a bucket.
       parameters:
@@ -3741,13 +3583,11 @@ paths:
                     description: Uploaded size of all objects including redundant sectors
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/txpool/recommendedfee:
     get:
+      tags:
+        - bus
       summary: Get recommended fee
       description: Returns the recommended fee for a transaction.
       responses:
@@ -3759,13 +3599,11 @@ paths:
                 $ref: "#/components/schemas/Currency"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/txpool/transactions:
     get:
+      tags:
+        - bus
       summary: Get all transactions
       description: Returns all transactions in the transaction pool.
       responses:
@@ -3779,13 +3617,11 @@ paths:
                   $ref: "#/components/schemas/Transaction"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/txpool/broadcast:
     post:
+      tags:
+        - bus
       summary: Broadcast transaction
       description: Broadcasts the specified transaction.
       requestBody:
@@ -3798,13 +3634,11 @@ paths:
           description: Successfully broadcast transaction
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/upload/{id}:
     post:
+      tags:
+        - bus
       summary: Track upload
       description: Starts tracking an upload with the given ID.
       parameters:
@@ -3816,7 +3650,11 @@ paths:
       responses:
         "200":
           description: Successfully started tracking upload
+        "500":
+          description: Internal server error
     delete:
+      tags:
+        - bus
       summary: Finish upload
       description: Marks an upload as finished and stops tracking it.
       parameters:
@@ -3828,9 +3666,13 @@ paths:
       responses:
         "200":
           description: Successfully finished upload
+        "500":
+          description: Internal server error
 
   /bus/upload/{id}/sector:
     post:
+      tags:
+        - bus
       summary: Add sectors to upload
       description: Adds sector roots to a tracked upload.
       parameters:
@@ -3851,13 +3693,11 @@ paths:
           description: Successfully added sectors
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/wallet:
     get:
+      tags:
+        - bus
       summary: Get wallet information
       description: Returns information about the wallet.
       responses:
@@ -3894,13 +3734,11 @@ paths:
                     description: The height up until which the wallet is synced
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/wallet/events:
     get:
+      tags:
+        - bus
       summary: Get wallet events
       description: Returns all events related to the wallet.
       parameters:
@@ -3942,13 +3780,11 @@ paths:
                   value: "offset must be greater than or equal to 0"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/wallet/pending:
     get:
+      tags:
+        - bus
       summary: Get unconfirmed events
       description: Returns all unconfirmed events in the wallet.
       responses:
@@ -3962,13 +3798,11 @@ paths:
                   $ref: "#/components/schemas/Event"
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/wallet/redistribute:
       post:
+        tags:
+        - bus
         summary: Redistribute wallet funds
         description: Redistributes the wallet's funds into desired number of outputs of requested value.
         requestBody:
@@ -3996,19 +3830,13 @@ paths:
                     $ref: "#/components/schemas/TransactionID"
           "400":
             description: Malformed request
-            content:
-              text/plain:
-                schema:
-                  type: string
           "500":
             description: Internal server error
-            content:
-              text/plain:
-                schema:
-                  type: string
 
   /bus/wallet/send:
     post:
+      tags:
+        - bus
       summary: Send siacoins
       description: Sends the specified amount of siacoins to the specified address.
       requestBody:
@@ -4042,19 +3870,13 @@ paths:
                   - description: The ID of the transaction
         "400":
           description: Malformed request
-          content:
-            text/plain:
-              schema:
-                type: string
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/webhooks:
     get:
+      tags:
+        - bus
       summary: Get webhooks
       description: Returns all registered webhooks and their queue information.
       responses:
@@ -4074,6 +3896,8 @@ paths:
                     items:
                       $ref: "#/components/schemas/Webhook"
     post:
+      tags:
+        - bus
       summary: Register webhook
       description: Registers a new webhook.
       requestBody:
@@ -4085,10 +3909,12 @@ paths:
         "200":
           description: Successfully registered webhook
         "500":
-          description: Failed to register webhook
+          description: Internal server error
 
-  /webhooks/action:
+  /bus/webhooks/action:
     post:
+      tags:
+        - bus
       summary: Broadcast webhook action
       description: Broadcasts a webhook event to registered webhooks.
       requestBody:
@@ -4101,13 +3927,11 @@ paths:
           description: Successfully broadcast action
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
   /bus/webhook/delete:
     post:
+      tags:
+        - bus
       summary: Delete webhook
       description: Deletes a registered webhook.
       requestBody:
@@ -4122,10 +3946,6 @@ paths:
           description: Webhook not found
         "500":
           description: Internal server error
-          content:
-            text/plain:
-              schema:
-                type: string
 
 components:
   schemas:
@@ -5250,6 +5070,7 @@ components:
       type: string
       pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
       description: The name of the bucket.
+      example: "default"
 
     BuildState:
       type: object
@@ -5726,10 +5547,12 @@ components:
           type: integer
           format: uint64
           description: The amount of remaining memory currently available in bytes
+          example: 83886080
         total:
           type: integer
           format: uint64
           description: The total amount of memory available in bytes
+          example: 1073741824
           minimum: 1
 
     MultipartUpload:
