@@ -3,9 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
-	"sort"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/internal/utils"
 )
 
@@ -13,62 +11,64 @@ const (
 	// BlocksPerDay defines the amount of blocks that are mined in a day (one
 	// block every 10 minutes roughly)
 	BlocksPerDay = 144
-
-	// DefaultAutopilotID is the id of the autopilot.
-	DefaultAutopilotID = "autopilot"
 )
 
 var (
-	// ErrAutopilotNotFound is returned when an autopilot can't be found.
-	ErrAutopilotNotFound = errors.New("couldn't find autopilot")
-
-	// ErrMaxDowntimeHoursTooHigh is returned if the autopilot config is updated
+	// ErrMaxDowntimeHoursTooHigh is returned if the contracts config is updated
 	// with a value that exceeds the maximum of 99 years.
 	ErrMaxDowntimeHoursTooHigh = errors.New("MaxDowntimeHours is too high, exceeds max value of 99 years")
+
+	// ErrInvalidReleaseVersion is returned if the version is an invalid release
+	// string.
+	ErrInvalidReleaseVersion = errors.New("invalid release version")
 )
 
 type (
-	// Autopilot contains the autopilot's config and current period.
-	Autopilot struct {
-		ID            string          `json:"id"`
-		Config        AutopilotConfig `json:"config"`
-		CurrentPeriod uint64          `json:"currentPeriod"`
-	}
-
-	// AutopilotConfig contains all autopilot configuration.
+	// AutopilotConfig contains host and contracts settings for the autopilot.
 	AutopilotConfig struct {
+		Enabled   bool            `json:"enabled"`
 		Contracts ContractsConfig `json:"contracts"`
 		Hosts     HostsConfig     `json:"hosts"`
 	}
 
 	// ContractsConfig contains all contract settings used in the autopilot.
 	ContractsConfig struct {
-		Set         string         `json:"set"`
-		Amount      uint64         `json:"amount"`
-		Allowance   types.Currency `json:"allowance"`
-		Period      uint64         `json:"period"`
-		RenewWindow uint64         `json:"renewWindow"`
-		Download    uint64         `json:"download"`
-		Upload      uint64         `json:"upload"`
-		Storage     uint64         `json:"storage"`
-		Prune       bool           `json:"prune"`
+		Amount      uint64 `json:"amount"`
+		Period      uint64 `json:"period"`
+		RenewWindow uint64 `json:"renewWindow"`
+		Download    uint64 `json:"download"`
+		Upload      uint64 `json:"upload"`
+		Storage     uint64 `json:"storage"`
+		Prune       bool   `json:"prune"`
 	}
 
 	// HostsConfig contains all hosts settings used in the autopilot.
 	HostsConfig struct {
-		AllowRedundantIPs          bool                        `json:"allowRedundantIPs"`
-		MaxDowntimeHours           uint64                      `json:"maxDowntimeHours"`
-		MinProtocolVersion         string                      `json:"minProtocolVersion"`
-		MaxConsecutiveScanFailures uint64                      `json:"maxConsecutiveScanFailures"`
-		ScoreOverrides             map[types.PublicKey]float64 `json:"scoreOverrides"`
+		MaxConsecutiveScanFailures uint64 `json:"maxConsecutiveScanFailures"`
+		MaxDowntimeHours           uint64 `json:"maxDowntimeHours"`
+		MinProtocolVersion         string `json:"minProtocolVersion"`
 	}
 )
 
-// EndHeight of a contract formed using the AutopilotConfig given the current
-// period.
-func (ap *Autopilot) EndHeight() uint64 {
-	return ap.CurrentPeriod + ap.Config.Contracts.Period + ap.Config.Contracts.RenewWindow
-}
+var (
+	DefaultAutopilotConfig = AutopilotConfig{
+		Enabled: false,
+		Contracts: ContractsConfig{
+			Amount:      50,
+			Period:      144 * 7 * 6,
+			RenewWindow: 144 * 7 * 2,
+			Download:    1e12, // 1 TB
+			Upload:      1e12, // 1 TB
+			Storage:     4e12, // 4 TB
+			Prune:       false,
+		},
+		Hosts: HostsConfig{
+			MaxConsecutiveScanFailures: 10,
+			MaxDowntimeHours:           24 * 7 * 2,
+			MinProtocolVersion:         "1.6.0",
+		},
+	}
+)
 
 type (
 	// AutopilotTriggerRequest is the request object used by the /trigger
@@ -86,7 +86,7 @@ type (
 	// AutopilotStateResponse is the response type for the /autopilot/state
 	// endpoint.
 	AutopilotStateResponse struct {
-		Configured         bool        `json:"configured"`
+		Enabled            bool        `json:"enabled"`
 		Migrating          bool        `json:"migrating"`
 		MigratingLastStart TimeRFC3339 `json:"migratingLastStart"`
 		Pruning            bool        `json:"pruning"`
@@ -122,6 +122,7 @@ type (
 				Pruning  uint64 `json:"pruning"`
 				Upload   uint64 `json:"upload"`
 			} `json:"gouging"`
+			LowMaxDuration        uint64 `json:"lowMaxDuration"`
 			NotAcceptingContracts uint64 `json:"notAcceptingContracts"`
 			NotScanned            uint64 `json:"notScanned"`
 		} `json:"unusable"`
@@ -129,22 +130,20 @@ type (
 	}
 )
 
-func (c AutopilotConfig) Validate() error {
-	if c.Hosts.MaxDowntimeHours > 99*365*24 {
-		return ErrMaxDowntimeHoursTooHigh
-	} else if c.Hosts.MinProtocolVersion != "" && !utils.IsVersion(c.Hosts.MinProtocolVersion) {
-		return fmt.Errorf("invalid min protocol version '%s'", c.Hosts.MinProtocolVersion)
+func (cc ContractsConfig) Validate() error {
+	if cc.Period == 0 {
+		return errors.New("period must be greater than 0")
+	} else if cc.RenewWindow == 0 {
+		return errors.New("renewWindow must be greater than 0")
 	}
 	return nil
 }
 
-func (c ContractsConfig) SortContractsForMaintenance(contracts []Contract) {
-	sort.SliceStable(contracts, func(i, j int) bool {
-		iInSet := contracts[i].InSet(c.Set)
-		jInSet := contracts[j].InSet(c.Set)
-		if iInSet != jInSet {
-			return iInSet
-		}
-		return contracts[i].FileSize() > contracts[j].FileSize()
-	})
+func (hc HostsConfig) Validate() error {
+	if hc.MaxDowntimeHours > 99*365*24 {
+		return ErrMaxDowntimeHoursTooHigh
+	} else if hc.MinProtocolVersion != "" && !utils.IsVersion(hc.MinProtocolVersion) {
+		return fmt.Errorf("%w: '%s'", ErrInvalidReleaseVersion, hc.MinProtocolVersion)
+	}
+	return nil
 }

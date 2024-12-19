@@ -5,38 +5,40 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net"
 	"net/http"
-	"strings"
+	"os"
 	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	cRhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/bus/client"
+	"go.sia.tech/renterd/config"
 	ibus "go.sia.tech/renterd/internal/bus"
 	"go.sia.tech/renterd/internal/gouging"
 	"go.sia.tech/renterd/internal/rhp"
 	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/blake2b"
 )
 
 const (
@@ -111,11 +113,9 @@ type (
 	}
 
 	UploadingSectorsCache interface {
-		AddSector(uID api.UploadID, fcid types.FileContractID, root types.Hash256) error
+		AddSectors(uID api.UploadID, roots ...types.Hash256) error
 		FinishUpload(uID api.UploadID)
-		HandleRenewal(fcid, renewedFrom types.FileContractID)
-		Pending(fcid types.FileContractID) (size uint64)
-		Sectors(fcid types.FileContractID) (roots []types.Hash256)
+		Sectors() (sectors []types.Hash256)
 		StartUpload(uID api.UploadID) error
 	}
 
@@ -126,7 +126,7 @@ type (
 
 	Syncer interface {
 		Addr() string
-		BroadcastHeader(h gateway.BlockHeader)
+		BroadcastHeader(h types.BlockHeader)
 		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
 		BroadcastTransactionSet([]types.Transaction)
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
@@ -164,6 +164,7 @@ type (
 	Store interface {
 		AccountStore
 		AutopilotStore
+		BackupStore
 		ChainStore
 		HostStore
 		MetadataStore
@@ -179,16 +180,22 @@ type (
 		SaveAccounts(context.Context, []api.Account) error
 	}
 
-	// An AutopilotStore stores autopilots.
+	// A AutopilotStore stores autopilot state.
 	AutopilotStore interface {
-		Autopilot(ctx context.Context, id string) (api.Autopilot, error)
-		Autopilots(ctx context.Context) ([]api.Autopilot, error)
-		UpdateAutopilot(ctx context.Context, ap api.Autopilot) error
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		InitAutopilotConfig(ctx context.Context) error
+		UpdateAutopilotConfig(ctx context.Context, ap api.AutopilotConfig) error
+	}
+
+	// BackupStore is the interface of a store that can be backed up.
+	BackupStore interface {
+		Backup(ctx context.Context, dbID, dst string) error
 	}
 
 	// A ChainStore stores information about the chain.
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
@@ -197,32 +204,29 @@ type (
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		HostAllowlist(ctx context.Context) ([]types.PublicKey, error)
 		HostBlocklist(ctx context.Context) ([]string, error)
-		HostsForScanning(ctx context.Context, maxLastScan time.Time, offset, limit int) ([]api.HostAddress, error)
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RecordHostScans(ctx context.Context, scans []api.HostScan) error
-		RecordPriceTables(ctx context.Context, priceTableUpdate []api.HostPriceTableUpdate) error
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
-		SearchHosts(ctx context.Context, autopilotID, filterMode, usabilityMode, addressContains string, keyIn []types.PublicKey, offset, limit int) ([]api.Host, error)
 		UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error
 		UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error
-		UpdateHostCheck(ctx context.Context, autopilotID string, hk types.PublicKey, check api.HostCheck) error
+		UpdateHostCheck(ctx context.Context, hk types.PublicKey, check api.HostChecks) error
+		UsableHosts(ctx context.Context) ([]sql.HostInfo, error)
 	}
 
 	// A MetadataStore stores information about contracts and objects.
 	MetadataStore interface {
-		AddContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error)
-		AddRenewedContract(ctx context.Context, c rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, renewedFrom types.FileContractID, state string) (api.ContractMetadata, error)
-		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ArchivedContract, error)
+		AddRenewal(ctx context.Context, c api.ContractMetadata) error
+		AncestorContracts(ctx context.Context, fcid types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
 		ArchiveContract(ctx context.Context, id types.FileContractID, reason string) error
 		ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
 		ArchiveAllContracts(ctx context.Context, reason string) error
 		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
 		Contracts(ctx context.Context, opts api.ContractsOpts) ([]api.ContractMetadata, error)
-		ContractSets(ctx context.Context) ([]string, error)
 		RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-		RemoveContractSet(ctx context.Context, name string) error
+		PutContract(ctx context.Context, c api.ContractMetadata) error
 		RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-		UpdateContractSet(ctx context.Context, set string, toAdd, toRemove []types.FileContractID) error
+		UpdateContractUsability(ctx context.Context, id types.FileContractID, usability string) error
 
 		ContractRoots(ctx context.Context, id types.FileContractID) ([]types.Hash256, error)
 		ContractSizes(ctx context.Context) (map[types.FileContractID]api.ContractSize, error)
@@ -232,69 +236,69 @@ type (
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
 		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
+		Buckets(_ context.Context) ([]api.Bucket, error)
 		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
 		DeleteBucket(_ context.Context, bucketName string) error
-		ListBuckets(_ context.Context) ([]api.Bucket, error)
 		UpdateBucketPolicy(ctx context.Context, bucketName string, policy api.BucketPolicy) error
 
-		CopyObject(ctx context.Context, srcBucket, dstBucket, srcPath, dstPath, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
-		ListObjects(ctx context.Context, bucketName, prefix, sortBy, sortDir, marker string, limit int) (api.ObjectsListResponse, error)
-		Object(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectMetadata(ctx context.Context, bucketName, path string) (api.Object, error)
-		ObjectEntries(ctx context.Context, bucketName, path, prefix, sortBy, sortDir, marker string, offset, limit int) ([]api.ObjectMetadata, bool, error)
-		ObjectsBySlabKey(ctx context.Context, bucketName string, slabKey object.EncryptionKey) ([]api.ObjectMetadata, error)
+		CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey, mimeType string, metadata api.ObjectUserMetadata) (api.ObjectMetadata, error)
+		Object(ctx context.Context, bucketName, key string) (api.Object, error)
+		Objects(ctx context.Context, bucketName, prefix, substring, delim, sortBy, sortDir, marker string, limit int, slabEncryptionKey object.EncryptionKey) (api.ObjectsResponse, error)
+		ObjectMetadata(ctx context.Context, bucketName, key string) (api.Object, error)
 		ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (api.ObjectsStatsResponse, error)
-		RemoveObject(ctx context.Context, bucketName, path string) error
+		RemoveObject(ctx context.Context, bucketName, key string) error
 		RemoveObjects(ctx context.Context, bucketName, prefix string) error
 		RenameObject(ctx context.Context, bucketName, from, to string, force bool) error
 		RenameObjects(ctx context.Context, bucketName, from, to string, force bool) error
-		SearchObjects(ctx context.Context, bucketName, substring string, offset, limit int) ([]api.ObjectMetadata, error)
-		UpdateObject(ctx context.Context, bucketName, path, contractSet, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
+		UpdateObject(ctx context.Context, bucketName, key, ETag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error
 
-		AbortMultipartUpload(ctx context.Context, bucketName, path string, uploadID string) (err error)
-		AddMultipartPart(ctx context.Context, bucketName, path, contractSet, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
-		CompleteMultipartUpload(ctx context.Context, bucketName, path, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
-		CreateMultipartUpload(ctx context.Context, bucketName, path string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
+		AbortMultipartUpload(ctx context.Context, bucketName, key string, uploadID string) (err error)
+		AddMultipartPart(ctx context.Context, bucketName, key, eTag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
+		CompleteMultipartUpload(ctx context.Context, bucketName, key, uploadID string, parts []api.MultipartCompletedPart, opts api.CompleteMultipartOptions) (_ api.MultipartCompleteResponse, err error)
+		CreateMultipartUpload(ctx context.Context, bucketName, key string, ec object.EncryptionKey, mimeType string, metadata api.ObjectUserMetadata) (api.MultipartCreateResponse, error)
 		MultipartUpload(ctx context.Context, uploadID string) (resp api.MultipartUpload, _ error)
 		MultipartUploads(ctx context.Context, bucketName, prefix, keyMarker, uploadIDMarker string, maxUploads int) (resp api.MultipartListUploadsResponse, _ error)
 		MultipartUploadParts(ctx context.Context, bucketName, object string, uploadID string, marker int, limit int64) (resp api.MultipartListPartsResponse, _ error)
 
 		MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
-		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, set string, limit int) ([]api.PackedSlab, error)
+		PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) ([]api.PackedSlab, error)
 		SlabBuffers(ctx context.Context) ([]api.SlabBuffer, error)
 
-		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8, contractSet string) (slabs []object.SlabSlice, bufferSize int64, err error)
+		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, bufferSize int64, err error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 		RefreshHealth(ctx context.Context) error
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, set string, limit int) ([]api.UnhealthySlab, error)
-		UpdateSlab(ctx context.Context, s object.Slab, contractSet string) error
+		UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
+		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 	}
 
 	// A MetricsStore stores metrics.
 	MetricsStore interface {
-		ContractSetMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetMetricsQueryOpts) ([]api.ContractSetMetric, error)
-
 		ContractPruneMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractPruneMetricsQueryOpts) ([]api.ContractPruneMetric, error)
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 
 		ContractMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractMetricsQueryOpts) ([]api.ContractMetric, error)
 		RecordContractMetric(ctx context.Context, metrics ...api.ContractMetric) error
 
-		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
-		ContractSetChurnMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.ContractSetChurnMetricsQueryOpts) ([]api.ContractSetChurnMetric, error)
-		RecordContractSetChurnMetric(ctx context.Context, metrics ...api.ContractSetChurnMetric) error
-
 		WalletMetrics(ctx context.Context, start time.Time, n uint64, interval time.Duration, opts api.WalletMetricsQueryOpts) ([]api.WalletMetric, error)
 		RecordWalletMetric(ctx context.Context, metrics ...api.WalletMetric) error
+
+		PruneMetrics(ctx context.Context, metric string, cutoff time.Time) error
 	}
 
 	// A SettingStore stores settings.
 	SettingStore interface {
-		DeleteSetting(ctx context.Context, key string) error
-		Setting(ctx context.Context, key string) (string, error)
-		Settings(ctx context.Context) ([]string, error)
-		UpdateSetting(ctx context.Context, key, value string) error
+		GougingSettings(ctx context.Context) (api.GougingSettings, error)
+		UpdateGougingSettings(ctx context.Context, gs api.GougingSettings) error
+
+		PinnedSettings(ctx context.Context) (api.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, ps api.PinnedSettings) error
+
+		UploadSettings(ctx context.Context) (api.UploadSettings, error)
+		UpdateUploadSettings(ctx context.Context, us api.UploadSettings) error
+
+		S3Settings(ctx context.Context) (api.S3Settings, error)
+		UpdateS3Settings(ctx context.Context, s3as api.S3Settings) error
 	}
 
 	WalletMetricsRecorder interface {
@@ -303,8 +307,9 @@ type (
 )
 
 type Bus struct {
-	startTime time.Time
-	masterKey utils.MasterKey
+	allowPrivateIPs bool
+	startTime       time.Time
+	masterKey       utils.MasterKey
 
 	alerts      alerts.Alerter
 	alertMgr    AlertManager
@@ -314,18 +319,14 @@ type Bus struct {
 	cs          ChainSubscriber
 	s           Syncer
 	w           Wallet
+	store       Store
 
-	accounts AccountStore
-	as       AutopilotStore
-	hs       HostStore
-	ms       MetadataStore
-	mtrcs    MetricsStore
-	ss       SettingStore
-
-	rhp2 *rhp2.Client
-	rhp3 *rhp3.Client
+	rhp2Client *rhp2.Client
+	rhp3Client *rhp3.Client
+	rhp4Client *rhp4.Client
 
 	contractLocker        ContractLocker
+	explorer              *ibus.Explorer
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 
@@ -333,34 +334,34 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, announcementMaxAge time.Duration, l *zap.Logger) (_ *Bus, err error) {
+func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
+	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
 	b := &Bus{
-		startTime: time.Now(),
-		masterKey: masterKey,
+		allowPrivateIPs: cfg.AllowPrivateIPs,
+		startTime:       time.Now(),
+		masterKey:       masterKey,
 
-		accounts: store,
 		s:        s,
 		cm:       cm,
 		w:        w,
-		hs:       store,
-		as:       store,
-		ms:       store,
-		mtrcs:    store,
-		ss:       store,
+		explorer: ibus.NewExplorer(explorerURL),
+		store:    store,
 
 		alerts:      alerts.WithOrigin(am, "bus"),
 		alertMgr:    am,
 		webhooksMgr: wm,
 		logger:      l.Sugar(),
 
-		rhp2: rhp2.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
-		rhp3: rhp3.New(rhp.NewFallbackDialer(store, net.Dialer{}, l), l),
+		rhp2Client: rhp2.New(dialer, l),
+		rhp3Client: rhp3.New(dialer, l),
+		rhp4Client: rhp4.New(dialer),
 	}
 
-	// init settings
-	if err := b.initSettings(ctx); err != nil {
+	// initialize autopilot config
+	err = store.InitAutopilotConfig(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -371,10 +372,11 @@ func New(ctx context.Context, masterKey [32]byte, am AlertManager, wm WebhooksMa
 	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
-	b.pinMgr = ibus.NewPinManager(b.alerts, wm, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
+	b.pinMgr = ibus.NewPinManager(b.alerts, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
 
 	// create chain subscriber
-	b.cs = ibus.NewChainSubscriber(wm, cm, store, w, announcementMaxAge, l)
+	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
+	b.cs = ibus.NewChainSubscriber(wm, cm, store, b.s, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
@@ -393,11 +395,8 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /alerts/dismiss":  b.handlePOSTAlertsDismiss,
 		"POST   /alerts/register": b.handlePOSTAlertsRegister,
 
-		"GET    /autopilots":    b.autopilotsListHandlerGET,
-		"GET    /autopilot/:id": b.autopilotsHandlerGET,
-		"PUT    /autopilot/:id": b.autopilotsHandlerPUT,
-
-		"PUT    /autopilot/:id/host/:hostkey/check": b.autopilotHostCheckHandlerPUT,
+		"GET    /autopilot": b.autopilotHandlerGET,
+		"PUT    /autopilot": b.autopilotHandlerPUT,
 
 		"GET    /buckets":             b.bucketsHandlerGET,
 		"POST   /buckets":             b.bucketsHandlerPOST,
@@ -407,44 +406,44 @@ func (b *Bus) Handler() http.Handler {
 
 		"POST   /consensus/acceptblock":        b.consensusAcceptBlock,
 		"GET    /consensus/network":            b.consensusNetworkHandler,
-		"GET    /consensus/siafundfee/:payout": b.contractTaxHandlerGET,
+		"GET    /consensus/siafundfee/:payout": b.consensusPayoutContractTaxHandlerGET,
 		"GET    /consensus/state":              b.consensusStateHandler,
 
-		"POST   /contracts":              b.contractsFormHandler,
-		"GET    /contracts":              b.contractsHandlerGET,
-		"DELETE /contracts/all":          b.contractsAllHandlerDELETE,
-		"POST   /contracts/archive":      b.contractsArchiveHandlerPOST,
-		"GET    /contracts/prunable":     b.contractsPrunableDataHandlerGET,
-		"GET    /contracts/renewed/:id":  b.contractsRenewedIDHandlerGET,
-		"GET    /contracts/sets":         b.contractsSetsHandlerGET,
-		"POST   /contracts/set/:set":     b.contractsSetHandlerPUT,
-		"DELETE /contracts/set/:set":     b.contractsSetHandlerDELETE,
-		"POST   /contracts/spending":     b.contractsSpendingHandlerPOST,
+		"PUT    /contracts":             b.contractsHandlerPUT,
+		"GET    /contracts":             b.contractsHandlerGET,
+		"DELETE /contracts/all":         b.contractsAllHandlerDELETE,
+		"POST   /contracts/archive":     b.contractsArchiveHandlerPOST,
+		"POST   /contracts/form":        b.contractsFormHandler,
+		"GET    /contracts/prunable":    b.contractsPrunableDataHandlerGET,
+		"GET    /contracts/renewed/:id": b.contractsRenewedIDHandlerGET,
+		"POST   /contracts/spending":    b.contractsSpendingHandlerPOST,
+
 		"GET    /contract/:id":           b.contractIDHandlerGET,
-		"POST   /contract/:id":           b.contractIDHandlerPOST,
 		"DELETE /contract/:id":           b.contractIDHandlerDELETE,
 		"POST   /contract/:id/acquire":   b.contractAcquireHandlerPOST,
 		"GET    /contract/:id/ancestors": b.contractIDAncestorsHandler,
 		"POST   /contract/:id/broadcast": b.contractIDBroadcastHandler,
 		"POST   /contract/:id/keepalive": b.contractKeepaliveHandlerPOST,
+		"GET    /contract/:id/revision":  b.contractLatestRevisionHandlerGET,
 		"POST   /contract/:id/prune":     b.contractPruneHandlerPOST,
 		"POST   /contract/:id/renew":     b.contractIDRenewHandlerPOST,
-		"POST   /contract/:id/renewed":   b.contractIDRenewedHandlerPOST,
 		"POST   /contract/:id/release":   b.contractReleaseHandlerPOST,
 		"GET    /contract/:id/roots":     b.contractIDRootsHandlerGET,
 		"GET    /contract/:id/size":      b.contractSizeHandlerGET,
+		"PUT    /contract/:id/usability": b.contractUsabilityHandlerPUT,
 
-		"GET    /hosts":                          b.hostsHandlerGETDeprecated,
-		"GET    /hosts/allowlist":                b.hostsAllowlistHandlerGET,
-		"PUT    /hosts/allowlist":                b.hostsAllowlistHandlerPUT,
-		"GET    /hosts/blocklist":                b.hostsBlocklistHandlerGET,
-		"PUT    /hosts/blocklist":                b.hostsBlocklistHandlerPUT,
-		"POST   /hosts/pricetables":              b.hostsPricetableHandlerPOST,
-		"POST   /hosts/remove":                   b.hostsRemoveHandlerPOST,
-		"POST   /hosts/scans":                    b.hostsScanHandlerPOST,
-		"GET    /hosts/scanning":                 b.hostsScanningHandlerGET,
+		"GET    /hosts":           b.hostsHandlerGET,
+		"POST   /hosts":           b.hostsHandlerPOST,
+		"GET    /hosts/allowlist": b.hostsAllowlistHandlerGET,
+		"PUT    /hosts/allowlist": b.hostsAllowlistHandlerPUT,
+		"GET    /hosts/blocklist": b.hostsBlocklistHandlerGET,
+		"PUT    /hosts/blocklist": b.hostsBlocklistHandlerPUT,
+		"POST   /hosts/remove":    b.hostsRemoveHandlerPOST,
+
 		"GET    /host/:hostkey":                  b.hostsPubkeyHandlerGET,
+		"PUT    /host/:hostkey/check":            b.hostsCheckHandlerPUT,
 		"POST   /host/:hostkey/resetlostsectors": b.hostsResetLostSectorsPOST,
+		"POST   /host/:hostkey/scan":             b.hostsScanHandlerPOST,
 
 		"PUT    /metric/:key": b.metricsHandlerPUT,
 		"GET    /metric/:key": b.metricsHandlerGET,
@@ -458,44 +457,49 @@ func (b *Bus) Handler() http.Handler {
 		"POST   /multipart/listuploads": b.multipartHandlerListUploadsPOST,
 		"POST   /multipart/listparts":   b.multipartHandlerListPartsPOST,
 
-		"GET    /objects/*path":  b.objectsHandlerGET,
-		"PUT    /objects/*path":  b.objectsHandlerPUT,
-		"DELETE /objects/*path":  b.objectsHandlerDELETE,
-		"POST   /objects/copy":   b.objectsCopyHandlerPOST,
-		"POST   /objects/rename": b.objectsRenameHandlerPOST,
-		"POST   /objects/list":   b.objectsListHandlerPOST,
+		"GET    /objects/*prefix": b.objectsHandlerGET,
+		"POST   /objects/copy":    b.objectsCopyHandlerPOST,
+		"POST   /objects/remove":  b.objectsRemoveHandlerPOST,
+		"POST   /objects/rename":  b.objectsRenameHandlerPOST,
+
+		"GET    /object/*key": b.objectHandlerGET,
+		"PUT    /object/*key": b.objectHandlerPUT,
+		"DELETE /object/*key": b.objectHandlerDELETE,
 
 		"GET    /params/gouging": b.paramsHandlerGougingGET,
 		"GET    /params/upload":  b.paramsHandlerUploadGET,
 
+		"DELETE /sectors/:hostkey/:root": b.sectorsHostRootHandlerDELETE,
+
+		"GET    /settings/gouging": b.settingsGougingHandlerGET,
+		"PUT    /settings/gouging": b.settingsGougingHandlerPUT,
+		"GET    /settings/pinned":  b.settingsPinnedHandlerGET,
+		"PUT    /settings/pinned":  b.settingsPinnedHandlerPUT,
+		"GET    /settings/s3":      b.settingsS3HandlerGET,
+		"PUT    /settings/s3":      b.settingsS3HandlerPUT,
+		"GET    /settings/upload":  b.settingsUploadHandlerGET,
+		"PUT    /settings/upload":  b.settingsUploadHandlerPUT,
+
 		"GET    /slabbuffers":      b.slabbuffersHandlerGET,
 		"POST   /slabbuffer/done":  b.packedSlabsHandlerDonePOST,
 		"POST   /slabbuffer/fetch": b.packedSlabsHandlerFetchPOST,
-
-		"POST   /search/hosts":   b.searchHostsHandlerPOST,
-		"GET    /search/objects": b.searchObjectsHandlerGET,
-
-		"DELETE /sectors/:hk/:root": b.sectorsHostRootHandlerDELETE,
-
-		"GET    /settings":     b.settingsHandlerGET,
-		"GET    /setting/:key": b.settingKeyHandlerGET,
-		"PUT    /setting/:key": b.settingKeyHandlerPUT,
-		"DELETE /setting/:key": b.settingKeyHandlerDELETE,
 
 		"POST   /slabs/migration":     b.slabsMigrationHandlerPOST,
 		"GET    /slabs/partial/:key":  b.slabsPartialHandlerGET,
 		"POST   /slabs/partial":       b.slabsPartialHandlerPOST,
 		"POST   /slabs/refreshhealth": b.slabsRefreshHealthHandlerPOST,
 		"GET    /slab/:key":           b.slabHandlerGET,
-		"GET    /slab/:key/objects":   b.slabObjectsHandlerGET,
-		"PUT    /slab":                b.slabHandlerPUT,
+		"PUT    /slab/:key":           b.slabHandlerPUT,
 
-		"GET    /state":         b.stateHandlerGET,
+		"GET    /state": b.stateHandlerGET,
+
 		"GET    /stats/objects": b.objectsStatshandlerGET,
 
 		"GET    /syncer/address": b.syncerAddrHandler,
 		"POST   /syncer/connect": b.syncerConnectHandler,
 		"GET    /syncer/peers":   b.syncerPeersHandler,
+
+		"POST /system/sqlite3/backup": b.postSystemSQLite3BackupHandler,
 
 		"GET    /txpool/recommendedfee": b.txpoolFeeHandler,
 		"GET    /txpool/transactions":   b.txpoolTransactionsHandler,
@@ -505,15 +509,11 @@ func (b *Bus) Handler() http.Handler {
 		"DELETE /upload/:id":        b.uploadFinishedHandlerDELETE,
 		"POST   /upload/:id/sector": b.uploadAddSectorHandlerPOST,
 
-		"GET    /wallet":              b.walletHandler,
-		"POST   /wallet/discard":      b.walletDiscardHandler,
-		"POST   /wallet/fund":         b.walletFundHandler,
-		"GET    /wallet/outputs":      b.walletOutputsHandler,
-		"GET    /wallet/pending":      b.walletPendingHandler,
-		"POST   /wallet/redistribute": b.walletRedistributeHandler,
-		"POST   /wallet/send":         b.walletSendSiacoinsHandler,
-		"POST   /wallet/sign":         b.walletSignHandler,
-		"GET    /wallet/transactions": b.walletTransactionsHandler,
+		"GET  /wallet":              b.walletHandler,
+		"GET  /wallet/events":       b.walletEventsHandler,
+		"GET  /wallet/pending":      b.walletPendingHandler,
+		"POST /wallet/redistribute": b.walletRedistributeHandler,
+		"POST /wallet/send":         b.walletSendSiacoinsHandler,
 
 		"GET    /webhooks":        b.webhookHandlerGet,
 		"POST   /webhooks":        b.webhookHandlerPost,
@@ -532,42 +532,21 @@ func (b *Bus) Shutdown(ctx context.Context) error {
 	)
 }
 
-func (b *Bus) addContract(ctx context.Context, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	c, err := b.ms.AddContract(ctx, rev, contractPrice, totalCost, startHeight, state)
-	if err != nil {
+func (b *Bus) addContract(ctx context.Context, contract api.ContractMetadata) (api.ContractMetadata, error) {
+	if err := b.store.PutContract(ctx, contract); err != nil {
 		return api.ContractMetadata{}, err
 	}
-
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventAdd,
-		Payload: api.EventContractAdd{
-			Added:     c,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-	return c, nil
+	return b.store.Contract(ctx, contract.ID)
 }
 
-func (b *Bus) addRenewedContract(ctx context.Context, renewedFrom types.FileContractID, rev rhpv2.ContractRevision, contractPrice, totalCost types.Currency, startHeight uint64, state string) (api.ContractMetadata, error) {
-	r, err := b.ms.AddRenewedContract(ctx, rev, contractPrice, totalCost, startHeight, renewedFrom, state)
-	if err != nil {
-		return api.ContractMetadata{}, err
+func (b *Bus) addRenewal(ctx context.Context, contract api.ContractMetadata) (api.ContractMetadata, error) {
+	if err := b.store.AddRenewal(ctx, contract); err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("couldn't add renewal: %w", err)
 	}
-
-	b.sectors.HandleRenewal(r.ID, r.RenewedFrom)
-	b.broadcastAction(webhooks.Event{
-		Module: api.ModuleContract,
-		Event:  api.EventRenew,
-		Payload: api.EventContractRenew{
-			Renewal:   r,
-			Timestamp: time.Now().UTC(),
-		},
-	})
-	return r, nil
+	return b.store.Contract(ctx, contract.ID)
 }
 
-func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (txnID types.TransactionID, _ error) {
+func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error) {
 	// acquire contract lock indefinitely and defer the release
 	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, fcid, time.Duration(math.MaxInt64))
 	if err != nil {
@@ -580,30 +559,81 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}()
 
 	// fetch contract
-	c, err := b.ms.Contract(ctx, fcid)
+	c, err := b.store.Contract(ctx, fcid)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch contract; %w", err)
 	}
 
-	// fetch revision
-	rk := b.deriveRenterKey(c.HostKey)
-	rev, err := b.rhp2.SignedRevision(ctx, c.HostIP, c.HostKey, rk, fcid, time.Minute)
+	// fetch host
+	host, err := b.store.Host(ctx, c.HostKey)
 	if err != nil {
-		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch host; %w", err)
 	}
+	fee := b.cm.RecommendedFee().Mul64(10e3)
+
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 
 	// send V2 transaction if we're passed the V2 hardfork allow height
 	if b.isPassedV2AllowHeight() {
-		panic("not implemented")
+		// fetch revision
+		rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.V2SiamuxAddr(), fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		}
+
+		// fetch parent contract element
+		fce, err := b.store.FileContractElement(ctx, fcid)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch file contract element; %w", err)
+		}
+
+		// create the transaction
+		txn := types.V2Transaction{
+			MinerFee: fee,
+			FileContractRevisions: []types.V2FileContractRevision{
+				{
+					Parent:   fce,
+					Revision: rev,
+				},
+			},
+		}
+
+		// fund the transaction (only the fee)
+		basis, toSign, err := b.w.FundV2Transaction(&txn, fee, true)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+		}
+		// sign the transaction
+		b.w.SignV2Inputs(&txn, toSign)
+
+		// verify the transaction and add it to the transaction pool
+		txnSet := []types.V2Transaction{txn}
+		_, err = b.cm.AddV2PoolTransactions(basis, txnSet)
+		if err != nil {
+			b.w.ReleaseInputs(nil, txnSet)
+			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
+		}
+
+		// broadcast the transaction
+		b.s.BroadcastV2TransactionSet(basis, txnSet)
+		return txn.ID(), nil
 	} else {
+		// fetch revision
+		rev, err := b.rhp2Client.SignedRevision(ctx, host.NetAddress, c.HostKey, renterKey, fcid, time.Minute)
+		if err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
+		}
+
 		// create the transaction
 		txn := types.Transaction{
+			MinerFees:             []types.Currency{fee},
 			FileContractRevisions: []types.FileContractRevision{rev.Revision},
 			Signatures:            rev.Signatures[:],
 		}
 
 		// fund the transaction (only the fee)
-		toSign, err := b.w.FundTransaction(&txn, types.ZeroCurrency, true)
+		toSign, err := b.w.FundTransaction(&txn, fee, true)
 		if err != nil {
 			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
 		}
@@ -620,15 +650,13 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 
 		// broadcast the transaction
 		b.s.BroadcastTransactionSet(txnset)
-		txnID = txn.ID()
+		return txn.ID(), nil
 	}
-
-	return
 }
 
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (rhpv2.ContractRevision, error) {
+func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {
 	// derive the renter key
-	renterKey := b.deriveRenterKey(hostKey)
+	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
 	// prepare the transaction
 	cs := b.cm.TipState()
@@ -643,144 +671,76 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
 	toSign, err := b.w.FundTransaction(&txn, cost, true)
 	if err != nil {
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't fund transaction: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("couldn't fund transaction: %w", err)
 	}
 
 	// sign the transaction
 	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
 
 	// form the contract
-	contract, txnSet, err := b.rhp2.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
+	contract, txnSet, err := b.rhp2Client.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, err
+		return api.ContractMetadata{}, err
 	}
 
 	// add transaction set to the pool
 	_, err = b.cm.AddPoolTransactions(txnSet)
 	if err != nil {
 		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return rhpv2.ContractRevision{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
 	}
 
-	// broadcast the transaction set
-	go b.s.BroadcastTransactionSet(txnSet)
-
-	return contract, nil
+	return api.ContractMetadata{
+		ID:                 contract.ID(),
+		HostKey:            contract.HostKey(),
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.WindowStart,
+		WindowEnd:          contract.Revision.WindowEnd,
+		ContractPrice:      contract.Revision.MissedHostPayout().Sub(hostCollateral),
+		InitialRenterFunds: renterFunds,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 false,
+	}, nil
 }
 
-// initSettings loads the default settings if the setting is not already set and
-// ensures the settings are valid
-func (b *Bus) initSettings(ctx context.Context) error {
-	// testnets have different redundancy settings
-	defaultRedundancySettings := api.DefaultRedundancySettings
-	if mn, _ := chain.Mainnet(); mn.Name != b.cm.TipState().Network.Name {
-		defaultRedundancySettings = api.DefaultRedundancySettingsTestnet
+func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+	cs := b.cm.TipState()
+	key := b.masterKey.DeriveContractKey(hk)
+	signer := ibus.NewFormContractSigner(b.w, key)
+
+	// form the contract
+	res, err := b.rhp4Client.FormContract(ctx, hk, hostIP, b.cm, signer, cs, prices, hostAddr, rhpv4.RPCFormContractParams{
+		RenterPublicKey: key.PublicKey(),
+		RenterAddress:   renterAddr,
+		Allowance:       renterFunds,
+		Collateral:      collateral,
+		ProofHeight:     endHeight,
+	})
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to form v2 contract: %w", err)
 	}
 
-	// load default settings if the setting is not already set
-	for key, value := range map[string]interface{}{
-		api.SettingGouging:       api.DefaultGougingSettings,
-		api.SettingPricePinning:  api.DefaultPricePinSettings,
-		api.SettingRedundancy:    defaultRedundancySettings,
-		api.SettingUploadPacking: api.DefaultUploadPackingSettings,
-	} {
-		if _, err := b.ss.Setting(ctx, key); errors.Is(err, api.ErrSettingNotFound) {
-			if bytes, err := json.Marshal(value); err != nil {
-				panic("failed to marshal default settings") // should never happen
-			} else if err := b.ss.UpdateSetting(ctx, key, string(bytes)); err != nil {
-				return err
-			}
-		}
+	// add transaction set to the pool
+	_, err = b.cm.AddV2PoolTransactions(res.FormationSet.Basis, res.FormationSet.Transactions)
+	if err != nil {
+		return api.ContractMetadata{}, fmt.Errorf("failed to add v2 transaction set to the pool: %w", err)
 	}
 
-	// check redundancy settings for validity
-	var rs api.RedundancySettings
-	if rss, err := b.ss.Setting(ctx, api.SettingRedundancy); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(rss), &rs); err != nil {
-		return err
-	} else if err := rs.Validate(); err != nil {
-		b.logger.Warn(fmt.Sprintf("invalid redundancy setting found '%v', overwriting the redundancy settings with the default settings", rss))
-		bytes, _ := json.Marshal(defaultRedundancySettings)
-		if err := b.ss.UpdateSetting(ctx, api.SettingRedundancy, string(bytes)); err != nil {
-			return err
-		}
-	}
-
-	// check gouging settings for validity
-	var gs api.GougingSettings
-	if gss, err := b.ss.Setting(ctx, api.SettingGouging); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(gss), &gs); err != nil {
-		return err
-	} else if err := gs.Validate(); err != nil {
-		// compat: apply default EA gouging settings
-		gs.MinMaxEphemeralAccountBalance = api.DefaultGougingSettings.MinMaxEphemeralAccountBalance
-		gs.MinPriceTableValidity = api.DefaultGougingSettings.MinPriceTableValidity
-		gs.MinAccountExpiry = api.DefaultGougingSettings.MinAccountExpiry
-		if err := gs.Validate(); err == nil {
-			b.logger.Info(fmt.Sprintf("updating gouging settings with default EA settings: %+v", gs))
-			bytes, _ := json.Marshal(gs)
-			if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-				return err
-			}
-		} else {
-			// compat: apply default host block leeway settings
-			gs.HostBlockHeightLeeway = api.DefaultGougingSettings.HostBlockHeightLeeway
-			if err := gs.Validate(); err == nil {
-				b.logger.Info(fmt.Sprintf("updating gouging settings with default HostBlockHeightLeeway settings: %v", gs))
-				bytes, _ := json.Marshal(gs)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return err
-				}
-			} else {
-				b.logger.Warn(fmt.Sprintf("invalid gouging setting found '%v', overwriting the gouging settings with the default settings", gss))
-				bytes, _ := json.Marshal(api.DefaultGougingSettings)
-				if err := b.ss.UpdateSetting(ctx, api.SettingGouging, string(bytes)); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	// compat: default price pin settings
-	var pps api.PricePinSettings
-	if pss, err := b.ss.Setting(ctx, api.SettingPricePinning); err != nil {
-		return err
-	} else if err := json.Unmarshal([]byte(pss), &pps); err != nil {
-		return err
-	} else if err := pps.Validate(); err != nil {
-		// overwrite values with defaults
-		var updates []string
-		if pps.ForexEndpointURL == "" {
-			pps.ForexEndpointURL = api.DefaultPricePinSettings.ForexEndpointURL
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.ForexEndpointURL to %v", pps.ForexEndpointURL))
-		}
-		if pps.Currency == "" {
-			pps.Currency = api.DefaultPricePinSettings.Currency
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.Currency to %v", pps.Currency))
-		}
-		if pps.Threshold == 0 {
-			pps.Threshold = api.DefaultPricePinSettings.Threshold
-			updates = append(updates, fmt.Sprintf("set PricePinSettings.Threshold to %v", pps.Threshold))
-		}
-
-		var updated []byte
-		if err := pps.Validate(); err == nil {
-			b.logger.Info(fmt.Sprintf("updating price pinning settings with default values: %v", strings.Join(updates, ", ")))
-			updated, _ = json.Marshal(pps)
-		} else {
-			b.logger.Warn(fmt.Sprintf("updated price pinning settings are invalid (%v), they have been overwritten with the default settings", err))
-			updated, _ = json.Marshal(api.DefaultPricePinSettings)
-		}
-
-		if err := b.ss.UpdateSetting(ctx, api.SettingPricePinning, string(updated)); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	contract := res.Contract
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            contract.Revision.HostPublicKey,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ProofHeight + rhpv4.ProofWindow,
+		ContractPrice:      res.Usage.RenterCost(),
+		InitialRenterFunds: renterFunds,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
 }
 
 func (b *Bus) isPassedV2AllowHeight() bool {
@@ -788,25 +748,7 @@ func (b *Bus) isPassedV2AllowHeight() bool {
 	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
 }
 
-func (b *Bus) deriveRenterKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.deriveSubKey("renterkey"), hostKey[:]...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
-func (b *Bus) deriveSubKey(purpose string) types.PrivateKey {
-	seed := blake2b.Sum256(append(b.masterKey[:], []byte(purpose)...))
-	pk := types.NewPrivateKeyFromSeed(seed[:])
-	for i := range seed {
-		seed[i] = 0
-	}
-	return pk
-}
-
-func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
+func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
 	return func(pt rhpv3.HostPriceTable) ([]types.Hash256, []types.Transaction, types.Currency, rhp3.DiscardTxnFn, error) {
 		// create the final revision from the provided revision
 		finalRevision := revision
@@ -831,11 +773,6 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 		// compute how much renter funds to put into the new contract
 		fundAmount := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
 
-		// make sure we don't exceed the max fund amount.
-		if maxFundAmount.Cmp(fundAmount) < 0 {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("%w: %v > %v", api.ErrMaxFundAmountExceeded, fundAmount, maxFundAmount)
-		}
-
 		// fund the transaction, we are not signing it yet since it's not
 		// complete. The host still needs to complete it and the revision +
 		// contract are signed with the renter key by the worker.
@@ -853,35 +790,133 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 	}
 }
 
-func (b *Bus) renewContract(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral, maxFundAmount types.Currency, endHeight, expectedNewStorage uint64) (rhpv2.ContractRevision, types.Currency, types.Currency, error) {
-	// acquire contract lock indefinitely and defer the release
-	lockID, err := b.contractLocker.Acquire(ctx, lockingPriorityRenew, c.ID, time.Duration(math.MaxInt64))
-	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't acquire contract lock; %w", err)
+func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+
+	// cap v1 renewals to the v2 require height since the host won't allow us to
+	// form contracts beyond that
+	v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+	if endHeight >= v2ReqHeight {
+		endHeight = v2ReqHeight - 1
 	}
-	defer func() {
-		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
-		}
-	}()
 
 	// fetch the revision
-	rev, err := b.rhp3.Revision(ctx, c.ID, c.HostKey, c.SiamuxAddr)
+	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, hs.SiamuxAddr())
 	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't fetch revision; %w", err)
+		return api.ContractMetadata{}, err
 	}
 
 	// renew contract
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState, gp.TransactionFee, nil, nil)
-	renterKey := b.deriveRenterKey(c.HostKey)
-	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, maxFundAmount, endHeight, expectedNewStorage)
-	newRevision, txnSet, contractPrice, fundAmount, err := b.rhp3.Renew(ctx, gc, rev, renterKey, c.HostKey, c.SiamuxAddr, prepareRenew, b.w.SignTransaction)
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
+	newRevision, _, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, hs.SiamuxAddr(), prepareRenew, b.w.SignTransaction)
 	if err != nil {
-		return rhpv2.ContractRevision{}, types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("couldn't renew contract; %w", err)
+		return api.ContractMetadata{}, err
 	}
 
-	// broadcast the transaction set
-	b.s.BroadcastTransactionSet(txnSet)
+	return api.ContractMetadata{
+		ID:                 newRevision.ID(),
+		HostKey:            newRevision.HostKey(),
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        newRevision.Revision.WindowStart,
+		WindowEnd:          newRevision.Revision.WindowEnd,
+		ContractPrice:      contractPrice,
+		InitialRenterFunds: fundAmount,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 false,
+	}, nil
+}
 
-	return newRevision, contractPrice, fundAmount, nil
+func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+	signer := ibus.NewFormContractSigner(b.w, renterKey)
+
+	// fetch the revision
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	// fetch prices and check them
+	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.V2SiamuxAddr())
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	if gb := gc.CheckV2(settings); gb.Gouging() {
+		return api.ContractMetadata{}, errors.New(gb.String())
+	}
+
+	// determine the new collateral we want the host to put into the
+	// renewed/refreshed contract
+	newCollateral := settings.Prices.Collateral.Mul64(expectedNewStorage).Mul64(endHeight - cs.Index.Height)
+	if newCollateral.Cmp(minNewCollateral) < 0 {
+		newCollateral = minNewCollateral
+	}
+	if newCollateral.Cmp(settings.MaxCollateral) > 0 {
+		newCollateral = settings.MaxCollateral
+	}
+	if newCollateral.Cmp(minNewCollateral) < 0 {
+		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v (max: %v)", newCollateral, minNewCollateral, settings.MaxCollateral)
+	}
+
+	var contract cRhp4.ContractRevision
+	if c.EndHeight() == endHeight {
+		// when refreshing, the 'collateral' is added on top of the existing
+		// collateral so we account for that by subtracting the rolled over
+		// value
+		collateral := types.ZeroCurrency
+		if rev.MissedHostValue.Cmp(newCollateral) < 0 {
+			collateral = newCollateral.Sub(rev.MissedHostValue)
+		}
+		// refresh
+		var res cRhp4.RPCRefreshContractResult
+		res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
+			ContractID: c.ID,
+			Allowance:  renterFunds,
+			Collateral: collateral,
+		})
+		contract = res.Contract
+	} else {
+		var res cRhp4.RPCRenewContractResult
+		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
+			ContractID:  c.ID,
+			Allowance:   renterFunds,
+			Collateral:  newCollateral,
+			ProofHeight: endHeight,
+		})
+		contract = res.Contract
+	}
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            h.PublicKey,
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ExpirationHeight,
+		ContractPrice:      settings.Prices.ContractPrice,
+		InitialRenterFunds: contract.Revision.RenterOutput.Value,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
+}
+
+func isErrHostUnreachable(err error) bool {
+	return utils.IsErr(err, os.ErrDeadlineExceeded) ||
+		utils.IsErr(err, context.DeadlineExceeded) ||
+		utils.IsErr(err, api.ErrHostOnPrivateNetwork) ||
+		utils.IsErr(err, utils.ErrNoRouteToHost) ||
+		utils.IsErr(err, utils.ErrNoSuchHost) ||
+		utils.IsErr(err, utils.ErrConnectionRefused) ||
+		utils.IsErr(err, errors.New("unknown port")) ||
+		utils.IsErr(err, errors.New("cannot assign requested address"))
 }

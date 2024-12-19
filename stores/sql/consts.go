@@ -1,9 +1,15 @@
 package sql
 
 import (
+	"errors"
 	"strings"
 
 	"go.sia.tech/renterd/api"
+)
+
+var (
+	ErrInvalidContractState     = errors.New("invalid contract state")
+	ErrInvalidContractUsability = errors.New("invalid contract usability")
 )
 
 type ContractState uint8
@@ -35,8 +41,6 @@ func ContractStateFromString(state string) ContractState {
 
 func (s *ContractState) LoadString(state string) error {
 	switch strings.ToLower(state) {
-	case api.ContractStateInvalid:
-		*s = contractStateInvalid
 	case api.ContractStatePending:
 		*s = contractStatePending
 	case api.ContractStateActive:
@@ -47,6 +51,7 @@ func (s *ContractState) LoadString(state string) error {
 		*s = contractStateFailed
 	default:
 		*s = contractStateInvalid
+		return ErrInvalidContractState
 	}
 	return nil
 }
@@ -65,5 +70,37 @@ func (s ContractState) String() string {
 		return api.ContractStateFailed
 	default:
 		return api.ContractStateUnknown
+	}
+}
+
+type ContractUsability uint8
+
+const (
+	contractUsabilityInvalid ContractUsability = iota
+	contractUsabilityBad
+	contractUsabilityGood
+)
+
+func (s *ContractUsability) LoadString(usability string) error {
+	switch strings.ToLower(usability) {
+	case api.ContractUsabilityBad:
+		*s = contractUsabilityBad
+	case api.ContractUsabilityGood:
+		*s = contractUsabilityGood
+	default:
+		*s = contractUsabilityInvalid
+		return ErrInvalidContractUsability
+	}
+	return nil
+}
+
+func (s ContractUsability) String() string {
+	switch s {
+	case contractUsabilityBad:
+		return api.ContractUsabilityBad
+	case contractUsabilityGood:
+		return api.ContractUsabilityGood
+	default:
+		return "invalid"
 	}
 }

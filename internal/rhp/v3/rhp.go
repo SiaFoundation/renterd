@@ -41,10 +41,13 @@ var (
 	// ErrFailedToCreatePayment is returned when the client failed to pay using a contract.
 	ErrFailedToCreatePayment = errors.New("failed to create contract payment")
 
+	// ErrFailedToFetchRevision is returned when the client failed to fetch the revision.
+	ErrFailedToFetchRevision = errors.New("failed to fetch revision")
+
 	// errDialTransport is returned when the worker could not dial the host.
 	ErrDialTransport = errors.New("could not dial transport")
 
-	// errBalanceInsufficient occurs when a withdrawal failed because the
+	// ErrBalanceInsufficient occurs when a withdrawal failed because the
 	// account balance was insufficient.
 	ErrBalanceInsufficient = errors.New("ephemeral account balance was insufficient")
 
@@ -56,9 +59,6 @@ var (
 	// ErrSectorNotFound is returned by a host when it can't find the requested
 	// sector.
 	ErrSectorNotFound = errors.New("sector not found")
-
-	// errHost is used to wrap rpc errors returned by the host.
-	errHost = errors.New("host responded with error")
 
 	// errTransport is used to wrap rpc errors caused by the transport.
 	errTransport = errors.New("transport error")
@@ -93,19 +93,12 @@ var (
 	errWithdrawalExpired = errors.New("withdrawal request expired")
 )
 
-// IsErrHost indicates whether an error was returned by a host as part of an RPC.
-func IsErrHost(err error) bool {
-	return utils.IsErr(err, errHost)
-}
-
-func IsBalanceInsufficient(err error) bool { return utils.IsErr(err, ErrBalanceInsufficient) }
-func IsBalanceMaxExceeded(err error) bool  { return utils.IsErr(err, errBalanceMaxExceeded) }
+func IsBalanceMaxExceeded(err error) bool { return utils.IsErr(err, errBalanceMaxExceeded) }
 func IsClosedStream(err error) bool {
 	return utils.IsErr(err, mux.ErrClosedStream) || utils.IsErr(err, net.ErrClosed)
 }
 func IsInsufficientFunds(err error) bool  { return utils.IsErr(err, errInsufficientFunds) }
 func IsPriceTableExpired(err error) bool  { return utils.IsErr(err, errPriceTableExpired) }
-func IsPriceTableGouging(err error) bool  { return utils.IsErr(err, gouging.ErrPriceTableGouging) }
 func IsPriceTableNotFound(err error) bool { return utils.IsErr(err, errPriceTableNotFound) }
 func IsSectorNotFound(err error) bool {
 	return utils.IsErr(err, ErrSectorNotFound) || utils.IsErr(err, errSectorNotFoundOld)
@@ -197,7 +190,7 @@ func (c *Client) PriceTableUnpaid(ctx context.Context, hk types.PublicKey, siamu
 	return
 }
 
-func (c *Client) ReadSector(ctx context.Context, offset, length uint32, root types.Hash256, w io.Writer, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, accKey types.PrivateKey, pt rhpv3.HostPriceTable) (types.Currency, error) {
+func (c *Client) ReadSector(ctx context.Context, offset, length uint64, root types.Hash256, w io.Writer, hk types.PublicKey, siamuxAddr string, accID rhpv3.Account, accKey types.PrivateKey, pt rhpv3.HostPriceTable) (types.Currency, error) {
 	var amount types.Currency
 	err := c.tpool.withTransport(ctx, hk, siamuxAddr, func(ctx context.Context, t *transportV3) error {
 		cost, err := readSectorCost(pt, uint64(length))

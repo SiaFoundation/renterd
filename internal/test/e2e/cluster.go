@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/bus"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
@@ -48,6 +49,7 @@ import (
 )
 
 const (
+	testBucket           = "testbucket"
 	testBusFlushInterval = 100 * time.Millisecond
 )
 
@@ -75,7 +77,6 @@ type TestCluster struct {
 	genesisBlock types.Block
 	bs           bus.Store
 	cm           *chain.Manager
-	apID         string
 	dbName       string
 	dir          string
 	logger       *zap.Logger
@@ -85,9 +86,8 @@ type TestCluster struct {
 }
 
 type dbConfig struct {
-	Database         config.Database
-	DatabaseLog      config.DatabaseLog
-	RetryTxIntervals []time.Duration
+	Database    config.Database
+	DatabaseLog config.DatabaseLog
 }
 
 func (tc *TestCluster) Accounts() []api.Account {
@@ -115,12 +115,17 @@ func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContrac
 	if h == nil {
 		return nil, fmt.Errorf("no host found for contract %v", c)
 	}
-
-	roots, err := h.store.SectorRoots()
-	if err != nil {
-		return nil, err
+	var roots []types.Hash256
+	state, unlock, err := h.contractsV2.LockV2Contract(fcid)
+	if err == nil {
+		roots = append(roots, state.Roots...)
+		defer unlock()
 	}
-	return roots[c.ID], nil
+	return append(roots, h.contracts.SectorRoots(fcid)...), nil
+}
+
+func (tc *TestCluster) IsPassedV2AllowHeight() bool {
+	return tc.cm.Tip().Height >= tc.network.HardforkV2.AllowHeight
 }
 
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
@@ -181,23 +186,6 @@ func (c *TestCluster) Reboot(t *testing.T) *TestCluster {
 	return newCluster
 }
 
-// AutopilotConfig returns the autopilot's config and current period.
-func (c *TestCluster) AutopilotConfig(ctx context.Context) (api.AutopilotConfig, uint64) {
-	c.tt.Helper()
-	ap, err := c.Bus.Autopilot(ctx, c.apID)
-	c.tt.OK(err)
-	return ap.Config, ap.CurrentPeriod
-}
-
-// UpdateAutopilotConfig updates the cluster's autopilot with given config.
-func (c *TestCluster) UpdateAutopilotConfig(ctx context.Context, cfg api.AutopilotConfig) {
-	c.tt.Helper()
-	c.tt.OK(c.Bus.UpdateAutopilot(ctx, api.Autopilot{
-		ID:     c.apID,
-		Config: cfg,
-	}))
-}
-
 type testClusterOptions struct {
 	dbName               string
 	dir                  string
@@ -205,24 +193,23 @@ type testClusterOptions struct {
 	hosts                int
 	logger               *zap.Logger
 	uploadPacking        bool
-	skipSettingAutopilot bool
 	skipRunningAutopilot bool
+	skipSettingAutopilot bool
+	skipUpdatingSettings bool
 	walletKey            *types.PrivateKey
 
-	autopilotCfg      *config.Autopilot
-	autopilotSettings *api.AutopilotConfig
-	busCfg            *config.Bus
-	workerCfg         *config.Worker
+	autopilotCfg    *config.Autopilot
+	autopilotConfig *api.AutopilotConfig
+	cm              *chain.Manager
+	busCfg          *config.Bus
+	workerCfg       *config.Worker
 }
 
 // newTestLogger creates a console logger used for testing.
-func newTestLogger() *zap.Logger {
-	return newTestLoggerCustom(zapcore.WarnLevel)
-}
-
-// newTestLoggerCustom creates a console logger used for testing and allows
-// passing in the desired log level.
-func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
+func newTestLogger(enable bool) *zap.Logger {
+	if !enable {
+		return zap.NewNop()
+	}
 	config := zap.NewProductionEncoderConfig()
 	config.EncodeTime = zapcore.RFC3339TimeEncoder
 	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
@@ -230,18 +217,17 @@ func newTestLoggerCustom(level zapcore.Level) *zap.Logger {
 	consoleEncoder := zapcore.NewConsoleEncoder(config)
 
 	return zap.New(
-		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level),
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zap.DebugLevel),
 		zap.AddCaller(),
-		zap.AddStacktrace(level),
+		zap.AddStacktrace(zap.DebugLevel),
 	)
 }
 
 // newTestCluster creates a new cluster without hosts with a funded bus.
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
+	t.Helper()
+
 	// Skip any test that requires a cluster when running short tests.
-	if testing.Short() {
-		t.SkipNow()
-	}
 	tt := test.NewTT(t)
 
 	// Ensure we don't hang
@@ -253,7 +239,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.dir != "" {
 		dir = opts.dir
 	}
-	logger := newTestLogger()
+	logger := newTestLogger(false) // enable logging here if needed
 	if opts.logger != nil {
 		logger = opts.logger
 	}
@@ -261,6 +247,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.walletKey != nil {
 		wk = *opts.walletKey
 	}
+
 	busCfg, workerCfg, apCfg, dbCfg := testBusCfg(), testWorkerCfg(), testApCfg(), testDBCfg()
 	if opts.busCfg != nil {
 		busCfg = *opts.busCfg
@@ -283,9 +270,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if opts.uploadPacking {
 		enableUploadPacking = opts.uploadPacking
 	}
-	apSettings := test.AutopilotConfig
-	if opts.autopilotSettings != nil {
-		apSettings = *opts.autopilotSettings
+	apConfig := test.AutopilotConfig
+	if opts.autopilotConfig != nil {
+		apConfig = *opts.autopilotConfig
 	}
 	if opts.dbName != "" {
 		dbCfg.Database.MySQL.Database = opts.dbName
@@ -348,9 +335,20 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 			},
 		})))
 
+	cm := opts.cm
+	if cm == nil {
+		// create chain manager
+		network, genesis := testNetwork()
+		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+		tt.OK(err)
+		cm = chain.NewManager(store, state)
+	}
+	network := cm.TipState().Network
+	genesis := types.Block{Timestamp: network.HardforkOak.GenesisTimestamp}
+
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, busDir, busCfg, dbCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(ctx, cm, genesis, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	busAuth := jape.BasicAuth(busPassword)
@@ -388,7 +386,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
 	// Create autopilot.
-	ap, err := autopilot.New(apCfg, busClient, []autopilot.Worker{workerClient}, logger)
+	ap, err := autopilot.New(apCfg, workerKey, busClient, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
@@ -400,9 +398,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	autopilotShutdownFns = append(autopilotShutdownFns, autopilotServer.Shutdown)
 	autopilotShutdownFns = append(autopilotShutdownFns, ap.Shutdown)
 
-	network, genesis := testNetwork()
 	cluster := &TestCluster{
-		apID:         apCfg.ID,
 		dir:          dir,
 		dbName:       dbCfg.Database.MySQL.Database,
 		logger:       logger,
@@ -453,39 +449,41 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		}()
 	}
 
-	// Finish worker setup.
-	if err := w.Setup(ctx, workerAddr, workerPassword); err != nil {
-		tt.Fatalf("failed to setup worker, err: %v", err)
-	}
-
-	// Set the test contract set to make sure we can add objects at the
-	// beginning of a test right away.
-	tt.OK(busClient.UpdateContractSet(ctx, test.ContractSet, nil, nil))
-
 	// Update the autopilot to use test settings
 	if !opts.skipSettingAutopilot {
-		tt.OK(busClient.UpdateAutopilot(ctx, api.Autopilot{
-			ID:     apCfg.ID,
-			Config: apSettings,
-		}))
+		tt.OKAll(
+			busClient.UpdateAutopilotConfig(ctx,
+				client.WithContractsConfig(apConfig.Contracts),
+				client.WithHostsConfig(apConfig.Hosts),
+				client.WithAutopilotEnabled(true),
+			),
+		)
+	}
+
+	// Build upload settings.
+	us := test.UploadSettings
+	us.Packing = api.UploadPackingSettings{
+		Enabled:               enableUploadPacking,
+		SlabBufferMaxSizeSoft: 1 << 32, // 4 GiB,
+	}
+
+	// Build S3 settings.
+	s3 := api.S3Settings{
+		Authentication: api.S3AuthenticationSettings{
+			V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
+		},
 	}
 
 	// Update the bus settings.
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingGouging, test.GougingSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingContractSet, test.ContractSetSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingPricePinning, test.PricePinSettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingRedundancy, test.RedundancySettings))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingS3Authentication, api.S3AuthenticationSettings{
-		V4Keypairs: map[string]string{test.S3AccessKeyID: test.S3SecretAccessKey},
-	}))
-	tt.OK(busClient.UpdateSetting(ctx, api.SettingUploadPacking, api.UploadPackingSettings{
-		Enabled:               enableUploadPacking,
-		SlabBufferMaxSizeSoft: api.DefaultUploadPackingSettings.SlabBufferMaxSizeSoft,
-	}))
+	if !opts.skipUpdatingSettings {
+		tt.OK(busClient.UpdateGougingSettings(ctx, test.GougingSettings))
+		tt.OK(busClient.UpdateUploadSettings(ctx, us))
+		tt.OK(busClient.UpdateS3Settings(ctx, s3))
+	}
 
 	// Fund the bus.
 	if funding {
-		cluster.MineBlocks(network.HardforkFoundation.Height + blocksPerDay) // mine until the first block reward matures
+		cluster.MineBlocks(network.HardforkFoundation.Height + network.MaturityDelay + 10) // mine until the first block reward matures plus a few more mature
 		tt.Retry(100, 100*time.Millisecond, func() error {
 			if cs, err := busClient.ConsensusState(ctx); err != nil {
 				return err
@@ -503,11 +501,16 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		})
 	}
 
+	// Add test bucket
+	err = cluster.Bus.CreateBucket(ctx, testBucket, api.CreateBucketOptions{})
+	if err != nil && !utils.IsErr(err, api.ErrBucketExists) {
+		tt.Fatalf("failed to create bucket: %v", err)
+	}
+
 	if nHosts > 0 {
 		cluster.AddHostsBlocking(nHosts)
 		cluster.WaitForPeers()
 		cluster.WaitForContracts()
-		cluster.WaitForContractSet(test.ContractSet, nHosts)
 		cluster.WaitForAccounts()
 	}
 
@@ -521,14 +524,15 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
-	// create store
+func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+	// create store config
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
+	// create store
 	sqlStore, err := stores.NewSQLStore(storeCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -548,21 +552,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
 		return nil, nil, nil, nil, err
 	}
-
-	// create chain database
-	chainPath := filepath.Join(consensusDir, "blockchain.db")
-	bdb, err := coreutils.OpenBoltChainDB(chainPath)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	// create chain manager
-	network, genesis := testNetwork()
-	store, state, err := chain.NewDBStore(bdb, network, genesis)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	cm := chain.NewManager(store, state)
 
 	// create wallet
 	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
@@ -584,7 +573,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 
 	// create header
 	header := gateway.Header{
-		GenesisID:  genesis.ID(),
+		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}
@@ -614,8 +603,7 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
 	// create bus
-	announcementMaxAgeHours := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b, err := bus.New(ctx, masterKey, alertsMgr, wh, cm, s, w, sqlStore, announcementMaxAgeHours, logger)
+	b, err := bus.New(ctx, cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -626,7 +614,6 @@ func newTestBus(ctx context.Context, dir string, cfg config.Bus, cfgDb dbConfig,
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-			bdb.Close(),
 			syncerShutdown(ctx),
 		)
 	}
@@ -652,9 +639,9 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 // the group
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
-		settings := defaultHostSettings
-		settings.NetAddress = host.RHPv2Addr()
-		if err := host.settings.UpdateSettings(settings); err != nil {
+		settings := host.settings.Settings()
+		settings.NetAddress = host.rhp4Listener.Addr().(*net.TCPAddr).IP.String()
+		if err := host.UpdateSettings(settings); err != nil {
 			return err
 		}
 		if err := host.settings.Announce(); err != nil {
@@ -664,21 +651,37 @@ func announceHosts(hosts []*Host) error {
 	return nil
 }
 
-// MineToRenewWindow is a helper which mines enough blocks for the autopilot to
-// reach its renew window.
+// MineToRenewWindow is a helper which mines to the height where all existing
+// contracts entered their respective renew window.
 func (c *TestCluster) MineToRenewWindow() {
 	c.tt.Helper()
+
+	// fetch autopilot config
+	cfg, err := c.Bus.AutopilotConfig(context.Background())
+	c.tt.OK(err)
+
+	// fetch consensus state
 	cs, err := c.Bus.ConsensusState(context.Background())
 	c.tt.OK(err)
 
-	ap, err := c.Bus.Autopilot(context.Background(), c.apID)
+	// fetch all contracts
+	contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeActive})
 	c.tt.OK(err)
 
-	renewWindowStart := ap.CurrentPeriod + ap.Config.Contracts.Period
-	if cs.BlockHeight >= renewWindowStart {
-		c.tt.Fatalf("already in renew window: bh: %v, currentPeriod: %v, periodLength: %v, renewWindow: %v", cs.BlockHeight, ap.CurrentPeriod, ap.Config.Contracts.Period, renewWindowStart)
+	// find max window start
+	var maxEndHeight uint64
+	for _, contract := range contracts {
+		if contract.EndHeight() > maxEndHeight {
+			maxEndHeight = contract.EndHeight()
+		}
 	}
-	c.MineBlocks(renewWindowStart - cs.BlockHeight)
+	if maxEndHeight < cfg.Contracts.RenewWindow {
+		c.tt.Fatal("contract was already in renew window")
+	} else if targetBH := maxEndHeight - cfg.Contracts.RenewWindow; cs.BlockHeight >= targetBH {
+		return // already in renew window
+	} else {
+		c.MineBlocks(targetBH - cs.BlockHeight)
+	}
 }
 
 // MineBlocks mines n blocks
@@ -687,30 +690,13 @@ func (c *TestCluster) MineBlocks(n uint64) {
 	wallet, err := c.Bus.Wallet(context.Background())
 	c.tt.OK(err)
 
-	// If we don't have any hosts in the cluster mine all blocks right away.
-	if len(c.hosts) == 0 {
-		c.tt.OK(c.mineBlocks(wallet.Address, n))
-		c.sync()
-		return
-	}
-
-	// Otherwise mine blocks in batches of 10 blocks to avoid going out of sync
-	// with hosts by too many blocks.
-	for mined := uint64(0); mined < n; {
-		toMine := n - mined
-		if toMine > 10 {
-			toMine = 10
-		}
-		c.tt.OK(c.mineBlocks(wallet.Address, toMine))
-		mined += toMine
-		c.sync()
-	}
+	c.tt.OK(c.mineBlocks(wallet.Address, n))
 	c.sync()
 }
 
 func (c *TestCluster) sync() {
 	tip := c.cm.Tip()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(10000, time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())
 		if err != nil {
 			return err
@@ -720,10 +706,11 @@ func (c *TestCluster) sync() {
 			return fmt.Errorf("subscriber hasn't caught up, %d < %d", cs.BlockHeight, tip.Height)
 		}
 
-		for _, h := range c.hosts {
-			if hh := h.cm.Tip().Height; hh < tip.Height {
-				return fmt.Errorf("host %v is not synced, %v < %v", h.PublicKey(), hh, cs.BlockHeight)
-			}
+		wallet, err := c.Bus.Wallet(context.Background())
+		if err != nil {
+			return err
+		} else if wallet.ScanHeight < tip.Height {
+			return fmt.Errorf("wallet hasn't caught up, %d < %d", wallet.ScanHeight, tip.Height)
 		}
 		return nil
 	})
@@ -747,7 +734,7 @@ func (c *TestCluster) WaitForAccounts() []api.Account {
 	return accounts
 }
 
-func (c *TestCluster) WaitForContracts() []api.Contract {
+func (c *TestCluster) WaitForContracts() []api.ContractMetadata {
 	c.tt.Helper()
 
 	// build hosts map
@@ -760,59 +747,14 @@ func (c *TestCluster) WaitForContracts() []api.Contract {
 	c.waitForHostContracts(hostsMap)
 
 	// fetch all contracts
-	resp, err := c.Worker.Contracts(context.Background(), time.Minute)
+	resp, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	c.tt.OK(err)
-	if resp.Error != "" {
-		c.tt.Fatal(resp.Error)
-	}
-	return resp.Contracts
-}
-
-func (c *TestCluster) WaitForContractSetContracts(set string, n int) {
-	c.tt.Helper()
-
-	// limit n to number of hosts we have
-	if n > len(c.hosts) {
-		n = len(c.hosts)
-	}
-
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		sets, err := c.Bus.ContractSets(context.Background())
-		if err != nil {
-			return err
-		}
-
-		// check if set exists
-		if len(sets) == 0 {
-			return errors.New("no contract sets found")
-		} else {
-			var found bool
-			for _, s := range sets {
-				if s == set {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("set '%v' not found, sets: %v", set, sets)
-			}
-		}
-
-		// check if it contains the desired number of contracts
-		csc, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{ContractSet: set})
-		if err != nil {
-			return err
-		}
-		if len(csc) != n {
-			return fmt.Errorf("contract set does not contain the desired number of contracts, %v!=%v", len(csc), n)
-		}
-		return nil
-	})
+	return resp
 }
 
 func (c *TestCluster) WaitForPeers() {
 	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		peers, err := c.Bus.SyncerPeers(context.Background())
 		if err != nil {
 			return err
@@ -839,7 +781,7 @@ func (c *TestCluster) NewHost() *Host {
 	c.tt.Helper()
 	// Create host.
 	hostDir := filepath.Join(c.dir, "hosts", fmt.Sprint(len(c.hosts)+1))
-	h, err := NewHost(types.GeneratePrivateKey(), hostDir, c.network, c.genesisBlock)
+	h, err := NewHost(types.GeneratePrivateKey(), c.cm, hostDir, c.network, c.genesisBlock)
 	c.tt.OK(err)
 
 	// Connect gateways.
@@ -862,7 +804,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.MineBlocks(1)
 
 	// Wait for host's wallet to be funded
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
+	c.tt.Retry(1000, time.Millisecond, func() error {
 		balance, err := h.wallet.Balance()
 		c.tt.OK(err)
 		if balance.Confirmed.IsZero() {
@@ -877,13 +819,13 @@ func (c *TestCluster) AddHost(h *Host) {
 	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
 	c.tt.OK(announceHosts([]*Host{h}))
 
-	// Mine until the host shows up.
-	c.tt.Retry(100, 100*time.Millisecond, func() error {
+	// Mine a block and wait until the host shows up.
+	c.MineBlocks(1)
+	c.tt.Retry(1000, time.Millisecond, func() error {
 		c.tt.Helper()
 
 		_, err := c.Bus.Host(context.Background(), h.PublicKey())
 		if err != nil {
-			c.MineBlocks(1)
 			return err
 		}
 		return nil
@@ -923,7 +865,7 @@ func (c *TestCluster) AddHostsBlocking(n int) []*Host {
 // MineTransactions tries to mine the transactions in the transaction pool until
 // it is empty.
 func (c *TestCluster) MineTransactions(ctx context.Context) error {
-	return test.Retry(100, 100*time.Millisecond, func() error {
+	return test.Retry(1000, 10*time.Millisecond, func() error {
 		txns, err := c.Bus.TransactionPool(ctx)
 		if err != nil {
 			return err
@@ -952,7 +894,7 @@ func (c *TestCluster) Shutdown() {
 // they have money in them
 func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
+	c.tt.Retry(3000, time.Millisecond, func() error {
 		accounts, err := c.Worker.Accounts(context.Background())
 		if err != nil {
 			return err
@@ -974,29 +916,12 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 	})
 }
 
-func (c *TestCluster) WaitForContractSet(set string, n int) {
-	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
-		contracts, err := c.Bus.Contracts(ctx, api.ContractsOpts{ContractSet: set})
-		if err != nil {
-			return err
-		}
-		if len(contracts) != n {
-			return fmt.Errorf("contract set not ready yet, %v!=%v", len(contracts), n)
-		}
-		return nil
-	})
-}
-
 // waitForHostContracts will fetch the contracts from the bus and wait until we
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(300, 100*time.Millisecond, func() error {
-		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{})
+	c.tt.Retry(3000, time.Millisecond, func() error {
+		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		if err != nil {
 			return err
 		}
@@ -1045,14 +970,17 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkOak.Height = 1
 	n.HardforkASIC.Height = 1
 	n.HardforkFoundation.Height = 1
-	n.HardforkV2.AllowHeight = 1000
-	n.HardforkV2.RequireHeight = 1020
+	n.HardforkV2.AllowHeight = HardforkV2AllowHeight
+	n.HardforkV2.RequireHeight = HardforkV2RequireHeight
+	n.MaturityDelay = 1
+	n.BlockInterval = 10 * time.Millisecond
 
 	return n, genesis
 }
 
 func testBusCfg() config.Bus {
 	return config.Bus{
+		AllowPrivateIPs:               true,
 		AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 		Bootstrap:                     false,
 		GatewayAddr:                   "127.0.0.1:0",
@@ -1071,46 +999,47 @@ func testDBCfg() dbConfig {
 			IgnoreRecordNotFoundError: true,
 			SlowThreshold:             100 * time.Millisecond,
 		},
-		RetryTxIntervals: []time.Duration{
-			50 * time.Millisecond,
-			100 * time.Millisecond,
-			200 * time.Millisecond,
-			500 * time.Millisecond,
-			time.Second,
-			5 * time.Second,
-		},
 	}
 }
 
 func testWorkerCfg() config.Worker {
 	return config.Worker{
-		AccountsRefillInterval:   time.Second,
-		AllowPrivateIPs:          true,
-		ContractLockTimeout:      5 * time.Second,
+		AccountsRefillInterval:   10 * time.Millisecond,
+		CacheExpiry:              100 * time.Millisecond,
 		ID:                       "worker",
 		BusFlushInterval:         testBusFlushInterval,
 		DownloadOverdriveTimeout: 500 * time.Millisecond,
 		UploadOverdriveTimeout:   500 * time.Millisecond,
 		DownloadMaxMemory:        1 << 28, // 256 MiB
 		UploadMaxMemory:          1 << 28, // 256 MiB
+		DownloadMaxOverdrive:     5,       // TODO: added b/c I think this was overlooked but not sure
 		UploadMaxOverdrive:       5,
 	}
 }
 
 func testApCfg() config.Autopilot {
 	return config.Autopilot{
-		Heartbeat:                      time.Second,
-		ID:                             api.DefaultAutopilotID,
-		MigrationHealthCutoff:          0.99,
-		MigratorParallelSlabsPerWorker: 1,
-		RevisionSubmissionBuffer:       0,
-		ScannerInterval:                time.Second,
-		ScannerBatchSize:               10,
-		ScannerNumThreads:              1,
+		AllowRedundantHostIPs:    true,
+		Heartbeat:                time.Second,
+		RevisionSubmissionBuffer: 0,
+
+		MigratorAccountsRefillInterval:   10 * time.Millisecond,
+		MigratorHealthCutoff:             0.99,
+		MigratorNumThreads:               1,
+		MigratorDownloadMaxOverdrive:     5,
+		MigratorDownloadOverdriveTimeout: 500 * time.Millisecond,
+		MigratorUploadOverdriveTimeout:   500 * time.Millisecond,
+		MigratorUploadMaxOverdrive:       5,
+
+		ScannerInterval:   10 * time.Millisecond,
+		ScannerBatchSize:  10,
+		ScannerNumThreads: 1,
 	}
 }
 
 func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThreshold int64, cfg dbConfig, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
+	partialSlabDir := filepath.Join(dir, "partial_slabs")
+
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -1134,7 +1063,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = mysql.NewMainDatabase(connMain, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -1154,7 +1083,7 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to open SQLite main database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold)
+		dbMain, err = sqlite.NewMainDatabase(db, logger, cfg.DatabaseLog.SlowThreshold, cfg.DatabaseLog.SlowThreshold, partialSlabDir)
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -1173,14 +1102,13 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		Alerts:                        alerts.WithOrigin(am, "bus"),
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                filepath.Join(dir, "partial_slabs"),
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       true,
 		SlabBufferCompletionThreshold: slabBufferCompletionThreshold,
 		Logger:                        logger,
 		WalletAddress:                 types.StandardUnlockHash(pk.PublicKey()),
 
-		RetryTransactionIntervals: cfg.RetryTxIntervals,
-		LongQueryDuration:         cfg.DatabaseLog.SlowThreshold,
-		LongTxDuration:            cfg.DatabaseLog.SlowThreshold,
+		LongQueryDuration: cfg.DatabaseLog.SlowThreshold,
+		LongTxDuration:    cfg.DatabaseLog.SlowThreshold,
 	}, nil
 }

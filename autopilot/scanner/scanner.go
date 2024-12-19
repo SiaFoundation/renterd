@@ -18,20 +18,20 @@ const (
 )
 
 type (
+	HostScanner interface {
+		ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
+	}
+
 	HostStore interface {
-		HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error)
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
 
 	Scanner interface {
-		Scan(ctx context.Context, w WorkerRHPScan, force bool)
+		Scan(ctx context.Context, hs HostScanner, force bool)
 		Shutdown(ctx context.Context) error
 		Status() (bool, time.Time)
 		UpdateHostsConfig(cfg api.HostsConfig)
-	}
-
-	WorkerRHPScan interface {
-		RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, timeout time.Duration) (api.RHPScanResponse, error)
 	}
 )
 
@@ -88,7 +88,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	}, nil
 }
 
-func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
+func (s *scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 	if s.canSkipScan(force) {
 		s.logger.Debug("host scan skipped")
 		return
@@ -110,8 +110,7 @@ func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
 	go func() {
 		defer s.wg.Done()
 
-		hosts := s.fetchHosts(ctx, cutoff)
-		scanned := s.scanHosts(ctx, w, hosts)
+		scanned := s.scanHosts(ctx, hs, cutoff)
 		removed := s.removeOfflineHosts(ctx)
 
 		s.mu.Lock()
@@ -128,13 +127,13 @@ func (s *scanner) Scan(ctx context.Context, w WorkerRHPScan, force bool) {
 }
 
 func (s *scanner) Shutdown(ctx context.Context) error {
-	defer close(s.shutdownChan)
-
 	waitChan := make(chan struct{})
 	go func() {
 		s.wg.Wait()
 		close(waitChan)
 	}()
+
+	close(s.shutdownChan)
 
 	select {
 	case <-ctx.Done():
@@ -157,56 +156,20 @@ func (s *scanner) UpdateHostsConfig(cfg api.HostsConfig) {
 	s.hostsCfg = &cfg
 }
 
-func (s *scanner) fetchHosts(ctx context.Context, cutoff time.Time) chan scanJob {
-	jobsChan := make(chan scanJob, s.scanBatchSize)
-	go func() {
-		defer close(jobsChan)
-
-		var exhausted bool
-		for offset := 0; !exhausted; offset += s.scanBatchSize {
-			hosts, err := s.hs.HostsForScanning(ctx, api.HostsForScanningOptions{
-				MaxLastScan: api.TimeRFC3339(cutoff),
-				Offset:      offset,
-				Limit:       s.scanBatchSize,
-			})
-			if err != nil {
-				s.logger.Errorf("could not get hosts for scanning, err: %v", err)
-				return
-			} else if len(hosts) < s.scanBatchSize {
-				exhausted = true
-			}
-
-			s.logger.Debugf("fetched %d hosts for scanning", len(hosts))
-			for _, h := range hosts {
-				select {
-				case <-s.interruptChan:
-					return
-				case <-s.shutdownChan:
-					return
-				case jobsChan <- scanJob{
-					hostKey: h.PublicKey,
-					hostIP:  h.NetAddress,
-				}:
-				}
-			}
-		}
-	}()
-
-	return jobsChan
-}
-
-func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, hosts chan scanJob) (scanned uint64) {
+func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Time) (scanned uint64) {
 	// define worker
-	worker := func() {
-		for h := range hosts {
+	worker := func(jobs <-chan scanJob) {
+		for h := range jobs {
 			if s.isShutdown() || s.isInterrupted() {
-				break // shutdown
+				return // shutdown
 			}
 
-			scan, err := w.RHPScan(ctx, h.hostKey, h.hostIP, DefaultScanTimeout)
-			if err != nil {
+			scan, err := hs.ScanHost(ctx, h.hostKey, DefaultScanTimeout)
+			if errors.Is(err, context.Canceled) {
+				return
+			} else if err != nil {
 				s.logger.Errorw("worker stopped", zap.Error(err), "hk", h.hostKey)
-				break // abort
+				return // abort
 			} else if err := scan.Error(); err != nil {
 				s.logger.Debugw("host scan failed", zap.Error(err), "hk", h.hostKey, "ip", h.hostIP)
 			} else {
@@ -216,18 +179,65 @@ func (s *scanner) scanHosts(ctx context.Context, w WorkerRHPScan, hosts chan sca
 		}
 	}
 
-	// launch all workers
-	var wg sync.WaitGroup
-	for t := 0; t < s.scanThreads; t++ {
-		wg.Add(1)
-		go func() {
-			worker()
-			wg.Done()
-		}()
-	}
+	var exhausted bool
+	for !exhausted {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.shutdownChan:
+			return
+		default:
+		}
 
-	// wait until they're done
-	wg.Wait()
+		// synchronisation vars
+		jobs := make(chan scanJob)
+		workersDone := make(chan struct{})
+		joinWorkers := func() {
+			close(jobs)
+			<-workersDone
+		}
+
+		// launch all workers for this batch
+		activeWorkers := int32(s.scanThreads)
+		for i := 0; i < s.scanThreads; i++ {
+			go func() {
+				worker(jobs)
+				if atomic.AddInt32(&activeWorkers, -1) == 0 {
+					close(workersDone) // close when all workers are done
+				}
+			}()
+		}
+
+		// fetch batch
+		hosts, err := s.hs.Hosts(ctx, api.HostOptions{
+			MaxLastScan: api.TimeRFC3339(cutoff),
+			Offset:      0,
+			Limit:       s.scanBatchSize,
+		})
+		if err != nil {
+			s.logger.Errorf("could not get hosts for scanning, err: %v", err)
+			joinWorkers()
+			break
+		}
+		exhausted = len(hosts) < s.scanBatchSize
+
+		// send batch to workers
+		for _, h := range hosts {
+			select {
+			case jobs <- scanJob{
+				hostKey: h.PublicKey,
+				hostIP:  h.NetAddress,
+			}:
+			case <-ctx.Done():
+				continue
+			case <-s.shutdownChan:
+				continue
+			case <-workersDone:
+				continue
+			}
+		}
+		joinWorkers()
+	}
 
 	s.statsHostPingMS.Recompute()
 	return
@@ -272,7 +282,7 @@ func (s *scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 
 	var err error
 	removed, err = s.hs.RemoveOfflineHosts(ctx, s.hostsCfg.MaxConsecutiveScanFailures, maxDowntime)
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Errorw("removing offline hosts failed", zap.Error(err), "maxDowntime", maxDowntime, "maxConsecutiveScanFailures", s.hostsCfg.MaxConsecutiveScanFailures)
 		return
 	}

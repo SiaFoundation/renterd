@@ -7,28 +7,32 @@ import (
 
 type (
 	PackedSlab struct {
-		BufferID uint                 `json:"bufferID"`
-		Data     []byte               `json:"data"`
-		Key      object.EncryptionKey `json:"key"`
+		BufferID      uint                 `json:"bufferID"`
+		Data          []byte               `json:"data"`
+		EncryptionKey object.EncryptionKey `json:"encryptionKey"`
 	}
 
 	SlabBuffer struct {
-		ContractSet string `json:"contractSet"` // contract set that be buffer will be uploaded to
-		Complete    bool   `json:"complete"`    // whether the slab buffer is complete and ready to upload
-		Filename    string `json:"filename"`    // name of the buffer on disk
-		Size        int64  `json:"size"`        // size of the buffer
-		MaxSize     int64  `json:"maxSize"`     // maximum size of the buffer
-		Locked      bool   `json:"locked"`      // whether the slab buffer is locked for uploading
+		Complete bool   `json:"complete"` // whether the slab buffer is complete and ready to upload
+		Filename string `json:"filename"` // name of the buffer on disk
+		Size     int64  `json:"size"`     // size of the buffer
+		MaxSize  int64  `json:"maxSize"`  // maximum size of the buffer
+		Locked   bool   `json:"locked"`   // whether the slab buffer is locked for uploading
 	}
 
 	UnhealthySlab struct {
-		Key    object.EncryptionKey `json:"key"`
-		Health float64              `json:"health"`
+		EncryptionKey object.EncryptionKey `json:"encryptionKey"`
+		Health        float64              `json:"health"`
 	}
 
 	UploadedPackedSlab struct {
 		BufferID uint
-		Shards   []object.Sector
+		Shards   []UploadedSector
+	}
+
+	UploadedSector struct {
+		ContractID types.FileContractID `json:"contractID"`
+		Root       types.Hash256        `json:"root"`
 	}
 )
 
@@ -40,7 +44,6 @@ type (
 
 	// MigrationSlabsRequest is the request type for the /slabs/migration endpoint.
 	MigrationSlabsRequest struct {
-		ContractSet  string  `json:"contractSet"`
 		HealthCutoff float64 `json:"healthCutoff"`
 		Limit        int     `json:"limit"`
 	}
@@ -49,7 +52,6 @@ type (
 		LockingDuration DurationMS `json:"lockingDuration"`
 		MinShards       uint8      `json:"minShards"`
 		TotalShards     uint8      `json:"totalShards"`
-		ContractSet     string     `json:"contractSet"`
 		Limit           int        `json:"limit"`
 	}
 
@@ -57,23 +59,22 @@ type (
 		Slabs []UploadedPackedSlab `json:"slabs"`
 	}
 
-	// UploadSectorRequest is the request type for the /upload/:id/sector endpoint.
-	UploadSectorRequest struct {
-		ContractID types.FileContractID `json:"contractID"`
-		Root       types.Hash256        `json:"root"`
-	}
-
 	UnhealthySlabsResponse struct {
 		Slabs []UnhealthySlab `json:"slabs"`
 	}
 
-	// UpdateSlabRequest is the request type for the /slab endpoint.
-	UpdateSlabRequest struct {
-		ContractSet string      `json:"contractSet"`
-		Slab        object.Slab `json:"slab"`
-	}
+	// UpdateSlabRequest is the request type for the PUT /slab/:key endpoint.
+	UpdateSlabRequest []UploadedSector
 )
 
-func (s UploadedPackedSlab) Contracts() []types.FileContractID {
-	return object.ContractsFromShards(s.Shards)
+func (s UploadedPackedSlab) Contracts() (fcids []types.FileContractID) {
+	seen := make(map[types.FileContractID]struct{})
+	for _, sector := range s.Shards {
+		_, ok := seen[sector.ContractID]
+		if !ok {
+			seen[sector.ContractID] = struct{}{}
+			fcids = append(fcids, sector.ContractID)
+		}
+	}
+	return
 }

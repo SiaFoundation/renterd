@@ -26,29 +26,30 @@ type mockHostStore struct {
 	removals []string
 }
 
-func (hs *mockHostStore) HostsForScanning(ctx context.Context, opts api.HostsForScanningOptions) ([]api.HostAddress, error) {
+func (hs *mockHostStore) Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	hs.scans = append(hs.scans, fmt.Sprintf("%d-%d", opts.Offset, opts.Offset+opts.Limit))
 
+	var hosts []api.Host
+	for _, host := range hs.hosts {
+		if !opts.MaxLastScan.IsZero() && opts.MaxLastScan.Std().Before(host.Interactions.LastScan) {
+			continue
+		}
+		hosts = append(hosts, host)
+	}
+
 	start := opts.Offset
-	if start > len(hs.hosts) {
+	if start > len(hosts) {
 		return nil, nil
 	}
 
 	end := opts.Offset + opts.Limit
-	if end > len(hs.hosts) {
-		end = len(hs.hosts)
+	if end > len(hosts) {
+		end = len(hosts)
 	}
 
-	var hostAddresses []api.HostAddress
-	for _, h := range hs.hosts[start:end] {
-		hostAddresses = append(hostAddresses, api.HostAddress{
-			NetAddress: h.NetAddress,
-			PublicKey:  h.PublicKey,
-		})
-	}
-	return hostAddresses, nil
+	return hosts[start:end], nil
 }
 
 func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error) {
@@ -58,29 +59,44 @@ func (hs *mockHostStore) RemoveOfflineHosts(ctx context.Context, maxConsecutiveS
 	return 0, nil
 }
 
+func (hs *mockHostStore) recordScan(hk types.PublicKey) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	for i, host := range hs.hosts {
+		if host.PublicKey == hk {
+			hs.hosts[i].Interactions.LastScan = time.Now().UTC()
+			return
+		}
+	}
+	panic("unknown host")
+}
+
 func (hs *mockHostStore) state() ([]string, []string) {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 	return hs.scans, hs.removals
 }
 
-type mockWorker struct {
+type mockHostScanner struct {
 	blockChan chan struct{}
+	hs        *mockHostStore
 
 	mu        sync.Mutex
 	scanCount int
 }
 
-func (w *mockWorker) RHPScan(ctx context.Context, hostKey types.PublicKey, hostIP string, _ time.Duration) (api.RHPScanResponse, error) {
+func (w *mockHostScanner) ScanHost(ctx context.Context, hostKey types.PublicKey, _ time.Duration) (api.HostScanResponse, error) {
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
+
+	w.hs.recordScan(hostKey)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.scanCount++
 
-	return api.RHPScanResponse{}, nil
+	return api.HostScanResponse{}, nil
 }
 
 func TestScanner(t *testing.T) {
@@ -101,8 +117,11 @@ func TestScanner(t *testing.T) {
 	}
 
 	// initiate a host scan using a worker that blocks
-	w := &mockWorker{blockChan: make(chan struct{})}
-	s.Scan(context.Background(), w, false)
+	b := &mockHostScanner{
+		blockChan: make(chan struct{}),
+		hs:        hs,
+	}
+	s.Scan(context.Background(), b, false)
 
 	// assert it's scanning
 	scanning, _ = s.Status()
@@ -111,7 +130,7 @@ func TestScanner(t *testing.T) {
 	}
 
 	// unblock the worker and sleep
-	close(w.blockChan)
+	close(b.blockChan)
 	time.Sleep(time.Second)
 
 	// assert the scan is done
@@ -128,17 +147,17 @@ func TestScanner(t *testing.T) {
 	// assert the scanner made 3 batch reqs
 	if scans, _ := hs.state(); len(scans) != 3 {
 		t.Fatalf("unexpected number of requests, %v != 3", len(scans))
-	} else if scans[0] != "0-40" || scans[1] != "40-80" || scans[2] != "80-120" {
+	} else if scans[0] != "0-40" || scans[1] != "0-40" || scans[2] != "0-40" {
 		t.Fatalf("unexpected requests, %v", scans)
 	}
 
 	// assert we scanned 100 hosts
-	if w.scanCount != 100 {
-		t.Fatalf("unexpected number of scans, %v != 100", w.scanCount)
+	if b.scanCount != 100 {
+		t.Fatalf("unexpected number of scans, %v != 100", b.scanCount)
 	}
 
 	// assert we prevent starting a host scan immediately after a scan was done
-	s.Scan(context.Background(), w, false)
+	s.Scan(context.Background(), b, false)
 	scanning, _ = s.Status()
 	if scanning {
 		t.Fatal("unexpected")
@@ -150,7 +169,7 @@ func TestScanner(t *testing.T) {
 		MaxDowntimeHours:           1,
 	})
 
-	s.Scan(context.Background(), w, true)
+	s.Scan(context.Background(), b, true)
 	time.Sleep(time.Second)
 
 	// assert we removed offline hosts

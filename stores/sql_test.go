@@ -24,9 +24,8 @@ import (
 )
 
 const (
-	testContractSet = "test"
-	testMimeType    = "application/octet-stream"
-	testETag        = "d34db33f"
+	testMimeType = "application/octet-stream"
+	testETag     = "d34db33f"
 )
 
 var (
@@ -43,12 +42,11 @@ type testSQLStore struct {
 }
 
 type testSQLStoreConfig struct {
-	dbName          string
-	dbMetricsName   string
-	dir             string
-	persistent      bool
-	skipMigrate     bool
-	skipContractSet bool
+	dbName        string
+	dbMetricsName string
+	dir           string
+	persistent    bool
+	skipMigrate   bool
 }
 
 var defaultTestSQLStoreConfig = testSQLStoreConfig{}
@@ -57,7 +55,7 @@ func randomDBName() string {
 	return "db" + hex.EncodeToString(frand.Bytes(16))
 }
 
-func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabase, error) {
+func (cfg *testSQLStoreConfig) dbConnections(partialSlabDir string) (sql.Database, sql.MetricsDatabase, error) {
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
 	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
@@ -96,7 +94,7 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open MySQL metrics database: %w", err)
 		}
-		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = mysql.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, partialSlabDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create MySQL main database: %w", err)
 		}
@@ -114,7 +112,7 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, partialSlabDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create SQLite main database: %w", err)
 		}
@@ -132,7 +130,7 @@ func (cfg *testSQLStoreConfig) dbConnections() (sql.Database, sql.MetricsDatabas
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open ephemeral SQLite metrics database: %w", err)
 		}
-		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond)
+		dbMain, err = sqlite.NewMainDatabase(connMain, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, partialSlabDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create ephemeral SQLite main database: %w", err)
 		}
@@ -162,7 +160,8 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 	}
 
 	// create db connections
-	dbMain, dbMetrics, err := cfg.dbConnections()
+	partialSlabDir := filepath.Join(cfg.dir, "partial_slabs")
+	dbMain, dbMetrics, err := cfg.dbConnections(partialSlabDir)
 	if err != nil {
 		t.Fatal("failed to create db connections", err)
 	}
@@ -172,24 +171,22 @@ func newTestSQLStore(t *testing.T, cfg testSQLStoreConfig) *testSQLStore {
 		Alerts:                        alerts,
 		DB:                            dbMain,
 		DBMetrics:                     dbMetrics,
-		PartialSlabDir:                cfg.dir,
+		PartialSlabDir:                partialSlabDir,
 		Migrate:                       !cfg.skipMigrate,
 		SlabBufferCompletionThreshold: 0,
 		Logger:                        zap.NewNop(),
 		LongQueryDuration:             100 * time.Millisecond,
 		LongTxDuration:                100 * time.Millisecond,
-		RetryTransactionIntervals:     []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond},
 	})
 	if err != nil {
 		t.Fatal("failed to create SQLStore", err)
 	}
 
-	if !cfg.skipContractSet {
-		err = sqlStore.UpdateContractSet(context.Background(), testContractSet, []types.FileContractID{}, nil)
-		if err != nil {
-			t.Fatal("failed to set contract set", err)
-		}
+	err = sqlStore.CreateBucket(context.Background(), testBucket, api.BucketPolicy{})
+	if err != nil && !errors.Is(err, api.ErrBucketExists) {
+		t.Fatal("failed to create test bucket", err)
 	}
+
 	return &testSQLStore{
 		cfg:      cfg,
 		t:        t,
@@ -253,7 +250,7 @@ func (s *testSQLStore) Close() error {
 }
 
 func (s *testSQLStore) DefaultBucketID() (id int64) {
-	if err := s.DB().QueryRow(context.Background(), "SELECT id FROM buckets WHERE name = ?", api.DefaultBucketName).
+	if err := s.DB().QueryRow(context.Background(), "SELECT id FROM buckets WHERE name = ?", testBucket).
 		Scan(&id); err != nil {
 		s.t.Fatal(err)
 	}
@@ -263,7 +260,6 @@ func (s *testSQLStore) DefaultBucketID() (id int64) {
 func (s *testSQLStore) Reopen() *testSQLStore {
 	s.t.Helper()
 	cfg := s.cfg
-	cfg.skipContractSet = true
 	cfg.skipMigrate = true
 	return newTestSQLStore(s.t, cfg)
 }
@@ -282,10 +278,10 @@ func (s *testSQLStore) Retry(tries int, durationBetweenAttempts time.Duration, f
 	}
 }
 
-func (s *testSQLStore) addTestObject(path string, o object.Object) (api.Object, error) {
-	if err := s.UpdateObjectBlocking(context.Background(), api.DefaultBucketName, path, testContractSet, testETag, testMimeType, testMetadata, o); err != nil {
+func (s *testSQLStore) addTestObject(key string, o object.Object) (api.Object, error) {
+	if err := s.UpdateObjectBlocking(context.Background(), testBucket, key, testETag, testMimeType, testMetadata, o); err != nil {
 		return api.Object{}, err
-	} else if obj, err := s.Object(context.Background(), api.DefaultBucketName, path); err != nil {
+	} else if obj, err := s.Object(context.Background(), testBucket, key); err != nil {
 		return api.Object{}, err
 	} else {
 		return obj, nil
@@ -314,13 +310,10 @@ func (s *testSQLStore) addTestContracts(keys []types.PublicKey) (fcids []types.F
 }
 
 func (s *SQLStore) addTestContract(fcid types.FileContractID, hk types.PublicKey) (api.ContractMetadata, error) {
-	rev := testContractRevision(fcid, hk)
-	return s.AddContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, 0, api.ContractStatePending)
-}
-
-func (s *SQLStore) addTestRenewedContract(fcid, renewedFrom types.FileContractID, hk types.PublicKey, startHeight uint64) (api.ContractMetadata, error) {
-	rev := testContractRevision(fcid, hk)
-	return s.AddRenewedContract(context.Background(), rev, types.ZeroCurrency, types.ZeroCurrency, startHeight, renewedFrom, api.ContractStatePending)
+	if err := s.PutContract(context.Background(), newTestContract(fcid, hk)); err != nil {
+		return api.ContractMetadata{}, err
+	}
+	return s.Contract(context.Background(), fcid)
 }
 
 func (s *testSQLStore) overrideSlabHealth(objectID string, health float64) (err error) {
@@ -335,4 +328,11 @@ func (s *testSQLStore) overrideSlabHealth(objectID string, health float64) (err 
 		) AS sub
 	)`, health, objectID))
 	return
+}
+
+func (s *testSQLStore) renewTestContract(hk types.PublicKey, renewedFrom, renewedTo types.FileContractID, startHeight uint64) error {
+	renewal := newTestContract(renewedTo, hk)
+	renewal.StartHeight = startHeight
+	renewal.RenewedFrom = renewedFrom
+	return s.AddRenewal(context.Background(), renewal)
 }

@@ -13,9 +13,8 @@ import (
 
 // A Sector uniquely identifies a sector stored on a particular host.
 type Sector struct {
-	Contracts  map[types.PublicKey][]types.FileContractID `json:"contracts"`
-	LatestHost types.PublicKey                            `json:"latestHost"`
-	Root       types.Hash256                              `json:"root"`
+	Contracts map[types.PublicKey][]types.FileContractID `json:"contracts"`
+	Root      types.Hash256                              `json:"root"`
 }
 
 // A Slab is raw data that has been erasure-encoded into sector-sized shards,
@@ -23,10 +22,10 @@ type Sector struct {
 // be used for each Slab, and should not be the same key used for the parent
 // Object.
 type Slab struct {
-	Health    float64       `json:"health"`
-	Key       EncryptionKey `json:"key"`
-	MinShards uint8         `json:"minShards"`
-	Shards    []Sector      `json:"shards,omitempty"`
+	Health        float64       `json:"health"`
+	EncryptionKey EncryptionKey `json:"encryptionKey"`
+	MinShards     uint8         `json:"minShards"`
+	Shards        []Sector      `json:"shards,omitempty"`
 }
 
 func (s Slab) IsPartial() bool {
@@ -36,37 +35,19 @@ func (s Slab) IsPartial() bool {
 // NewSlab returns a new slab for the shards.
 func NewSlab(minShards uint8) Slab {
 	return Slab{
-		Key:       GenerateEncryptionKey(),
-		MinShards: minShards,
+		EncryptionKey: GenerateEncryptionKey(EncryptionKeyTypeSalted),
+		MinShards:     minShards,
 	}
 }
 
 // NewPartialSlab returns a new partial slab.
 func NewPartialSlab(ec EncryptionKey, minShards uint8) Slab {
 	return Slab{
-		Health:    1,
-		Key:       ec,
-		MinShards: minShards,
-		Shards:    nil,
+		Health:        1,
+		EncryptionKey: ec,
+		MinShards:     minShards,
+		Shards:        nil,
 	}
-}
-
-// ContractsFromShards is a helper to extract all contracts used by a set of
-// shards.
-func ContractsFromShards(shards []Sector) []types.FileContractID {
-	var usedContracts []types.FileContractID
-	usedMap := make(map[types.FileContractID]struct{})
-	for _, shard := range shards {
-		for _, fcids := range shard.Contracts {
-			for _, fcid := range fcids {
-				if _, exists := usedMap[fcid]; !exists {
-					usedContracts = append(usedContracts, fcid)
-				}
-				usedMap[fcid] = struct{}{}
-			}
-		}
-	}
-	return usedContracts
 }
 
 func (s Slab) Contracts() []types.FileContractID {
@@ -98,7 +79,7 @@ func (s Slab) Encrypt(shards [][]byte) {
 		wg.Add(1)
 		go func(i int) {
 			nonce := [24]byte{1: byte(i)}
-			c, _ := chacha20.NewUnauthenticatedCipher(s.Key.entropy[:], nonce[:])
+			c, _ := chacha20.NewUnauthenticatedCipher(s.EncryptionKey.entropy[:], nonce[:])
 			c.XORKeyStream(shards[i], shards[i])
 			wg.Done()
 		}(i)
@@ -157,14 +138,14 @@ type SlabSlice struct {
 
 // SectorRegion returns the offset and length of the sector region that must be
 // downloaded in order to recover the data referenced by the SlabSlice.
-func (ss SlabSlice) SectorRegion() (offset, length uint32) {
+func (ss SlabSlice) SectorRegion() (offset, length uint64) {
 	minChunkSize := rhpv2.LeafSize * uint32(ss.MinShards)
 	start := (ss.Offset / minChunkSize) * rhpv2.LeafSize
 	end := ((ss.Offset + ss.Length) / minChunkSize) * rhpv2.LeafSize
 	if (ss.Offset+ss.Length)%minChunkSize != 0 {
 		end += rhpv2.LeafSize
 	}
-	return uint32(start), uint32(end - start)
+	return uint64(start), uint64(end - start)
 }
 
 // Decrypt xors shards with the keystream derived from s.Key (starting at the
@@ -176,7 +157,7 @@ func (ss SlabSlice) Decrypt(shards [][]byte) {
 		wg.Add(1)
 		go func(i int) {
 			nonce := [24]byte{1: byte(i)}
-			c, _ := chacha20.NewUnauthenticatedCipher(ss.Key.entropy[:], nonce[:])
+			c, _ := chacha20.NewUnauthenticatedCipher(ss.EncryptionKey.entropy[:], nonce[:])
 			c.SetCounter(offset)
 			c.XORKeyStream(shards[i], shards[i])
 			wg.Done()

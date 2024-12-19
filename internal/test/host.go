@@ -35,23 +35,24 @@ func NewHost(hk types.PublicKey, pt rhpv3.HostPriceTable, settings rhpv2.HostSet
 			SuccessfulInteractions: 2,
 			FailedInteractions:     0,
 		},
-		PublicKey:         hk,
-		PriceTable:        api.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
-		Settings:          settings,
-		Scanned:           true,
-		ResolvedAddresses: []string{"38.135.51.1"},
-		Subnets:           []string{"38.135.51.0/24"},
+		PublicKey:  hk,
+		PriceTable: api.HostPriceTable{HostPriceTable: pt, Expiry: time.Now().Add(time.Minute)},
+		Settings:   settings,
+		Scanned:    true,
 	}
 }
 
 func NewHostSettings() rhpv2.HostSettings {
 	return rhpv2.HostSettings{
-		AcceptingContracts: true,
-		Collateral:         types.Siacoins(1).Div64(1 << 40),
-		MaxCollateral:      types.Siacoins(10000),
-		MaxDuration:        144 * 7 * 12, // 12w
-		Version:            "1.5.10",
-		RemainingStorage:   1 << 42, // 4 TiB
+		AcceptingContracts:         true,
+		Collateral:                 types.Siacoins(1).Div64(1 << 40),
+		EphemeralAccountExpiry:     time.Hour * 24,
+		MaxCollateral:              types.Siacoins(10000),
+		MaxDuration:                144 * 7 * 12, // 12w
+		MaxEphemeralAccountBalance: types.Siacoins(1000),
+		Version:                    "1.5.10",
+		RemainingStorage:           1 << 42, // 4 TiB
+		SiaMuxPort:                 "9983",
 	}
 }
 

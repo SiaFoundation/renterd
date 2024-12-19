@@ -9,7 +9,11 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/internal/download"
 	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/internal/upload"
+	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"lukechampine.com/frand"
@@ -20,41 +24,40 @@ type (
 		tt test.TT
 		*Worker
 
-		cs *contractStoreMock
-		os *objectStoreMock
-		hs *hostStoreMock
+		cs *mocks.ContractStore
+		os *mocks.ObjectStore
+		hs *mocks.HostStore
 
-		dlmm *memoryManagerMock
-		ulmm *memoryManagerMock
+		dlmm *mocks.MemoryManager
+		ulmm *mocks.MemoryManager
 
 		hm *testHostManager
 	}
 )
 
-func newTestWorker(t test.TestingCommon) *testWorker {
+func newTestWorker(t test.TestingCommon, cfg config.Worker) *testWorker {
 	// create bus dependencies
-	cs := newContractStoreMock()
-	os := newObjectStoreMock(testBucket)
-	hs := newHostStoreMock()
+	cs := mocks.NewContractStore()
+	os := mocks.NewObjectStore(testBucket, cs)
+	hs := mocks.NewHostStore()
 
 	// create worker dependencies
-	b := newBusMock(cs, hs, os)
-	dlmm := newMemoryManagerMock()
-	ulmm := newMemoryManagerMock()
+	b := mocks.NewBus(cs, hs, os)
+	dlmm := mocks.NewMemoryManager()
+	ulmm := mocks.NewMemoryManager()
 
 	// create worker
-	w, err := New(newTestWorkerCfg(), blake2b.Sum256([]byte("testwork")), b, zap.NewNop())
+	mk := utils.MasterKey(blake2b.Sum256([]byte("testwork")))
+	w, err := New(cfg, mk, b, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// override managers
 	hm := newTestHostManager(t)
-	w.priceTables.hm = hm
-	w.downloadManager.hm = hm
-	w.downloadManager.mm = dlmm
-	w.uploadManager.hm = hm
-	w.uploadManager.mm = ulmm
+	uploadKey := mk.DeriveUploadKey()
+	w.downloadManager = download.NewManager(context.Background(), &uploadKey, hm, dlmm, b, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, zap.NewNop())
+	w.uploadManager = upload.NewManager(context.Background(), &uploadKey, hm, ulmm, b, b, b, cfg.UploadMaxMemory, cfg.UploadOverdriveTimeout, zap.NewNop())
 
 	return &testWorker{
 		test.NewTT(t),
@@ -76,65 +79,85 @@ func (w *testWorker) AddHosts(n int) (added []*testHost) {
 }
 
 func (w *testWorker) AddHost() *testHost {
-	h := w.hs.addHost()
-	c := w.cs.addContract(h.hk)
+	h := w.hs.AddHost()
+	c := w.cs.AddContract(h.PublicKey())
 	host := newTestHost(h, c)
 	w.hm.addHost(host)
 	return host
 }
 
 func (w *testWorker) BlockUploads() func() {
-	select {
-	case <-w.ulmm.memBlockChan:
-	case <-time.After(time.Second):
-		w.tt.Fatal("already blocking")
-	}
-
-	blockChan := make(chan struct{})
-	w.ulmm.memBlockChan = blockChan
-	return func() { close(blockChan) }
+	return w.ulmm.Block()
 }
 
-func (w *testWorker) BlockAsyncPackedSlabUploads(up uploadParameters) {
+func (w *testWorker) BlockAsyncPackedSlabUploads(up upload.Parameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
-	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
+	key := fmt.Sprintf("%d-%d", up.RS.MinShards, up.RS.TotalShards)
 	w.uploadingPackedSlabs[key] = struct{}{}
 }
 
-func (w *testWorker) UnblockAsyncPackedSlabUploads(up uploadParameters) {
+func (w *testWorker) UnblockAsyncPackedSlabUploads(up upload.Parameters) {
 	w.uploadsMu.Lock()
 	defer w.uploadsMu.Unlock()
-	key := fmt.Sprintf("%d-%d_%s", up.rs.MinShards, up.rs.TotalShards, up.contractSet)
+	key := fmt.Sprintf("%d-%d", up.RS.MinShards, up.RS.TotalShards)
 	delete(w.uploadingPackedSlabs, key)
 }
 
-func (w *testWorker) Contracts() []api.ContractMetadata {
-	metadatas, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+func (w *testWorker) UploadHosts() (hcs []upload.HostInfo) {
+	hosts, err := w.hs.UsableHosts(context.Background())
 	if err != nil {
 		w.tt.Fatal(err)
 	}
-	return metadatas
+	hmap := make(map[types.PublicKey]api.HostInfo)
+	for _, h := range hosts {
+		hmap[h.PublicKey] = h
+	}
+
+	contracts, err := w.cs.Contracts(context.Background(), api.ContractsOpts{})
+	if err != nil {
+		w.tt.Fatal(err)
+	}
+	for _, c := range contracts {
+		if h, ok := hmap[c.HostKey]; ok {
+			hcs = append(hcs, upload.HostInfo{
+				HostInfo:            h,
+				ContractEndHeight:   c.WindowEnd,
+				ContractID:          c.ID,
+				ContractRenewedFrom: c.RenewedFrom,
+			})
+		}
+	}
+
+	return
 }
 
-func (w *testWorker) RenewContract(hk types.PublicKey) *contractMock {
+func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
 	h := w.hm.hosts[hk]
 	if h == nil {
 		w.tt.Fatal("host not found")
 	}
 
-	renewal, err := w.cs.renewContract(hk)
+	renewal, err := w.cs.RenewContract(hk)
 	if err != nil {
 		w.tt.Fatal(err)
 	}
 	return renewal
 }
 
+func (w *testWorker) UsableHosts() []api.HostInfo {
+	hosts, err := w.hs.UsableHosts(context.Background())
+	if err != nil {
+		w.tt.Fatal(err)
+	}
+	return hosts
+}
+
 func newTestWorkerCfg() config.Worker {
 	return config.Worker{
 		AccountsRefillInterval:   time.Second,
+		CacheExpiry:              100 * time.Millisecond,
 		ID:                       "test",
-		ContractLockTimeout:      time.Second,
 		BusFlushInterval:         time.Second,
 		DownloadOverdriveTimeout: time.Second,
 		UploadOverdriveTimeout:   time.Second,

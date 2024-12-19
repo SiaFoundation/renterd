@@ -1,18 +1,24 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
 )
 
 const (
+	ContractFilterModeAll      = "all"
+	ContractFilterModeActive   = "active"
+	ContractFilterModeArchived = "archived"
+	ContractFilterModeGood     = "good"
+
 	HostFilterModeAll     = "all"
 	HostFilterModeAllowed = "allowed"
 	HostFilterModeBlocked = "blocked"
@@ -30,6 +36,7 @@ var (
 
 var (
 	ErrUsabilityHostBlocked               = errors.New("host is blocked")
+	ErrUsabilityHostCheckNotFound         = errors.New("host not checked")
 	ErrUsabilityHostNotFound              = errors.New("host not found")
 	ErrUsabilityHostOffline               = errors.New("host is offline")
 	ErrUsabilityHostLowScore              = errors.New("host's score is below minimum")
@@ -41,48 +48,26 @@ var (
 )
 
 type (
-	// HostsScanRequest is the request type for the /hosts/scans endpoint.
-	HostsScanRequest struct {
-		Scans []HostScan `json:"scans"`
-	}
-
 	// HostsPriceTablesRequest is the request type for the /hosts/pricetables endpoint.
 	HostsPriceTablesRequest struct {
 		PriceTableUpdates []HostPriceTableUpdate `json:"priceTableUpdates"`
 	}
 
-	// HostsRemoveRequest is the request type for the /hosts/remove endpoint.
+	// HostsRemoveRequest is the request type for the delete /hosts endpoint.
 	HostsRemoveRequest struct {
 		MaxDowntimeHours           DurationH `json:"maxDowntimeHours"`
 		MaxConsecutiveScanFailures uint64    `json:"maxConsecutiveScanFailures"`
 	}
 
-	// SearchHostsRequest is the request type for the /api/bus/search/hosts
-	// endpoint.
-	SearchHostsRequest struct {
+	// HostsRequest is the request type for the /api/bus/hosts endpoint.
+	HostsRequest struct {
 		Offset          int               `json:"offset"`
 		Limit           int               `json:"limit"`
-		AutopilotID     string            `json:"autopilotID"`
 		FilterMode      string            `json:"filterMode"`
 		UsabilityMode   string            `json:"usabilityMode"`
 		AddressContains string            `json:"addressContains"`
 		KeyIn           []types.PublicKey `json:"keyIn"`
-	}
-
-	// HostResponse is the response type for the GET
-	// /api/autopilot/host/:hostkey endpoint.
-	HostResponse struct {
-		Host   Host        `json:"host"`
-		Checks *HostChecks `json:"checks,omitempty"`
-	}
-
-	HostChecks struct {
-		Gouging          bool                 `json:"gouging"`
-		GougingBreakdown HostGougingBreakdown `json:"gougingBreakdown"`
-		Score            float64              `json:"score"`
-		ScoreBreakdown   HostScoreBreakdown   `json:"scoreBreakdown"`
-		Usable           bool                 `json:"usable"`
-		UnusableReasons  []string             `json:"unusableReasons,omitempty"`
+		MaxLastScan     TimeRFC3339       `json:"maxLastScan"`
 	}
 )
 
@@ -104,68 +89,38 @@ type (
 
 // Option types.
 type (
-	GetHostsOptions struct {
-		Offset int
-		Limit  int
-	}
-	HostsForScanningOptions struct {
-		MaxLastScan TimeRFC3339
-		Limit       int
-		Offset      int
-	}
-
-	SearchHostOptions struct {
-		AutopilotID     string
+	HostOptions struct {
 		AddressContains string
 		FilterMode      string
 		UsabilityMode   string
 		KeyIn           []types.PublicKey
 		Limit           int
+		MaxLastScan     TimeRFC3339
 		Offset          int
 	}
 )
 
-func (opts GetHostsOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-}
-
-func (opts HostsForScanningOptions) Apply(values url.Values) {
-	if opts.Offset != 0 {
-		values.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	if opts.Limit != 0 {
-		values.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if !opts.MaxLastScan.IsZero() {
-		values.Set("lastScan", TimeRFC3339(opts.MaxLastScan).String())
-	}
-}
-
 type (
 	Host struct {
-		KnownSince        time.Time            `json:"knownSince"`
-		LastAnnouncement  time.Time            `json:"lastAnnouncement"`
-		PublicKey         types.PublicKey      `json:"publicKey"`
-		NetAddress        string               `json:"netAddress"`
-		PriceTable        HostPriceTable       `json:"priceTable"`
-		Settings          rhpv2.HostSettings   `json:"settings"`
-		Interactions      HostInteractions     `json:"interactions"`
-		Scanned           bool                 `json:"scanned"`
-		Blocked           bool                 `json:"blocked"`
-		Checks            map[string]HostCheck `json:"checks"`
-		StoredData        uint64               `json:"storedData"`
-		ResolvedAddresses []string             `json:"resolvedAddresses"`
-		Subnets           []string             `json:"subnets"`
+		KnownSince        time.Time          `json:"knownSince"`
+		LastAnnouncement  time.Time          `json:"lastAnnouncement"`
+		PublicKey         types.PublicKey    `json:"publicKey"`
+		NetAddress        string             `json:"netAddress"`
+		PriceTable        HostPriceTable     `json:"priceTable"`
+		Settings          rhpv2.HostSettings `json:"settings,omitempty"`
+		V2Settings        rhp4.HostSettings  `json:"v2Settings,omitempty"`
+		Interactions      HostInteractions   `json:"interactions"`
+		Scanned           bool               `json:"scanned"`
+		Blocked           bool               `json:"blocked"`
+		Checks            HostChecks         `json:"checks,omitempty"`
+		StoredData        uint64             `json:"storedData"`
+		V2SiamuxAddresses []string           `json:"v2SiamuxAddresses"`
 	}
 
-	HostAddress struct {
-		PublicKey  types.PublicKey `json:"publicKey"`
-		NetAddress string          `json:"netAddress"`
+	HostInfo struct {
+		PublicKey         types.PublicKey `json:"publicKey"`
+		SiamuxAddr        string          `json:"siamuxAddr"`
+		V2SiamuxAddresses []string        `json:"v2SiamuxAddresses"`
 	}
 
 	HostInteractions struct {
@@ -182,13 +137,12 @@ type (
 	}
 
 	HostScan struct {
-		HostKey           types.PublicKey      `json:"hostKey"`
-		PriceTable        rhpv3.HostPriceTable `json:"priceTable"`
-		Settings          rhpv2.HostSettings   `json:"settings"`
-		ResolvedAddresses []string             `json:"resolvedAddresses"`
-		Subnets           []string             `json:"subnets"`
-		Success           bool                 `json:"success"`
-		Timestamp         time.Time            `json:"timestamp"`
+		HostKey    types.PublicKey      `json:"hostKey"`
+		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
+		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
+		V2Settings rhp4.HostSettings    `json:"v2Settings,omitempty"`
+		Success    bool                 `json:"success"`
+		Timestamp  time.Time            `json:"timestamp"`
 	}
 
 	HostPriceTable struct {
@@ -203,14 +157,13 @@ type (
 		PriceTable HostPriceTable  `json:"priceTable"`
 	}
 
-	HostCheck struct {
-		Gouging   HostGougingBreakdown   `json:"gouging"`
-		Score     HostScoreBreakdown     `json:"score"`
-		Usability HostUsabilityBreakdown `json:"usability"`
+	HostChecks struct {
+		GougingBreakdown   HostGougingBreakdown   `json:"gougingBreakdown"`
+		ScoreBreakdown     HostScoreBreakdown     `json:"scoreBreakdown"`
+		UsabilityBreakdown HostUsabilityBreakdown `json:"usabilityBreakdown"`
 	}
 
 	HostGougingBreakdown struct {
-		ContractErr string `json:"contractErr"`
 		DownloadErr string `json:"downloadErr"`
 		GougingErr  string `json:"gougingErr"`
 		PruneErr    string `json:"pruneErr"`
@@ -230,6 +183,7 @@ type (
 	HostUsabilityBreakdown struct {
 		Blocked               bool `json:"blocked"`
 		Offline               bool `json:"offline"`
+		LowMaxDuration        bool `json:"lowMaxDuration"`
 		LowScore              bool `json:"lowScore"`
 		RedundantIP           bool `json:"redundantIP"`
 		Gouging               bool `json:"gouging"`
@@ -238,6 +192,27 @@ type (
 		NotCompletingScan     bool `json:"notCompletingScan"`
 	}
 )
+
+func (hc HostChecks) MarshalJSON() ([]byte, error) {
+	type check HostChecks
+	return json.Marshal(struct {
+		check
+		Score  float64 `json:"score"`
+		Usable bool    `json:"usable"`
+	}{
+		check:  check(hc),
+		Score:  hc.ScoreBreakdown.Score(),
+		Usable: hc.UsabilityBreakdown.IsUsable(),
+	})
+}
+
+func (h Host) Info() HostInfo {
+	return HostInfo{
+		PublicKey:         h.PublicKey,
+		SiamuxAddr:        h.Settings.SiamuxAddr(),
+		V2SiamuxAddresses: h.V2SiamuxAddresses,
+	}
+}
 
 // IsAnnounced returns whether the host has been announced.
 func (h Host) IsAnnounced() bool {
@@ -254,13 +229,36 @@ func (h Host) IsOnline() bool {
 	return h.Interactions.LastScanSuccess || h.Interactions.SecondToLastScanSuccess
 }
 
+func (h Host) IsV2() bool {
+	return h.Info().IsV2()
+}
+
+func (h Host) V2SiamuxAddr() string {
+	return h.Info().V2SiamuxAddr()
+}
+
+func (h HostInfo) IsV2() bool {
+	// consider a host to be v2 if it has announced a v2 address
+	return len(h.V2SiamuxAddresses) > 0
+}
+
+func (h HostInfo) V2SiamuxAddr() string {
+	// NOTE: eventually we can improve this by implementing a dialer wrapper that
+	// can be created from a slice of addresses and tries them in order. It
+	// should also be aware of whether we support v4 or v6 and pick addresses
+	// accordingly.
+	if len(h.V2SiamuxAddresses) > 0 {
+		return h.V2SiamuxAddresses[0]
+	}
+	return ""
+}
+
 func (sb HostScoreBreakdown) String() string {
 	return fmt.Sprintf("Age: %v, Col: %v, Int: %v, SR: %v, UT: %v, V: %v, Pr: %v", sb.Age, sb.Collateral, sb.Interactions, sb.StorageRemaining, sb.Uptime, sb.Version, sb.Prices)
 }
 
 func (hgb HostGougingBreakdown) Gouging() bool {
 	for _, err := range []string{
-		hgb.ContractErr,
 		hgb.DownloadErr,
 		hgb.GougingErr,
 		hgb.PruneErr,
@@ -276,7 +274,6 @@ func (hgb HostGougingBreakdown) Gouging() bool {
 func (hgb HostGougingBreakdown) String() string {
 	var reasons []string
 	for _, errStr := range []string{
-		hgb.ContractErr,
 		hgb.DownloadErr,
 		hgb.GougingErr,
 		hgb.PruneErr,
@@ -295,6 +292,10 @@ func (sb HostScoreBreakdown) Score() float64 {
 
 func (ub HostUsabilityBreakdown) IsUsable() bool {
 	return !ub.Blocked && !ub.Offline && !ub.LowScore && !ub.RedundantIP && !ub.Gouging && !ub.NotAcceptingContracts && !ub.NotAnnounced && !ub.NotCompletingScan
+}
+
+func (ub HostUsabilityBreakdown) String() string {
+	return strings.Join(ub.UnusableReasons(), ", ")
 }
 
 func (ub HostUsabilityBreakdown) UnusableReasons() []string {

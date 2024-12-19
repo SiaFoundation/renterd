@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -14,9 +13,10 @@ import (
 	crhpv2 "go.sia.tech/core/rhp/v2"
 	crhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/hostd/host/accounts"
 	"go.sia.tech/hostd/host/contracts"
@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/hostd/host/storage"
 	"go.sia.tech/hostd/index"
 	"go.sia.tech/hostd/persist/sqlite"
+	"go.sia.tech/hostd/rhp"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.uber.org/zap"
@@ -35,73 +36,6 @@ const (
 	blocksPerMonth = blocksPerDay * 30
 )
 
-type ephemeralPeerStore struct {
-	peers map[string]syncer.PeerInfo
-	bans  map[string]time.Time
-	mu    sync.Mutex
-}
-
-func (eps *ephemeralPeerStore) AddPeer(addr string) error {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	eps.peers[addr] = syncer.PeerInfo{Address: addr}
-	return nil
-}
-
-func (eps *ephemeralPeerStore) Peers() ([]syncer.PeerInfo, error) {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	var peers []syncer.PeerInfo
-	for _, peer := range eps.peers {
-		peers = append(peers, peer)
-	}
-	return peers, nil
-}
-
-func (eps *ephemeralPeerStore) PeerInfo(addr string) (syncer.PeerInfo, error) {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	peer, ok := eps.peers[addr]
-	if !ok {
-		return syncer.PeerInfo{}, syncer.ErrPeerNotFound
-	}
-	return peer, nil
-}
-
-func (eps *ephemeralPeerStore) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	peer, ok := eps.peers[addr]
-	if !ok {
-		return syncer.ErrPeerNotFound
-	}
-	fn(&peer)
-	eps.peers[addr] = peer
-	return nil
-}
-
-func (eps *ephemeralPeerStore) Ban(addr string, duration time.Duration, reason string) error {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	eps.bans[addr] = time.Now().Add(duration)
-	return nil
-}
-
-// Banned returns true, nil if the peer is banned.
-func (eps *ephemeralPeerStore) Banned(addr string) (bool, error) {
-	eps.mu.Lock()
-	defer eps.mu.Unlock()
-	t, ok := eps.bans[addr]
-	return ok && time.Now().Before(t), nil
-}
-
-func newEphemeralPeerStore() syncer.PeerStore {
-	return &ephemeralPeerStore{
-		peers: make(map[string]syncer.PeerInfo),
-		bans:  make(map[string]time.Time),
-	}
-}
-
 // A Host is an ephemeral host that can be used for testing.
 type Host struct {
 	dir     string
@@ -109,20 +43,20 @@ type Host struct {
 
 	s            *syncer.Syncer
 	syncerCancel context.CancelFunc
-	cm           *chain.Manager
-	chainDB      *coreutils.BoltChainDB
 
-	store     *sqlite.Store
-	wallet    *wallet.SingleAddressWallet
-	settings  *settings.ConfigManager
-	storage   *storage.VolumeManager
-	index     *index.Manager
-	registry  *registry.Manager
-	accounts  *accounts.AccountManager
-	contracts *contracts.Manager
+	store       *sqlite.Store
+	wallet      *wallet.SingleAddressWallet
+	settings    *settings.ConfigManager
+	storage     *storage.VolumeManager
+	index       *index.Manager
+	registry    *registry.Manager
+	accounts    *accounts.AccountManager
+	contracts   *contracts.Manager
+	contractsV2 *testutil.EphemeralContractor
 
-	rhpv2 *rhpv2.SessionHandler
-	rhpv3 *rhpv3.SessionHandler
+	rhpv2        *rhpv2.SessionHandler
+	rhpv3        *rhpv3.SessionHandler
+	rhp4Listener net.Listener
 }
 
 // defaultHostSettings returns the default settings for the test host
@@ -142,7 +76,7 @@ var defaultHostSettings = settings.Settings{
 	IngressPrice:         types.Siacoins(100).Div64(1e12),
 	WindowSize:           5,
 
-	PriceTableValidity: 10 * time.Second,
+	PriceTableValidity: 5 * time.Minute,
 
 	AccountExpiry:     30 * 24 * time.Hour, // 1 month
 	MaxAccountBalance: types.Siacoins(10),
@@ -152,6 +86,7 @@ var defaultHostSettings = settings.Settings{
 func (h *Host) Close() error {
 	h.rhpv2.Close()
 	h.rhpv3.Close()
+	h.rhp4Listener.Close()
 	h.settings.Close()
 	h.index.Close()
 	h.wallet.Close()
@@ -160,7 +95,6 @@ func (h *Host) Close() error {
 	h.store.Close()
 	h.syncerCancel()
 	h.s.Close()
-	h.chainDB.Close()
 	return nil
 }
 
@@ -172,6 +106,11 @@ func (h *Host) RHPv2Addr() string {
 // RHPv3Addr returns the address of the RHPv3 listener
 func (h *Host) RHPv3Addr() string {
 	return h.rhpv3.LocalAddr()
+}
+
+// RHPv4Addr returns the address of the RHPv4 listener
+func (h *Host) RHPv4Addr() string {
+	return h.rhp4Listener.Addr().String()
 }
 
 // AddVolume adds a new volume to the host
@@ -191,12 +130,12 @@ func (h *Host) UpdateSettings(settings settings.Settings) error {
 
 // RHPv2Settings returns the host's current RHPv2 settings
 func (h *Host) RHPv2Settings() (crhpv2.HostSettings, error) {
-	return h.rhpv2.Settings()
+	return h.settings.RHP2Settings()
 }
 
 // RHPv3PriceTable returns the host's current RHPv3 price table
 func (h *Host) RHPv3PriceTable() (crhpv3.HostPriceTable, error) {
-	return h.rhpv3.PriceTable()
+	return h.settings.RHP3PriceTable()
 }
 
 // WalletAddress returns the host's wallet address
@@ -220,25 +159,15 @@ func (h *Host) SyncerAddr() string {
 }
 
 // NewHost initializes a new test host.
-func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, genesisBlock types.Block) (*Host, error) {
+func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *consensus.Network, genesisBlock types.Block) (*Host, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create dir: %w", err)
 	}
-	chainDB, err := coreutils.OpenBoltChainDB(filepath.Join(dir, "chain.db"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chaindb: %w", err)
-	}
-	dbStore, tipState, err := chain.NewDBStore(chainDB, network, genesisBlock)
-	if err != nil {
-		return nil, err
-	}
-	cm := chain.NewManager(dbStore, tipState)
-
 	l, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create syncer listener: %w", err)
 	}
-	s := syncer.New(l, cm, newEphemeralPeerStore(), gateway.Header{
+	s := syncer.New(l, cm, testutil.NewEphemeralPeerStore(), gateway.Header{
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
@@ -283,7 +212,18 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, wallet, settings.WithValidateNetAddress(false))
+	rhp4Listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
+	}
+
+	settings, err := settings.NewConfigManager(privKey, db, cm, s, storage, wallet,
+		settings.WithValidateNetAddress(false),
+		settings.WithRHP2Port(uint16(rhp2Listener.Addr().(*net.TCPAddr).Port)),
+		settings.WithRHP3Port(uint16(rhp3Listener.Addr().(*net.TCPAddr).Port)),
+		settings.WithRHP4Port(uint16(rhp4Listener.Addr().(*net.TCPAddr).Port)),
+		settings.WithInitialSettings(defaultHostSettings),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
@@ -296,17 +236,15 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 	registry := registry.NewManager(privKey, db, zap.NewNop())
 	accounts := accounts.NewManager(db, settings)
 
-	rhpv2, err := rhpv2.NewSessionHandler(rhp2Listener, privKey, rhp3Listener.Addr().String(), cm, s, wallet, contracts, settings, storage)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rhpv2 session handler: %w", err)
-	}
+	rhpv2 := rhpv2.NewSessionHandler(rhp2Listener, privKey, cm, s, wallet, contracts, settings, storage, log.Named("rhpv2"))
 	go rhpv2.Serve()
 
-	rhpv3, err := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rhpv3 session handler: %w", err)
-	}
+	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv3"))
 	go rhpv3.Serve()
+
+	contractsV2 := testutil.NewEphemeralContractor(cm)
+	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
+	go rhp.ServeRHP4SiaMux(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
 		dir:     dir,
@@ -314,19 +252,20 @@ func NewHost(privKey types.PrivateKey, dir string, network *consensus.Network, g
 
 		s:            s,
 		syncerCancel: syncerCancel,
-		cm:           cm,
-		chainDB:      chainDB,
 
-		store:     db,
-		wallet:    wallet,
-		settings:  settings,
-		index:     idx,
-		storage:   storage,
-		registry:  registry,
-		accounts:  accounts,
-		contracts: contracts,
+		store:       db,
+		wallet:      wallet,
+		settings:    settings,
+		index:       idx,
+		storage:     storage,
+		registry:    registry,
+		accounts:    accounts,
+		contracts:   contracts,
+		contractsV2: contractsV2,
 
 		rhpv2: rhpv2,
 		rhpv3: rhpv3,
+
+		rhp4Listener: rhp4Listener,
 	}, nil
 }
