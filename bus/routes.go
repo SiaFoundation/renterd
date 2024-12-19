@@ -1406,10 +1406,8 @@ func (b *Bus) packedSlabsHandlerDonePOST(jc jape.Context) {
 }
 
 func (b *Bus) settingsGougingHandlerGET(jc jape.Context) {
-	gs, err := b.store.GougingSettings(jc.Request.Context())
-	if errors.Is(err, sql.ErrSettingNotFound) {
-		gs = api.DefaultGougingSettings
-	} else if err != nil {
+	gs, err := b.gougingSettings(jc.Request.Context())
+	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -1432,10 +1430,8 @@ func (b *Bus) settingsGougingHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsPinnedHandlerGET(jc jape.Context) {
-	ps, err := b.store.PinnedSettings(jc.Request.Context())
-	if errors.Is(err, sql.ErrSettingNotFound) {
-		ps = api.DefaultPinnedSettings
-	} else if err != nil {
+	ps, err := b.pinnedSettings(jc.Request.Context())
+	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -1461,10 +1457,8 @@ func (b *Bus) settingsPinnedHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsUploadHandlerGET(jc jape.Context) {
-	us, err := b.store.UploadSettings(jc.Request.Context())
-	if errors.Is(err, sql.ErrSettingNotFound) {
-		us = api.DefaultUploadSettings(b.cm.TipState().Network.Name)
-	} else if err != nil {
+	us, err := b.uploadSettings(jc.Request.Context())
+	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -1485,10 +1479,8 @@ func (b *Bus) settingsUploadHandlerPUT(jc jape.Context) {
 }
 
 func (b *Bus) settingsS3HandlerGET(jc jape.Context) {
-	s3s, err := b.store.S3Settings(jc.Request.Context())
-	if errors.Is(err, sql.ErrSettingNotFound) {
-		s3s = api.DefaultS3Settings
-	} else if err != nil {
+	s3s, err := b.s3Settings(jc.Request.Context())
+	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
@@ -1656,7 +1648,7 @@ func (b *Bus) slabsPartialHandlerPOST(jc jape.Context) {
 	if jc.Check("failed to add partial slab", err) != nil {
 		return
 	}
-	us, err := b.store.UploadSettings(jc.Request.Context())
+	us, err := b.uploadSettings(jc.Request.Context())
 	if err != nil {
 		jc.Error(fmt.Errorf("could not get upload packing settings: %w", err), http.StatusInternalServerError)
 		return
@@ -1751,16 +1743,15 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 		return
 	}
 
-	var uploadPacking bool
-	us, err := b.store.UploadSettings(jc.Request.Context())
-	if jc.Check("could not get upload settings", err) == nil {
-		uploadPacking = us.Packing.Enabled
+	us, err := b.uploadSettings(jc.Request.Context())
+	if jc.Check("could not get upload settings", err) != nil {
+		return
 	}
 
 	api.WriteResponse(jc, api.UploadParams{
 		CurrentHeight: b.cm.TipState().Index.Height,
 		GougingParams: gp,
-		UploadPacking: uploadPacking,
+		UploadPacking: us.Packing.Enabled,
 	})
 }
 
@@ -1792,17 +1783,13 @@ func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
 }
 
 func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
-	gs, err := b.store.GougingSettings(ctx)
-	if errors.Is(err, sql.ErrSettingNotFound) {
-		gs = api.DefaultGougingSettings
-	} else if err != nil {
+	gs, err := b.gougingSettings(ctx)
+	if err != nil {
 		return api.GougingParams{}, err
 	}
 
-	us, err := b.store.UploadSettings(ctx)
-	if errors.Is(err, sql.ErrSettingNotFound) {
-		us = api.DefaultUploadSettings(b.cm.TipState().Network.Name)
-	} else if err != nil {
+	us, err := b.uploadSettings(ctx)
+	if err != nil {
 		return api.GougingParams{}, err
 	}
 
