@@ -36,6 +36,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"lukechampine.com/frand"
 )
@@ -3086,4 +3087,63 @@ func TestV1ToV2Transition(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestDefaultSettingsUploadDownload(t *testing.T) {
+	// create a test cluster
+	apCfg := test.AutopilotConfig
+	apCfg.Contracts.Amount = uint64(api.DefaultRedundancySettingsTestnet.TotalShards)
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:                api.DefaultRedundancySettingsTestnet.TotalShards,
+		logger:               newTestLogger(false),
+		skipUpdatingSettings: true,
+		autopilotConfig:      &apCfg,
+	})
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// sanity check settings
+	_, err := cluster.bs.GougingSettings(context.Background())
+	tt.AssertIs(err, sql.ErrSettingNotFound)
+	_, err = cluster.bs.PinnedSettings(context.Background())
+	tt.AssertIs(err, sql.ErrSettingNotFound)
+	_, err = cluster.bs.S3Settings(context.Background())
+	tt.AssertIs(err, sql.ErrSettingNotFound)
+	_, err = cluster.bs.UploadSettings(context.Background())
+	tt.AssertIs(err, sql.ErrSettingNotFound)
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload and download data the native way
+	path := "/regularFile"
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
+	tt.OK(w.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, path, api.DownloadObjectOptions{}))
+
+	// upload and download a multipart upload
+	multipartPath := "/multipartFile"
+	mpu, err := b.CreateMultipartUpload(context.Background(), testBucket, multipartPath, api.CreateMultipartOptions{})
+	tt.OK(err)
+	offset := 0
+	part, err := w.UploadMultipartUploadPart(context.Background(), bytes.NewReader(data), testBucket, multipartPath, mpu.UploadID, 1, api.UploadMultipartUploadPartOptions{EncryptionOffset: &offset})
+	tt.OK(err)
+	tt.OKAll(b.CompleteMultipartUpload(context.Background(), testBucket, multipartPath, mpu.UploadID, []api.MultipartCompletedPart{
+		{
+			PartNumber: 1,
+			ETag:       part.ETag,
+		},
+	}, api.CompleteMultipartOptions{}))
+	tt.OK(err)
+	tt.OK(w.DownloadObject(context.Background(), bytes.NewBuffer(nil), testBucket, multipartPath, api.DownloadObjectOptions{}))
+
+	// upload and download via s3 to test the default s3 settings
+	s3Path := "/s3File"
+	_, err = cluster.S3.PutObject(testBucket, s3Path, bytes.NewReader(data), putObjectOptions{})
+	if err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatal("expected access denied error")
+	}
 }
