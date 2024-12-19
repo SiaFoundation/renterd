@@ -2086,6 +2086,7 @@ func UpdatePeerInfo(ctx context.Context, tx sql.Tx, addr string, fn func(*syncer
 }
 
 func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []api.UploadedSector) error {
+	fmt.Println("DB: update slab", len(updated))
 	// update slab
 	res, err := tx.Exec(ctx, `
 		UPDATE slabs
