@@ -1721,6 +1721,30 @@ func TestUploadPacking(t *testing.T) {
 	} else if res.Objects[1].Key != "/file2" {
 		t.Fatal("expected file2", res.Objects[1].Key)
 	}
+
+	// sanity check object metadata
+	assertObjectMetadata := func(key string) {
+		t.Helper()
+		obj, err := b.Object(context.Background(), testBucket, key, api.GetObjectOptions{})
+		tt.OK(err)
+		for _, slab := range obj.Slabs {
+			if len(slab.Shards) != 3 {
+				t.Fatalf("unexpected number of shards")
+			}
+			for _, shard := range slab.Shards {
+				if len(shard.Contracts) != 1 {
+					t.Fatalf("unexpected number of hosts in contracts map")
+				}
+				for _, fcids := range shard.Contracts {
+					if len(fcids) != 1 {
+						t.Fatalf("unexpected number of contracts")
+					}
+				}
+			}
+		}
+	}
+	assertObjectMetadata("/file1")
+	assertObjectMetadata("/file2")
 }
 
 func TestWallet(t *testing.T) {
