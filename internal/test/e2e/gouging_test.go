@@ -24,9 +24,20 @@ func TestGouging(t *testing.T) {
 	w := cluster.Worker
 	tt := cluster.tt
 
-	// add hosts
+	// add hosts with short price table validity to speed up test
+	gs, err := b.GougingSettings(context.Background())
+	tt.OK(err)
+	gs.MinPriceTableValidity = api.DurationMS(10 * time.Second)
+	tt.OK(cluster.bs.UpdateGougingSettings(context.Background(), gs))
+
 	n := int(test.AutopilotConfig.Contracts.Amount)
-	tt.OKAll(cluster.AddHostsBlocking(n))
+	for i := 0; i < n; i++ {
+		h := cluster.NewHost()
+		settings := h.settings.Settings()
+		settings.PriceTableValidity = time.Duration(gs.MinPriceTableValidity)
+		h.UpdateSettings(settings)
+		cluster.AddHost(h)
+	}
 	cluster.WaitForAccounts()
 
 	// assert all hosts are usable
@@ -66,7 +77,7 @@ func TestGouging(t *testing.T) {
 	tt.OK(cluster.hosts[0].UpdateSettings(updated))
 
 	// update gouging settings
-	gs := test.GougingSettings
+	gs = test.GougingSettings
 	gs.MaxStoragePrice = settings.StoragePrice
 	if err := b.UpdateGougingSettings(context.Background(), gs); err != nil {
 		t.Fatal(err)
@@ -74,13 +85,13 @@ func TestGouging(t *testing.T) {
 
 	// make sure the price table expires so the worker is forced to fetch it
 	// again, this is necessary for the host to be considered price gouging
-	time.Sleep(defaultHostSettings.PriceTableValidity)
+	time.Sleep(time.Duration(gs.MinPriceTableValidity))
 
 	// assert all but one host are usable
 	h, err = b.UsableHosts(context.Background())
 	tt.OK(err)
 	if len(h) != n-1 {
-		t.Fatal("unexpected number of hosts", len(h))
+		t.Fatal("unexpected number of hosts", len(h), n-1)
 	}
 
 	// upload some data - should fail
