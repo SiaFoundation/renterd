@@ -555,7 +555,14 @@ func DeleteHostSector(ctx context.Context, tx sql.Tx, hk types.PublicKey, root t
 	}
 
 	// remove sector from host_sectors
-	_, err = tx.Exec(ctx, "DELETE FROM host_sectors WHERE db_sector_id = ?", sectorID)
+	_, err = tx.Exec(ctx, `
+		DELETE FROM host_sectors
+		WHERE db_sector_id = ? AND db_host_id IN (
+			SELECT h.id
+			FROM hosts h
+			WHERE h.public_key = ?
+		)
+	`, sectorID, PublicKey(hk))
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete host sector: %w", err)
 	}
