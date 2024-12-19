@@ -785,6 +785,7 @@ loop:
 			sectors = append(sectors, sector.uploaded)
 		}
 	}
+	fmt.Println("UPLOAD MGR: num sectors ", len(sectors))
 
 	// calculate the upload speed
 	bytes := slab.numUploaded * rhpv2.SectorSize
