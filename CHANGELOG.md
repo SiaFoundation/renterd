@@ -1,4 +1,4 @@
-## 2.0.0 (2024-12-19)
+## 2.0.0 (2024-12-20)
 
 ### Breaking Changes
 
@@ -18,7 +18,7 @@
 - Removed the "current period" concept from the contractor ([#1692](https://github.com/SiaFoundation/renterd/pull/1692)).
 - Updated autopilot configuration by removing the ability to toggle redundant host IPs ([#1692](https://github.com/SiaFoundation/renterd/pull/1692)).
 - Updated gouging settings to remove the migration surcharge multiplier ([#1696](https://github.com/SiaFoundation/renterd/pull/1696)).
-- Updated UI to version `v0.71.0`. ([#1764](https://github.com/SiaFoundation/renterd/pull/1764)).
+- Updated UI to version `v0.72.0`. ([#1764](https://github.com/SiaFoundation/renterd/pull/1764)).
 
 ### Fixes
 
