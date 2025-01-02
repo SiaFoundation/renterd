@@ -358,7 +358,7 @@ func (ap *autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	ap.s.UpdateHostsConfig(apCfg.Hosts)
 
 	// perform wallet maintenance
-	err = ap.w.PerformWalletMaintenance(ap.shutdownCtx)
+	err = ap.w.PerformWalletMaintenance(ap.shutdownCtx, apCfg)
 	if err != nil && utils.IsErr(err, context.Canceled) {
 		return
 	} else if err != nil {

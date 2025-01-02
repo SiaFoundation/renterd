@@ -15,15 +15,13 @@ import (
 
 type (
 	Bus interface {
-		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
-
 		Wallet(ctx context.Context) (api.WalletResponse, error)
 		WalletPending(ctx context.Context) (resp []cwallet.Event, err error)
 		WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 	}
 
 	Wallet interface {
-		PerformWalletMaintenance(ctx context.Context) error
+		PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error
 	}
 )
 
@@ -46,30 +44,23 @@ func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) Wallet {
 	}
 }
 
-func (w *wallet) PerformWalletMaintenance(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.logger.Info("performing wallet maintenance")
-
-	cfg, err := w.bus.AutopilotConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch autopilot: %w", err)
-	}
-	wallet, err := w.bus.Wallet(ctx)
-	if err != nil {
-		w.logger.Warnf("wallet maintenance skipped, fetching wallet failed with err: %v", err)
-		return fmt.Errorf("failed to fetch wallet: %w", err)
-	}
-	balance := wallet.Confirmed
-
+func (w *wallet) PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error {
 	// no contracts - nothing to do
 	if cfg.Contracts.Amount == 0 {
 		w.logger.Warn("wallet maintenance skipped, no contracts wanted")
 		return nil
 	}
 
+	w.logger.Info("performing wallet maintenance")
+
+	wallet, err := w.bus.Wallet(ctx)
+	if err != nil {
+		w.logger.Warnf("wallet maintenance skipped, fetching wallet failed with err: %v", err)
+		return fmt.Errorf("failed to fetch wallet: %w", err)
+	}
+
 	// register an alert if balance is low
+	balance := wallet.Confirmed
 	if balance.Cmp(contractor.InitialContractFunding.Mul64(cfg.Contracts.Amount)) < 0 {
 		if err := w.alerter.RegisterAlert(ctx, newAccountLowBalanceAlert(wallet.Address, balance, contractor.InitialContractFunding)); err != nil {
 			w.logger.Warnf("failed to register low balance alert: %v", err)
@@ -80,13 +71,17 @@ func (w *wallet) PerformWalletMaintenance(ctx context.Context) error {
 		}
 	}
 
+	w.mu.Lock()
+	maintenanceTxnIDs := w.maintenanceTxnIDs
+	w.mu.Unlock()
+
 	// pending maintenance transaction - nothing to do
 	pending, err := w.bus.WalletPending(ctx)
 	if err != nil {
 		return nil
 	}
 	for _, txn := range pending {
-		for _, mTxnID := range w.maintenanceTxnIDs {
+		for _, mTxnID := range maintenanceTxnIDs {
 			if mTxnID == types.TransactionID(txn.ID) {
 				w.logger.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
@@ -105,6 +100,8 @@ func (w *wallet) PerformWalletMaintenance(ctx context.Context) error {
 	}
 
 	w.logger.Debugf("wallet maintenance succeeded, txns %v", ids)
-	w.maintenanceTxnIDs = ids
+	w.mu.Lock()
+	maintenanceTxnIDs = ids
+	w.mu.Unlock()
 	return nil
 }
