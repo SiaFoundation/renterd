@@ -955,12 +955,12 @@ func (tx *MainDatabaseTx) Slab(ctx context.Context, key object.EncryptionKey) (o
 	return ssql.Slab(ctx, tx, key)
 }
 
-func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
-	return ssql.Tip(ctx, tx.Tx)
+func (tx *MainDatabaseTx) SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error) {
+	return ssql.SlabsForMigration(ctx, tx, healthCutoff, limit)
 }
 
-func (tx *MainDatabaseTx) UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error) {
-	return ssql.UnhealthySlabs(ctx, tx, healthCutoff, limit)
+func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
+	return ssql.Tip(ctx, tx.Tx)
 }
 
 func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {

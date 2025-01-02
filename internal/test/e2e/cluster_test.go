@@ -2223,7 +2223,6 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	if wr.Unconfirmed.Cmp(toSend) < 0 || wr.Unconfirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
 		t.Fatal("wallet should have unconfirmed balance")
 	}
-	fmt.Println(wr.Confirmed, wr.Unconfirmed)
 
 	// try again - this should fail
 	_, err = b.SendSiacoins(context.Background(), wr.Address, toSend, false)
@@ -2239,7 +2238,6 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	if wr.Unconfirmed.Cmp(toSend) < 0 || wr.Unconfirmed.Add(types.Siacoins(1)).Cmp(toSend) < 0 {
 		t.Fatal("wallet should have unconfirmed balance")
 	}
-	fmt.Println(wr.Confirmed, wr.Unconfirmed)
 
 	// mine a block, this should confirm the transactions
 	cluster.MineBlocks(1)

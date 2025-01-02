@@ -70,7 +70,7 @@ func (m *migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, h
 		return err
 	}
 	defer func() {
-		releaseCtx, cancel := context.WithTimeout(m.shutdownCtx, 10*time.Second)
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		_ = contractLock.Release(releaseCtx)
 		cancel()
 	}()

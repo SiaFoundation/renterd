@@ -110,7 +110,7 @@ func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
 // needs to be migrated if it has sectors on contracts that are not part of the
 // given 'set'.
 func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) (slabs []api.UnhealthySlab, err error) {
-	var usr api.UnhealthySlabsResponse
+	var usr api.SlabsForMigrationResponse
 	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{HealthCutoff: healthCutoff, Limit: limit}, &usr)
 	if err != nil {
 		return

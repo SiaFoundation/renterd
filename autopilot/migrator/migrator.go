@@ -100,8 +100,7 @@ type (
 
 		statsSlabMigrationSpeedMS *utils.DataPoints
 
-		shutdownCtx context.Context
-		wg          sync.WaitGroup
+		wg sync.WaitGroup
 
 		logger *zap.SugaredLogger
 
@@ -125,8 +124,6 @@ func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, 
 		signalMaintenanceFinished: make(chan struct{}, 1),
 
 		statsSlabMigrationSpeedMS: utils.NewDataPoints(time.Hour),
-
-		shutdownCtx: ctx,
 
 		logger: logger.Sugar(),
 	}
