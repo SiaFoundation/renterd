@@ -9,126 +9,43 @@ import (
 	"sync"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
-
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/autopilot/migrator"
+	"go.sia.tech/renterd/autopilot/pruner"
 	"go.sia.tech/renterd/autopilot/scanner"
+	"go.sia.tech/renterd/autopilot/wallet"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/config"
 	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
 )
 
 type Bus interface {
-	alerts.Alerter
-	webhooks.Broadcaster
-
-	// accounts
-	Accounts(ctx context.Context, owner string) (accounts []api.Account, err error)
-	FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
-	UpdateAccounts(context.Context, []api.Account) error
-
-	// autopilot
 	AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
-
-	// consensus
-	ConsensusNetwork(ctx context.Context) (consensus.Network, error)
 	ConsensusState(ctx context.Context) (api.ConsensusState, error)
-
-	// contracts
-	AncestorContracts(ctx context.Context, id types.FileContractID, minStartHeight uint64) ([]api.ContractMetadata, error)
-	ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error
-	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
-	Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
-	Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
-	FileContractTax(ctx context.Context, payout types.Currency) (types.Currency, error)
-	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
-	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
-	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
-	RecordContractSpending(ctx context.Context, records []api.ContractSpendingRecord) error
-	RenewedContract(ctx context.Context, renewedFrom types.FileContractID) (api.ContractMetadata, error)
-	UpdateContractUsability(ctx context.Context, contractID types.FileContractID, usability string) (err error)
-	PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
-	PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
-
-	// hostdb
-	Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
-	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
-	RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
-	UpdateHostCheck(ctx context.Context, hostKey types.PublicKey, hostCheck api.HostChecks) error
-
-	// metrics
-	RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
-
-	// buckets
-	ListBuckets(ctx context.Context) ([]api.Bucket, error)
-
-	// migrations
-	UploadParams(ctx context.Context) (api.UploadParams, error)
-	UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error)
-	AddMultipartPart(ctx context.Context, bucket, key, ETag, uploadID string, partNumber int, slices []object.SlabSlice) (err error)
-	AddObject(ctx context.Context, bucket, key string, o object.Object, opts api.AddObjectOptions) error
-	AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, slabBufferMaxSizeSoftReached bool, err error)
-	AddUploadingSectors(ctx context.Context, uID api.UploadID, root []types.Hash256) error
-	FinishUpload(ctx context.Context, uID api.UploadID) error
-	MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) error
-	TrackUpload(ctx context.Context, uID api.UploadID) error
-	UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
-
-	// locker
-	AcquireContract(ctx context.Context, fcid types.FileContractID, priority int, d time.Duration) (lockID uint64, err error)
-	KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error)
-	ReleaseContract(ctx context.Context, fcid types.FileContractID, lockID uint64) (err error)
-
-	// objects
-	Objects(ctx context.Context, prefix string, opts api.ListObjectOptions) (resp api.ObjectsResponse, err error)
-	RefreshHealth(ctx context.Context) error
-	Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
-	SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
-	DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
-	FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
-
-	// scanner
-	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (resp api.HostScanResponse, err error)
-
-	// settings
-	GougingParams(ctx context.Context) (api.GougingParams, error)
 	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
-	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
-
-	// syncer
-	SyncerPeers(ctx context.Context) (resp []string, err error)
-
-	// txpool
+	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 	RecommendedFee(ctx context.Context) (types.Currency, error)
-	TransactionPool(ctx context.Context) (txns []types.Transaction, err error)
-
-	// wallet
+	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
+	SyncerPeers(ctx context.Context) (resp []string, err error)
+	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
 	Wallet(ctx context.Context) (api.WalletResponse, error)
-	WalletPending(ctx context.Context) (resp []wallet.Event, err error)
-	WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
 }
 
 type Autopilot struct {
-	alerts alerts.Alerter
-	bus    Bus
-	logger *zap.SugaredLogger
+	b Bus
+	l *zap.SugaredLogger
 
-	c *contractor.Contractor
+	c contractor.Contractor
 	m migrator.Migrator
+	p pruner.Pruner
 	s scanner.Scanner
+	w wallet.Wallet
 
-	tickerDuration time.Duration
-	wg             sync.WaitGroup
+	hearbeat time.Duration
+	wg       sync.WaitGroup
 
 	startStopMu       sync.Mutex
 	startTime         time.Time
@@ -136,49 +53,25 @@ type Autopilot struct {
 	shutdownCtxCancel context.CancelFunc
 	ticker            *time.Ticker
 	triggerChan       chan bool
-
-	mu               sync.Mutex
-	pruning          bool
-	pruningLastStart time.Time
-	pruningAlertIDs  map[types.FileContractID]types.Hash256
-
-	maintenanceTxnIDs []types.TransactionID
 }
 
 // New initializes an Autopilot.
-func New(cfg config.Autopilot, masterKey utils.MasterKey, bus Bus, logger *zap.Logger) (_ *Autopilot, err error) {
-	logger = logger.Named("autopilot")
+func New(ctx context.Context, cancel context.CancelFunc, b Bus, c contractor.Contractor, m migrator.Migrator, p pruner.Pruner, s scanner.Scanner, w wallet.Wallet, heartbeat time.Duration, logger *zap.Logger) *Autopilot {
+	return &Autopilot{
+		b: b,
+		l: logger.Named("autopilot").Sugar(),
 
-	ctx, cancel := context.WithCancel(context.Background())
-	ap := &Autopilot{
-		alerts: alerts.WithOrigin(bus, "autopilot"),
-		bus:    bus,
-		logger: logger.Sugar(),
+		c: c,
+		m: m,
+		p: p,
+		s: s,
+		w: w,
 
 		shutdownCtx:       ctx,
 		shutdownCtxCancel: cancel,
 
-		tickerDuration: cfg.Heartbeat,
-
-		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
+		hearbeat: heartbeat,
 	}
-
-	// create scanner
-	ap.s, err = scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, logger)
-	if err != nil {
-		return
-	}
-
-	// create contractor
-	ap.c = contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, logger)
-
-	// create migrator
-	ap.m, err = migrator.New(ctx, masterKey, ap.alerts, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, logger)
-	if err != nil {
-		return nil, err
-	}
-
-	return ap, nil
 }
 
 // Handler returns an HTTP handler that serves the autopilot api.
@@ -203,13 +96,13 @@ func (ap *Autopilot) configEvaluateHandlerPOST(jc jape.Context) {
 	reqCfg := req.AutopilotConfig
 	gs := req.GougingSettings
 	rs := req.RedundancySettings
-	cs, err := ap.bus.ConsensusState(ctx)
+	cs, err := ap.b.ConsensusState(ctx)
 	if jc.Check("failed to get consensus state", err) != nil {
 		return
 	}
 
 	// fetch hosts
-	hosts, err := ap.bus.Hosts(ctx, api.HostOptions{})
+	hosts, err := ap.b.Hosts(ctx, api.HostOptions{})
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -234,7 +127,7 @@ func (ap *Autopilot) Run() {
 	}
 	ap.startTime = time.Now()
 	ap.triggerChan = make(chan bool, 1)
-	ap.ticker = time.NewTicker(ap.tickerDuration)
+	ap.ticker = time.NewTicker(ap.hearbeat)
 
 	ap.wg.Add(1)
 	defer ap.wg.Done()
@@ -242,29 +135,29 @@ func (ap *Autopilot) Run() {
 
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
-		ap.logger.Error("autopilot stopped before it was able to come online")
+		ap.l.Error("autopilot stopped before it was able to come online")
 		return
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
 	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
 		if !errors.Is(err, context.Canceled) {
-			ap.logger.Error(err)
+			ap.l.Error(err)
 		}
 		return
 	}
 
 	var forceScan bool
 	for !ap.isStopped() {
-		ap.logger.Info("autopilot iteration starting")
+		ap.l.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.performMaintenance(forceScan, tickerFired)
 		select {
 		case <-ap.shutdownCtx.Done():
 			return
 		case forceScan = <-ap.triggerChan:
-			ap.logger.Info("autopilot iteration triggered")
-			ap.ticker.Reset(ap.tickerDuration)
+			ap.l.Info("autopilot iteration triggered")
+			ap.ticker.Reset(ap.hearbeat)
 		case <-ap.ticker.C:
 		case <-tickerFired:
 		}
@@ -282,6 +175,7 @@ func (ap *Autopilot) Shutdown(ctx context.Context) error {
 		close(ap.triggerChan)
 		ap.wg.Wait()
 		ap.m.Stop()
+		ap.p.Stop()
 		ap.s.Shutdown(ctx)
 		ap.startTime = time.Time{}
 	}
@@ -322,13 +216,13 @@ func (ap *Autopilot) blockUntilEnabled(interrupt <-chan time.Time) (enabled, int
 	var once sync.Once
 
 	for {
-		apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
+		apCfg, err := ap.b.AutopilotConfig(ap.shutdownCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			ap.logger.Errorf("unable to fetch autopilot from the bus, err: %v", err)
+			ap.l.Errorf("unable to fetch autopilot from the bus, err: %v", err)
 		}
 
 		if err != nil || !apCfg.Enabled {
-			once.Do(func() { ap.logger.Info("autopilot is waiting to be enabled...") })
+			once.Do(func() { ap.l.Info("autopilot is waiting to be enabled...") })
 			select {
 			case <-ap.shutdownCtx.Done():
 				return false, false
@@ -350,16 +244,16 @@ func (ap *Autopilot) blockUntilOnline() (online bool) {
 
 	for {
 		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-		peers, err := ap.bus.SyncerPeers(ctx)
+		peers, err := ap.b.SyncerPeers(ctx)
 		online = len(peers) > 0
 		cancel()
 
 		if utils.IsErr(err, context.Canceled) {
 			return
 		} else if err != nil {
-			ap.logger.Errorf("failed to get peers, err: %v", err)
+			ap.l.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
-			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
+			once.Do(func() { ap.l.Info("autopilot is waiting on the bus to connect to peers...") })
 		}
 
 		if err != nil || !online {
@@ -383,7 +277,7 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 	for {
 		// try and fetch consensus
 		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-		cs, err := ap.bus.ConsensusState(ctx)
+		cs, err := ap.b.ConsensusState(ctx)
 		synced = cs.Synced
 		cancel()
 
@@ -391,9 +285,9 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		if utils.IsErr(err, context.Canceled) {
 			return
 		} else if err != nil {
-			ap.logger.Errorf("failed to get consensus state, err: %v", err)
+			ap.l.Errorf("failed to get consensus state, err: %v", err)
 		} else if !synced {
-			once.Do(func() { ap.logger.Info("autopilot is waiting for consensus to sync...") })
+			once.Do(func() { ap.l.Info("autopilot is waiting for consensus to sync...") })
 		}
 
 		if err != nil || !synced {
@@ -413,10 +307,10 @@ func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{}) {
-	defer ap.logger.Info("autopilot iteration ended")
+	defer ap.l.Info("autopilot iteration ended")
 
 	// initiate a host scan - no need to be synced or configured for scanning
-	ap.s.Scan(ap.shutdownCtx, ap.bus, forceScan)
+	ap.s.Scan(ap.shutdownCtx, ap.b, forceScan)
 
 	// reset forceScans
 	forceScan = false
@@ -427,11 +321,11 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 			close(tickerFired)
 			return
 		}
-		ap.logger.Info("autopilot stopped before consensus was synced")
+		ap.l.Info("autopilot stopped before consensus was synced")
 		return
 	} else if blocked {
 		if scanning, _ := ap.s.Status(); !scanning {
-			ap.s.Scan(ap.shutdownCtx, ap.bus, true)
+			ap.s.Scan(ap.shutdownCtx, ap.b, true)
 		}
 	}
 
@@ -441,14 +335,14 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 			close(tickerFired)
 			return
 		}
-		ap.logger.Info("autopilot stopped before it was able to confirm it was enabled in the bus")
+		ap.l.Info("autopilot stopped before it was able to confirm it was enabled in the bus")
 		return
 	}
 
 	// fetch autopilot config
-	apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
+	apCfg, err := ap.b.AutopilotConfig(ap.shutdownCtx)
 	if err != nil {
-		ap.logger.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
+		ap.l.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
 		return
 	}
 
@@ -456,15 +350,17 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	ap.s.UpdateHostsConfig(apCfg.Hosts)
 
 	// perform wallet maintenance
-	err = ap.performWalletMaintenance(ap.shutdownCtx)
-	if err != nil {
-		ap.logger.Errorf("wallet maintenance failed, err: %v", err)
+	err = ap.w.PerformWalletMaintenance(ap.shutdownCtx)
+	if err != nil && utils.IsErr(err, context.Canceled) {
+		return
+	} else if err != nil {
+		ap.l.Errorf("wallet maintenance failed, err: %v", err)
 	}
 
 	// build maintenance state
 	buildState, err := ap.buildState(ap.shutdownCtx)
 	if err != nil {
-		ap.logger.Errorf("aborting maintenance, failed to build state, err: %v", err)
+		ap.l.Errorf("aborting maintenance, failed to build state, err: %v", err)
 		return
 	}
 
@@ -473,7 +369,7 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	if err != nil && utils.IsErr(err, context.Canceled) {
 		return
 	} else if err != nil {
-		ap.logger.Errorf("contract maintenance failed, err: %v", err)
+		ap.l.Errorf("contract maintenance failed, err: %v", err)
 	}
 	maintenanceSuccess := err == nil
 
@@ -487,10 +383,10 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	ap.m.Migrate(ap.shutdownCtx)
 
 	// pruning
-	if apCfg.Contracts.Prune {
-		ap.tryPerformPruning()
+	if ap.p != nil {
+		ap.p.PerformContractPruning(ap.shutdownCtx)
 	} else {
-		ap.logger.Info("pruning disabled")
+		ap.l.Info("pruning disabled")
 	}
 }
 
@@ -500,7 +396,7 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 	defer cancel()
 
 	// no need to schedule a trigger if the wallet is already funded
-	wallet, err := ap.bus.Wallet(ctx)
+	wallet, err := ap.b.Wallet(ctx)
 	if err != nil {
 		return err
 	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
@@ -508,7 +404,7 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 	}
 
 	// spin a goroutine that triggers the autopilot when we receive a deposit
-	ap.logger.Info("autopilot loop trigger is scheduled for when the wallet receives a deposit")
+	ap.l.Info("autopilot loop trigger is scheduled for when the wallet receives a deposit")
 	ap.wg.Add(1)
 	go func() {
 		defer ap.wg.Done()
@@ -524,8 +420,8 @@ func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 
 			// fetch wallet info
 			ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-			if wallet, err = ap.bus.Wallet(ctx); err != nil {
-				ap.logger.Errorf("failed to get wallet info, err: %v", err)
+			if wallet, err = ap.b.Wallet(ctx); err != nil {
+				ap.l.Errorf("failed to get wallet info, err: %v", err)
 			}
 			cancel()
 
@@ -554,76 +450,6 @@ func (ap *Autopilot) isStopped() bool {
 	}
 }
 
-func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
-	if ap.isStopped() {
-		return nil // skip contract maintenance if we're not synced
-	}
-
-	ap.logger.Info("performing wallet maintenance")
-
-	cfg, err := ap.bus.AutopilotConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch autopilot: %w", err)
-	}
-	w, err := ap.bus.Wallet(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch wallet: %w", err)
-	}
-
-	// convenience variables
-	b := ap.bus
-	l := ap.logger
-
-	// no contracts - nothing to do
-	if cfg.Contracts.Amount == 0 {
-		l.Warn("wallet maintenance skipped, no contracts wanted")
-		return nil
-	}
-
-	// fetch wallet balance
-	wallet, err := b.Wallet(ctx)
-	if err != nil {
-		l.Warnf("wallet maintenance skipped, fetching wallet balance failed with err: %v", err)
-		return err
-	}
-	balance := wallet.Confirmed
-
-	// register an alert if balance is low
-	if balance.Cmp(contractor.InitialContractFunding.Mul64(cfg.Contracts.Amount)) < 0 {
-		ap.RegisterAlert(ctx, newAccountLowBalanceAlert(w.Address, balance, contractor.InitialContractFunding))
-	} else {
-		ap.DismissAlert(ctx, alertLowBalanceID)
-	}
-
-	// pending maintenance transaction - nothing to do
-	pending, err := b.WalletPending(ctx)
-	if err != nil {
-		return nil
-	}
-	for _, txn := range pending {
-		for _, mTxnID := range ap.maintenanceTxnIDs {
-			if mTxnID == types.TransactionID(txn.ID) {
-				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
-				return nil
-			}
-		}
-	}
-
-	// figure out the amount per output
-	wantedNumOutputs := 10
-	amount := contractor.InitialContractFunding.Div64(uint64(wantedNumOutputs))
-
-	// redistribute outputs
-	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, amount)
-	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", wantedNumOutputs, amount, balance, err)
-	}
-
-	l.Debugf("wallet maintenance succeeded, txns %v", ids)
-	ap.maintenanceTxnIDs = ids
-	return nil
-}
-
 func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	var req api.AutopilotTriggerRequest
 	if jc.Decode(&req) != nil {
@@ -635,13 +461,11 @@ func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
-	ap.mu.Lock()
-	pruning, pLastStart := ap.pruning, ap.pruningLastStart // TODO: move to a 'pruner' type
-	ap.mu.Unlock()
+	pruning, pLastStart := ap.p.Status()
 	migrating, mLastStart := ap.m.Status()
 	scanning, sLastStart := ap.s.Status()
 
-	cfg, err := ap.bus.AutopilotConfig(jc.Request.Context())
+	cfg, err := ap.b.AutopilotConfig(jc.Request.Context())
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -667,53 +491,53 @@ func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	})
 }
 
-func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
+func (ap *Autopilot) buildState(ctx context.Context) (contractor.MaintenanceState, error) {
 	// fetch autopilot config
-	apCfg, err := ap.bus.AutopilotConfig(ctx)
+	apCfg, err := ap.b.AutopilotConfig(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch autopilot config, err: %v", err)
+		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch autopilot config, err: %v", err)
 	}
 
 	// fetch consensus state
-	cs, err := ap.bus.ConsensusState(ctx)
+	cs, err := ap.b.ConsensusState(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
+		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch consensus state, err: %v", err)
 	} else if !cs.Synced {
-		return nil, errors.New("consensus not synced")
+		return contractor.MaintenanceState{}, errors.New("consensus not synced")
 	}
 
 	// fetch upload settings
-	us, err := ap.bus.UploadSettings(ctx)
+	us, err := ap.b.UploadSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch upload settings, err: %v", err)
+		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch upload settings, err: %v", err)
 	}
 
 	// fetch gouging settings
-	gs, err := ap.bus.GougingSettings(ctx)
+	gs, err := ap.b.GougingSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch gouging settings, err: %v", err)
+		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch gouging settings, err: %v", err)
 	}
 
 	// fetch recommended transaction fee
-	fee, err := ap.bus.RecommendedFee(ctx)
+	fee, err := ap.b.RecommendedFee(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch fee, err: %v", err)
+		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch fee, err: %v", err)
 	}
 
 	// fetch our wallet address
-	wi, err := ap.bus.Wallet(ctx)
+	wi, err := ap.b.Wallet(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch wallet address, err: %v", err)
+		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch wallet address, err: %v", err)
 	}
 	address := wi.Address
 
 	// no need to try and form contracts if wallet is completely empty
 	skipContractFormations := wi.Confirmed.IsZero() && wi.Unconfirmed.IsZero()
 	if skipContractFormations {
-		ap.logger.Warn("contract formations skipped, wallet is empty")
+		ap.l.Warn("contract formations skipped, wallet is empty")
 	}
 
-	return &contractor.MaintenanceState{
+	return contractor.MaintenanceState{
 		GS: gs,
 		RS: us.Redundancy,
 		AP: apCfg,

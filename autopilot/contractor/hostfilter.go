@@ -89,7 +89,7 @@ func (u *unusableHostsBreakdown) keysAndValues() []interface{} {
 // - recoverable -> can be usable if it is refreshed/renewed
 // - refresh -> should be refreshed
 // - renew -> should be renewed
-func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, contract contract, bh uint64) (usable, refresh, renew bool, reasons []string) {
+func (c *contractor) isUsableContract(cfg api.AutopilotConfig, contract contract, bh uint64) (usable, refresh, renew bool, reasons []string) {
 	usable = true
 	if bh > contract.EndHeight() {
 		reasons = append(reasons, errContractExpired.Error())

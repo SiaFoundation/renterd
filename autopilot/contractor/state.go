@@ -26,11 +26,11 @@ type (
 
 	mCtx struct {
 		ctx   context.Context
-		state *MaintenanceState
+		state MaintenanceState
 	}
 )
 
-func newMaintenanceCtx(ctx context.Context, state *MaintenanceState) *mCtx {
+func newMaintenanceCtx(ctx context.Context, state MaintenanceState) *mCtx {
 	return &mCtx{
 		ctx:   ctx,
 		state: state,

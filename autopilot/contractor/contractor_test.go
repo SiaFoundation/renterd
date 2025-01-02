@@ -92,7 +92,7 @@ func TestRenewFundingEstimate(t *testing.T) {
 }
 
 func TestShouldArchive(t *testing.T) {
-	c := Contractor{revisionSubmissionBuffer: 5}
+	c := contractor{revisionSubmissionBuffer: 5}
 
 	// dummy network
 	var n consensus.Network
@@ -174,7 +174,7 @@ func TestShouldArchive(t *testing.T) {
 func TestShouldForgiveFailedRenewal(t *testing.T) {
 	var fcid types.FileContractID
 	frand.Read(fcid[:])
-	c := &Contractor{
+	c := &contractor{
 		firstRefreshFailure: make(map[types.FileContractID]time.Time),
 	}
 

@@ -23,11 +23,16 @@ import (
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
-	"go.sia.tech/coreutils/wallet"
+	cwallet "go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/autopilot/migrator"
+	"go.sia.tech/renterd/autopilot/pruner"
+	"go.sia.tech/renterd/autopilot/scanner"
+	"go.sia.tech/renterd/autopilot/wallet"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
@@ -385,8 +390,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	var s3ShutdownFns []func(context.Context) error
 	s3ShutdownFns = append(s3ShutdownFns, s3Server.Shutdown)
 
-	// Create autopilot.
-	ap, err := autopilot.New(apCfg, workerKey, busClient, logger)
+	ap, err := newTestAutopilot(workerKey, apCfg, busClient, logger)
 	tt.OK(err)
 
 	autopilotAuth := jape.BasicAuth(autopilotPassword)
@@ -524,6 +528,30 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
+func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (*autopilot.Autopilot, error) {
+	a := alerts.WithOrigin(bus, "autopilot")
+	l = l.Named("autopilot")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	s, err := scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, l)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	c := contractor.New(bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
+	p := pruner.New(a, bus, l)
+	w := wallet.New(a, bus, l)
+
+	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
+}
+
 func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
 	// create store config
 	alertsMgr := alerts.NewManager()
@@ -554,7 +582,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	}
 
 	// create wallet
-	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, cwallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
