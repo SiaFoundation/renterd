@@ -528,7 +528,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (*autopilot.Autopilot, error) {
+func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (autopilot.Autopilot, error) {
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 
