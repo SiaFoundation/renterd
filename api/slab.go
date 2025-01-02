@@ -59,7 +59,7 @@ type (
 		Slabs []UploadedPackedSlab `json:"slabs"`
 	}
 
-	UnhealthySlabsResponse struct {
+	SlabsForMigrationResponse struct {
 		Slabs []UnhealthySlab `json:"slabs"`
 	}
 

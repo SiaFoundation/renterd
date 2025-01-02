@@ -267,8 +267,8 @@ type (
 		AddPartialSlab(ctx context.Context, data []byte, minShards, totalShards uint8) (slabs []object.SlabSlice, bufferSize int64, err error)
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
+		SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 		RefreshHealth(ctx context.Context) error
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 		UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) error
 	}
 
