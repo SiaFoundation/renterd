@@ -134,9 +134,14 @@ func defaultConfig() config.Config {
 }
 
 func assertWorkerID(cfg *config.Config) error {
-	if cfg.Bus.RemoteAddr != "" && cfg.Worker.ID == "" {
+	if !cfg.Worker.Enabled {
+		// no worker
+		return nil
+	} else if cfg.Bus.RemoteAddr != "" && cfg.Worker.ID == "" {
+		// remote worker
 		return errors.New("a unique worker ID must be set in a cluster setup")
 	} else if cfg.Worker.ID == "" {
+		// local worker
 		cfg.Worker.ID = "worker"
 	}
 	return nil
