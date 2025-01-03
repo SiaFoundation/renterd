@@ -97,7 +97,7 @@ func (s *SQLStore) waitForPruneLoop(ts time.Time) error {
 	return test.Retry(100, 100*time.Millisecond, func() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if !s.lastPrunedAt.After(ts) {
+		if !s.lastPrunedSlabsAt.After(ts) {
 			return errors.New("slabs have not been pruned yet")
 		}
 		return nil
