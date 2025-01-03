@@ -436,7 +436,7 @@ func TestSQLContractStore(t *testing.T) {
 	}
 
 	// archive the contract
-	if err := ss.ArchiveContract(context.Background(), fcid, api.ContractArchivalReasonRemoved); err != nil {
+	if err := ss.ArchiveContractBlocking(context.Background(), fcid, api.ContractArchivalReasonRemoved); err != nil {
 		t.Fatal(err)
 	}
 
@@ -530,7 +530,7 @@ func TestContractUsability(t *testing.T) {
 	}
 
 	// archive a contract
-	err = ss.ArchiveContract(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
+	err = ss.ArchiveContractBlocking(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1877,7 +1877,7 @@ func TestContractSectors(t *testing.T) {
 	}
 
 	// archive the contract
-	err = ss.ArchiveContract(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
+	err = ss.ArchiveContractBlocking(context.Background(), fcids[0], api.ContractArchivalReasonRemoved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3701,7 +3701,7 @@ func TestSlabSectorOnHostButNotInContract(t *testing.T) {
 
 	// delete one of the contracts - this should cause the host to still be in
 	// the slab but the associated slice should be empty
-	if err := ss.ArchiveContract(context.Background(), contracts[0].ID, "test"); err != nil {
+	if err := ss.ArchiveContractBlocking(context.Background(), contracts[0].ID, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3828,14 +3828,14 @@ func TestSlabHealthInvalidation(t *testing.T) {
 	}
 
 	// archive the contract for h3 and assert s2 was invalidated
-	if err := ss.ArchiveContract(context.Background(), types.FileContractID{3}, "test"); err != nil {
+	if err := ss.ArchiveContractBlocking(context.Background(), types.FileContractID{3}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	assertHealthValid(s1, true)
 	assertHealthValid(s2, false)
 
 	// archive the contract for h1 and assert s1 was invalidated
-	if err := ss.ArchiveContract(context.Background(), types.FileContractID{1}, "test"); err != nil {
+	if err := ss.ArchiveContractBlocking(context.Background(), types.FileContractID{1}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	assertHealthValid(s1, false)
@@ -4014,7 +4014,7 @@ func TestRenewedContract(t *testing.T) {
 	}
 
 	// archive the renewal
-	err = ss.ArchiveContract(context.Background(), renewal.ID, t.Name())
+	err = ss.ArchiveContractBlocking(context.Background(), renewal.ID, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
