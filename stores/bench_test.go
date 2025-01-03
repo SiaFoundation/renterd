@@ -20,6 +20,51 @@ import (
 	"lukechampine.com/frand"
 )
 
+// BenchmarkArchiveContract benchmarks the performance of archiving a contract.
+//
+// cpu: Apple M1 Max
+// BenchmarkArchiveContract-10    	     100	  26956454 ns/op	    3089 B/op	      83 allocs/op
+func BenchmarkArchiveContract(b *testing.B) {
+	// define parameters
+	contractSize := 1 << 30 // 1 GiB contract
+	sectorSize := 4 << 20   // 4 MiB sector
+	numSectors := contractSize / sectorSize
+
+	// create database
+	db, err := newTestDB(context.Background(), b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare host
+	hk := types.PublicKey{1}
+	err = insertHost(db.DB(), hk)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare contracts
+	fcids := make([]types.FileContractID, b.N)
+	for i := 0; i < b.N; i++ {
+		h := types.NewHasher()
+		h.E.WriteUint64(uint64(i))
+		fcids[i] = types.FileContractID(h.Sum())
+		if _, err := insertContract(db.DB(), hk, fcids[i], numSectors); err != nil {
+			b.Log(i, fcids[i], fcids[i].String())
+			b.Fatal(i, err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+			return tx.ArchiveContract(context.Background(), fcids[i], api.ContractArchivalReasonHostPruned)
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkObjects benchmarks the performance of various object-related
 // database operations.
 //
@@ -89,8 +134,14 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 
 	// prepare database
+	hk := types.PublicKey{1}
+	err = insertHost(db.DB(), hk)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	fcid := types.FileContractID{1}
-	roots, err := insertContractSectors(db.DB(), fcid, numSectors)
+	roots, err := insertContract(db.DB(), hk, fcid, numSectors)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -117,6 +168,119 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func insertHost(db *isql.DB, hk types.PublicKey) error {
+	_, err := db.Exec(context.Background(), `INSERT INTO hosts (public_key) VALUES (?)`, sql.PublicKey(hk))
+	return err
+}
+
+func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, n int) (roots []types.Hash256, _ error) {
+	var hostID int64
+	err := db.QueryRow(context.Background(), `SELECT id FROM hosts WHERE public_key = ?`, sql.PublicKey(hk)).Scan(&hostID)
+	if err != nil {
+		return nil, err
+	}
+
+	// prepare usability
+	var usability sql.ContractUsability
+	if err := usability.LoadString(api.ContractUsabilityGood); err != nil {
+		return nil, err
+	}
+
+	// insert contract
+	res, err := db.Exec(context.Background(), `
+	INSERT INTO contracts (fcid, host_key, start_height, v2, usability) VALUES (?, ?, ?, ?, ?)`, sql.FileContractID(fcid), sql.PublicKey(hk), 0, false, usability)
+	if err != nil {
+		return nil, err
+	}
+	contractID, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	// insert slab
+	key := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
+	res, err = db.Exec(context.Background(), `
+	INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
+	if err != nil {
+		return nil, err
+	}
+	slabID, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	// insert sectors
+	insertSectorStmt, err := db.Prepare(context.Background(), `
+	INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?)`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
+	}
+	defer insertSectorStmt.Close()
+	for i := 0; i < n; i++ {
+		roots = append(roots, frand.Entropy256())
+		_, err := insertSectorStmt.Exec(context.Background(), slabID, i, sql.Hash256(roots[i]))
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert sector: %w", err)
+		}
+	}
+
+	// query sector ids
+	rows, err := db.Query(context.Background(), `SELECT id FROM sectors where db_slab_id = ?`, slabID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sectors: %w", err)
+	}
+	defer rows.Close()
+
+	var sectorIDs []int64
+	for rows.Next() {
+		var sectorID int64
+		if err := rows.Scan(&sectorID); err != nil {
+			return nil, fmt.Errorf("failed to scan sector id: %w", err)
+		}
+		sectorIDs = append(sectorIDs, sectorID)
+	}
+
+	// insert contract sectors
+	insertLinkStmt, err := db.Prepare(context.Background(), `
+		INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement to insert contract sectors: %w", err)
+	}
+	defer insertLinkStmt.Close()
+	for _, sectorID := range sectorIDs {
+		if _, err := insertLinkStmt.Exec(context.Background(), contractID, sectorID); err != nil {
+			return nil, fmt.Errorf("failed to insert contract sector: %w", err)
+		}
+	}
+
+	// insert host sectors
+	insertHostSectorStmt, err := db.Prepare(context.Background(), `
+	INSERT INTO host_sectors (db_sector_id, db_host_id) VALUES (?, ?)`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement to insert host sectors: %w", err)
+	}
+	defer insertHostSectorStmt.Close()
+	for _, sectorID := range sectorIDs {
+		if _, err := insertHostSectorStmt.Exec(context.Background(), sectorID, hostID); err != nil {
+			return nil, fmt.Errorf("failed to insert host sector: %w", err)
+		}
+	}
+
+	// sanity check
+	var cnt int
+	err = db.QueryRow(context.Background(), `
+		SELECT COUNT(s.root)
+		FROM contracts c
+		INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+		INNER JOIN sectors s ON cs.db_sector_id = s.id
+		WHERE c.fcid = ?`, sql.FileContractID(fcid)).Scan(&cnt)
+	if cnt != n {
+		return nil, fmt.Errorf("expected %v sectors, got %v", n, cnt)
+	}
+
+	return roots, nil
 }
 
 func insertObjects(db *isql.DB, bucket string, n int) (dirs []string, _ error) {
@@ -157,77 +321,6 @@ func insertObjects(db *isql.DB, bucket string, n int) (dirs []string, _ error) {
 		}
 	}
 	return dirs, nil
-}
-
-func insertContractSectors(db *isql.DB, fcid types.FileContractID, n int) (roots []types.Hash256, _ error) {
-	// insert host
-	hk := types.PublicKey{1}
-	res, err := db.Exec(context.Background(), `
-INSERT INTO contracts (fcid, host_key, start_height, v2) VALUES (?, ?, ?, ?)`, sql.PublicKey(hk), sql.FileContractID(fcid), 0, false)
-	if err != nil {
-		return nil, err
-	}
-	contractID, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// insert slab
-	key := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
-	res, err = db.Exec(context.Background(), `
-INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
-	if err != nil {
-		return nil, err
-	}
-	slabID, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// insert sectors
-	insertSectorStmt, err := db.Prepare(context.Background(), `
-INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?) RETURNING id`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
-	}
-	defer insertSectorStmt.Close()
-	var sectorIDs []int64
-	for i := 0; i < n; i++ {
-		var sectorID int64
-		roots = append(roots, frand.Entropy256())
-		err := insertSectorStmt.QueryRow(context.Background(), slabID, i, sql.Hash256(roots[i])).Scan(&sectorID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert sector: %w", err)
-		}
-		sectorIDs = append(sectorIDs, sectorID)
-	}
-
-	// insert contract sectors
-	insertLinkStmt, err := db.Prepare(context.Background(), `
-INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement to insert contract sectors: %w", err)
-	}
-	defer insertLinkStmt.Close()
-	for _, sectorID := range sectorIDs {
-		if _, err := insertLinkStmt.Exec(context.Background(), contractID, sectorID); err != nil {
-			return nil, fmt.Errorf("failed to insert contract sector: %w", err)
-		}
-	}
-
-	// sanity check
-	var cnt int
-	err = db.QueryRow(context.Background(), `
-SELECT COUNT(s.root)
-FROM contracts c
-INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-INNER JOIN sectors s ON cs.db_sector_id = s.id
-WHERE c.fcid = ?`, sql.FileContractID(fcid)).Scan(&cnt)
-	if cnt != n {
-		return nil, fmt.Errorf("expected %v sectors, got %v", n, cnt)
-	}
-
-	return
 }
 
 func generateRandomPath(maxLevels int) string {
