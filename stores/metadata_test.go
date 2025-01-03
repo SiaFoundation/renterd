@@ -28,6 +28,15 @@ import (
 
 const testBucket = "testbucket"
 
+func (s *testSQLStore) ArchiveContractBlocking(ctx context.Context, id types.FileContractID, reason string) error {
+	ts := time.Now()
+	time.Sleep(time.Millisecond)
+	if err := s.ArchiveContract(ctx, id, reason); err != nil {
+		return err
+	}
+	return s.waitForHostSectorPruneLoop(ts)
+}
+
 func (s *testSQLStore) InsertSlab(slab object.Slab) {
 	s.t.Helper()
 	obj := object.Object{
@@ -50,7 +59,7 @@ func (s *SQLStore) RemoveObjectBlocking(ctx context.Context, bucket, key string)
 	if err := s.RemoveObject(ctx, bucket, key); err != nil {
 		return err
 	}
-	return s.waitForPruneLoop(ts)
+	return s.waitForSlabPruneLoop(ts)
 }
 
 func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix string) error {
@@ -59,7 +68,7 @@ func (s *SQLStore) RemoveObjectsBlocking(ctx context.Context, bucket, prefix str
 	if err := s.RemoveObjects(ctx, bucket, prefix); err != nil {
 		return err
 	}
-	return s.waitForPruneLoop(ts)
+	return s.waitForSlabPruneLoop(ts)
 }
 
 func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, keyNew string, force bool) error {
@@ -68,7 +77,7 @@ func (s *SQLStore) RenameObjectBlocking(ctx context.Context, bucket, keyOld, key
 	if err := s.RenameObject(ctx, bucket, keyOld, keyNew, force); err != nil {
 		return err
 	}
-	return s.waitForPruneLoop(ts)
+	return s.waitForSlabPruneLoop(ts)
 }
 
 func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld, prefixNew string, force bool) error {
@@ -77,7 +86,7 @@ func (s *SQLStore) RenameObjectsBlocking(ctx context.Context, bucket, prefixOld,
 	if err := s.RenameObjects(ctx, bucket, prefixOld, prefixNew, force); err != nil {
 		return err
 	}
-	return s.waitForPruneLoop(ts)
+	return s.waitForSlabPruneLoop(ts)
 }
 
 func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, eTag, mimeType string, metadata api.ObjectUserMetadata, o object.Object) error {
@@ -90,10 +99,21 @@ func (s *SQLStore) UpdateObjectBlocking(ctx context.Context, bucket, path, eTag,
 	if err := s.UpdateObject(ctx, bucket, path, eTag, mimeType, metadata, o); err != nil {
 		return err
 	}
-	return s.waitForPruneLoop(ts)
+	return s.waitForSlabPruneLoop(ts)
 }
 
-func (s *SQLStore) waitForPruneLoop(ts time.Time) error {
+func (s *SQLStore) waitForHostSectorPruneLoop(ts time.Time) error {
+	return test.Retry(100, 100*time.Millisecond, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if !s.lastPrunedHostSectorsAt.After(ts) {
+			return errors.New("host sectors have not been pruned yet")
+		}
+		return nil
+	})
+}
+
+func (s *SQLStore) waitForSlabPruneLoop(ts time.Time) error {
 	return test.Retry(100, 100*time.Millisecond, func() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -4832,7 +4852,7 @@ func TestHostSectors(t *testing.T) {
 	}
 
 	// archive the 2nd contract
-	if err := ss.ArchiveContract(context.Background(), fcids[1], "foo"); err != nil {
+	if err := ss.ArchiveContractBlocking(context.Background(), fcids[1], "foo"); err != nil {
 		t.Fatal(err)
 	}
 
