@@ -23,7 +23,7 @@ import (
 // BenchmarkArchiveContract benchmarks the performance of archiving a contract.
 //
 // cpu: Apple M1 Max
-// BenchmarkArchiveContract-10    	     100	  26956454 ns/op	    3089 B/op	      83 allocs/op
+// BenchmarkArchiveContract-10         2080            615705 ns/op            2941 B/op         83 allocs/op
 func BenchmarkArchiveContract(b *testing.B) {
 	// define parameters
 	contractSize := 1 << 30 // 1 GiB contract
@@ -43,22 +43,17 @@ func BenchmarkArchiveContract(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// prepare contracts
-	fcids := make([]types.FileContractID, b.N)
-	for i := 0; i < b.N; i++ {
-		h := types.NewHasher()
-		h.E.WriteUint64(uint64(i))
-		fcids[i] = types.FileContractID(h.Sum())
-		if _, err := insertContract(db.DB(), hk, fcids[i], numSectors); err != nil {
-			b.Log(i, fcids[i], fcids[i].String())
-			b.Fatal(i, err)
-		}
-	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		fcid := generateFileContractID(i)
+		if _, err := insertContract(db.DB(), hk, fcid, numSectors); err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+
 		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-			return tx.ArchiveContract(context.Background(), fcids[i], api.ContractArchivalReasonHostPruned)
+			return tx.ArchiveContract(context.Background(), fcid, api.ContractArchivalReasonHostPruned)
 		}); err != nil {
 			b.Fatal(err)
 		}
@@ -321,6 +316,12 @@ func insertObjects(db *isql.DB, bucket string, n int) (dirs []string, _ error) {
 		}
 	}
 	return dirs, nil
+}
+
+func generateFileContractID(i int) types.FileContractID {
+	h := types.NewHasher()
+	h.E.WriteUint64(uint64(i))
+	return types.FileContractID(h.Sum())
 }
 
 func generateRandomPath(maxLevels int) string {

@@ -195,14 +195,14 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 	// soft delete all host_sectors for every host that we don't have an active
 	// contract with anymore
 	_, err = tx.Exec(ctx, `
-	UPDATE host_sectors SET deleted_at = ? WHERE db_host_id NOT IN (
+	UPDATE host_sectors SET deleted_at = ? WHERE deleted_at IS NULL AND db_host_id NOT IN (
 		SELECT h.id
 		FROM contracts c
 		INNER JOIN hosts h ON c.host_id = h.id
 		WHERE c.archival_reason IS NULL
 	)`, time.Now())
 	if err != nil {
-		return fmt.Errorf("failed to delete host_sectors: %w", err)
+		return fmt.Errorf("failed to soft delete host_sectors: %w", err)
 	}
 	return nil
 }
