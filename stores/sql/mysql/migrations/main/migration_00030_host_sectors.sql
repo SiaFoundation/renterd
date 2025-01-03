@@ -12,7 +12,11 @@ CREATE TABLE `host_sectors` (
   CONSTRAINT `fk_host_sectors_db_host` FOREIGN KEY (`db_host_id`) REFERENCES `hosts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+LOCK TABLES contracts READ, contract_sectors READ, host_sectors WRITE;
+
 INSERT IGNORE INTO host_sectors (updated_at, db_sector_id, db_host_id)
 SELECT NOW(), cs.db_sector_id, c.host_id
 FROM contract_sectors cs
 INNER JOIN contracts c ON cs.db_contract_id = c.id AND c.host_id IS NOT NULL;
+
+UNLOCK TABLES;
