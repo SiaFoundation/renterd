@@ -15,8 +15,8 @@ CREATE TABLE `host_sectors` (
 LOCK TABLES contracts READ, contract_sectors READ, host_sectors WRITE;
 
 INSERT IGNORE INTO host_sectors (updated_at, db_sector_id, db_host_id)
-SELECT NOW(), cs.db_sector_id, c.host_id
-FROM contract_sectors cs
-INNER JOIN contracts c ON cs.db_contract_id = c.id AND c.host_id IS NOT NULL;
+SELECT NOW(), contract_sectors.db_sector_id, contracts.host_id
+FROM contract_sectors
+INNER JOIN contracts ON contract_sectors.db_contract_id = contracts.id AND contracts.host_id IS NOT NULL;
 
 UNLOCK TABLES;
