@@ -727,6 +727,21 @@ CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable))
 	return
 }
 
+func (tx *MainDatabaseTx) PruneHostSectors(ctx context.Context, limit int64) (int64, error) {
+	res, err := tx.Exec(ctx, `DELETE FROM host_sectors
+		WHERE rowid IN (
+			SELECT rowid
+			FROM host_sectors
+			WHERE deleted_at IS NOT NULL
+			ORDER BY rowid
+			LIMIT ?
+		)`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, error) {
 	res, err := tx.Exec(ctx, `
 	DELETE FROM slabs
@@ -1183,7 +1198,7 @@ func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSec
 	defer insertContractSectorStmt.Close()
 
 	// insert host <-> sector links
-	insertHostSectorStmt, err := tx.Prepare(ctx, `INSERT INTO host_sectors (updated_at, db_sector_id, db_host_id) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET updated_at = EXCLUDED.updated_at`)
+	insertHostSectorStmt, err := tx.Prepare(ctx, `INSERT INTO host_sectors (updated_at, db_sector_id, db_host_id) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET updated_at = EXCLUDED.updated_at, deleted_at = NULL`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert host sector link: %w", err)
 	}

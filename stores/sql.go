@@ -53,12 +53,14 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
-		slabPruneSigChan chan struct{}
-		wg               sync.WaitGroup
+		hostSectorPruneSigChan chan struct{}
+		slabPruneSigChan       chan struct{}
+		wg                     sync.WaitGroup
 
-		mu           sync.Mutex
-		lastPrunedAt time.Time
-		closed       bool
+		mu                      sync.Mutex
+		lastPrunedHostSectorsAt time.Time
+		lastPrunedSlabsAt       time.Time
+		closed                  bool
 	}
 )
 
@@ -99,8 +101,11 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
 
-		slabPruneSigChan: make(chan struct{}, 1),
-		lastPrunedAt:     time.Now(),
+		hostSectorPruneSigChan: make(chan struct{}, 1),
+		slabPruneSigChan:       make(chan struct{}, 1),
+
+		lastPrunedHostSectorsAt: time.Now(),
+		lastPrunedSlabsAt:       time.Now(),
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
@@ -110,14 +115,21 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ss.initSlabPruning(); err != nil {
+	if err := ss.initPruneLoops(); err != nil {
 		return nil, err
 	}
 	return ss, nil
 }
 
-func (s *SQLStore) initSlabPruning() error {
-	// start pruning loop
+func (s *SQLStore) initPruneLoops() error {
+	// start host sector pruning loop
+	s.wg.Add(1)
+	go func() {
+		s.pruneHostSectorLoop()
+		s.wg.Done()
+	}()
+
+	// start slab pruning loop
 	s.wg.Add(1)
 	go func() {
 		s.pruneSlabsLoop()
@@ -126,8 +138,12 @@ func (s *SQLStore) initSlabPruning() error {
 
 	// prune once to guarantee consistency on startup
 	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
-		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
-		return err
+		if _, err := tx.PruneHostSectors(s.shutdownCtx, math.MaxInt64); err != nil {
+			return err
+		} else if _, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 

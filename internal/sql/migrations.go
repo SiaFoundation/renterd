@@ -543,6 +543,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00034_v2", log)
 				},
 			},
+			{
+				ID: "00035_soft_delete_host_sector",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00035_soft_delete_host_sector", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {
