@@ -2538,6 +2538,34 @@ func TestHostScan(t *testing.T) {
 	if len(toScan) != 1 {
 		t.Fatalf("expected 1 hosts, got %v", len(toScan))
 	}
+
+	// switch to second host which is still online
+	host = hosts[1]
+	hk = host.PublicKey()
+
+	// update the host's net address
+	settings := host.settings.Settings()
+	settings.NetAddress = "hostwithoutport.com"
+	tt.OK(host.settings.UpdateSettings(settings))
+	tt.OK(host.settings.Announce())
+
+	tt.Retry(100, 100*time.Millisecond, func() error {
+		cluster.MineBlocks(1)
+
+		h, err := b.Host(context.Background(), hk)
+		tt.OK(err)
+		if !strings.HasPrefix(h.NetAddress, settings.NetAddress) && !strings.HasPrefix(h.V2SiamuxAddr(), settings.NetAddress) {
+			return fmt.Errorf("expected net address to be %v, got '%v' and '%v'", settings.NetAddress, h.NetAddress, h.V2SiamuxAddr())
+		}
+		return nil
+	})
+
+	// scan the host and expect the scan to fail
+	if err := scanHost(); err == nil || !strings.Contains(err.Error(), "host failed pre-scan checks") {
+		t.Fatal("expected scan error")
+	}
+	// make sure the scan got recorded
+	assertHost(ls, false, false, 1)
 }
 
 // TestDownloadAllHosts makes sure we try to download sectors, from all hosts
