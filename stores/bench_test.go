@@ -23,7 +23,7 @@ import (
 // BenchmarkArchiveContract benchmarks the performance of archiving a contract.
 //
 // cpu: Apple M1 Max
-// BenchmarkArchiveContract-10         2080            615705 ns/op            2941 B/op         83 allocs/op
+// BenchmarkArchiveContract-10         6087            220385 ns/op            2591 B/op         68 allocs/op
 func BenchmarkArchiveContract(b *testing.B) {
 	// define parameters
 	contractSize := 1 << 30 // 1 GiB contract
@@ -185,7 +185,7 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 
 	// insert contract
 	res, err := db.Exec(context.Background(), `
-	INSERT INTO contracts (fcid, host_key, start_height, v2, usability) VALUES (?, ?, ?, ?, ?)`, sql.FileContractID(fcid), sql.PublicKey(hk), 0, false, usability)
+INSERT INTO contracts (fcid, host_key, start_height, v2, usability) VALUES (?, ?, ?, ?, ?)`, sql.FileContractID(fcid), sql.PublicKey(hk), 0, false, usability)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 	// insert slab
 	key := object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
 	res, err = db.Exec(context.Background(), `
-	INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
+INSERT INTO slabs (created_at, `+"`key`"+`) VALUES (?, ?)`, time.Now(), sql.EncryptionKey(key))
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 
 	// insert sectors
 	insertSectorStmt, err := db.Prepare(context.Background(), `
-	INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?)`)
+INSERT INTO sectors (db_slab_id, slab_index, root) VALUES (?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert sector: %w", err)
 	}
@@ -239,7 +239,7 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 
 	// insert contract sectors
 	insertLinkStmt, err := db.Prepare(context.Background(), `
-		INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)`)
+INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert contract sectors: %w", err)
 	}
@@ -252,7 +252,7 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 
 	// insert host sectors
 	insertHostSectorStmt, err := db.Prepare(context.Background(), `
-	INSERT INTO host_sectors (db_sector_id, db_host_id) VALUES (?, ?)`)
+INSERT INTO host_sectors (db_sector_id, db_host_id) VALUES (?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert host sectors: %w", err)
 	}
@@ -266,11 +266,11 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 	// sanity check
 	var cnt int
 	err = db.QueryRow(context.Background(), `
-		SELECT COUNT(s.root)
-		FROM contracts c
-		INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
-		INNER JOIN sectors s ON cs.db_sector_id = s.id
-		WHERE c.fcid = ?`, sql.FileContractID(fcid)).Scan(&cnt)
+SELECT COUNT(s.root)
+FROM contracts c
+INNER JOIN contract_sectors cs ON cs.db_contract_id = c.id
+INNER JOIN sectors s ON cs.db_sector_id = s.id
+WHERE c.fcid = ?`, sql.FileContractID(fcid)).Scan(&cnt)
 	if cnt != n {
 		return nil, fmt.Errorf("expected %v sectors, got %v", n, cnt)
 	}

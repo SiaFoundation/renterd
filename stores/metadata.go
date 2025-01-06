@@ -584,8 +584,12 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 }
 
 func (s *SQLStore) pruneHostSectorLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
 	for {
 		select {
+		case <-ticker.C:
 		case <-s.hostSectorPruneSigChan:
 		case <-s.shutdownCtx.Done():
 			return
@@ -622,11 +626,12 @@ func (s *SQLStore) pruneHostSectorLoop() {
 			}
 		}
 
-		// mark the last prune time where both slabs and dirs were pruned
+		// mark the last prune time where host sectors were pruned
 		if pruneSuccess {
 			s.mu.Lock()
 			s.lastPrunedHostSectorsAt = time.Now()
 			s.mu.Unlock()
+			s.logger.Debug("host sectors pruned successfully")
 		}
 	}
 }

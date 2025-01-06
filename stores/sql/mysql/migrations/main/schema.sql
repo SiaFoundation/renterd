@@ -156,12 +156,10 @@ CREATE TABLE `contract_sectors` (
 -- dbHost <-> dbSector
 CREATE TABLE `host_sectors` (
   `updated_at` datetime(3) DEFAULT NULL,
-  `deleted_at` datetime(3) DEFAULT NULL,
   `db_sector_id` bigint unsigned NOT NULL,
   `db_host_id` bigint unsigned NOT NULL,
   PRIMARY KEY (`db_sector_id`, `db_host_id`),
   KEY `idx_host_sectors_updated_at` (`updated_at`),
-  KEY `idx_host_sectors_deleted_at` (`deleted_at`),
   KEY `idx_host_sectors_db_sector_id` (`db_sector_id`),
   KEY `idx_host_sectors_db_host_id` (`db_host_id`),
   CONSTRAINT `fk_host_sectors_db_sector` FOREIGN KEY (`db_sector_id`) REFERENCES `sectors` (`id`) ON DELETE CASCADE,

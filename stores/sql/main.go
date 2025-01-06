@@ -192,18 +192,6 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
 
-	// soft delete all host_sectors for every host that we don't have an active
-	// contract with anymore
-	_, err = tx.Exec(ctx, `
-	UPDATE host_sectors SET deleted_at = ? WHERE deleted_at IS NULL AND db_host_id NOT IN (
-		SELECT h.id
-		FROM contracts c
-		INNER JOIN hosts h ON c.host_id = h.id
-		WHERE c.archival_reason IS NULL
-	)`, time.Now())
-	if err != nil {
-		return fmt.Errorf("failed to soft delete host_sectors: %w", err)
-	}
 	return nil
 }
 
@@ -1870,7 +1858,7 @@ func Slab(ctx context.Context, tx sql.Tx, key object.EncryptionKey) (object.Slab
 		SELECT h.public_key
 		FROM host_sectors hs
 		INNER JOIN hosts h ON h.id = hs.db_host_id
-		WHERE hs.db_sector_id = ? AND hs.deleted_at IS NULL
+		WHERE hs.db_sector_id = ?
 	`)
 	if err != nil {
 		return object.Slab{}, fmt.Errorf("failed to prepare statement to fetch hosts: %w", err)
