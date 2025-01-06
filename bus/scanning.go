@@ -164,13 +164,10 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 // shouldScanAddr checks whether the provided addr should be scanned according
 // to the bus's configuration. A scanned address needs to:
 // - be resolvable
-// - pass the IP checks we enforce on hosts
 // - not be a private IP if the bus is configured to disallow private IPs
 func (b *Bus) shouldScanAddr(addr string) error {
 	resolved, err := utils.ResolveHostIPs(context.Background(), []string{addr})
 	if err != nil {
-		return err
-	} else if err := utils.PerformHostIPChecks(resolved); err != nil {
 		return err
 	}
 	for _, ipAddr := range resolved {
