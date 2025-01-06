@@ -63,7 +63,7 @@ func BenchmarkArchiveContract(b *testing.B) {
 // BenchmarkPruneHostSectors benchmarks the performance of pruning host sectors.
 //
 // cpu: Apple M1 Max
-// BenchmarkPruneHostSectors-10                   4         333581052 ns/op           79684 B/op       1711 allocs/op
+// BenchmarkPruneHostSectors-10                   4         313942406 ns/op        133601.07 MB/s     56800 B/op       1401 allocs/op
 func BenchmarkPruneHostSectors(b *testing.B) {
 	// define parameters
 	contractSize := 1 << 40 // 1 TiB contract
@@ -112,6 +112,7 @@ func BenchmarkPruneHostSectors(b *testing.B) {
 			} else if n == 0 {
 				break
 			}
+			b.SetBytes(hostSectorPruningBatchSize * int64(sectorSize))
 		}
 
 		b.StopTimer()
