@@ -708,10 +708,18 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	// check if the scan failed due to a shutdown - shouldn't be necessary but
 	// just in case since recording a failed scan might have serious
 	// repercussions
-	select {
-	case <-jc.Request.Context().Done():
+	// NOTE: This inline function is a hack to avoid a panic in the jape check
+	interrupted := func() bool {
+		select {
+		case <-jc.Request.Context().Done():
+			return true
+		default:
+			return false
+		}
+	}
+	if interrupted() {
 		jc.Error(errors.New("scan failed due to bus shutting down"), http.StatusServiceUnavailable)
-	default:
+		return
 	}
 
 	// record host scan - make sure this is interrupted by the request ctx and
