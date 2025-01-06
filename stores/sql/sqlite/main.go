@@ -731,12 +731,12 @@ func (tx *MainDatabaseTx) PruneHostSectors(ctx context.Context, limit int64) (in
 	res, err := tx.Exec(ctx, `DELETE FROM host_sectors
 WHERE rowid IN (
 	SELECT rowid
-	FROM host_sectors hs
-	WHERE NOT EXISTS (
-		SELECT 1
+	FROM host_sectors
+	WHERE db_host_id NOT IN (
+		SELECT h.id
 		FROM contracts c
 		INNER JOIN hosts h ON c.host_id = h.id
-		WHERE c.archival_reason IS NULL AND h.id = hs.db_host_id
+		WHERE c.archival_reason IS NULL
 	)
 	LIMIT ?
 )`, limit)

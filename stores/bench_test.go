@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -64,10 +63,10 @@ func BenchmarkArchiveContract(b *testing.B) {
 // BenchmarkPruneHostSectors benchmarks the performance of pruning host sectors.
 //
 // cpu: Apple M1 Max
-// BenchmarkPruneHostSectors-10                5007            243928 ns/op            1776 B/op         49 allocs/op
+// BenchmarkPruneHostSectors-10                   4         333581052 ns/op           79684 B/op       1711 allocs/op
 func BenchmarkPruneHostSectors(b *testing.B) {
 	// define parameters
-	contractSize := 1 << 30 // 1 GiB contract
+	contractSize := 1 << 40 // 1 TiB contract
 	sectorSize := 4 << 20   // 4 MiB sector
 	numSectors := contractSize / sectorSize
 
@@ -103,11 +102,16 @@ func BenchmarkPruneHostSectors(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-			_, err := tx.PruneHostSectors(context.Background(), math.MaxInt64)
-			return err
-		}); err != nil {
-			b.Fatal(err)
+		for {
+			var n int64
+			if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
+				n, err = tx.PruneHostSectors(context.Background(), hostSectorPruningBatchSize)
+				return
+			}); err != nil {
+				b.Fatal(err)
+			} else if n == 0 {
+				break
+			}
 		}
 
 		b.StopTimer()

@@ -719,11 +719,11 @@ CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable))
 
 func (tx *MainDatabaseTx) PruneHostSectors(ctx context.Context, limit int64) (int64, error) {
 	res, err := tx.Exec(ctx, `DELETE FROM host_sectors
-WHERE NOT EXISTS (
-	SELECT 1
+WHERE db_host_id NOT IN (
+	SELECT h.id
 	FROM contracts c
 	INNER JOIN hosts h ON c.host_id = h.id
-	WHERE c.archival_reason IS NULL AND h.id = host_sectors.db_host_id
+	WHERE c.archival_reason IS NULL
 ) LIMIT ?`, limit)
 	if err != nil {
 		return 0, err
