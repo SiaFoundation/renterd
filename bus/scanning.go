@@ -77,11 +77,7 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type
 	if err := b.shouldScanAddr(hostIP); err != nil {
-		// record host scan even if we don't actually scan the host since
-		// something is still wrong with the host
-		err = fmt.Errorf("host failed pre-scan checks: %w", err)
-		b.recordHostScan(ctx, err, hostKey, rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, rhp4.HostSettings{})
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, err
+		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, fmt.Errorf("host failed pre-scan checks: %w", err)
 	}
 
 	// scan: first try
@@ -104,20 +100,6 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 			logger.Infow("failed to scan host")
 		}
 	}
-
-	// check if the scan failed due to a shutdown - shouldn't be necessary but
-	// just in case since recording a failed scan might have serious
-	// repercussions
-	select {
-	case <-ctx.Done():
-		return rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, 0, context.Cause(ctx)
-	default:
-	}
-
-	// record host scan - make sure this is interrupted by the request ctx and
-	// not the context with the timeout used to time out the scan itself.
-	// Otherwise scans that time out won't be recorded.
-	b.recordHostScan(ctx, err, hostKey, settings, pt, rhp4.HostSettings{})
 
 	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
 	return settings, pt, duration, err
@@ -151,11 +133,7 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 	// resolve host ip, don't scan if the host is on a private network or if it
 	// resolves to more than two addresses of the same type
 	if err := b.shouldScanAddr(hostIP); err != nil {
-		// record host scan even if we don't actually scan the host since
-		// something is still wrong with the host
-		err = fmt.Errorf("host failed pre-scan checks: %w", err)
-		b.recordHostScan(ctx, err, hostKey, rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, rhp4.HostSettings{})
-		return rhp4.HostSettings{}, 0, err
+		return rhp4.HostSettings{}, 0, fmt.Errorf("host failed pre-scan checks: %w", err)
 	}
 
 	// scan: first try
@@ -178,20 +156,6 @@ func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey typ
 			logger.Infow("failed to scan host")
 		}
 	}
-
-	// check if the scan failed due to a shutdown - shouldn't be necessary but
-	// just in case since recording a failed scan might have serious
-	// repercussions
-	select {
-	case <-ctx.Done():
-		return rhp4.HostSettings{}, 0, context.Cause(ctx)
-	default:
-	}
-
-	// record host scan - make sure this is interrupted by the request ctx and
-	// not the context with the timeout used to time out the scan itself.
-	// Otherwise scans that time out won't be recorded.
-	b.recordHostScan(ctx, err, hostKey, rhpv2.HostSettings{}, rhpv3.HostPriceTable{}, settings)
 
 	logger.With(zap.Error(err)).Debugw("scanned host", "success", err == nil)
 	return settings, duration, err
