@@ -3,7 +3,6 @@ package stores
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"sync"
 	"time"
@@ -110,25 +109,17 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ss.initSlabPruning(); err != nil {
-		return nil, err
-	}
+	ss.initSlabPruning()
 	return ss, nil
 }
 
-func (s *SQLStore) initSlabPruning() error {
+func (s *SQLStore) initSlabPruning() {
 	// start pruning loop
 	s.wg.Add(1)
 	go func() {
 		s.pruneSlabsLoop()
 		s.wg.Done()
 	}()
-
-	// prune once to guarantee consistency on startup
-	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
-		_, err := tx.PruneSlabs(s.shutdownCtx, math.MaxInt64)
-		return err
-	})
 }
 
 // Close closes the underlying database connection of the store.

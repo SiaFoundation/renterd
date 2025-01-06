@@ -46,10 +46,10 @@ SET
             )
         FROM
             (
-                -- Convert ns to ms by trimming the last 3 digits
+                -- Convert ns to μs by trimming the last 3 digits
                 SELECT
-                    SUBSTR (minAccountExpiry, 1, LENGTH (minAccountExpiry) -3) AS newMinAccountExpiry,
-                    SUBSTR (
+                    SUBSTR(minAccountExpiry, 1, LENGTH (minAccountExpiry) -3) AS newMinAccountExpiry,
+                    SUBSTR(
                         minPriceTableValidity,
                         1,
                         LENGTH (minPriceTableValidity) -3
