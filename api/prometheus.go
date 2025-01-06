@@ -838,7 +838,6 @@ func (t TxPoolFeeResp) ToFloat64() (float64, error) {
 func (t TxPoolFeeResp) PrometheusMetric() (metrics []prometheus.Metric) {
 	floatValue, err := t.ToFloat64()
 	if err != nil {
-		fmt.Println("Error:", err)
 		return
 	}
 	return []prometheus.Metric{
