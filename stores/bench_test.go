@@ -63,12 +63,14 @@ func BenchmarkArchiveContract(b *testing.B) {
 // BenchmarkPruneHostSectors benchmarks the performance of pruning host sectors.
 //
 // cpu: Apple M1 Max
-// BenchmarkPruneHostSectors-10                   4         313942406 ns/op        133601.07 MB/s     56800 B/op       1401 allocs/op
+// BenchmarkPruneHostSectors-10                 100          12663735 ns/op        3312059.09 MB/s     1888 B/op         49 allocs/op
 func BenchmarkPruneHostSectors(b *testing.B) {
 	// define parameters
-	contractSize := 1 << 40 // 1 TiB contract
-	sectorSize := 4 << 20   // 4 MiB sector
-	numSectors := contractSize / sectorSize
+	numSectors := b.N * hostSectorPruningBatchSize
+	sectorSize := 4 << 20 // 4 MiB sector
+
+	// set the amount of bytes pruned in every iteration
+	b.SetBytes(hostSectorPruningBatchSize * int64(sectorSize))
 
 	// create database
 	db, err := newTestDB(context.Background(), b.TempDir())
@@ -90,36 +92,17 @@ func BenchmarkPruneHostSectors(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// fetch everything we need to reinsert sectors
-	hostID, err := fetchHostID(db.DB(), hk)
-	if err != nil {
-		b.Fatal(err)
-	}
-	sectorIDs, err := fetchSectorIDs(db.DB())
-	if err != nil {
-		b.Fatal(err)
-	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for {
-			var n int64
-			if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
-				n, err = tx.PruneHostSectors(context.Background(), hostSectorPruningBatchSize)
-				return
-			}); err != nil {
-				b.Fatal(err)
-			} else if n == 0 {
-				break
-			}
-			b.SetBytes(hostSectorPruningBatchSize * int64(sectorSize))
-		}
-
-		b.StopTimer()
-		if err := reinsertHostSectors(db.DB(), hostID, sectorIDs); err != nil {
+		var n int64
+		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
+			n, err = tx.PruneHostSectors(context.Background(), hostSectorPruningBatchSize)
+			return
+		}); err != nil {
 			b.Fatal(err)
+		} else if n != hostSectorPruningBatchSize {
+			b.Fatalf("expected %d sectors to be pruned, got %d", hostSectorPruningBatchSize, n)
 		}
-		b.StartTimer()
 	}
 }
 
@@ -379,46 +362,6 @@ func insertObjects(db *isql.DB, bucket string, n int) (dirs []string, _ error) {
 		}
 	}
 	return dirs, nil
-}
-
-func fetchHostID(db *isql.DB, hk types.PublicKey) (int64, error) {
-	var hostID int64
-	if err := db.QueryRow(context.Background(), `SELECT id FROM hosts WHERE public_key = ?`, sql.PublicKey(hk)).Scan(&hostID); err != nil {
-		return 0, err
-	}
-	return hostID, nil
-}
-
-func fetchSectorIDs(db *isql.DB) (ids []int64, _ error) {
-	rows, err := db.Query(context.Background(), `SELECT db_sector_id FROM contract_sectors`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query sectors: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var sectorID int64
-		if err := rows.Scan(&sectorID); err != nil {
-			return nil, fmt.Errorf("failed to scan sector id: %w", err)
-		}
-		ids = append(ids, sectorID)
-	}
-	return
-}
-
-func reinsertHostSectors(db *isql.DB, hostID int64, sectorIDs []int64) error {
-	insertStmt, err := db.Prepare(context.Background(), `INSERT INTO host_sectors (db_sector_id, db_host_id) VALUES (?, ?)`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to insert host sectors: %w", err)
-	}
-	defer insertStmt.Close()
-
-	for _, sectorID := range sectorIDs {
-		if _, err := insertStmt.Exec(context.Background(), sectorID, hostID); err != nil {
-			return fmt.Errorf("failed to insert host sector: %w", err)
-		}
-	}
-	return nil
 }
 
 func generateFileContractID(i int) types.FileContractID {
