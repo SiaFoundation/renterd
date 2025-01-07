@@ -119,6 +119,85 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
+// BenchmarkPruneSlabs benchmarks pruning unreferenced slabs from a database
+// containing 100 TiB worth of slabs of which 50% are prunable in batches that
+// reflect our batchsize in production.
+//
+// 2.3 TB/s | M2 Pro | fd751630
+func BenchmarkPruneSlabs(b *testing.B) {
+	// define parameters
+	totalShardsPerSlab := 30                 // shards per slab
+	slabSize := totalShardsPerSlab * 4 << 20 // 120MiB
+	numSlabs := 100 << 40 / slabSize         // 100 TiB of slabs
+	if numSlabs%2 != 0 {
+		numSlabs++ // make number even
+	}
+
+	// prepare database
+	db, err := newTestDB(context.Background(), b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+	}
+	for i := 0; i < int(numSlabs); i++ {
+		slab := object.SlabSlice{
+			Slab: object.Slab{
+				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+			},
+		}
+		obj.Slabs = append(obj.Slabs, slab)
+	}
+
+	err = db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		if err := tx.CreateBucket(context.Background(), testBucket, api.BucketPolicy{}); err != nil {
+			b.Fatal(err)
+		} else if err := tx.InsertObject(context.Background(), testBucket, "foo", obj, "", "", api.ObjectUserMetadata{}); err != nil {
+			b.Fatal(err)
+		}
+		return nil
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// delete half the slices to make half the slabs prunable
+	_, err = db.DB().Exec(context.Background(), "DELETE FROM slices WHERE slices.db_slab_id % 2 = 0")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// sanity check slabs and slices
+	var createdSlabs, createdSlices int
+	if err := db.DB().QueryRow(context.Background(), "SELECT COUNT(*) FROM slabs").Scan(&createdSlabs); err != nil {
+		b.Fatal(err)
+	} else if err := db.DB().QueryRow(context.Background(), "SELECT COUNT(*) FROM slices").Scan(&createdSlices); err != nil {
+		b.Fatal(err)
+	} else if createdSlabs != numSlabs || createdSlices != numSlabs/2 {
+		b.Fatalf("expected %d slabs and %d slices, got %d slabs and %d slices", numSlabs, numSlabs/2, createdSlabs, createdSlices)
+	}
+
+	// start benchmark
+	batchSize := slabPruningBatchSize
+	b.ResetTimer()
+	b.SetBytes(int64(batchSize * slabSize))
+	for i := 0; i < b.N; i++ {
+		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+			pruned, err := tx.PruneSlabs(context.Background(), int64(batchSize))
+			if err != nil {
+				return err
+			} else if pruned != int64(batchSize) {
+				b.Fatal("benchmark ran out of slabs to prune, increase number of slabs in db setup")
+			}
+			return nil
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func insertObjects(db *isql.DB, bucket string, n int) (dirs []string, _ error) {
 	var bucketID int64
 	res, err := db.Exec(context.Background(), "INSERT INTO buckets (created_at, name) VALUES (?, ?)", time.Now(), bucket)
