@@ -63,6 +63,12 @@ var (
 	clusterOptNoFunding = false
 )
 
+type Autopilot interface {
+	Handler() http.Handler
+	Run()
+	Shutdown(context.Context) error
+}
+
 // TestCluster is a helper type that allows for easily creating a number of
 // nodes connected to each other and ready for testing.
 type TestCluster struct {
@@ -528,7 +534,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (autopilot.Autopilot, error) {
+func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 

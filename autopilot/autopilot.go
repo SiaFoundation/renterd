@@ -20,14 +20,6 @@ import (
 )
 
 type (
-	Autopilot interface {
-		Handler() http.Handler
-		Run()
-		Shutdown(context.Context) error
-		Trigger(forceScan bool) bool
-		Uptime() time.Duration
-	}
-
 	Bus interface {
 		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
 		ConsensusState(ctx context.Context) (api.ConsensusState, error)
@@ -91,7 +83,7 @@ type autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) Autopilot {
+func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) *autopilot {
 	return &autopilot{
 		bus:    b,
 		logger: logger.Named("autopilot").Sugar(),

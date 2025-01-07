@@ -44,6 +44,12 @@ import (
 )
 
 type (
+	Autopilot interface {
+		Handler() http.Handler
+		Run()
+		Shutdown(context.Context) error
+	}
+
 	node struct {
 		cfg config.Config
 
@@ -233,7 +239,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	}, nil
 }
 
-func newAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (autopilot.Autopilot, error) {
+func newAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 
