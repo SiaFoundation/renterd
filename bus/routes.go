@@ -1378,7 +1378,7 @@ func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
 	if jc.Check("couldn't get objects stats", err) != nil {
 		return
 	}
-	jc.Encode(info)
+	api.WriteResponse(jc, info)
 }
 
 func (b *Bus) packedSlabsHandlerFetchPOST(jc jape.Context) {
