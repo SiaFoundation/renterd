@@ -584,12 +584,8 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 }
 
 func (s *SQLStore) pruneHostSectorLoop() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
 	for {
 		select {
-		case <-ticker.C:
 		case <-s.hostSectorPruneSigChan:
 		case <-s.shutdownCtx.Done():
 			return
