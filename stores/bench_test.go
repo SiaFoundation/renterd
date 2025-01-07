@@ -14,6 +14,7 @@ import (
 	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.uber.org/zap"
 
@@ -123,7 +124,8 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 // containing 100 TiB worth of slabs of which 50% are prunable in batches that
 // reflect our batchsize in production.
 //
-// 2.3 TB/s | M2 Pro | fd751630
+// 2.3 TB/s | M2 Pro | fd751630 | SQLite
+// 0.8 TB/s | M2 Pro | fd751630 | MySQL
 func BenchmarkPruneSlabs(b *testing.B) {
 	// define parameters
 	totalShardsPerSlab := 30                 // shards per slab
@@ -134,7 +136,7 @@ func BenchmarkPruneSlabs(b *testing.B) {
 	}
 
 	// prepare database
-	db, err := newTestDB(context.Background(), b.TempDir())
+	db, err := newTestMysqlDB(context.Background())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -328,6 +330,32 @@ func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {
 	}
 
 	dbMain, err := sqlite.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, "")
+	if err != nil {
+		return nil, err
+	}
+
+	err = dbMain.Migrate(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return dbMain, nil
+}
+
+func newTestMysqlDB(ctx context.Context) (*mysql.MainDatabase, error) {
+	db, err := mysql.Open("root", "test", "localhost:3306", "")
+	if err != nil {
+		return nil, err
+	}
+
+	dbName := fmt.Sprintf("bench_%d", time.Now().UnixNano())
+	if _, err := db.Exec(fmt.Sprintf("CREATE DATABASE %s", dbName)); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(fmt.Sprintf("USE %s", dbName)); err != nil {
+		return nil, err
+	}
+	dbMain, err := mysql.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, "")
 	if err != nil {
 		return nil, err
 	}
