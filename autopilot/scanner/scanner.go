@@ -29,7 +29,7 @@ type (
 )
 
 type (
-	scanner struct {
+	Scanner struct {
 		hs HostStore
 
 		scanBatchSize int
@@ -58,7 +58,7 @@ type (
 	}
 )
 
-func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (*scanner, error) {
+func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (*Scanner, error) {
 	logger = logger.Named("scanner")
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")
@@ -66,7 +66,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	if scanThreads == 0 {
 		return nil, errors.New("scanner threads has to be greater than zero")
 	}
-	return &scanner{
+	return &Scanner{
 		hs: hs,
 
 		scanBatchSize: int(scanBatchSize),
@@ -81,7 +81,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	}, nil
 }
 
-func (s *scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
+func (s *Scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 	if s.canSkipScan(force) {
 		s.logger.Debug("host scan skipped")
 		return
@@ -119,7 +119,7 @@ func (s *scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 	}()
 }
 
-func (s *scanner) Shutdown(ctx context.Context) error {
+func (s *Scanner) Shutdown(ctx context.Context) error {
 	waitChan := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -137,19 +137,19 @@ func (s *scanner) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (s *scanner) Status() (bool, time.Time) {
+func (s *Scanner) Status() (bool, time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.scanning, s.scanningLastStart
 }
 
-func (s *scanner) UpdateHostsConfig(cfg api.HostsConfig) {
+func (s *Scanner) UpdateHostsConfig(cfg api.HostsConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hostsCfg = &cfg
 }
 
-func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Time) (scanned uint64) {
+func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Time) (scanned uint64) {
 	// define worker
 	worker := func(jobs <-chan scanJob) {
 		for h := range jobs {
@@ -236,7 +236,7 @@ func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 	return
 }
 
-func (s *scanner) isInterrupted() bool {
+func (s *Scanner) isInterrupted() bool {
 	select {
 	case <-s.interruptChan:
 		return true
@@ -245,7 +245,7 @@ func (s *scanner) isInterrupted() bool {
 	return false
 }
 
-func (s *scanner) isShutdown() bool {
+func (s *Scanner) isShutdown() bool {
 	select {
 	case <-s.shutdownChan:
 		return true
@@ -254,7 +254,7 @@ func (s *scanner) isShutdown() bool {
 	return false
 }
 
-func (s *scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
+func (s *Scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -283,7 +283,7 @@ func (s *scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 	return
 }
 
-func (s *scanner) canSkipScan(force bool) bool {
+func (s *Scanner) canSkipScan(force bool) bool {
 	if s.isShutdown() {
 		return true
 	}

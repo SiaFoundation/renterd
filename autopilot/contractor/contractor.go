@@ -104,7 +104,7 @@ type revisionBroadcaster interface {
 }
 
 type (
-	contractor struct {
+	Contractor struct {
 		alerter alerts.Alerter
 		cm      ContractManager
 		cs      ConsensusStore
@@ -130,9 +130,9 @@ type (
 	}
 )
 
-func New(alerter alerts.Alerter, cs ConsensusStore, cm ContractManager, db Database, hs HostScanner, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.Logger) *contractor {
+func New(alerter alerts.Alerter, cs ConsensusStore, cm ContractManager, db Database, hs HostScanner, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.Logger) *Contractor {
 	logger = logger.Named("contractor")
-	return &contractor{
+	return &Contractor{
 		cs:      cs,
 		cm:      cm,
 		db:      db,
@@ -151,11 +151,11 @@ func New(alerter alerts.Alerter, cs ConsensusStore, cm ContractManager, db Datab
 	}
 }
 
-func (c *contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
+func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 
-func (c *contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 
 	// convenience variables
@@ -226,7 +226,7 @@ func (c *contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	return contract, true, nil
 }
 
-func (c *contractor) pruneContractRefreshFailures(contracts []api.ContractMetadata) {
+func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetadata) {
 	contractMap := make(map[types.FileContractID]struct{})
 	for _, contract := range contracts {
 		contractMap[contract.ID] = struct{}{}
@@ -238,7 +238,7 @@ func (c *contractor) pruneContractRefreshFailures(contracts []api.ContractMetada
 	}
 }
 
-func (c *contractor) refreshContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	if contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
 	}
@@ -301,7 +301,7 @@ func (c *contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	return renewal, true, nil
 }
 
-func (c *contractor) renewContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	if contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
@@ -369,7 +369,7 @@ func (c *contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 
 // broadcastRevisions broadcasts contract revisions, we only broadcast the
 // revision of good contracts since we're migrating away from bad contracts.
-func (c *contractor) broadcastRevisions(ctx context.Context, contracts []api.ContractMetadata, logger *zap.SugaredLogger) {
+func (c *Contractor) broadcastRevisions(ctx context.Context, contracts []api.ContractMetadata, logger *zap.SugaredLogger) {
 	if c.revisionBroadcastInterval == 0 {
 		return // not enabled
 	}
@@ -425,7 +425,7 @@ func (c *contractor) broadcastRevisions(ctx context.Context, contracts []api.Con
 	}
 }
 
-func (c *contractor) refreshFundingEstimate(contract contract, logger *zap.SugaredLogger) types.Currency {
+func (c *Contractor) refreshFundingEstimate(contract contract, logger *zap.SugaredLogger) types.Currency {
 	// refresh with 1.2x the funds
 	refreshAmount := contract.InitialRenterFunds.Mul64(6).Div64(5)
 
@@ -443,7 +443,7 @@ func (c *contractor) refreshFundingEstimate(contract contract, logger *zap.Sugar
 	return refreshAmountCapped
 }
 
-func (c *contractor) shouldArchive(contract contract, bh uint64, n consensus.Network) (err error) {
+func (c *Contractor) shouldArchive(contract contract, bh uint64, n consensus.Network) (err error) {
 	if bh > contract.EndHeight()-c.revisionSubmissionBuffer {
 		return errContractExpired
 	} else if contract.Revision != nil && contract.Revision.RevisionNumber == math.MaxUint64 {
@@ -460,7 +460,7 @@ func (c *contractor) shouldArchive(contract contract, bh uint64, n consensus.Net
 	return nil
 }
 
-func (c *contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool {
+func (c *Contractor) shouldForgiveFailedRefresh(fcid types.FileContractID) bool {
 	lastFailure, exists := c.firstRefreshFailure[fcid]
 	if !exists {
 		lastFailure = time.Now()

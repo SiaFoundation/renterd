@@ -61,7 +61,7 @@ type (
 	}
 )
 
-type autopilot struct {
+type Autopilot struct {
 	bus    Bus
 	logger *zap.SugaredLogger
 
@@ -83,8 +83,8 @@ type autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) *autopilot {
-	return &autopilot{
+func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) *Autopilot {
+	return &Autopilot{
 		bus:    b,
 		logger: logger.Named("autopilot").Sugar(),
 
@@ -102,7 +102,7 @@ func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m 
 }
 
 // Handler returns an HTTP handler that serves the autopilot api.
-func (ap *autopilot) Handler() http.Handler {
+func (ap *Autopilot) Handler() http.Handler {
 	return jape.Mux(map[string]jape.Handler{
 		"POST   /config/evaluate": ap.configEvaluateHandlerPOST,
 		"GET    /state":           ap.stateHandlerGET,
@@ -110,7 +110,7 @@ func (ap *autopilot) Handler() http.Handler {
 	})
 }
 
-func (ap *autopilot) configEvaluateHandlerPOST(jc jape.Context) {
+func (ap *Autopilot) configEvaluateHandlerPOST(jc jape.Context) {
 	ctx := jc.Request.Context()
 
 	// decode request
@@ -146,7 +146,7 @@ func (ap *autopilot) configEvaluateHandlerPOST(jc jape.Context) {
 	jc.Encode(res)
 }
 
-func (ap *autopilot) Run() {
+func (ap *Autopilot) Run() {
 	ap.startStopMu.Lock()
 	if ap.isRunning() {
 		ap.startStopMu.Unlock()
@@ -192,7 +192,7 @@ func (ap *autopilot) Run() {
 }
 
 // Shutdown shuts down the autopilot.
-func (ap *autopilot) Shutdown(ctx context.Context) error {
+func (ap *Autopilot) Shutdown(ctx context.Context) error {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 
@@ -209,13 +209,13 @@ func (ap *autopilot) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (ap *autopilot) StartTime() time.Time {
+func (ap *Autopilot) StartTime() time.Time {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 	return ap.startTime
 }
 
-func (ap *autopilot) Trigger(forceScan bool) bool {
+func (ap *Autopilot) Trigger(forceScan bool) bool {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 
@@ -227,7 +227,7 @@ func (ap *autopilot) Trigger(forceScan bool) bool {
 	}
 }
 
-func (ap *autopilot) Uptime() (dur time.Duration) {
+func (ap *Autopilot) Uptime() (dur time.Duration) {
 	ap.startStopMu.Lock()
 	defer ap.startStopMu.Unlock()
 	if ap.isRunning() {
@@ -236,7 +236,7 @@ func (ap *autopilot) Uptime() (dur time.Duration) {
 	return
 }
 
-func (ap *autopilot) blockUntilEnabled(interrupt <-chan time.Time) (enabled, interrupted bool) {
+func (ap *Autopilot) blockUntilEnabled(interrupt <-chan time.Time) (enabled, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -263,7 +263,7 @@ func (ap *autopilot) blockUntilEnabled(interrupt <-chan time.Time) (enabled, int
 	}
 }
 
-func (ap *autopilot) blockUntilOnline() (online bool) {
+func (ap *Autopilot) blockUntilOnline() (online bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -295,7 +295,7 @@ func (ap *autopilot) blockUntilOnline() (online bool) {
 	}
 }
 
-func (ap *autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, blocked, interrupted bool) {
+func (ap *Autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, blocked, interrupted bool) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -333,7 +333,7 @@ func (ap *autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 	}
 }
 
-func (ap *autopilot) performMaintenance(forceScan bool, tickerFired chan struct{}) {
+func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{}) {
 	defer ap.logger.Info("autopilot iteration ended")
 
 	// initiate a host scan - no need to be synced or configured for scanning
@@ -417,7 +417,7 @@ func (ap *autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	}
 }
 
-func (ap *autopilot) tryScheduleTriggerWhenFunded() error {
+func (ap *Autopilot) tryScheduleTriggerWhenFunded() error {
 	// apply sane timeout
 	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
 	defer cancel()
@@ -464,11 +464,11 @@ func (ap *autopilot) tryScheduleTriggerWhenFunded() error {
 	return nil
 }
 
-func (ap *autopilot) isRunning() bool {
+func (ap *Autopilot) isRunning() bool {
 	return !ap.startTime.IsZero()
 }
 
-func (ap *autopilot) isStopped() bool {
+func (ap *Autopilot) isStopped() bool {
 	select {
 	case <-ap.shutdownCtx.Done():
 		return true
@@ -477,7 +477,7 @@ func (ap *autopilot) isStopped() bool {
 	}
 }
 
-func (ap *autopilot) triggerHandlerPOST(jc jape.Context) {
+func (ap *Autopilot) triggerHandlerPOST(jc jape.Context) {
 	var req api.AutopilotTriggerRequest
 	if jc.Decode(&req) != nil {
 		return
@@ -487,7 +487,7 @@ func (ap *autopilot) triggerHandlerPOST(jc jape.Context) {
 	})
 }
 
-func (ap *autopilot) stateHandlerGET(jc jape.Context) {
+func (ap *Autopilot) stateHandlerGET(jc jape.Context) {
 	pruning, pLastStart := ap.pruner.Status()
 	migrating, mLastStart := ap.migrator.Status()
 	scanning, sLastStart := ap.scanner.Status()
@@ -518,7 +518,7 @@ func (ap *autopilot) stateHandlerGET(jc jape.Context) {
 	})
 }
 
-func (ap *autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
+func (ap *Autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
 	// fetch autopilot config
 	apCfg, err := ap.bus.AutopilotConfig(ctx)
 	if err != nil {

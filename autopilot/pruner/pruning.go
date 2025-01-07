@@ -38,7 +38,7 @@ type (
 	}
 )
 
-type pruner struct {
+type Pruner struct {
 	alerter alerts.Alerter
 	bus     Bus
 	logger  *zap.SugaredLogger
@@ -51,8 +51,8 @@ type pruner struct {
 	pruningAlertIDs  map[types.FileContractID]types.Hash256
 }
 
-func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *pruner {
-	return &pruner{
+func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *Pruner {
+	return &Pruner{
 		alerter: alerter,
 		bus:     bus,
 		logger:  logger.Named("pruner").Sugar(),
@@ -61,7 +61,7 @@ func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *pruner {
 	}
 }
 
-func (p *pruner) PerformContractPruning(ctx context.Context) {
+func (p *Pruner) PerformContractPruning(ctx context.Context) {
 	p.mu.Lock()
 	if p.pruning {
 		p.mu.Unlock()
@@ -81,18 +81,18 @@ func (p *pruner) PerformContractPruning(ctx context.Context) {
 	}()
 }
 
-func (p *pruner) Status() (bool, time.Time) {
+func (p *Pruner) Status() (bool, time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.pruning, p.pruningLastStart
 }
 
-func (p *pruner) Stop() {
+func (p *Pruner) Stop() {
 	p.wg.Wait()
 	return
 }
 
-func (p *pruner) dismissPruneAlerts(ctx context.Context, prunable []api.ContractPrunableData) {
+func (p *Pruner) dismissPruneAlerts(ctx context.Context, prunable []api.ContractPrunableData) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -115,7 +115,7 @@ func (p *pruner) dismissPruneAlerts(ctx context.Context, prunable []api.Contract
 	}
 }
 
-func (p *pruner) fetchPrunableContracts(ctx context.Context) (prunable []api.ContractPrunableData, _ error) {
+func (p *Pruner) fetchPrunableContracts(ctx context.Context) (prunable []api.ContractPrunableData, _ error) {
 	// use a sane timeout
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -149,7 +149,7 @@ func (p *pruner) fetchPrunableContracts(ctx context.Context) (prunable []api.Con
 	return
 }
 
-func (p *pruner) fetchHostContract(ctx context.Context, fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
+func (p *Pruner) fetchHostContract(ctx context.Context, fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
 	// use a sane timeout
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -165,7 +165,7 @@ func (p *pruner) fetchHostContract(ctx context.Context, fcid types.FileContractI
 	return
 }
 
-func (p *pruner) performContractPruning(ctx context.Context) {
+func (p *Pruner) performContractPruning(ctx context.Context) {
 	log := p.logger.Named("performContractPruning")
 	log.Info("performing contract pruning")
 
@@ -226,7 +226,7 @@ func (p *pruner) performContractPruning(ctx context.Context) {
 	log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
 }
 
-func (p *pruner) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
+func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
 	// define logger
 	log := logger.With(
 		zap.Stringer("contract", fcid),

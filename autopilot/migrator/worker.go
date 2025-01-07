@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (m *migrator) migrateSlab(ctx context.Context, key object.EncryptionKey) error {
+func (m *Migrator) migrateSlab(ctx context.Context, key object.EncryptionKey) error {
 	// fetch slab
 	slab, err := m.ss.Slab(ctx, key)
 	if err != nil {
@@ -90,7 +90,7 @@ func (m *migrator) migrateSlab(ctx context.Context, key object.EncryptionKey) er
 	return nil
 }
 
-func (m *migrator) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulHosts []upload.HostInfo, bh uint64) error {
+func (m *Migrator) migrate(ctx context.Context, s object.Slab, dlHosts []api.HostInfo, ulHosts []upload.HostInfo, bh uint64) error {
 	// map usable hosts
 	usableHosts := make(map[types.PublicKey]struct{})
 	for _, h := range dlHosts {

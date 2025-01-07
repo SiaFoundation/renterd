@@ -19,7 +19,7 @@ const (
 	lockingPrioritySyncing = 30
 )
 
-func (m *migrator) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
+func (m *Migrator) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
 	// calculate the deposit amount
 	acc := m.accounts.ForHost(hk)
 	return acc.WithDeposit(func(balance types.Currency) (types.Currency, error) {
@@ -48,7 +48,7 @@ func (m *migrator) FundAccount(ctx context.Context, fcid types.FileContractID, h
 	})
 }
 
-func (m *migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
+func (m *Migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
 	// handle v2 host
 	if host.IsV2() {
 		account := m.accounts.ForHost(host.PublicKey)
