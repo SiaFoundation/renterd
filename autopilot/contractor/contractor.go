@@ -103,10 +103,6 @@ type revisionBroadcaster interface {
 	broadcastRevisions(ctx context.Context, contracts []api.ContractMetadata, logger *zap.SugaredLogger)
 }
 
-type Contractor interface {
-	PerformContractMaintenance(context.Context, MaintenanceState) (bool, error)
-}
-
 type (
 	contractor struct {
 		alerter alerts.Alerter
@@ -134,7 +130,7 @@ type (
 	}
 )
 
-func New(alerter alerts.Alerter, cs ConsensusStore, cm ContractManager, db Database, hs HostScanner, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.Logger) Contractor {
+func New(alerter alerts.Alerter, cs ConsensusStore, cm ContractManager, db Database, hs HostScanner, revisionSubmissionBuffer uint64, revisionBroadcastInterval time.Duration, allowRedundantHostIPs bool, logger *zap.Logger) *contractor {
 	logger = logger.Named("contractor")
 	return &contractor{
 		cs:      cs,
@@ -155,7 +151,7 @@ func New(alerter alerts.Alerter, cs ConsensusStore, cm ContractManager, db Datab
 	}
 }
 
-func (c *contractor) PerformContractMaintenance(ctx context.Context, state MaintenanceState) (bool, error) {
+func (c *contractor) PerformContractMaintenance(ctx context.Context, state *MaintenanceState) (bool, error) {
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 

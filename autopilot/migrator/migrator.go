@@ -65,13 +65,6 @@ type (
 		UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error)
 	}
 
-	Migrator interface {
-		Migrate(ctx context.Context)
-		SignalMaintenanceFinished()
-		Status() (bool, time.Time)
-		Stop()
-	}
-
 	SlabStore interface {
 		RefreshHealth(ctx context.Context) error
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
@@ -100,7 +93,8 @@ type (
 
 		statsSlabMigrationSpeedMS *utils.DataPoints
 
-		wg sync.WaitGroup
+		shutdownCtx context.Context
+		wg          sync.WaitGroup
 
 		logger *zap.SugaredLogger
 
@@ -124,6 +118,8 @@ func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, 
 		signalMaintenanceFinished: make(chan struct{}, 1),
 
 		statsSlabMigrationSpeedMS: utils.NewDataPoints(time.Hour),
+
+		shutdownCtx: ctx,
 
 		logger: logger.Sugar(),
 	}

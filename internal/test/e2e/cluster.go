@@ -23,7 +23,7 @@ import (
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
-	cwallet "go.sia.tech/coreutils/wallet"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
@@ -32,7 +32,7 @@ import (
 	"go.sia.tech/renterd/autopilot/migrator"
 	"go.sia.tech/renterd/autopilot/pruner"
 	"go.sia.tech/renterd/autopilot/scanner"
-	"go.sia.tech/renterd/autopilot/wallet"
+	"go.sia.tech/renterd/autopilot/walletmaintainer"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/config"
@@ -547,7 +547,7 @@ func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.
 
 	c := contractor.New(bus, bus, bus, bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
 	p := pruner.New(a, bus, l)
-	w := wallet.New(a, bus, l)
+	w := walletmaintainer.New(a, bus, l)
 
 	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }
@@ -582,7 +582,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	}
 
 	// create wallet
-	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, cwallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

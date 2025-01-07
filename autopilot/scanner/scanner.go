@@ -26,13 +26,6 @@ type (
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
-
-	Scanner interface {
-		Scan(ctx context.Context, hs HostScanner, force bool)
-		Shutdown(ctx context.Context) error
-		Status() (bool, time.Time)
-		UpdateHostsConfig(cfg api.HostsConfig)
-	}
 )
 
 type (
@@ -65,7 +58,7 @@ type (
 	}
 )
 
-func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (Scanner, error) {
+func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (*scanner, error) {
 	logger = logger.Named("scanner")
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")

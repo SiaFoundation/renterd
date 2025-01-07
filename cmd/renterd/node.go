@@ -25,7 +25,7 @@ import (
 	"go.sia.tech/renterd/autopilot/migrator"
 	"go.sia.tech/renterd/autopilot/pruner"
 	"go.sia.tech/renterd/autopilot/scanner"
-	"go.sia.tech/renterd/autopilot/wallet"
+	"go.sia.tech/renterd/autopilot/walletmaintainer"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
@@ -252,7 +252,7 @@ func newAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Clie
 
 	c := contractor.New(bus, bus, bus, bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
 	p := pruner.New(a, bus, l)
-	w := wallet.New(a, bus, l)
+	w := walletmaintainer.New(a, bus, l)
 
 	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }

@@ -1,4 +1,4 @@
-package wallet
+package walletmaintainer
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"go.sia.tech/core/types"
-	cwallet "go.sia.tech/coreutils/wallet"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
@@ -16,17 +16,13 @@ import (
 type (
 	Bus interface {
 		Wallet(ctx context.Context) (api.WalletResponse, error)
-		WalletPending(ctx context.Context) (resp []cwallet.Event, err error)
+		WalletPending(ctx context.Context) (resp []wallet.Event, err error)
 		WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
-	}
-
-	Wallet interface {
-		PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error
 	}
 )
 
 type (
-	wallet struct {
+	walletMaintainer struct {
 		alerter alerts.Alerter
 		bus     Bus
 		logger  *zap.SugaredLogger
@@ -36,15 +32,15 @@ type (
 	}
 )
 
-func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) Wallet {
-	return &wallet{
+func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *walletMaintainer {
+	return &walletMaintainer{
 		alerter: alerter,
 		bus:     bus,
 		logger:  logger.Named("wallet").Sugar(),
 	}
 }
 
-func (w *wallet) PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error {
+func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error {
 	// no contracts - nothing to do
 	if cfg.Contracts.Amount == 0 {
 		w.logger.Warn("wallet maintenance skipped, no contracts wanted")

@@ -13,44 +13,71 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot/contractor"
-	"go.sia.tech/renterd/autopilot/migrator"
-	"go.sia.tech/renterd/autopilot/pruner"
 	"go.sia.tech/renterd/autopilot/scanner"
-	"go.sia.tech/renterd/autopilot/wallet"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 )
 
-type Bus interface {
-	AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
-	ConsensusState(ctx context.Context) (api.ConsensusState, error)
-	GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
-	Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
-	RecommendedFee(ctx context.Context) (types.Currency, error)
-	ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
-	SyncerPeers(ctx context.Context) (resp []string, err error)
-	UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
-	Wallet(ctx context.Context) (api.WalletResponse, error)
-}
+type (
+	Autopilot interface {
+		Handler() http.Handler
+		Run()
+		Shutdown(context.Context) error
+		Trigger(forceScan bool) bool
+		Uptime() time.Duration
+	}
 
-type Autopilot interface {
-	Handler() http.Handler
-	Run()
-	Shutdown(context.Context) error
-	Trigger(forceScan bool) bool
-	Uptime() time.Duration
-}
+	Bus interface {
+		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
+		ConsensusState(ctx context.Context) (api.ConsensusState, error)
+		GougingSettings(ctx context.Context) (gs api.GougingSettings, err error)
+		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
+		RecommendedFee(ctx context.Context) (types.Currency, error)
+		ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
+		SyncerPeers(ctx context.Context) (resp []string, err error)
+		UploadSettings(ctx context.Context) (us api.UploadSettings, err error)
+		Wallet(ctx context.Context) (api.WalletResponse, error)
+	}
+
+	Contractor interface {
+		PerformContractMaintenance(context.Context, *contractor.MaintenanceState) (bool, error)
+	}
+
+	Migrator interface {
+		Migrate(ctx context.Context)
+		SignalMaintenanceFinished()
+		Status() (bool, time.Time)
+		Stop()
+	}
+
+	Pruner interface {
+		PerformContractPruning(context.Context)
+		Status() (bool, time.Time)
+		Stop()
+	}
+
+	Scanner interface {
+		Scan(ctx context.Context, hs scanner.HostScanner, force bool)
+		Shutdown(ctx context.Context) error
+		Status() (bool, time.Time)
+		UpdateHostsConfig(cfg api.HostsConfig)
+	}
+
+	WalletMaintainer interface {
+		PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error
+	}
+)
 
 type autopilot struct {
-	b Bus
-	l *zap.SugaredLogger
+	bus    Bus
+	logger *zap.SugaredLogger
 
-	c contractor.Contractor
-	m migrator.Migrator
-	p pruner.Pruner
-	s scanner.Scanner
-	w wallet.Wallet
+	contractor Contractor
+	migrator   Migrator
+	pruner     Pruner
+	scanner    Scanner
+	maintainer WalletMaintainer
 
 	hearbeat time.Duration
 	wg       sync.WaitGroup
@@ -64,16 +91,16 @@ type autopilot struct {
 }
 
 // New initializes an Autopilot.
-func New(ctx context.Context, cancel context.CancelFunc, b Bus, c contractor.Contractor, m migrator.Migrator, p pruner.Pruner, s scanner.Scanner, w wallet.Wallet, heartbeat time.Duration, logger *zap.Logger) Autopilot {
+func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) Autopilot {
 	return &autopilot{
-		b: b,
-		l: logger.Named("autopilot").Sugar(),
+		bus:    b,
+		logger: logger.Named("autopilot").Sugar(),
 
-		c: c,
-		m: m,
-		p: p,
-		s: s,
-		w: w,
+		contractor: c,
+		migrator:   m,
+		pruner:     p,
+		scanner:    s,
+		maintainer: w,
 
 		shutdownCtx:       ctx,
 		shutdownCtxCancel: cancel,
@@ -104,13 +131,13 @@ func (ap *autopilot) configEvaluateHandlerPOST(jc jape.Context) {
 	reqCfg := req.AutopilotConfig
 	gs := req.GougingSettings
 	rs := req.RedundancySettings
-	cs, err := ap.b.ConsensusState(ctx)
+	cs, err := ap.bus.ConsensusState(ctx)
 	if jc.Check("failed to get consensus state", err) != nil {
 		return
 	}
 
 	// fetch hosts
-	hosts, err := ap.b.Hosts(ctx, api.HostOptions{})
+	hosts, err := ap.bus.Hosts(ctx, api.HostOptions{})
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -143,28 +170,28 @@ func (ap *autopilot) Run() {
 
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
-		ap.l.Error("autopilot stopped before it was able to come online")
+		ap.logger.Error("autopilot stopped before it was able to come online")
 		return
 	}
 
 	// schedule a trigger when the wallet receives its first deposit
 	if err := ap.tryScheduleTriggerWhenFunded(); err != nil {
 		if !errors.Is(err, context.Canceled) {
-			ap.l.Error(err)
+			ap.logger.Error(err)
 		}
 		return
 	}
 
 	var forceScan bool
 	for !ap.isStopped() {
-		ap.l.Info("autopilot iteration starting")
+		ap.logger.Info("autopilot iteration starting")
 		tickerFired := make(chan struct{})
 		ap.performMaintenance(forceScan, tickerFired)
 		select {
 		case <-ap.shutdownCtx.Done():
 			return
 		case forceScan = <-ap.triggerChan:
-			ap.l.Info("autopilot iteration triggered")
+			ap.logger.Info("autopilot iteration triggered")
 			ap.ticker.Reset(ap.hearbeat)
 		case <-ap.ticker.C:
 		case <-tickerFired:
@@ -182,9 +209,9 @@ func (ap *autopilot) Shutdown(ctx context.Context) error {
 		ap.shutdownCtxCancel()
 		close(ap.triggerChan)
 		ap.wg.Wait()
-		ap.m.Stop()
-		ap.p.Stop()
-		ap.s.Shutdown(ctx)
+		ap.migrator.Stop()
+		ap.pruner.Stop()
+		ap.scanner.Shutdown(ctx)
 		ap.startTime = time.Time{}
 	}
 	return nil
@@ -224,13 +251,13 @@ func (ap *autopilot) blockUntilEnabled(interrupt <-chan time.Time) (enabled, int
 	var once sync.Once
 
 	for {
-		apCfg, err := ap.b.AutopilotConfig(ap.shutdownCtx)
+		apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			ap.l.Errorf("unable to fetch autopilot from the bus, err: %v", err)
+			ap.logger.Errorf("unable to fetch autopilot from the bus, err: %v", err)
 		}
 
 		if err != nil || !apCfg.Enabled {
-			once.Do(func() { ap.l.Info("autopilot is waiting to be enabled...") })
+			once.Do(func() { ap.logger.Info("autopilot is waiting to be enabled...") })
 			select {
 			case <-ap.shutdownCtx.Done():
 				return false, false
@@ -252,16 +279,16 @@ func (ap *autopilot) blockUntilOnline() (online bool) {
 
 	for {
 		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-		peers, err := ap.b.SyncerPeers(ctx)
+		peers, err := ap.bus.SyncerPeers(ctx)
 		online = len(peers) > 0
 		cancel()
 
 		if utils.IsErr(err, context.Canceled) {
 			return
 		} else if err != nil {
-			ap.l.Errorf("failed to get peers, err: %v", err)
+			ap.logger.Errorf("failed to get peers, err: %v", err)
 		} else if !online {
-			once.Do(func() { ap.l.Info("autopilot is waiting on the bus to connect to peers...") })
+			once.Do(func() { ap.logger.Info("autopilot is waiting on the bus to connect to peers...") })
 		}
 
 		if err != nil || !online {
@@ -285,7 +312,7 @@ func (ap *autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 	for {
 		// try and fetch consensus
 		ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-		cs, err := ap.b.ConsensusState(ctx)
+		cs, err := ap.bus.ConsensusState(ctx)
 		synced = cs.Synced
 		cancel()
 
@@ -293,9 +320,9 @@ func (ap *autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 		if utils.IsErr(err, context.Canceled) {
 			return
 		} else if err != nil {
-			ap.l.Errorf("failed to get consensus state, err: %v", err)
+			ap.logger.Errorf("failed to get consensus state, err: %v", err)
 		} else if !synced {
-			once.Do(func() { ap.l.Info("autopilot is waiting for consensus to sync...") })
+			once.Do(func() { ap.logger.Info("autopilot is waiting for consensus to sync...") })
 		}
 
 		if err != nil || !synced {
@@ -315,10 +342,10 @@ func (ap *autopilot) blockUntilSynced(interrupt <-chan time.Time) (synced, block
 }
 
 func (ap *autopilot) performMaintenance(forceScan bool, tickerFired chan struct{}) {
-	defer ap.l.Info("autopilot iteration ended")
+	defer ap.logger.Info("autopilot iteration ended")
 
 	// initiate a host scan - no need to be synced or configured for scanning
-	ap.s.Scan(ap.shutdownCtx, ap.b, forceScan)
+	ap.scanner.Scan(ap.shutdownCtx, ap.bus, forceScan)
 
 	// reset forceScans
 	forceScan = false
@@ -329,11 +356,11 @@ func (ap *autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 			close(tickerFired)
 			return
 		}
-		ap.l.Info("autopilot stopped before consensus was synced")
+		ap.logger.Info("autopilot stopped before consensus was synced")
 		return
 	} else if blocked {
-		if scanning, _ := ap.s.Status(); !scanning {
-			ap.s.Scan(ap.shutdownCtx, ap.b, true)
+		if scanning, _ := ap.scanner.Status(); !scanning {
+			ap.scanner.Scan(ap.shutdownCtx, ap.bus, true)
 		}
 	}
 
@@ -343,58 +370,58 @@ func (ap *autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 			close(tickerFired)
 			return
 		}
-		ap.l.Info("autopilot stopped before it was able to confirm it was enabled in the bus")
+		ap.logger.Info("autopilot stopped before it was able to confirm it was enabled in the bus")
 		return
 	}
 
 	// fetch autopilot config
-	apCfg, err := ap.b.AutopilotConfig(ap.shutdownCtx)
+	apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
 	if err != nil {
-		ap.l.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
+		ap.logger.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
 		return
 	}
 
 	// update the scanner with the hosts config
-	ap.s.UpdateHostsConfig(apCfg.Hosts)
+	ap.scanner.UpdateHostsConfig(apCfg.Hosts)
 
 	// perform wallet maintenance
-	err = ap.w.PerformWalletMaintenance(ap.shutdownCtx, apCfg)
+	err = ap.maintainer.PerformWalletMaintenance(ap.shutdownCtx, apCfg)
 	if err != nil && utils.IsErr(err, context.Canceled) {
 		return
 	} else if err != nil {
-		ap.l.Errorf("wallet maintenance failed, err: %v", err)
+		ap.logger.Errorf("wallet maintenance failed, err: %v", err)
 	}
 
 	// build maintenance state
 	buildState, err := ap.buildState(ap.shutdownCtx)
 	if err != nil {
-		ap.l.Errorf("aborting maintenance, failed to build state, err: %v", err)
+		ap.logger.Errorf("aborting maintenance, failed to build state, err: %v", err)
 		return
 	}
 
 	// perform maintenance
-	setChanged, err := ap.c.PerformContractMaintenance(ap.shutdownCtx, buildState)
+	setChanged, err := ap.contractor.PerformContractMaintenance(ap.shutdownCtx, buildState)
 	if err != nil && utils.IsErr(err, context.Canceled) {
 		return
 	} else if err != nil {
-		ap.l.Errorf("contract maintenance failed, err: %v", err)
+		ap.logger.Errorf("contract maintenance failed, err: %v", err)
 	}
 	maintenanceSuccess := err == nil
 
 	// upon success, notify the migrator. The health of slabs might have
 	// changed.
 	if maintenanceSuccess && setChanged {
-		ap.m.SignalMaintenanceFinished()
+		ap.migrator.SignalMaintenanceFinished()
 	}
 
 	// migration
-	ap.m.Migrate(ap.shutdownCtx)
+	ap.migrator.Migrate(ap.shutdownCtx)
 
 	// pruning
-	if ap.p != nil {
-		ap.p.PerformContractPruning(ap.shutdownCtx)
+	if ap.pruner != nil {
+		ap.pruner.PerformContractPruning(ap.shutdownCtx)
 	} else {
-		ap.l.Info("pruning disabled")
+		ap.logger.Info("pruning disabled")
 	}
 }
 
@@ -404,7 +431,7 @@ func (ap *autopilot) tryScheduleTriggerWhenFunded() error {
 	defer cancel()
 
 	// no need to schedule a trigger if the wallet is already funded
-	wallet, err := ap.b.Wallet(ctx)
+	wallet, err := ap.bus.Wallet(ctx)
 	if err != nil {
 		return err
 	} else if !wallet.Confirmed.Add(wallet.Unconfirmed).IsZero() {
@@ -412,7 +439,7 @@ func (ap *autopilot) tryScheduleTriggerWhenFunded() error {
 	}
 
 	// spin a goroutine that triggers the autopilot when we receive a deposit
-	ap.l.Info("autopilot loop trigger is scheduled for when the wallet receives a deposit")
+	ap.logger.Info("autopilot loop trigger is scheduled for when the wallet receives a deposit")
 	ap.wg.Add(1)
 	go func() {
 		defer ap.wg.Done()
@@ -428,8 +455,8 @@ func (ap *autopilot) tryScheduleTriggerWhenFunded() error {
 
 			// fetch wallet info
 			ctx, cancel := context.WithTimeout(ap.shutdownCtx, 30*time.Second)
-			if wallet, err = ap.b.Wallet(ctx); err != nil {
-				ap.l.Errorf("failed to get wallet info, err: %v", err)
+			if wallet, err = ap.bus.Wallet(ctx); err != nil {
+				ap.logger.Errorf("failed to get wallet info, err: %v", err)
 			}
 			cancel()
 
@@ -469,11 +496,11 @@ func (ap *autopilot) triggerHandlerPOST(jc jape.Context) {
 }
 
 func (ap *autopilot) stateHandlerGET(jc jape.Context) {
-	pruning, pLastStart := ap.p.Status()
-	migrating, mLastStart := ap.m.Status()
-	scanning, sLastStart := ap.s.Status()
+	pruning, pLastStart := ap.pruner.Status()
+	migrating, mLastStart := ap.migrator.Status()
+	scanning, sLastStart := ap.scanner.Status()
 
-	cfg, err := ap.b.AutopilotConfig(jc.Request.Context())
+	cfg, err := ap.bus.AutopilotConfig(jc.Request.Context())
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -499,53 +526,53 @@ func (ap *autopilot) stateHandlerGET(jc jape.Context) {
 	})
 }
 
-func (ap *autopilot) buildState(ctx context.Context) (contractor.MaintenanceState, error) {
+func (ap *autopilot) buildState(ctx context.Context) (*contractor.MaintenanceState, error) {
 	// fetch autopilot config
-	apCfg, err := ap.b.AutopilotConfig(ctx)
+	apCfg, err := ap.bus.AutopilotConfig(ctx)
 	if err != nil {
-		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch autopilot config, err: %v", err)
+		return nil, fmt.Errorf("could not fetch autopilot config, err: %v", err)
 	}
 
 	// fetch consensus state
-	cs, err := ap.b.ConsensusState(ctx)
+	cs, err := ap.bus.ConsensusState(ctx)
 	if err != nil {
-		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch consensus state, err: %v", err)
+		return nil, fmt.Errorf("could not fetch consensus state, err: %v", err)
 	} else if !cs.Synced {
-		return contractor.MaintenanceState{}, errors.New("consensus not synced")
+		return nil, errors.New("consensus not synced")
 	}
 
 	// fetch upload settings
-	us, err := ap.b.UploadSettings(ctx)
+	us, err := ap.bus.UploadSettings(ctx)
 	if err != nil {
-		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch upload settings, err: %v", err)
+		return nil, fmt.Errorf("could not fetch upload settings, err: %v", err)
 	}
 
 	// fetch gouging settings
-	gs, err := ap.b.GougingSettings(ctx)
+	gs, err := ap.bus.GougingSettings(ctx)
 	if err != nil {
-		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch gouging settings, err: %v", err)
+		return nil, fmt.Errorf("could not fetch gouging settings, err: %v", err)
 	}
 
 	// fetch recommended transaction fee
-	fee, err := ap.b.RecommendedFee(ctx)
+	fee, err := ap.bus.RecommendedFee(ctx)
 	if err != nil {
-		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch fee, err: %v", err)
+		return nil, fmt.Errorf("could not fetch fee, err: %v", err)
 	}
 
 	// fetch our wallet address
-	wi, err := ap.b.Wallet(ctx)
+	wi, err := ap.bus.Wallet(ctx)
 	if err != nil {
-		return contractor.MaintenanceState{}, fmt.Errorf("could not fetch wallet address, err: %v", err)
+		return nil, fmt.Errorf("could not fetch wallet address, err: %v", err)
 	}
 	address := wi.Address
 
 	// no need to try and form contracts if wallet is completely empty
 	skipContractFormations := wi.Confirmed.IsZero() && wi.Unconfirmed.IsZero()
 	if skipContractFormations {
-		ap.l.Warn("contract formations skipped, wallet is empty")
+		ap.logger.Warn("contract formations skipped, wallet is empty")
 	}
 
-	return contractor.MaintenanceState{
+	return &contractor.MaintenanceState{
 		GS: gs,
 		RS: us.Redundancy,
 		AP: apCfg,

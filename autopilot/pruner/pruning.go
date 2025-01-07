@@ -36,12 +36,6 @@ type (
 		PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
 		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
 	}
-
-	Pruner interface {
-		PerformContractPruning(context.Context)
-		Status() (bool, time.Time)
-		Stop()
-	}
 )
 
 type pruner struct {
@@ -57,7 +51,7 @@ type pruner struct {
 	pruningAlertIDs  map[types.FileContractID]types.Hash256
 }
 
-func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) Pruner {
+func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *pruner {
 	return &pruner{
 		alerter: alerter,
 		bus:     bus,
