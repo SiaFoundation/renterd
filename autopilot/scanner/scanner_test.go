@@ -89,7 +89,6 @@ func (w *mockHostScanner) ScanHost(ctx context.Context, hostKey types.PublicKey,
 	if w.blockChan != nil {
 		<-w.blockChan
 	}
-
 	w.hs.recordScan(hostKey)
 
 	w.mu.Lock()
@@ -115,13 +114,27 @@ func TestScanner(t *testing.T) {
 	if scanning {
 		t.Fatal("unexpected")
 	}
-
 	// initiate a host scan using a worker that blocks
 	b := &mockHostScanner{
 		blockChan: make(chan struct{}),
 		hs:        hs,
 	}
 	s.Scan(context.Background(), b, false)
+
+	// assert it's scanning
+	scanning, _ = s.Status()
+	if !scanning {
+		t.Fatal("unexpected")
+	}
+
+	// assert forcing a scan interrupts an ongoing scan, waits for the scan to
+	// finish and starts a new scan
+	t1 := make(chan struct{})
+	go func() {
+		s.Scan(context.Background(), b, true)
+		close(t1)
+	}()
+	<-t1
 
 	// assert it's scanning
 	scanning, _ = s.Status()
