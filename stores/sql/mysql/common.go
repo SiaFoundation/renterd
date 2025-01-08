@@ -12,6 +12,7 @@ import (
 
 var deadlockMsgs = []string{
 	"Deadlock found when trying to get lock",
+	"Lock wait timeout exceeded",
 }
 
 func Open(user, password, addr, dbName string) (*dsql.DB, error) {
