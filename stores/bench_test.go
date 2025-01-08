@@ -63,8 +63,8 @@ func BenchmarkArchiveContract(b *testing.B) {
 
 // BenchmarkPruneHostSectors benchmarks the performance of pruning host sectors.
 //
-// cpu: Apple M1 Max
-// BenchmarkPruneHostSectors-10                 100          12663735 ns/op        3312059.09 MB/s     1888 B/op         49 allocs/op
+// 3.3 TB/s | M1 Max | 8363023b | SQLite
+// 4.8 TB/s | M1 Max | 8363023b | MySQL
 func BenchmarkPruneHostSectors(b *testing.B) {
 	// define parameters
 	numSectors := b.N * hostSectorPruningBatchSize
@@ -90,6 +90,13 @@ func BenchmarkPruneHostSectors(b *testing.B) {
 	fcid := types.FileContractID{1}
 	_, err = insertContract(db.DB(), hk, fcid, numSectors)
 	if err != nil {
+		b.Fatal(err)
+	}
+
+	// archive contract
+	if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		return tx.ArchiveContract(context.Background(), fcid, api.ContractArchivalReasonRenewed)
+	}); err != nil {
 		b.Fatal(err)
 	}
 
@@ -241,7 +248,8 @@ func BenchmarkObjects(b *testing.B) {
 // BenchmarkPrunableContractRoots benchmarks diffing the roots of a contract
 // with a given set of roots to determine which roots are prunable.
 //
-// 15.32 MB/s | M1 Max | cd32fad7 (diff ~2TiB of contract data per second)
+// 2.5 TB/s | M1 Max | 8363023b | SQLite
+// 0.5 TB/s | M1 Max | 8363023b | MySQL
 func BenchmarkPrunableContractRoots(b *testing.B) {
 	// define parameters
 	batchSize := int64(25600) // 100GiB of contract data
@@ -276,7 +284,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 
 	// start benchmark
 	b.ResetTimer()
-	b.SetBytes(batchSize * 32)
+	b.SetBytes(batchSize * int64(sectorSize))
 	for i := 0; i < b.N; i++ {
 		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			indices, err := tx.PrunableContractRoots(context.Background(), fcid, batch)
@@ -312,7 +320,7 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 
 	// insert contract
 	res, err := db.Exec(context.Background(), `
-INSERT INTO contracts (fcid, host_key, start_height, v2, usability) VALUES (?, ?, ?, ?, ?)`, sql.FileContractID(fcid), sql.PublicKey(hk), 0, false, usability)
+INSERT INTO contracts (fcid, host_key, host_id, start_height, v2, usability) VALUES (?, ?, ?, ?, ?, ?)`, sql.FileContractID(fcid), sql.PublicKey(hk), hostID, 0, false, usability)
 	if err != nil {
 		return nil, err
 	}
