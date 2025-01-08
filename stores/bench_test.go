@@ -14,6 +14,7 @@ import (
 	isql "go.sia.tech/renterd/internal/sql"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/stores/sql/mysql"
 	"go.sia.tech/renterd/stores/sql/sqlite"
 	"go.uber.org/zap"
 
@@ -102,6 +103,86 @@ func BenchmarkPruneHostSectors(b *testing.B) {
 			b.Fatal(err)
 		} else if n != hostSectorPruningBatchSize {
 			b.Fatalf("expected %d sectors to be pruned, got %d", hostSectorPruningBatchSize, n)
+		}
+	}
+}
+
+// BenchmarkPruneSlabs benchmarks pruning unreferenced slabs from a database
+// containing 100 TiB worth of slabs of which 50% are prunable in batches that
+// reflect our batchsize in production.
+//
+// 2.3 TB/s | M2 Pro | fd751630 | SQLite
+// 0.8 TB/s | M2 Pro | fd751630 | MySQL
+func BenchmarkPruneSlabs(b *testing.B) {
+	// define parameters
+	totalShardsPerSlab := 30                 // shards per slab
+	slabSize := totalShardsPerSlab * 4 << 20 // 120MiB
+	numSlabs := 100 << 40 / slabSize         // 100 TiB of slabs
+	if numSlabs%2 != 0 {
+		numSlabs++ // make number even
+	}
+
+	// prepare database
+	db, err := newTestMysqlDB(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	obj := object.Object{
+		Key: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+	}
+	for i := 0; i < int(numSlabs); i++ {
+		slab := object.SlabSlice{
+			Slab: object.Slab{
+				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
+			},
+		}
+		obj.Slabs = append(obj.Slabs, slab)
+	}
+
+	err = db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		if err := tx.CreateBucket(context.Background(), testBucket, api.BucketPolicy{}); err != nil {
+			b.Fatal(err)
+		} else if err := tx.InsertObject(context.Background(), testBucket, "foo", obj, "", "", api.ObjectUserMetadata{}); err != nil {
+			b.Fatal(err)
+		}
+		return nil
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// delete half the slices to make half the slabs prunable
+	_, err = db.DB().Exec(context.Background(), "DELETE FROM slices WHERE slices.db_slab_id % 2 = 0")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// sanity check slabs and slices
+	var createdSlabs, createdSlices int
+	if err := db.DB().QueryRow(context.Background(), "SELECT COUNT(*) FROM slabs").Scan(&createdSlabs); err != nil {
+		b.Fatal(err)
+	} else if err := db.DB().QueryRow(context.Background(), "SELECT COUNT(*) FROM slices").Scan(&createdSlices); err != nil {
+		b.Fatal(err)
+	} else if createdSlabs != numSlabs || createdSlices != numSlabs/2 {
+		b.Fatalf("expected %d slabs and %d slices, got %d slabs and %d slices", numSlabs, numSlabs/2, createdSlabs, createdSlices)
+	}
+
+	// start benchmark
+	batchSize := slabPruningBatchSize
+	b.ResetTimer()
+	b.SetBytes(int64(batchSize * slabSize))
+	for i := 0; i < b.N; i++ {
+		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+			pruned, err := tx.PruneSlabs(context.Background(), int64(batchSize))
+			if err != nil {
+				return err
+			} else if pruned != int64(batchSize) {
+				b.Fatal("benchmark ran out of slabs to prune, increase number of slabs in db setup")
+			}
+			return nil
+		}); err != nil {
+			b.Fatal(err)
 		}
 	}
 }
@@ -389,6 +470,32 @@ func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {
 	}
 
 	dbMain, err := sqlite.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, "")
+	if err != nil {
+		return nil, err
+	}
+
+	err = dbMain.Migrate(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return dbMain, nil
+}
+
+func newTestMysqlDB(ctx context.Context) (*mysql.MainDatabase, error) {
+	db, err := mysql.Open("root", "test", "localhost:3306", "")
+	if err != nil {
+		return nil, err
+	}
+
+	dbName := fmt.Sprintf("bench_%d", time.Now().UnixNano())
+	if _, err := db.Exec(fmt.Sprintf("CREATE DATABASE %s", dbName)); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(fmt.Sprintf("USE %s", dbName)); err != nil {
+		return nil, err
+	}
+	dbMain, err := mysql.NewMainDatabase(db, zap.NewNop(), 100*time.Millisecond, 100*time.Millisecond, "")
 	if err != nil {
 		return nil, err
 	}

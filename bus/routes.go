@@ -704,11 +704,34 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	} else {
 		settings, pt, ping, err = b.scanHostV1(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
 	}
+
+	// check if the scan failed due to a shutdown - shouldn't be necessary but
+	// just in case since recording a failed scan might have serious
+	// repercussions
+	// NOTE: This inline function is a hack to avoid a panic in the jape check
+	interrupted := func() bool {
+		select {
+		case <-jc.Request.Context().Done():
+			return true
+		default:
+			return false
+		}
+	}
+	if interrupted() {
+		jc.Error(errors.New("scan failed due to bus shutting down"), http.StatusServiceUnavailable)
+		return
+	}
+
+	// record host scan - make sure this is interrupted by the request ctx and
+	// not the context with the timeout used to time out the scan itself.
+	// Otherwise scans that time out won't be recorded.
+	b.recordHostScan(jc.Request.Context(), err, hk, settings, pt, v2Settings)
+
+	// send response
 	var errStr string
 	if err != nil {
 		errStr = err.Error()
 	}
-
 	jc.Encode(api.HostScanResponse{
 		Ping:       api.DurationMS(ping),
 		PriceTable: pt,
@@ -1378,7 +1401,7 @@ func (b *Bus) objectsStatshandlerGET(jc jape.Context) {
 	if jc.Check("couldn't get objects stats", err) != nil {
 		return
 	}
-	jc.Encode(info)
+	api.WriteResponse(jc, info)
 }
 
 func (b *Bus) packedSlabsHandlerFetchPOST(jc jape.Context) {

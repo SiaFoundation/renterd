@@ -577,15 +577,22 @@ func (sr BusStateResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 		{
 			Name: "renterd_state",
 			Labels: map[string]any{
-				"network":    sr.Network,
-				"version":    sr.Version,
-				"commit":     sr.Commit,
-				"start_time": sr.StartTime.String(),
-				"os":         sr.OS,
-				"build_time": sr.BuildTime.String(),
+				"network": sr.Network,
+				"version": sr.Version,
+				"commit":  sr.Commit,
+				"os":      sr.OS,
 			},
 			Value: 1,
-		}}
+		},
+		{
+			Name:  "renterd_runtime",
+			Value: float64(time.Since(sr.StartTime.Std()).Milliseconds()),
+		},
+		{
+			Name:  "renterd_start_time",
+			Value: float64(sr.StartTime.Std().UnixMilli()),
+		},
+	}
 }
 
 func (os ObjectsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
@@ -838,7 +845,6 @@ func (t TxPoolFeeResp) ToFloat64() (float64, error) {
 func (t TxPoolFeeResp) PrometheusMetric() (metrics []prometheus.Metric) {
 	floatValue, err := t.ToFloat64()
 	if err != nil {
-		fmt.Println("Error:", err)
 		return
 	}
 	return []prometheus.Metric{

@@ -1618,6 +1618,24 @@ func Peers(ctx context.Context, tx sql.Tx) ([]syncer.PeerInfo, error) {
 	return peers, nil
 }
 
+func PruneSlabs(ctx context.Context, tx sql.Tx, limit int64) (int64, error) {
+	res, err := tx.Exec(ctx, `
+	DELETE FROM slabs
+	WHERE id IN (
+		SELECT id FROM (
+			SELECT s.id
+			FROM slabs s
+			LEFT JOIN slices sl ON sl.db_slab_id = s.id
+			WHERE s.db_buffered_slab_id IS NULL AND sl.db_slab_id IS NULL
+			LIMIT ?
+		) AS limited
+	)`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {
 	if len(scans) == 0 {
 		return nil
