@@ -57,7 +57,7 @@ func (b *Bus) pruneContractV1(ctx context.Context, rk types.PrivateKey, cm api.C
 	}
 
 	var pruneErr string
-	if err != nil {
+	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) {
 		pruneErr = err.Error()
 	}
 
