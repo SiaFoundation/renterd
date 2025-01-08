@@ -83,8 +83,6 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 	// scan: first try
 	settings, pt, duration, err := scan()
 	if err != nil {
-		logger = logger.With(zap.Error(err))
-
 		// scan: second try
 		select {
 		case <-ctx.Done():
