@@ -169,8 +169,15 @@ func (m *Migrator) Migrate(ctx context.Context) {
 	}()
 }
 
-func (m *Migrator) Stop() {
+func (m *Migrator) Shutdown(ctx context.Context) error {
 	m.wg.Wait()
+
+	// stop uploads and downloads
+	m.downloadManager.Stop()
+	m.uploadManager.Stop()
+
+	// stop account manager
+	return m.accounts.Shutdown(ctx)
 }
 
 func (m *Migrator) SignalMaintenanceFinished() {

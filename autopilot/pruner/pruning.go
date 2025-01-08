@@ -87,9 +87,9 @@ func (p *Pruner) Status() (bool, time.Time) {
 	return p.pruning, p.pruningLastStart
 }
 
-func (p *Pruner) Stop() {
+func (p *Pruner) Shutdown(_ context.Context) error {
 	p.wg.Wait()
-	return
+	return nil
 }
 
 func (p *Pruner) dismissPruneAlerts(ctx context.Context, prunable []api.ContractPrunableData) {

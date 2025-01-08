@@ -19,6 +19,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrShuttingDown = errors.New("autopilot is shutting down")
+)
+
 type (
 	Bus interface {
 		AutopilotConfig(ctx context.Context) (api.AutopilotConfig, error)
@@ -39,14 +43,14 @@ type (
 	Migrator interface {
 		Migrate(ctx context.Context)
 		SignalMaintenanceFinished()
+		Shutdown(ctx context.Context) error
 		Status() (bool, time.Time)
-		Stop()
 	}
 
 	Pruner interface {
 		PerformContractPruning(context.Context)
+		Shutdown(ctx context.Context) error
 		Status() (bool, time.Time)
-		Stop()
 	}
 
 	Scanner interface {
@@ -74,16 +78,17 @@ type Autopilot struct {
 	hearbeat time.Duration
 	wg       sync.WaitGroup
 
-	startStopMu       sync.Mutex
-	startTime         time.Time
 	shutdownCtx       context.Context
-	shutdownCtxCancel context.CancelFunc
-	ticker            *time.Ticker
-	triggerChan       chan bool
+	shutdownCtxCancel context.CancelCauseFunc
+
+	mu          sync.Mutex
+	startTime   time.Time
+	ticker      *time.Ticker
+	triggerChan chan bool
 }
 
 // New initializes an Autopilot.
-func New(ctx context.Context, cancel context.CancelFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) *Autopilot {
+func New(ctx context.Context, cancel context.CancelCauseFunc, b Bus, c Contractor, m Migrator, p Pruner, s Scanner, w WalletMaintainer, heartbeat time.Duration, logger *zap.Logger) *Autopilot {
 	return &Autopilot{
 		bus:    b,
 		logger: logger.Named("autopilot").Sugar(),
@@ -147,9 +152,9 @@ func (ap *Autopilot) configEvaluateHandlerPOST(jc jape.Context) {
 }
 
 func (ap *Autopilot) Run() {
-	ap.startStopMu.Lock()
+	ap.mu.Lock()
 	if ap.isRunning() {
-		ap.startStopMu.Unlock()
+		ap.mu.Unlock()
 		return
 	}
 	ap.startTime = time.Now()
@@ -158,7 +163,7 @@ func (ap *Autopilot) Run() {
 
 	ap.wg.Add(1)
 	defer ap.wg.Done()
-	ap.startStopMu.Unlock()
+	ap.mu.Unlock()
 
 	// block until the autopilot is online
 	if online := ap.blockUntilOnline(); !online {
@@ -192,32 +197,34 @@ func (ap *Autopilot) Run() {
 }
 
 // Shutdown shuts down the autopilot.
-func (ap *Autopilot) Shutdown(ctx context.Context) error {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+func (ap *Autopilot) Shutdown(ctx context.Context) (err error) {
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 
 	if ap.isRunning() {
 		ap.ticker.Stop()
-		ap.shutdownCtxCancel()
+		ap.shutdownCtxCancel(ErrShuttingDown)
 		close(ap.triggerChan)
 		ap.wg.Wait()
-		ap.migrator.Stop()
-		ap.pruner.Stop()
-		ap.scanner.Shutdown(ctx)
-		ap.startTime = time.Time{}
+		err = errors.Join(
+			ap.migrator.Shutdown(ctx),
+			ap.pruner.Shutdown(ctx),
+			ap.scanner.Shutdown(ctx),
+		)
 	}
-	return nil
+
+	return
 }
 
 func (ap *Autopilot) StartTime() time.Time {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 	return ap.startTime
 }
 
 func (ap *Autopilot) Trigger(forceScan bool) bool {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 
 	select {
 	case ap.triggerChan <- forceScan:
@@ -228,8 +235,8 @@ func (ap *Autopilot) Trigger(forceScan bool) bool {
 }
 
 func (ap *Autopilot) Uptime() (dur time.Duration) {
-	ap.startStopMu.Lock()
-	defer ap.startStopMu.Unlock()
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
 	if ap.isRunning() {
 		dur = time.Since(ap.startTime)
 	}

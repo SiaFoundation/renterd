@@ -243,16 +243,16 @@ func newAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Clie
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
 	if err != nil {
-		cancel()
+		cancel(nil)
 		return nil, err
 	}
 
 	s, err := scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, l)
 	if err != nil {
-		cancel()
+		cancel(nil)
 		return nil, err
 	}
 
