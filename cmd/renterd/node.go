@@ -403,9 +403,9 @@ func (n *node) Run() error {
 		time.Sleep(time.Millisecond) // give the web server a chance to start
 		_, port, err := net.SplitHostPort(n.apiListener.Addr().String())
 		if err != nil {
-			n.logger.Debug("failed to parse API address", zap.Error(err))
+			n.logger.Debugw("failed to parse API address", zap.Error(err))
 		} else if err := utils.OpenBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
-			n.logger.Debug("failed to open browser", zap.Error(err))
+			n.logger.Debugw("failed to open browser", zap.Error(err))
 		}
 	}
 	return nil

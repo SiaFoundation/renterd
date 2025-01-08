@@ -167,7 +167,7 @@ LOOP:
 			}
 		}
 		if !locked {
-			break LOOP
+			return err
 		}
 		// exponential backoff
 		sleep := time.Duration(math.Pow(factor, float64(attempt))) * time.Millisecond
@@ -202,7 +202,7 @@ func (s *DB) transaction(ctx context.Context, fn func(tx Tx) error) error {
 	start := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return err
 	}
 	defer func() {
 		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {

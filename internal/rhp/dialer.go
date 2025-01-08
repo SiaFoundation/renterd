@@ -81,7 +81,7 @@ func (d *FallbackDialer) Dial(ctx context.Context, hk types.PublicKey, address s
 
 	// If resolution fails, check the cache
 	if cachedIP, ok := d.cache.Get(host); ok {
-		logger.Debug("Failed to resolve host, using cached IP", zap.Error(err))
+		logger.Debugw("Failed to resolve host, using cached IP", zap.Error(err))
 		conn, err := d.dialer.DialContext(ctx, "tcp", net.JoinHostPort(cachedIP, port))
 		if err == nil {
 			return conn, nil
