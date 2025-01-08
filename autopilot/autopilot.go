@@ -574,12 +574,6 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	b := ap.bus
 	l := ap.logger
 
-	// no contracts - nothing to do
-	if cfg.Contracts.Amount == 0 {
-		l.Warn("wallet maintenance skipped, no contracts wanted")
-		return nil
-	}
-
 	// fetch wallet balance
 	wallet, err := b.Wallet(ctx)
 	if err != nil {
@@ -609,17 +603,21 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 		}
 	}
 
-	// figure out the amount per output
+	// check whether the wallet needs to be redistributed
 	wantedNumOutputs := 10
-	amount := contractor.InitialContractFunding.Div64(uint64(wantedNumOutputs))
+	amount := contractor.InitialContractFunding.Mul64(10)
+	if balance.Cmp(amount.Mul64(uint64(wantedNumOutputs))) < 0 {
+		l.Warnf("wallet maintenance skipped, wallet balance %v is too low to redistribute into meaningful outputs", balance)
+		return nil
+	}
 
 	// redistribute outputs
-	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, amount)
+	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, balance.Div64(11))
 	if err != nil {
 		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", wantedNumOutputs, amount, balance, err)
 	}
 
-	l.Debugf("wallet maintenance succeeded, txns %v", ids)
+	l.Infof("wallet maintenance succeeded, txns %v", ids)
 	ap.maintenanceTxnIDs = ids
 	return nil
 }
