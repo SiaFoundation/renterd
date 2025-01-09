@@ -186,7 +186,7 @@ func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 	worker := func(jobs <-chan scanJob) {
 		for h := range jobs {
 			scan, err := hs.ScanHost(ctx, h.hostKey, DefaultScanTimeout)
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, ErrShuttingDown) || errors.Is(err, ErrScanInterrupted) || errors.Is(err, context.Canceled) {
 				return
 			} else if err != nil {
 				s.logger.Errorw("worker stopped", zap.Error(err), "hk", h.hostKey)
