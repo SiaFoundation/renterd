@@ -3,7 +3,6 @@ package mocks
 import (
 	"context"
 	"errors"
-	"log"
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
@@ -140,7 +139,7 @@ func (mm *MemoryManager) Block() func() {
 	select {
 	case <-mm.memBlockChan:
 	default:
-		log.Fatal("already blocking")
+		panic("already blocking") // developer error
 	}
 	blockChan := make(chan struct{})
 	mm.memBlockChan = blockChan

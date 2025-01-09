@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -81,4 +82,14 @@ func main() {
 	checkFatalError("failed to shut down", node.Shutdown())
 
 	os.Exit(0)
+}
+
+// checkFatalError prints an error message to stderr and exits with a 1 exit
+// code. If err is nil, this is a no-op.
+func checkFatalError(context string, err error) {
+	if err == nil {
+		return
+	}
+	os.Stderr.WriteString(fmt.Sprintf("%s: %s\n", context, err))
+	os.Exit(1)
 }

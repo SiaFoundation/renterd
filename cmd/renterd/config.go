@@ -152,7 +152,9 @@ func assertWorkerID(cfg *config.Config) error {
 // variables, in that order.
 func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.Block, err error) {
 	cfg = defaultConfig()
-	parseYamlConfig(&cfg)
+	if err = parseYamlConfig(&cfg); err != nil {
+		return
+	}
 	parseCLIFlags(&cfg)
 	parseEnvironmentVariables(&cfg)
 
@@ -226,20 +228,23 @@ func sanitizeConfig(cfg *config.Config) error {
 	return nil
 }
 
-func parseYamlConfig(cfg *config.Config) {
+func parseYamlConfig(cfg *config.Config) error {
 	configPath := "renterd.yml"
 	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
 		configPath = str
 	}
 
 	// If the config file doesn't exist, don't try to load it.
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return
+	_, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
 	}
 
 	f, err := os.Open(configPath)
 	if err != nil {
-		log.Fatal("failed to open config file:", err)
+		return fmt.Errorf("failed to open config file: %w", err)
 	}
 	defer f.Close()
 
@@ -247,8 +252,9 @@ func parseYamlConfig(cfg *config.Config) {
 	dec.KnownFields(true)
 
 	if err := dec.Decode(&cfg); err != nil {
-		log.Fatal("failed to decode config file:", err)
+		return fmt.Errorf("failed to decode config file: %w", err)
 	}
+	return nil
 }
 
 func parseCLIFlags(cfg *config.Config) {
@@ -341,9 +347,8 @@ func parseEnvironmentVariables(cfg *config.Config) {
 	// define helper function to parse environment variables
 	parseEnvVar := func(s string, v interface{}) {
 		if env, ok := os.LookupEnv(s); ok {
-			if _, err := fmt.Sscan(env, v); err != nil {
-				log.Fatalf("failed to parse %s: %v", s, err)
-			}
+			_, err := fmt.Sscan(env, v)
+			checkFatalError(fmt.Sprintf("failed to parse %s", s), err)
 			fmt.Printf("Using %s environment variable\n", s)
 		}
 	}
@@ -458,15 +463,6 @@ func promptQuestion(question string, answers []string) string {
 func promptYesNo(question string) bool {
 	answer := promptQuestion(question, []string{"yes", "no"})
 	return strings.EqualFold(answer, "yes")
-}
-
-// checkFatalError prints an error message to stderr and exits with a 1 exit code. If err is nil, this is a no-op.
-func checkFatalError(context string, err error) {
-	if err == nil {
-		return
-	}
-	os.Stderr.WriteString(fmt.Sprintf("%s: %s\n", context, err))
-	os.Exit(1)
 }
 
 // stdoutError prints an error message to stdout
