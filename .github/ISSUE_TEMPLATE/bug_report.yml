@@ -65,11 +65,21 @@ body:
       label: Bus Config
       description: |
         The configuration of your bus
+
+        For version 2.0.0 and later:
         ```bash
         curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/settings/gouging
         curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/settings/pinned
-        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/settings/s3
-        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/settings/uploads
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/settings/upload
+        ```
+
+        For versions 1.1.1 and earlier:
+        ```bash
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/contractset
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/gouging
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/pricepinning
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/redundancy
+        curl -u ":[YOUR_PASSWORD]" http://localhost:9980/api/bus/setting/uploadpacking
         ```
       placeholder: Paste the output of the above commands here
     validations:
