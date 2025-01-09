@@ -242,6 +242,10 @@ type (
 		// the contract.
 		PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error)
 
+		// PruneHostSectors deletes host-sector links for sectors that are no
+		// longer linked to an active contract.
+		PruneHostSectors(ctx context.Context, limit int64) (int64, error)
+
 		// PruneSlabs deletes slabs that are no longer referenced by any slice
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
