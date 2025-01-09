@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
@@ -362,7 +361,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	b, bShutdownFn, cm, bs, err := newTestBus(ctx, cm, genesis, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
-	busAuth := jape.BasicAuth(busPassword)
+	busAuth := utils.Auth(busPassword)
 	busServer := &http.Server{
 		Handler: utils.TreeMux{
 			Handler: renterd.Handler(), // ui
@@ -383,7 +382,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	w, err := worker.New(workerCfg, workerKey, busClient, logger)
 	tt.OK(err)
 
-	workerServer := http.Server{Handler: utils.Auth(workerPassword, false)(w.Handler())}
+	workerServer := http.Server{Handler: utils.WorkerAuth(workerPassword, false)(w.Handler())}
 	var workerShutdownFns []func(context.Context) error
 	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
 	workerShutdownFns = append(workerShutdownFns, w.Shutdown)
@@ -399,7 +398,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	ap, err := newTestAutopilot(workerKey, apCfg, busClient, logger)
 	tt.OK(err)
 
-	autopilotAuth := jape.BasicAuth(autopilotPassword)
+	autopilotAuth := utils.Auth(autopilotPassword)
 	autopilotServer := http.Server{
 		Handler: autopilotAuth(ap.Handler()),
 	}

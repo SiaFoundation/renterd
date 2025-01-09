@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	cwallet "go.sia.tech/coreutils/wallet"
-	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/autopilot/contractor"
@@ -119,7 +118,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	})
 
 	// initialise auth handler
-	auth := jape.BasicAuth(cfg.HTTP.Password)
+	auth := utils.Auth(cfg.HTTP.Password)
 
 	// generate private key from seed
 	var pk types.PrivateKey
@@ -175,7 +174,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			fn:   w.Shutdown,
 		})
 
-		mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.Auth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
+		mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.WorkerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
 
 		if cfg.S3.Enabled {
 			s3Handler, err := s3.New(bc, w, logger, s3.Opts{

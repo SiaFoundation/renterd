@@ -41,13 +41,29 @@ func (t TreeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.NotFound(w, req)
 }
 
-func Auth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
+// Auth wraps an http.Handler to force authentication with either a basic auth
+// password or a cookie.
+func Auth(password string) func(http.Handler) http.Handler {
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if cookie, err := req.Cookie("renterd_auth"); err == nil && cookie.Value == password {
+				h.ServeHTTP(w, req)
+			} else {
+				jape.BasicAuth(password)(h).ServeHTTP(w, req)
+			}
+		})
+	}
+}
+
+// WorkerAuth is a wrapper for Auth that allows unauthenticated downloads if
+// 'unauthenticatedDownloads' is true.
+func WorkerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/object/") {
 				h.ServeHTTP(w, req)
 			} else {
-				jape.BasicAuth(password)(h).ServeHTTP(w, req)
+				Auth(password)(h).ServeHTTP(w, req)
 			}
 		})
 	}
