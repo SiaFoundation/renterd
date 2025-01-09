@@ -425,10 +425,9 @@ type (
 	}
 
 	UsedContract struct {
-		ID          int64
-		FCID        FileContractID
-		RenewedFrom FileContractID
-		HostID      int64
+		ID     int64
+		FCID   FileContractID
+		HostID int64
 	}
 
 	ContractSector struct {

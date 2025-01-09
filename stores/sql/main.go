@@ -581,63 +581,48 @@ func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 	return nil
 }
 
-func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (map[types.FileContractID]UsedContract, error) {
+func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (used []UsedContract, _ error) {
 	if len(fcids) == 0 {
-		return make(map[types.FileContractID]UsedContract), nil
+		return nil, nil
 	}
 
-	// flatten map to get all used contract ids
-	usedFCIDs := make([]FileContractID, 0, len(fcids))
+	// build args
+	var args []interface{}
+	lookup := make(map[FileContractID]struct{}, len(fcids))
 	for _, fcid := range fcids {
-		usedFCIDs = append(usedFCIDs, FileContractID(fcid))
+		args = append(args, FileContractID(fcid))
+		lookup[FileContractID(fcid)] = struct{}{}
 	}
+	args = append(args, args...)
 
-	placeholders := make([]string, len(usedFCIDs))
-	for i := range usedFCIDs {
-		placeholders[i] = "?"
-	}
-	placeholdersStr := strings.Join(placeholders, ", ")
+	// build placeholder
+	placeholder := strings.Repeat("?, ", len(fcids)-1) + "?"
 
-	args := make([]interface{}, len(usedFCIDs)*2)
-	for i := range args {
-		args[i] = usedFCIDs[i%len(usedFCIDs)]
-	}
-
-	// fetch all contracts, take into account renewals
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, fcid, renewed_from, host_id
-				   FROM contracts
-				   WHERE contracts.fcid IN (%s) OR renewed_from IN (%s)
-				   `, placeholdersStr, placeholdersStr), args...)
+	// fetch used contracts
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+SELECT id, fcid, host_id, renewed_from
+FROM contracts
+WHERE (fcid IN (%s) OR renewed_from IN (%s)) AND contracts.archival_reason IS NULL`, placeholder, placeholder), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch used contracts: %w", err)
 	}
 	defer rows.Close()
 
-	var contracts []UsedContract
+	// build used contracts
 	for rows.Next() {
 		var c UsedContract
-		if err := rows.Scan(&c.ID, &c.FCID, &c.RenewedFrom, &c.HostID); err != nil {
+		var rf FileContractID
+		if err := rows.Scan(&c.ID, &c.FCID, &c.HostID, &rf); err != nil {
 			return nil, fmt.Errorf("failed to scan used contract: %w", err)
 		}
-		contracts = append(contracts, c)
-	}
 
-	fcidMap := make(map[types.FileContractID]struct{}, len(fcids))
-	for _, fcid := range fcids {
-		fcidMap[fcid] = struct{}{}
-	}
-
-	// build map of used contracts
-	usedContracts := make(map[types.FileContractID]UsedContract, len(contracts))
-	for _, c := range contracts {
-		if _, used := fcidMap[types.FileContractID(c.FCID)]; used {
-			usedContracts[types.FileContractID(c.FCID)] = c
+		// swap the fcid for renewals
+		if _, ok := lookup[c.FCID]; !ok {
+			c.FCID = rf
 		}
-		if _, used := fcidMap[types.FileContractID(c.RenewedFrom)]; used {
-			usedContracts[types.FileContractID(c.RenewedFrom)] = c
-		}
+		used = append(used, c)
 	}
-	return usedContracts, nil
+	return
 }
 
 func HasMigration(ctx context.Context, tx sql.Tx, id string) (applied bool, err error) {
@@ -2138,10 +2123,16 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 		fcids = append(fcids, s.ContractID)
 	}
 
-	// fetch contracts
-	contracts, err := FetchUsedContracts(ctx, tx, fcids)
+	// fetch used contracts
+	ucs, err := FetchUsedContracts(ctx, tx, fcids)
 	if err != nil {
 		return err
+	}
+
+	// build used contracts map
+	contracts := make(map[types.FileContractID]UsedContract, 0)
+	for _, c := range ucs {
+		contracts[types.FileContractID(c.FCID)] = c
 	}
 
 	// build contract <-> sector links
@@ -2464,9 +2455,15 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	}
 
 	// fetch used contracts
-	usedContracts, err := FetchUsedContracts(ctx, tx, slab.Contracts())
+	ucs, err := FetchUsedContracts(ctx, tx, slab.Contracts())
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch used contracts: %w", err)
+	}
+
+	// build used contracts map
+	contracts := make(map[types.FileContractID]UsedContract, 0)
+	for _, c := range ucs {
+		contracts[types.FileContractID(c.FCID)] = c
 	}
 
 	// stmt to add sector
@@ -2502,7 +2499,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 			return "", fmt.Errorf("failed to get sector id: %w", err)
 		}
 
-		uc, ok := usedContracts[sector.ContractID]
+		uc, ok := contracts[sector.ContractID]
 		if !ok {
 			continue
 		}

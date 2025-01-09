@@ -1227,9 +1227,16 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		return nil // nothing to do
 	}
 
-	usedContracts, err := ssql.FetchUsedContracts(ctx, tx.Tx, slices.Contracts())
+	// fetch used contracts
+	ucs, err := ssql.FetchUsedContracts(ctx, tx.Tx, slices.Contracts())
 	if err != nil {
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
+	}
+
+	// build used contracts map
+	contracts := make(map[types.FileContractID]ssql.UsedContract, 0)
+	for _, c := range ucs {
+		contracts[types.FileContractID(c.FCID)] = c
 	}
 
 	// insert slabs
@@ -1314,10 +1321,10 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 		for _, shard := range ss.Shards {
 			for _, fcids := range shard.Contracts {
 				for _, fcid := range fcids {
-					if _, ok := usedContracts[fcid]; ok {
+					if c, ok := contracts[fcid]; ok {
 						upsertContractSectors = append(upsertContractSectors, ssql.ContractSector{
-							HostID:     usedContracts[fcid].HostID,
-							ContractID: usedContracts[fcid].ID,
+							HostID:     c.HostID,
+							ContractID: c.ID,
 							SectorID:   sectorIDs[sectorIdx],
 						})
 					} else {
