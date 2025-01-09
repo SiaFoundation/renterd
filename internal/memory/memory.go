@@ -83,7 +83,8 @@ func (mm *memoryManager) Status() Status {
 
 func (mm *memoryManager) AcquireMemory(ctx context.Context, amt uint64) Memory {
 	if amt == 0 {
-		mm.logger.Fatal("cannot acquire 0 memory")
+		mm.logger.Errorf("cannot acquire 0 memory")
+		return nil
 	} else if mm.totalAvailable < amt {
 		mm.logger.Errorf("cannot acquire %v memory with only %v available", amt, mm.totalAvailable)
 		return nil

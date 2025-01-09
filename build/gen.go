@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -98,7 +97,8 @@ func getGitMeta() (meta gitMeta, _ error) {
 func main() {
 	meta, err := getGitMeta()
 	if err != nil {
-		log.Fatalln(err)
+		os.Stderr.WriteString(fmt.Sprintf("failed to get git metadata: %v", err))
+		os.Exit(1)
 	}
 
 	commit := meta.ShortCommit
@@ -111,7 +111,8 @@ func main() {
 
 	f, err := os.Create("meta.go")
 	if err != nil {
-		log.Fatalln(err)
+		os.Stderr.WriteString(fmt.Sprintf("failed to create meta.go: %v", err))
+		os.Exit(1)
 	}
 	defer f.Close()
 
@@ -129,6 +130,7 @@ func main() {
 		RunTime: time.Now().Format(time.RFC3339),
 	})
 	if err != nil {
-		log.Fatalln(err)
+		os.Stderr.WriteString(fmt.Sprintf("command failed, err %v", err))
+		os.Exit(1)
 	}
 }

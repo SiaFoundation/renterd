@@ -157,7 +157,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
 		w, err := worker.New(cfg.Worker, workerKey, bc, logger)
 		if err != nil {
-			logger.Fatal("failed to create worker: " + err.Error())
+			return nil, fmt.Errorf("failed to create worker: %v", err)
 		}
 		shutdownFns = append(shutdownFns, fn{
 			name: "Worker",
@@ -174,7 +174,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			})
 			if err != nil {
 				err = errors.Join(err, w.Shutdown(context.Background()))
-				logger.Fatal("failed to create s3 handler: " + err.Error())
+				return nil, fmt.Errorf("failed to create s3 handler: %v", err)
 			}
 
 			s3Srv = &http.Server{
@@ -183,7 +183,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			}
 			s3Listener, err = utils.ListenTCP(cfg.S3.Address, logger)
 			if err != nil {
-				logger.Fatal("failed to create listener: " + err.Error())
+				return nil, fmt.Errorf("failed to create listener: %v", err)
 			}
 			shutdownFns = append(shutdownFns, fn{
 				name: "S3",
@@ -197,7 +197,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
 		ap, err := autopilot.New(cfg.Autopilot, workerKey, bc, logger)
 		if err != nil {
-			logger.Fatal("failed to create autopilot: " + err.Error())
+			return nil, fmt.Errorf("failed to create autopilot: %v", err)
 		}
 		setupFns = append(setupFns, fn{
 			name: "Autopilot",
