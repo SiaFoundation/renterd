@@ -554,7 +554,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}
 	defer func() {
 		if err := b.contractLocker.Release(fcid, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
+			b.logger.Errorw("failed to release contract lock", zap.Error(err))
 		}
 	}()
 

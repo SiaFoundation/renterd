@@ -158,7 +158,7 @@ func (pm *pinManager) run() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		err := pm.updatePrices(ctx, forced)
 		if err != nil {
-			pm.logger.Warn("failed to update prices", zap.Error(err))
+			pm.logger.Warnw("failed to update prices", zap.Error(err))
 			pm.a.RegisterAlert(ctx, newPricePinningFailedAlert(err))
 		} else {
 			pm.a.DismissAlerts(ctx, alertPricePinningID)
