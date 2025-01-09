@@ -33,12 +33,17 @@ const (
 	// redundancy.
 	slabPruningBatchSize = 100
 
+	// hostSectorPruningBatchSize is the number of host sectors per batch when
+	// we prune host sectors.
+	hostSectorPruningBatchSize = 10000
+
 	refreshHealthMinHealthValidity = 12 * time.Hour
 	refreshHealthMaxHealthValidity = 72 * time.Hour
 )
 
 var (
-	pruneSlabsAlertID = frand.Entropy256()
+	pruneHostSectorsAlertID = frand.Entropy256()
+	pruneSlabsAlertID       = frand.Entropy256()
 )
 
 var objectDeleteBatchSizes = []int64{10, 50, 100, 200, 500, 1000, 5000, 10000, 50000, 100000}
@@ -127,6 +132,8 @@ func (s *SQLStore) ArchiveContract(ctx context.Context, id types.FileContractID,
 }
 
 func (s *SQLStore) ArchiveContracts(ctx context.Context, toArchive map[types.FileContractID]string) error {
+	defer s.triggerHostSectorPruning()
+
 	// archive contracts one-by-one to avoid overwhelming the database due to
 	// the cascade deletion of contract-sectors.
 	var errs []string
@@ -576,6 +583,55 @@ func (s *SQLStore) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Uplo
 	return nil
 }
 
+func (s *SQLStore) pruneHostSectorLoop() {
+	for {
+		select {
+		case <-s.hostSectorPruneSigChan:
+		case <-s.shutdownCtx.Done():
+			return
+		}
+
+		// prune host sectors
+		pruneSuccess := true
+		for {
+			var deleted int64
+			err := s.db.Transaction(s.shutdownCtx, func(dt sql.DatabaseTx) error {
+				var err error
+				deleted, err = dt.PruneHostSectors(s.shutdownCtx, hostSectorPruningBatchSize)
+				return err
+			})
+			if err != nil {
+				s.logger.Errorw("hest sector pruning failed", zap.Error(err))
+				s.alerts.RegisterAlert(s.shutdownCtx, alerts.Alert{
+					ID:        pruneHostSectorsAlertID,
+					Severity:  alerts.SeverityWarning,
+					Message:   "Failed to prune host sectors",
+					Timestamp: time.Now(),
+					Data: map[string]interface{}{
+						"error": err.Error(),
+						"hint":  "This might happen when your database is under a lot of load due to deleting objects rapidly. This alert will disappear the next time host sectors are pruned successfully.",
+					},
+				})
+				pruneSuccess = false
+			} else {
+				s.alerts.DismissAlerts(s.shutdownCtx, pruneHostSectorsAlertID)
+			}
+
+			if deleted < hostSectorPruningBatchSize {
+				break // done
+			}
+		}
+
+		// mark the last prune time where host sectors were pruned
+		if pruneSuccess {
+			s.mu.Lock()
+			s.lastPrunedHostSectorsAt = time.Now()
+			s.mu.Unlock()
+			s.logger.Debug("host sectors pruned successfully")
+		}
+	}
+}
+
 func (s *SQLStore) pruneSlabsLoop() {
 	for {
 		select {
@@ -618,9 +674,16 @@ func (s *SQLStore) pruneSlabsLoop() {
 		// mark the last prune time where both slabs and dirs were pruned
 		if pruneSuccess {
 			s.mu.Lock()
-			s.lastPrunedAt = time.Now()
+			s.lastPrunedSlabsAt = time.Now()
 			s.mu.Unlock()
 		}
+	}
+}
+
+func (s *SQLStore) triggerHostSectorPruning() {
+	select {
+	case s.hostSectorPruneSigChan <- struct{}{}:
+	default:
 	}
 }
 

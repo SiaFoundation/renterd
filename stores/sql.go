@@ -52,12 +52,14 @@ type (
 		shutdownCtx       context.Context
 		shutdownCtxCancel context.CancelFunc
 
-		slabPruneSigChan chan struct{}
-		wg               sync.WaitGroup
+		hostSectorPruneSigChan chan struct{}
+		slabPruneSigChan       chan struct{}
+		wg                     sync.WaitGroup
 
-		mu           sync.Mutex
-		lastPrunedAt time.Time
-		closed       bool
+		mu                      sync.Mutex
+		lastPrunedHostSectorsAt time.Time
+		lastPrunedSlabsAt       time.Time
+		closed                  bool
 	}
 )
 
@@ -98,8 +100,11 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		settings:      make(map[string]string),
 		walletAddress: cfg.WalletAddress,
 
-		slabPruneSigChan: make(chan struct{}, 1),
-		lastPrunedAt:     time.Now(),
+		hostSectorPruneSigChan: make(chan struct{}, 1),
+		slabPruneSigChan:       make(chan struct{}, 1),
+
+		lastPrunedHostSectorsAt: time.Now(),
+		lastPrunedSlabsAt:       time.Now(),
 
 		shutdownCtx:       shutdownCtx,
 		shutdownCtxCancel: shutdownCtxCancel,
@@ -109,12 +114,17 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	ss.initSlabPruning()
+
+	ss.initPruneLoops()
 	return ss, nil
 }
 
-func (s *SQLStore) initSlabPruning() {
-	// start pruning loop
+func (s *SQLStore) initPruneLoops() {
+	s.wg.Add(1)
+	go func() {
+		s.pruneHostSectorLoop()
+		s.wg.Done()
+	}()
 	s.wg.Add(1)
 	go func() {
 		s.pruneSlabsLoop()

@@ -192,19 +192,6 @@ func ArchiveContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, 
 		return fmt.Errorf("failed to delete contract_sectors: %w", err)
 	}
 
-	// delete all host_sectors for every host that we don't have an active
-	// contract with anymore
-	_, err = tx.Exec(ctx, `DELETE FROM host_sectors
-		WHERE NOT EXISTS (
-		  SELECT 1
-		  FROM contracts
-		  INNER JOIN hosts ON contracts.host_id = hosts.id
-		  WHERE contracts.archival_reason IS NULL
-		  AND hosts.id = host_sectors.db_host_id
-		)`)
-	if err != nil {
-		return fmt.Errorf("failed to delete host_sectors: %w", err)
-	}
 	return nil
 }
 
@@ -1629,6 +1616,24 @@ func Peers(ctx context.Context, tx sql.Tx) ([]syncer.PeerInfo, error) {
 		peers = append(peers, peer)
 	}
 	return peers, nil
+}
+
+func PruneSlabs(ctx context.Context, tx sql.Tx, limit int64) (int64, error) {
+	res, err := tx.Exec(ctx, `
+	DELETE FROM slabs
+	WHERE id IN (
+		SELECT id FROM (
+			SELECT s.id
+			FROM slabs s
+			LEFT JOIN slices sl ON sl.db_slab_id = s.id
+			WHERE s.db_buffered_slab_id IS NULL AND sl.db_slab_id IS NULL
+			LIMIT ?
+		) AS limited
+	)`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error {

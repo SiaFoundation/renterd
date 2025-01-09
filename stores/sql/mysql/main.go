@@ -717,25 +717,22 @@ CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable))
 	return
 }
 
-func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, error) {
-	res, err := tx.Exec(ctx, `
-	DELETE FROM slabs
-	WHERE id IN (
-    SELECT id
-    FROM (
-        SELECT slabs.id
-        FROM slabs
-        WHERE NOT EXISTS (
-            SELECT 1 FROM slices WHERE slices.db_slab_id = slabs.id
-        )
-        AND slabs.db_buffered_slab_id IS NULL
-        LIMIT ?
-    ) AS limited
-	)`, limit)
+func (tx *MainDatabaseTx) PruneHostSectors(ctx context.Context, limit int64) (int64, error) {
+	res, err := tx.Exec(ctx, `DELETE FROM host_sectors
+WHERE db_host_id NOT IN (
+	SELECT h.id
+	FROM contracts c
+	INNER JOIN hosts h ON c.host_id = h.id
+	WHERE c.archival_reason IS NULL
+) LIMIT ?`, limit)
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) PruneSlabs(ctx context.Context, limit int64) (int64, error) {
+	return ssql.PruneSlabs(ctx, tx, limit)
 }
 
 func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadata) error {

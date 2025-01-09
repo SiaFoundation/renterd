@@ -376,7 +376,7 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	// fetch autopilot config
 	apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
 	if err != nil {
-		ap.logger.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
+		ap.logger.Errorw("aborting maintenance, failed to fetch autopilot", zap.Error(err))
 		return
 	}
 
