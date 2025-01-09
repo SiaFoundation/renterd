@@ -612,7 +612,7 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	}
 
 	// redistribute outputs
-	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, balance.Div64(11))
+	ids, err := b.WalletRedistribute(ctx, wantedNumOutputs, amount)
 	if err != nil {
 		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", wantedNumOutputs, amount, balance, err)
 	}
