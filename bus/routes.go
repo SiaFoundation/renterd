@@ -166,7 +166,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 		spending,
 	})
 	if err != nil {
-		b.logger.Error("failed to record contract spending", zap.Error(err))
+		b.logger.Errorw("failed to record contract spending", zap.Error(err))
 	}
 	jc.Encode(api.AccountsFundResponse{
 		Deposit: deposit,
@@ -963,7 +963,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}
 	defer func() {
 		if err := b.contractLocker.Release(fcid, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
+			b.logger.Errorw("failed to release contract lock", zap.Error(err))
 		}
 	}()
 
@@ -1172,7 +1172,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	}
 	defer func() {
 		if err := b.contractLocker.Release(c.ID, lockID); err != nil {
-			b.logger.Error("failed to release contract lock", zap.Error(err))
+			b.logger.Errorw("failed to release contract lock", zap.Error(err))
 		}
 	}()
 

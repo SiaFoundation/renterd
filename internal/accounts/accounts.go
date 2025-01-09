@@ -246,7 +246,7 @@ func (a *Manager) run() {
 			break
 		}
 
-		a.logger.Warn("failed to fetch accounts from bus - retrying in a few seconds", zap.Error(err))
+		a.logger.Warnw("failed to fetch accounts from bus - retrying in a few seconds", zap.Error(err))
 		select {
 		case <-a.shutdownCtx.Done():
 			return
@@ -289,7 +289,7 @@ func (a *Manager) run() {
 	}
 	err = a.s.UpdateAccounts(a.shutdownCtx, uncleanAccounts)
 	if err != nil {
-		a.logger.Error("failed to mark account shutdown as unclean", zap.Error(err))
+		a.logger.Errorw("failed to mark account shutdown as unclean", zap.Error(err))
 	}
 
 	ticker = time.NewTicker(a.refillInterval)
@@ -382,7 +382,7 @@ func (a *Manager) refillAccounts() {
 				a.mu.Unlock()
 
 				if err != nil && shouldLog {
-					a.logger.Error("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
+					a.logger.Errorw("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				} else if refilled {
 					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				}

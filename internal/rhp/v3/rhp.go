@@ -131,7 +131,7 @@ func (c *Client) AppendSector(ctx context.Context, sectorRoot types.Hash256, sec
 	}
 	payment, err := payByContract(rev, expectedCost, accID, rk)
 	if err != nil {
-		return types.ZeroCurrency, ErrFailedToCreatePayment
+		return types.ZeroCurrency, fmt.Errorf("%w; %w", err, ErrFailedToCreatePayment)
 	}
 
 	var cost types.Currency

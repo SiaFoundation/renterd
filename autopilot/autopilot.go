@@ -448,7 +448,7 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	// fetch autopilot config
 	apCfg, err := ap.bus.AutopilotConfig(ap.shutdownCtx)
 	if err != nil {
-		ap.logger.Errorf("aborting maintenance, failed to fetch autopilot", zap.Error(err))
+		ap.logger.Errorw("aborting maintenance, failed to fetch autopilot", zap.Error(err))
 		return
 	}
 
@@ -598,12 +598,12 @@ func (ap *Autopilot) performWalletMaintenance(ctx context.Context) error {
 	// pending maintenance transaction - nothing to do
 	pending, err := b.WalletPending(ctx)
 	if err != nil {
-		return nil
+		return err
 	}
 	for _, txn := range pending {
 		for _, mTxnID := range ap.maintenanceTxnIDs {
 			if mTxnID == types.TransactionID(txn.ID) {
-				l.Debugf("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
+				l.Infof("wallet maintenance skipped, pending transaction found with id %v", mTxnID)
 				return nil
 			}
 		}

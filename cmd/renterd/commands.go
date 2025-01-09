@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 
 	"go.sia.tech/core/types"
@@ -17,9 +16,7 @@ import (
 
 func cmdBackup() {
 	err := sqlite.Backup(context.Background(), flag.Arg(2), flag.Arg(3))
-	if err != nil {
-		log.Fatal("failed to create backup", err)
-	}
+	checkFatalError("failed to backup sqlite database", err)
 }
 
 func cmdBuildConfig(cfg *config.Config) {

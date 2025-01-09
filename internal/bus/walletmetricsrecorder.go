@@ -56,7 +56,7 @@ func (wmr *WalletMetricsRecorder) run(interval time.Duration) {
 		for {
 			balance, err := wmr.wallet.Balance()
 			if err != nil {
-				wmr.logger.Error("failed to get wallet balance", zap.Error(err))
+				wmr.logger.Errorw("failed to get wallet balance", zap.Error(err))
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 				if err = wmr.store.RecordWalletMetric(ctx, api.WalletMetric{
@@ -66,7 +66,7 @@ func (wmr *WalletMetricsRecorder) run(interval time.Duration) {
 					Unconfirmed: balance.Unconfirmed,
 					Immature:    balance.Immature,
 				}); err != nil {
-					wmr.logger.Error("failed to record wallet metric", zap.Error(err))
+					wmr.logger.Errorw("failed to record wallet metric", zap.Error(err))
 				} else {
 					wmr.logger.Debugw("successfully recorded wallet metrics",
 						zap.Stringer("spendable", balance.Spendable),
