@@ -87,7 +87,11 @@ type mockHostScanner struct {
 
 func (w *mockHostScanner) ScanHost(ctx context.Context, hostKey types.PublicKey, _ time.Duration) (api.HostScanResponse, error) {
 	if w.blockChan != nil {
-		<-w.blockChan
+		select {
+		case <-ctx.Done():
+			return api.HostScanResponse{}, ctx.Err()
+		case <-w.blockChan:
+		}
 	}
 	w.hs.recordScan(hostKey)
 
