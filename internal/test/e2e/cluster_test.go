@@ -2384,10 +2384,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 }
 
 func TestWalletRedistribute(t *testing.T) {
-	cluster := newTestCluster(t, testClusterOptions{
-		hosts:         test.RedundancySettings.TotalShards,
-		uploadPacking: true,
-	})
+	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
 	defer cluster.Shutdown()
 
 	// mine to get more money
