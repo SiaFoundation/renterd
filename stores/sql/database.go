@@ -306,12 +306,12 @@ type (
 		// Slab returns the slab with the given ID or api.ErrSlabNotFound.
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
 
+		// SlabsForMigration returns up to 'limit' slabs with a health smaller
+		// than or equal to 'healthCutoff'
+		SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
+
 		// Tip returns the sync height.
 		Tip(ctx context.Context) (types.ChainIndex, error)
-
-		// UnhealthySlabs returns up to 'limit' slabs belonging to the contract
-		// set 'set' with a health smaller than or equal to 'healthCutoff'
-		UnhealthySlabs(ctx context.Context, healthCutoff float64, limit int) ([]api.UnhealthySlab, error)
 
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)

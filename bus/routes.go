@@ -1607,12 +1607,12 @@ func (b *Bus) slabsMigrationHandlerPOST(jc jape.Context) {
 		return
 	}
 
-	slabs, err := b.store.UnhealthySlabs(jc.Request.Context(), msr.HealthCutoff, msr.Limit)
+	slabs, err := b.store.SlabsForMigration(jc.Request.Context(), msr.HealthCutoff, msr.Limit)
 	if jc.Check("couldn't fetch slabs for migration", err) != nil {
 		return
 	}
 
-	jc.Encode(api.UnhealthySlabsResponse{Slabs: slabs})
+	jc.Encode(api.SlabsForMigrationResponse{Slabs: slabs})
 }
 
 func (b *Bus) slabsPartialHandlerGET(jc jape.Context) {

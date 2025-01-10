@@ -17,10 +17,15 @@ import (
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
-	"go.sia.tech/coreutils/wallet"
+	cwallet "go.sia.tech/coreutils/wallet"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/autopilot"
+	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/autopilot/migrator"
+	"go.sia.tech/renterd/autopilot/pruner"
+	"go.sia.tech/renterd/autopilot/scanner"
+	"go.sia.tech/renterd/autopilot/walletmaintainer"
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
@@ -39,6 +44,12 @@ import (
 )
 
 type (
+	Autopilot interface {
+		Handler() http.Handler
+		Run()
+		Shutdown(context.Context) error
+	}
+
 	node struct {
 		cfg config.Config
 
@@ -114,11 +125,11 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	var pk types.PrivateKey
 	if cfg.Seed != "" {
 		var rawSeed [32]byte
-		err := wallet.SeedFromPhrase(&rawSeed, cfg.Seed)
+		err := cwallet.SeedFromPhrase(&rawSeed, cfg.Seed)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load wallet: %w", err)
 		}
-		pk = wallet.KeyFromSeed(&rawSeed, 0)
+		pk = cwallet.KeyFromSeed(&rawSeed, 0)
 	}
 
 	// initialise bus
@@ -195,7 +206,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	// initialise autopilot
 	if cfg.Autopilot.Enabled {
 		workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
-		ap, err := autopilot.New(cfg.Autopilot, workerKey, bc, logger)
+		ap, err := newAutopilot(workerKey, cfg.Autopilot, bc, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create autopilot: %v", err)
 		}
@@ -226,6 +237,30 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 
 		logger: logger.Sugar(),
 	}, nil
+}
+
+func newAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
+	a := alerts.WithOrigin(bus, "autopilot")
+	l = l.Named("autopilot")
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
+	if err != nil {
+		cancel(nil)
+		return nil, err
+	}
+
+	s, err := scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, l)
+	if err != nil {
+		cancel(nil)
+		return nil, err
+	}
+
+	c := contractor.New(bus, bus, bus, bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
+	p := pruner.New(a, bus, l)
+	w := walletmaintainer.New(a, bus, l)
+
+	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }
 
 func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
@@ -281,7 +316,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	cm := chain.NewManager(store, state)
 
 	// create wallet
-	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
+	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, cwallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, err
 	}

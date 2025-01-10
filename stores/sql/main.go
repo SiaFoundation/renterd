@@ -1954,7 +1954,7 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	}, nil
 }
 
-func UnhealthySlabs(ctx context.Context, tx sql.Tx, healthCutoff float64, limit int) ([]api.UnhealthySlab, error) {
+func SlabsForMigration(ctx context.Context, tx sql.Tx, healthCutoff float64, limit int) ([]api.UnhealthySlab, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT sla.key, sla.health
 		FROM slabs sla

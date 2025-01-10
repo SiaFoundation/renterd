@@ -1481,8 +1481,8 @@ func TestObjectsSubstring(t *testing.T) {
 	}
 }
 
-// TestUnhealthySlabs tests the functionality of UnhealthySlabs.
-func TestUnhealthySlabs(t *testing.T) {
+// TestSlabsForMigration tests the functionality of SlabsForMigration.
+func TestSlabsForMigration(t *testing.T) {
 	// create db
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -1598,7 +1598,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
+	slabs, err := ss.SlabsForMigration(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1619,7 +1619,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.49, -1)
+	slabs, err = ss.SlabsForMigration(context.Background(), 0.49, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1636,7 +1636,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 }
 
-func TestUnhealthySlabsNegHealth(t *testing.T) {
+func TestSlabsForMigrationNegHealth(t *testing.T) {
 	// create db
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
@@ -1681,7 +1681,7 @@ func TestUnhealthySlabsNegHealth(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
+	slabs, err := ss.SlabsForMigration(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1732,7 +1732,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
+	slabs, err := ss.SlabsForMigration(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1754,7 +1754,7 @@ func TestUnhealthySlabsNoContracts(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err = ss.UnhealthySlabs(context.Background(), 0.99, -1)
+	slabs, err = ss.SlabsForMigration(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1824,7 +1824,7 @@ func TestUnhealthySlabsNoRedundancy(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, -1)
+	slabs, err := ss.SlabsForMigration(context.Background(), 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1998,7 +1998,7 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	toMigrate, err := ss.UnhealthySlabs(ctx, 0.99, -1)
+	toMigrate, err := ss.SlabsForMigration(ctx, 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2043,7 +2043,7 @@ func TestUpdateSlab(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	toMigrate, err = ss.UnhealthySlabs(ctx, 0.99, -1)
+	toMigrate, err = ss.SlabsForMigration(ctx, 0.99, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3929,7 +3929,7 @@ func TestRenewedContract(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, 10); err != nil {
+	if slabs, err := ss.SlabsForMigration(context.Background(), 0.99, 10); err != nil {
 		t.Fatal(err)
 	} else if len(slabs) > 0 {
 		t.Fatal("shouldn't return any slabs", len(slabs))
@@ -3973,7 +3973,7 @@ func TestRenewedContract(t *testing.T) {
 	if err := ss.RefreshHealth(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if slabs, err := ss.UnhealthySlabs(context.Background(), 0.99, 10); err != nil {
+	if slabs, err := ss.SlabsForMigration(context.Background(), 0.99, 10); err != nil {
 		t.Fatal(err)
 	} else if len(slabs) > 0 {
 		t.Fatal("shouldn't return any slabs", len(slabs))

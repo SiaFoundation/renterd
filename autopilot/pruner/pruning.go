@@ -1,9 +1,10 @@
-package autopilot
+package pruner
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -26,12 +27,77 @@ const (
 	timeoutPruneContract = 10 * time.Minute
 )
 
-func (ap *Autopilot) dismissPruneAlerts(prunable []api.ContractPrunableData) {
-	ap.mu.Lock()
-	defer ap.mu.Unlock()
+type (
+	Bus interface {
+		Contract(ctx context.Context, id types.FileContractID) (api.ContractMetadata, error)
+		Contracts(ctx context.Context, opts api.ContractsOpts) (contracts []api.ContractMetadata, err error)
+		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
+		PrunableData(ctx context.Context) (prunableData api.ContractsPrunableDataResponse, err error)
+		PruneContract(ctx context.Context, id types.FileContractID, timeout time.Duration) (api.ContractPruneResponse, error)
+		RecordContractPruneMetric(ctx context.Context, metrics ...api.ContractPruneMetric) error
+	}
+)
+
+type Pruner struct {
+	alerter alerts.Alerter
+	bus     Bus
+	logger  *zap.SugaredLogger
+
+	wg sync.WaitGroup
+
+	mu               sync.Mutex
+	pruning          bool
+	pruningLastStart time.Time
+	pruningAlertIDs  map[types.FileContractID]types.Hash256
+}
+
+func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *Pruner {
+	return &Pruner{
+		alerter: alerter,
+		bus:     bus,
+		logger:  logger.Named("pruner").Sugar(),
+
+		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
+	}
+}
+
+func (p *Pruner) PerformContractPruning(ctx context.Context) {
+	p.mu.Lock()
+	if p.pruning {
+		p.mu.Unlock()
+		return
+	}
+	p.pruning = true
+	p.pruningLastStart = time.Now()
+	p.mu.Unlock()
+
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.performContractPruning(ctx)
+		p.mu.Lock()
+		p.pruning = false
+		p.mu.Unlock()
+	}()
+}
+
+func (p *Pruner) Status() (bool, time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pruning, p.pruningLastStart
+}
+
+func (p *Pruner) Shutdown(_ context.Context) error {
+	p.wg.Wait()
+	return nil
+}
+
+func (p *Pruner) dismissPruneAlerts(ctx context.Context, prunable []api.ContractPrunableData) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	// use a sane timeout
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	// fetch contract ids that are prunable
@@ -41,21 +107,21 @@ func (ap *Autopilot) dismissPruneAlerts(prunable []api.ContractPrunableData) {
 	}
 
 	// dismiss alerts for contracts that are no longer prunable
-	for fcid, alertID := range ap.pruningAlertIDs {
+	for fcid, alertID := range p.pruningAlertIDs {
 		if _, ok := prunableIDs[fcid]; !ok {
-			ap.DismissAlert(ctx, alertID)
-			delete(ap.pruningAlertIDs, fcid)
+			p.alerter.DismissAlerts(ctx, alertID)
+			delete(p.pruningAlertIDs, fcid)
 		}
 	}
 }
 
-func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableData, _ error) {
+func (p *Pruner) fetchPrunableContracts(ctx context.Context) (prunable []api.ContractPrunableData, _ error) {
 	// use a sane timeout
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
 	// fetch prunable data
-	res, err := ap.bus.PrunableData(ctx)
+	res, err := p.bus.PrunableData(ctx)
 	if err != nil {
 		return nil, err
 	} else if res.TotalPrunable == 0 {
@@ -63,7 +129,7 @@ func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 	}
 
 	// fetch good contracts
-	contracts, err := ap.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
+	contracts, err := p.bus.Contracts(ctx, api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 	if err != nil {
 		return nil, err
 	}
@@ -83,28 +149,28 @@ func (ap *Autopilot) fetchPrunableContracts() (prunable []api.ContractPrunableDa
 	return
 }
 
-func (ap *Autopilot) fetchHostContract(fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
+func (p *Pruner) fetchHostContract(ctx context.Context, fcid types.FileContractID) (host api.Host, metadata api.ContractMetadata, err error) {
 	// use a sane timeout
-	ctx, cancel := context.WithTimeout(ap.shutdownCtx, time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
 	// fetch the contract
-	metadata, err = ap.bus.Contract(ctx, fcid)
+	metadata, err = p.bus.Contract(ctx, fcid)
 	if err != nil {
 		return
 	}
 
 	// fetch the host
-	host, err = ap.bus.Host(ctx, metadata.HostKey)
+	host, err = p.bus.Host(ctx, metadata.HostKey)
 	return
 }
 
-func (ap *Autopilot) performContractPruning() {
-	log := ap.logger.Named("performContractPruning")
+func (p *Pruner) performContractPruning(ctx context.Context) {
+	log := p.logger.Named("performContractPruning")
 	log.Info("performing contract pruning")
 
 	// fetch prunable contracts
-	prunable, err := ap.fetchPrunableContracts()
+	prunable, err := p.fetchPrunableContracts(ctx)
 	if err != nil {
 		log.Error(err)
 		return
@@ -112,18 +178,13 @@ func (ap *Autopilot) performContractPruning() {
 	log.Debugf("found %d prunable contracts", len(prunable))
 
 	// dismiss alerts for contracts that are no longer prunable
-	ap.dismissPruneAlerts(prunable)
+	p.dismissPruneAlerts(ctx, prunable)
 
 	// loop prunable contracts
 	var total uint64
 	for _, contract := range prunable {
-		// check if we're stopped
-		if ap.isStopped() {
-			break
-		}
-
 		// fetch host
-		h, _, err := ap.fetchHostContract(contract.ID)
+		h, _, err := p.fetchHostContract(ctx, contract.ID)
 		if utils.IsErr(err, api.ErrContractNotFound) {
 			log.Debugw("contract got archived", "contract", contract.ID)
 			continue // contract got archived
@@ -133,23 +194,29 @@ func (ap *Autopilot) performContractPruning() {
 		}
 
 		// prune contract
-		n, err := ap.pruneContract(ap.shutdownCtx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release, log)
+		n, err := p.pruneContract(ctx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release, log)
 		if err != nil {
 			log.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
 			continue
 		}
 
 		// handle alerts
-		ap.mu.Lock()
+		p.mu.Lock()
 		alertID := alerts.IDForContract(alertPruningID, contract.ID)
 		if shouldSendPruneAlert(err, h.Settings.Version, h.Settings.Release) {
-			ap.RegisterAlert(ap.shutdownCtx, newContractPruningFailedAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, contract.ID, err))
-			ap.pruningAlertIDs[contract.ID] = alertID // store id to dismiss stale alerts
+			if err := p.alerter.RegisterAlert(ctx, newContractPruningFailedAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, contract.ID, err)); err != nil {
+				log.Errorf("failed to register alert: %v", err)
+			} else {
+				p.pruningAlertIDs[contract.ID] = alertID // store id to dismiss stale alerts
+			}
 		} else {
-			ap.DismissAlert(ap.shutdownCtx, alertID)
-			delete(ap.pruningAlertIDs, contract.ID)
+			if err := p.alerter.DismissAlerts(ctx, alertID); err != nil {
+				log.Errorf("failed to dismiss alert: %v", err)
+			} else {
+				delete(p.pruningAlertIDs, contract.ID)
+			}
 		}
-		ap.mu.Unlock()
+		p.mu.Unlock()
 
 		// adjust total
 		total += n
@@ -159,7 +226,7 @@ func (ap *Autopilot) performContractPruning() {
 	log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
 }
 
-func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
+func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
 	// define logger
 	log := logger.With(
 		zap.Stringer("contract", fcid),
@@ -169,7 +236,7 @@ func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractI
 
 	// prune the contract
 	start := time.Now()
-	res, err := ap.bus.PruneContract(ctx, fcid, timeoutPruneContract)
+	res, err := p.bus.PruneContract(ctx, fcid, timeoutPruneContract)
 	if err != nil {
 		return 0, err
 	}
@@ -189,7 +256,7 @@ func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractI
 
 	// handle metrics
 	if res.Pruned > 0 {
-		if err := ap.bus.RecordContractPruneMetric(ctx, api.ContractPruneMetric{
+		if err := p.bus.RecordContractPruneMetric(ctx, api.ContractPruneMetric{
 			Timestamp: api.TimeRFC3339(start),
 
 			ContractID:  fcid,
@@ -200,7 +267,7 @@ func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractI
 			Remaining: res.Remaining,
 			Duration:  time.Since(start),
 		}); err != nil {
-			ap.logger.Error(err)
+			log.Error(err)
 		}
 	}
 
@@ -212,26 +279,6 @@ func (ap *Autopilot) pruneContract(ctx context.Context, fcid types.FileContractI
 	}
 
 	return res.Pruned, nil
-}
-
-func (ap *Autopilot) tryPerformPruning() {
-	ap.mu.Lock()
-	if ap.pruning || ap.isStopped() {
-		ap.mu.Unlock()
-		return
-	}
-	ap.pruning = true
-	ap.pruningLastStart = time.Now()
-	ap.mu.Unlock()
-
-	ap.wg.Add(1)
-	go func() {
-		defer ap.wg.Done()
-		ap.performContractPruning()
-		ap.mu.Lock()
-		ap.pruning = false
-		ap.mu.Unlock()
-	}()
 }
 
 func humanReadableSize(b int) string {

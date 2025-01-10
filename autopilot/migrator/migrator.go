@@ -65,13 +65,6 @@ type (
 		UsableHosts(ctx context.Context) (hosts []api.HostInfo, err error)
 	}
 
-	Migrator interface {
-		Migrate(ctx context.Context)
-		SignalMaintenanceFinished()
-		Status() (bool, time.Time)
-		Stop()
-	}
-
 	SlabStore interface {
 		RefreshHealth(ctx context.Context) error
 		Slab(ctx context.Context, key object.EncryptionKey) (object.Slab, error)
@@ -80,7 +73,7 @@ type (
 )
 
 type (
-	migrator struct {
+	Migrator struct {
 		alerts alerts.Alerter
 		bus    Bus
 		ss     SlabStore
@@ -111,9 +104,9 @@ type (
 	}
 )
 
-func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, logger *zap.Logger) (*migrator, error) {
+func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, logger *zap.Logger) (*Migrator, error) {
 	logger = logger.Named("migrator")
-	m := &migrator{
+	m := &Migrator{
 		alerts: alerts,
 		bus:    b,
 		ss:     ss,
@@ -156,7 +149,7 @@ func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, 
 	return m, nil
 }
 
-func (m *migrator) Migrate(ctx context.Context) {
+func (m *Migrator) Migrate(ctx context.Context) {
 	m.mu.Lock()
 	if m.migrating {
 		m.mu.Unlock()
@@ -176,24 +169,31 @@ func (m *migrator) Migrate(ctx context.Context) {
 	}()
 }
 
-func (m *migrator) Stop() {
+func (m *Migrator) Shutdown(ctx context.Context) error {
 	m.wg.Wait()
+
+	// stop uploads and downloads
+	m.downloadManager.Stop()
+	m.uploadManager.Stop()
+
+	// stop account manager
+	return m.accounts.Shutdown(ctx)
 }
 
-func (m *migrator) SignalMaintenanceFinished() {
+func (m *Migrator) SignalMaintenanceFinished() {
 	select {
 	case m.signalMaintenanceFinished <- struct{}{}:
 	default:
 	}
 }
 
-func (m *migrator) Status() (bool, time.Time) {
+func (m *Migrator) Status() (bool, time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.migrating, m.migratingLastStart
 }
 
-func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
+func (m *Migrator) slabMigrationEstimate(remaining int) time.Duration {
 	// recompute p90
 	m.statsSlabMigrationSpeedMS.Recompute()
 
@@ -207,7 +207,7 @@ func (m *migrator) slabMigrationEstimate(remaining int) time.Duration {
 	return time.Duration(totalNumMS) * time.Millisecond
 }
 
-func (m *migrator) performMigrations(ctx context.Context) {
+func (m *Migrator) performMigrations(ctx context.Context) {
 	m.logger.Info("performing migrations")
 
 	// prepare jobs channel

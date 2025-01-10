@@ -31,17 +31,10 @@ type (
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)
 		RemoveOfflineHosts(ctx context.Context, maxConsecutiveScanFailures uint64, maxDowntime time.Duration) (uint64, error)
 	}
-
-	Scanner interface {
-		Scan(ctx context.Context, hs HostScanner, force bool)
-		Shutdown(ctx context.Context) error
-		Status() (bool, time.Time)
-		UpdateHostsConfig(cfg api.HostsConfig)
-	}
 )
 
 type (
-	scanner struct {
+	Scanner struct {
 		hs HostStore
 
 		scanBatchSize int
@@ -68,7 +61,7 @@ type (
 	}
 )
 
-func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (Scanner, error) {
+func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.Duration, logger *zap.Logger) (*Scanner, error) {
 	logger = logger.Named("scanner")
 	if scanBatchSize == 0 {
 		return nil, errors.New("scanner batch size has to be greater than zero")
@@ -76,7 +69,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	if scanThreads == 0 {
 		return nil, errors.New("scanner threads has to be greater than zero")
 	}
-	return &scanner{
+	return &Scanner{
 		hs: hs,
 
 		scanBatchSize: int(scanBatchSize),
@@ -88,7 +81,7 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 	}, nil
 }
 
-func (s *scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
+func (s *Scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 	s.mu.Lock()
 	if force {
 		if s.scanning {
@@ -145,7 +138,7 @@ func (s *scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 	}()
 }
 
-func (s *scanner) Shutdown(ctx context.Context) error {
+func (s *Scanner) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	if !s.scanning {
 		s.mu.Unlock()
@@ -169,19 +162,19 @@ func (s *scanner) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (s *scanner) Status() (bool, time.Time) {
+func (s *Scanner) Status() (bool, time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.scanning, s.scanningLastStart
 }
 
-func (s *scanner) UpdateHostsConfig(cfg api.HostsConfig) {
+func (s *Scanner) UpdateHostsConfig(cfg api.HostsConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hostsCfg = &cfg
 }
 
-func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Time) (scanned uint64) {
+func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Time) (scanned uint64) {
 	// define worker
 	worker := func(jobs <-chan scanJob) {
 		for h := range jobs {
@@ -261,7 +254,7 @@ func (s *scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 	return
 }
 
-func (s *scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
+func (s *Scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
