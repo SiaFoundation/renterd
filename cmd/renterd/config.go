@@ -79,7 +79,7 @@ func defaultConfig() config.Config {
 			Database: config.DatabaseLog{
 				Enabled:                   true,
 				IgnoreRecordNotFoundError: true,
-				SlowThreshold:             100 * time.Millisecond,
+				SlowThreshold:             500 * time.Millisecond,
 			},
 		},
 		Bus: config.Bus{
@@ -276,7 +276,7 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.BoolVar(&cfg.Log.Database.Enabled, "log.database.enabled", cfg.Log.Database.Enabled, "Enable logging database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_ENABLED)")
 	flag.StringVar(&cfg.Log.Database.Level, "log.database.level", cfg.Log.Database.Level, "Logger level for database queries (info|warn|error). Defaults to 'warn' (overrides with RENTERD_LOG_LEVEL and RENTERD_LOG_DATABASE_LEVEL)")
 	flag.BoolVar(&cfg.Log.Database.IgnoreRecordNotFoundError, "log.database.ignoreRecordNotFoundError", cfg.Log.Database.IgnoreRecordNotFoundError, "Enable ignoring 'not found' errors resulting from database queries. Defaults to 'true' (overrides with RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR)")
-	flag.DurationVar(&cfg.Log.Database.SlowThreshold, "log.database.slowThreshold", cfg.Log.Database.SlowThreshold, "Threshold for slow queries in logger. Defaults to 100ms (overrides with RENTERD_LOG_DATABASE_SLOW_THRESHOLD)")
+	flag.DurationVar(&cfg.Log.Database.SlowThreshold, "log.database.slowThreshold", cfg.Log.Database.SlowThreshold, "Threshold for slow queries in logger. Defaults to 500ms (overrides with RENTERD_LOG_DATABASE_SLOW_THRESHOLD)")
 
 	// db
 	flag.StringVar(&cfg.Database.MySQL.URI, "db.uri", cfg.Database.MySQL.URI, "Database URI for the bus (overrides with RENTERD_DB_URI)")
