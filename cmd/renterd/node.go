@@ -131,6 +131,11 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 		pk = cwallet.KeyFromSeed(&rawSeed, 0)
 	}
 
+	// add auth route
+	if cfg.HTTP.Password != "" {
+		mux.Sub["/auth"] = utils.TreeMux{Handler: utils.AuthHandler(cfg.HTTP.Password)}
+	}
+
 	// initialise bus
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
