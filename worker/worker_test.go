@@ -138,11 +138,7 @@ func (w *testWorker) RenewContract(hk types.PublicKey) *mocks.Contract {
 		w.tt.Fatal("host not found")
 	}
 
-	renewal, err := w.cs.RenewContract(hk)
-	if err != nil {
-		w.tt.Fatal(err)
-	}
-	return renewal
+	return w.cs.RenewContract(hk)
 }
 
 func (w *testWorker) UsableHosts() []api.HostInfo {
