@@ -104,7 +104,7 @@ type (
 	}
 )
 
-func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, logger *zap.Logger) (*Migrator, error) {
+func New(ctx context.Context, masterKey [32]byte, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, logger *zap.Logger) (*Migrator, error) {
 	logger = logger.Named("migrator")
 	m := &Migrator{
 		alerts: alerts,
@@ -125,8 +125,9 @@ func New(ctx context.Context, masterKey utils.MasterKey, alerts alerts.Alerter, 
 	}
 
 	// derive keys
-	ak := masterKey.DeriveAccountsKey("migrator")
-	uk := masterKey.DeriveUploadKey()
+	mk := utils.MasterKey(masterKey)
+	ak := mk.DeriveAccountsKey("migrator")
+	uk := mk.DeriveUploadKey()
 
 	// create account manager
 	am, err := accounts.NewManager(ak, "migrator", alerts, m, m, b, b, b, b, accountsRefillInterval, logger)
