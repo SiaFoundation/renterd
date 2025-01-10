@@ -35,8 +35,12 @@ func (b *Bus) pruneContractV1(ctx context.Context, rk types.PrivateKey, cm api.C
 		indices = filtered
 		return indices, nil
 	})
+
+	var pruneErr string
 	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) && !errors.Is(err, context.Canceled) {
 		return api.ContractPruneResponse{}, err
+	} else if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) {
+		pruneErr = err.Error()
 	}
 
 	// record spending
@@ -54,11 +58,6 @@ func (b *Bus) pruneContractV1(ctx context.Context, rk types.PrivateKey, cm api.C
 				ValidRenterPayout: rev.ValidRenterPayout(),
 			},
 		})
-	}
-
-	var pruneErr string
-	if err != nil {
-		pruneErr = err.Error()
 	}
 
 	return api.ContractPruneResponse{

@@ -87,9 +87,12 @@ type mockHostScanner struct {
 
 func (w *mockHostScanner) ScanHost(ctx context.Context, hostKey types.PublicKey, _ time.Duration) (api.HostScanResponse, error) {
 	if w.blockChan != nil {
-		<-w.blockChan
+		select {
+		case <-ctx.Done():
+			return api.HostScanResponse{}, ctx.Err()
+		case <-w.blockChan:
+		}
 	}
-
 	w.hs.recordScan(hostKey)
 
 	w.mu.Lock()
@@ -177,5 +180,40 @@ func TestScanner(t *testing.T) {
 		t.Fatalf("unexpected removals, %v != 1", len(removals))
 	} else if removals[0] != "10-3600000000000" {
 		t.Fatalf("unexpected removals, %v", removals)
+	}
+
+	// block worker and start scanning
+	b.blockChan = make(chan struct{})
+	s.Scan(context.Background(), b, true)
+
+	// assert it's scanning
+	scanning, _ = s.Status()
+	if !scanning {
+		t.Fatal("unexpected")
+	}
+
+	// assert forcing a scan interrupts an ongoing scan, waits for the scan to
+	// finish and starts a new scan
+	t1 := make(chan struct{})
+	go func() {
+		s.Scan(context.Background(), b, true)
+		close(t1)
+	}()
+	<-t1
+
+	// assert it's scanning
+	scanning, _ = s.Status()
+	if !scanning {
+		t.Fatal("unexpected")
+	}
+
+	// unblock the worker and sleep
+	close(b.blockChan)
+	time.Sleep(time.Second)
+
+	// assert the scan is done
+	scanning, _ = s.Status()
+	if scanning {
+		t.Fatal("unexpected")
 	}
 }

@@ -17,6 +17,11 @@ const (
 	DefaultScanTimeout = 10 * time.Second
 )
 
+var (
+	ErrShuttingDown    = errors.New("scanner is shutting down")
+	ErrScanInterrupted = errors.New("scanning was interrupted")
+)
+
 type (
 	HostScanner interface {
 		ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (api.HostScanResponse, error)
@@ -38,8 +43,7 @@ type (
 
 		statsHostPingMS *utils.DataPoints
 
-		shutdownChan chan struct{}
-		wg           sync.WaitGroup
+		wg sync.WaitGroup
 
 		logger *zap.SugaredLogger
 
@@ -48,8 +52,7 @@ type (
 
 		scanning          bool
 		scanningLastStart time.Time
-
-		interruptChan chan struct{}
+		scanningCtxCancel context.CancelCauseFunc
 	}
 
 	scanJob struct {
@@ -75,17 +78,31 @@ func New(hs HostStore, scanBatchSize, scanThreads uint64, scanMinInterval time.D
 
 		statsHostPingMS: utils.NewDataPoints(0),
 		logger:          logger.Sugar(),
-
-		interruptChan: make(chan struct{}),
-		shutdownChan:  make(chan struct{}),
 	}, nil
 }
 
 func (s *Scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
-	if s.canSkipScan(force) {
+	s.mu.Lock()
+	if force {
+		if s.scanning {
+			s.scanningCtxCancel(ErrScanInterrupted)
+			s.mu.Unlock()
+
+			s.logger.Infof("host scan interrupted, waiting for ongoing scan to complete")
+			s.wg.Wait()
+			s.mu.Lock()
+		}
+	} else if s.scanning || time.Since(s.scanningLastStart) < s.scanInterval {
+		s.mu.Unlock()
 		s.logger.Debug("host scan skipped")
 		return
 	}
+
+	ctx, cancel := context.WithCancelCause(ctx)
+	s.scanningCtxCancel = cancel
+	s.scanningLastStart = time.Now()
+	s.scanning = true
+	s.mu.Unlock()
 
 	cutoff := time.Now()
 	if !force {
@@ -101,14 +118,16 @@ func (s *Scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer func() {
+			s.mu.Lock()
+			s.scanning = false
+			s.mu.Unlock()
 
+			s.wg.Done()
+			cancel(nil)
+		}()
 		scanned := s.scanHosts(ctx, hs, cutoff)
 		removed := s.removeOfflineHosts(ctx)
-
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.scanning = false
 		s.logger.Infow("scan finished",
 			"force", force,
 			"duration", time.Since(s.scanningLastStart),
@@ -120,13 +139,19 @@ func (s *Scanner) Scan(ctx context.Context, hs HostScanner, force bool) {
 }
 
 func (s *Scanner) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	if !s.scanning {
+		s.mu.Unlock()
+		return nil
+	}
+	s.scanningCtxCancel(ErrShuttingDown)
+	s.mu.Unlock()
+
 	waitChan := make(chan struct{})
 	go func() {
 		s.wg.Wait()
 		close(waitChan)
 	}()
-
-	close(s.shutdownChan)
 
 	select {
 	case <-ctx.Done():
@@ -153,12 +178,8 @@ func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 	// define worker
 	worker := func(jobs <-chan scanJob) {
 		for h := range jobs {
-			if s.isShutdown() || s.isInterrupted() {
-				return // shutdown
-			}
-
 			scan, err := hs.ScanHost(ctx, h.hostKey, DefaultScanTimeout)
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, ErrShuttingDown) || errors.Is(err, ErrScanInterrupted) || errors.Is(err, context.Canceled) {
 				return
 			} else if err != nil {
 				s.logger.Errorw("worker stopped", zap.Error(err), "hk", h.hostKey)
@@ -174,10 +195,9 @@ func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 
 	var exhausted bool
 	for !exhausted {
+		// check if we should stop
 		select {
 		case <-ctx.Done():
-			return
-		case <-s.shutdownChan:
 			return
 		default:
 		}
@@ -223,8 +243,6 @@ func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 			}:
 			case <-ctx.Done():
 				continue
-			case <-s.shutdownChan:
-				continue
 			case <-workersDone:
 				continue
 			}
@@ -234,24 +252,6 @@ func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 
 	s.statsHostPingMS.Recompute()
 	return
-}
-
-func (s *Scanner) isInterrupted() bool {
-	select {
-	case <-s.interruptChan:
-		return true
-	default:
-	}
-	return false
-}
-
-func (s *Scanner) isShutdown() bool {
-	select {
-	case <-s.shutdownChan:
-		return true
-	default:
-	}
-	return false
 }
 
 func (s *Scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
@@ -281,30 +281,4 @@ func (s *Scanner) removeOfflineHosts(ctx context.Context) (removed uint64) {
 	}
 
 	return
-}
-
-func (s *Scanner) canSkipScan(force bool) bool {
-	if s.isShutdown() {
-		return true
-	}
-
-	s.mu.Lock()
-	if force {
-		close(s.interruptChan)
-		s.mu.Unlock()
-
-		s.logger.Infof("host scan interrupted, waiting for ongoing scan to complete")
-		s.wg.Wait()
-
-		s.mu.Lock()
-		s.interruptChan = make(chan struct{})
-	} else if s.scanning || time.Since(s.scanningLastStart) < s.scanInterval {
-		s.mu.Unlock()
-		return true
-	}
-	s.scanningLastStart = time.Now()
-	s.scanning = true
-	s.mu.Unlock()
-
-	return false
 }
