@@ -95,17 +95,22 @@ func Auth(password string) func(http.Handler) http.Handler {
 
 func AuthHandler(password string) http.Handler {
 	return jape.BasicAuth(password)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
+		if req.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return // only POST is allowed
+		}
 
 		// parse validity
 		validityMS := req.FormValue("validity")
 		if validityMS == "" {
+			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("'validity' parameter is missing"))
 			return
 		}
 		var validity time.Duration
 		if _, err := fmt.Sscan(validityMS, &validity); err != nil {
+			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("failed to parse validity"))
 			return
@@ -113,6 +118,7 @@ func AuthHandler(password string) http.Handler {
 		validity *= time.Millisecond
 
 		// send token
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(fmt.Sprintf(`{"token": %q}`, authTokens.GenerateNew(validity))))
 	}))
