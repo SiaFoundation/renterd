@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -111,23 +112,49 @@ func TestRefreshUploader(t *testing.T) {
 	hm := mocks.NewHostManager()
 	cl := mocks.NewContractLocker()
 
+	// create contract
+	hi := api.HostInfo{
+		PublicKey:  types.PublicKey{1},
+		SiamuxAddr: "localhost:1234",
+	}
+	c := cs.AddContract(hi.PublicKey).Metadata()
+
 	// create uploader
-	hk := types.PublicKey{1}
-	c1 := cs.AddContract(hk).Metadata()
-	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, c1.ID, c1.WindowEnd, zap.NewNop().Sugar())
+	ul := New(context.Background(), cl, cs, hm, hi, c.ID, c.WindowEnd, zap.NewNop().Sugar())
 
-	// renew the first contract
-	c1Renewed, err := cs.RenewContract(hk)
-	if err != nil {
-		t.Fatal(err)
+	// assert state
+	if ul.expiry != c.WindowEnd {
+		t.Fatal("endheight was not initialized", ul.expiry)
+	} else if ul.fcid != c.ID {
+		t.Fatal("contract id was not initialized", ul.fcid, c.ID)
+	} else if !reflect.DeepEqual(ul.host, hi) {
+		t.Fatal("host info was not initialized", ul.host, hi)
 	}
 
-	// refresh uploader to cause it to expire
+	// renew the contract
+	cr := cs.RenewContract(hi.PublicKey).Metadata()
+
+	// refresh uploader
 	if !ul.tryRefresh(context.Background()) {
-		t.Fatal("uploader wasn't refreshed")
+		t.Fatal("refresh failed unexpectedly")
 	}
 
-	if ul.fcid != c1Renewed.ID() {
-		t.Fatalf("expected uploader to be using renewed contract, got %v", ul.fcid)
+	// assert state
+	if ul.expiry != cr.WindowEnd {
+		t.Fatal("endheight was not updated", ul.expiry, cr.WindowEnd)
+	} else if ul.fcid != cr.ID {
+		t.Fatal("contract id was not updated", ul.fcid, cr.ID)
+	} else if !reflect.DeepEqual(ul.host, hi) {
+		t.Fatal("host info was not updated", ul.host, hi)
+	}
+
+	// refresh uploader with new host info
+	update := hi
+	update.SiamuxAddr = "localhost:5678"
+	ul.Refresh(&update, cr.ID, cr.WindowEnd)
+
+	// assert host info got updated
+	if !reflect.DeepEqual(ul.host, update) {
+		t.Fatal("host info was not updated", ul.host, update)
 	}
 }

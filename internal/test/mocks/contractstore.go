@@ -2,7 +2,6 @@ package mocks
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
@@ -79,17 +78,17 @@ func (cs *ContractStore) DeleteContracdt(fcid types.FileContractID) {
 	delete(cs.contracts, fcid)
 }
 
-func (cs *ContractStore) RenewContract(hk types.PublicKey) (*Contract, error) {
+func (cs *ContractStore) RenewContract(hk types.PublicKey) *Contract {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
 	curr, ok := cs.hosts2fcid[hk]
 	if !ok {
-		return nil, errors.New("host not found")
+		panic("host not found") // developer error
 	}
 	c := cs.contracts[curr]
 	if c == nil {
-		return nil, errors.New("host does not have a contract to renew")
+		panic("contract not found") // developer error
 	}
 	delete(cs.contracts, curr)
 
@@ -99,7 +98,7 @@ func (cs *ContractStore) RenewContract(hk types.PublicKey) (*Contract, error) {
 	renewal.metadata.WindowEnd = renewal.metadata.WindowStart + (c.metadata.WindowEnd - c.metadata.WindowStart)
 	cs.contracts[renewal.metadata.ID] = renewal
 	cs.hosts2fcid[hk] = renewal.metadata.ID
-	return renewal, nil
+	return renewal
 }
 
 func (cs *ContractStore) newFileContractID() types.FileContractID {

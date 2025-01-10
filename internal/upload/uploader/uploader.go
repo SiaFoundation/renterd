@@ -10,7 +10,6 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/host"
 	"go.sia.tech/renterd/internal/hosts"
 	"go.sia.tech/renterd/internal/locking"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
@@ -80,12 +79,12 @@ type (
 		signalNewUpload chan struct{}
 		shutdownCtx     context.Context
 
-		mu        sync.Mutex
-		endHeight uint64
-		fcid      types.FileContractID
-		host      host.Uploader
-		queue     []*SectorUploadReq
-		stopped   bool
+		mu      sync.Mutex
+		expiry  uint64
+		fcid    types.FileContractID
+		host    api.HostInfo
+		queue   []*SectorUploadReq
+		stopped bool
 
 		// stats related field
 		consecutiveFailures uint64
@@ -113,10 +112,10 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		statsSectorUploadSpeedBytesPerMS: utils.NewDataPoints(0),
 
 		// covered by mutex
-		host:      hm.Uploader(hi, fcid),
-		fcid:      fcid,
-		endHeight: endHeight,
-		queue:     make([]*SectorUploadReq, 0),
+		expiry: endHeight,
+		fcid:   fcid,
+		host:   hi,
+		queue:  make([]*SectorUploadReq, 0),
 	}
 }
 
@@ -133,7 +132,7 @@ func (u *Uploader) ContractID() types.FileContractID {
 func (u *Uploader) Expired(bh uint64) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return bh >= u.endHeight
+	return bh >= u.expiry
 }
 
 func (u *Uploader) Healthy() bool {
@@ -150,12 +149,12 @@ func (u *Uploader) Refresh(hi *api.HostInfo, fcid types.FileContractID, endHeigh
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	if hi != nil {
-		u.host = u.hm.Uploader(*hi, fcid)
-	}
-
-	u.endHeight = endHeight
+	// update state
+	u.expiry = endHeight
 	u.fcid = fcid
+	if hi != nil {
+		u.host = *hi
+	}
 }
 
 func (u *Uploader) Start() {
@@ -351,7 +350,7 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 
 	// upload the sector
 	start := time.Now()
-	err = host.UploadSector(ctx, req.Root, req.Data)
+	err = u.hm.Uploader(host, fcid).UploadSector(ctx, req.Root, req.Data)
 	if err != nil {
 		return 0, fmt.Errorf("failed to upload sector to contract %v; %w", fcid, err)
 	}
