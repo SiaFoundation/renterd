@@ -417,7 +417,7 @@ func (ap *Autopilot) performMaintenance(forceScan bool, tickerFired chan struct{
 	ap.migrator.Migrate(ap.shutdownCtx)
 
 	// pruning
-	if ap.pruner != nil {
+	if apCfg.Contracts.Prune {
 		ap.pruner.PerformContractPruning(ap.shutdownCtx)
 	} else {
 		ap.logger.Info("pruning disabled")

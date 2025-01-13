@@ -12,6 +12,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/bus/client"
 	"go.sia.tech/renterd/internal/test"
 )
 
@@ -76,6 +77,53 @@ func TestHostPruning(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestContractPruning(t *testing.T) {
+	// create a cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: test.RedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
+
+	// convenience variables
+	w := cluster.Worker
+	b := cluster.Bus
+	tt := cluster.tt
+
+	// helper to assert there is data to prune yes or no, which essentially
+	// checks whether the pruner is running or not
+	assertPrunableData := func(prunable bool) {
+		tt.Retry(100, 100*time.Millisecond, func() error {
+			res, err := b.PrunableData(context.Background())
+			tt.OK(err)
+			if prunable && res.TotalPrunable == 0 {
+				return errors.New("expected prunable data")
+			} else if !prunable && res.TotalPrunable != 0 {
+				return errors.New("expected no prunable data")
+			}
+			return nil
+		})
+	}
+
+	// create prunable data by adding and immediately removing an object
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader([]byte(t.Name())), testBucket, t.Name(), api.UploadObjectOptions{}))
+	tt.OK(b.DeleteObject(context.Background(), testBucket, t.Name()))
+
+	// assert there's data to prune and there's nothing pruning it
+	assertPrunableData(true)
+	time.Sleep(time.Second)
+	assertPrunableData(true)
+
+	// enable contract pruning
+	ap, err := b.AutopilotConfig(context.Background())
+	tt.OK(err)
+	cfg := ap.Contracts
+	cfg.Prune = true
+	tt.OK(b.UpdateAutopilotConfig(context.Background(), client.WithContractsConfig(cfg)))
+
+	// assert data got pruned
+	assertPrunableData(false)
 }
 
 func TestSectorPruning(t *testing.T) {
