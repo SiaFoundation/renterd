@@ -26,10 +26,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	batchSizeInsertSectors = 500
-)
-
 type (
 	MainDatabase struct {
 		partialSlabDir string
@@ -682,21 +678,16 @@ CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable, 
 		}
 	}()
 
-	// insert roots in batches
-	idx := uint64(0)
-	for i := 0; i < len(roots); i += batchSizeInsertSectors {
-		end := i + batchSizeInsertSectors
-		if end > len(roots) {
-			end = len(roots)
-		}
+	// prepare insert statement
+	insertStmt, err := tx.Prepare(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES (?, ?)`, tmpTable))
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare statement to insert contract roots: %w", err)
+	}
+	defer insertStmt.Close()
 
-		var params []interface{}
-		for _, r := range roots[i:end] {
-			params = append(params, idx, ssql.Hash256(r))
-			idx++
-		}
-
-		_, err = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES %s`, tmpTable, strings.TrimSuffix(strings.Repeat("(?, ?), ", end-i), ", ")), params...)
+	// insert roots
+	for i, r := range roots {
+		_, err := insertStmt.Exec(ctx, uint64(i), ssql.Hash256(r))
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
 		}
