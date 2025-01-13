@@ -686,6 +686,7 @@ CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable, tmpT
 	defer insertStmt.Close()
 
 	// insert roots in batches
+	idx := uint64(0)
 	for i := 0; i < len(roots); i += batchSizeInsertSectors {
 		end := i + batchSizeInsertSectors
 		if end > len(roots) {
@@ -693,8 +694,9 @@ CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable, tmpT
 		}
 
 		var params []interface{}
-		for i, r := range roots[i:end] {
-			params = append(params, uint64(i), ssql.Hash256(r))
+		for _, r := range roots[i:end] {
+			params = append(params, idx, ssql.Hash256(r))
+			idx++
 		}
 
 		if len(params) == batchSizeInsertSectors {
