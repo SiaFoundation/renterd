@@ -665,7 +665,8 @@ func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.
 	_, err = tx.Exec(ctx, fmt.Sprintf(`
 DROP TABLE IF EXISTS %s;
 CREATE TEMPORARY TABLE %s (idx INT, root blob);
-CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable))
+CREATE UNIQUE INDEX %s_idx_idx ON %s (idx);
+CREATE INDEX %s_idx ON %s (root);`, tmpTable, tmpTable, tmpTable, tmpTable, tmpTable, tmpTable))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporary table: %w", err)
 	}
