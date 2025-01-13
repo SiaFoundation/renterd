@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
     CGO_ENABLED=1 go build -tags='netgo timetzdata' -ldflags='-s -w -linkmode external -extldflags "-static"' ./cmd/renterd
 
 # Build image that will be used to run renterd.
-FROM scratch
+FROM debian:bookworm-slim
 LABEL maintainer="The Sia Foundation <info@sia.tech>" \
     org.opencontainers.image.description.vendor="The Sia Foundation" \
     org.opencontainers.image.description="A renterd container - next-generation Sia renter" \
