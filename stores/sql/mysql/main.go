@@ -1216,15 +1216,9 @@ func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64,
 	}
 
 	// fetch used contracts
-	ucs, err := ssql.FetchUsedContracts(ctx, tx.Tx, slices.Contracts())
+	contracts, err := ssql.FetchUsedContracts(ctx, tx.Tx, slices.Contracts())
 	if err != nil {
 		return fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// build used contracts map
-	contracts := make(map[types.FileContractID]ssql.UsedContract, 0)
-	for _, c := range ucs {
-		contracts[types.FileContractID(c.FCID)] = c
 	}
 
 	// insert slabs
