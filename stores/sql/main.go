@@ -594,7 +594,7 @@ func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 	return nil
 }
 
-func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (used []UsedContract, _ error) {
+func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (map[types.FileContractID]UsedContract, error) {
 	if len(fcids) == 0 {
 		return nil, nil
 	}
@@ -622,6 +622,7 @@ WHERE (fcid IN (%s) OR renewed_from IN (%s)) AND contracts.archival_reason IS NU
 	defer rows.Close()
 
 	// build used contracts
+	used := make(map[types.FileContractID]UsedContract, len(fcids))
 	for rows.Next() {
 		var c UsedContract
 		var rf FileContractID
@@ -633,9 +634,9 @@ WHERE (fcid IN (%s) OR renewed_from IN (%s)) AND contracts.archival_reason IS NU
 		if _, ok := lookup[c.FCID]; !ok {
 			c.FCID = rf
 		}
-		used = append(used, c)
+		used[types.FileContractID(c.FCID)] = c
 	}
-	return
+	return used, nil
 }
 
 func HasMigration(ctx context.Context, tx sql.Tx, id string) (applied bool, err error) {
@@ -2137,15 +2138,9 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 	}
 
 	// fetch used contracts
-	ucs, err := FetchUsedContracts(ctx, tx, fcids)
+	contracts, err := FetchUsedContracts(ctx, tx, fcids)
 	if err != nil {
 		return err
-	}
-
-	// build used contracts map
-	contracts := make(map[types.FileContractID]UsedContract, 0)
-	for _, c := range ucs {
-		contracts[types.FileContractID(c.FCID)] = c
 	}
 
 	// build contract <-> sector links
@@ -2468,15 +2463,9 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	}
 
 	// fetch used contracts
-	ucs, err := FetchUsedContracts(ctx, tx, slab.Contracts())
+	contracts, err := FetchUsedContracts(ctx, tx, slab.Contracts())
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch used contracts: %w", err)
-	}
-
-	// build used contracts map
-	contracts := make(map[types.FileContractID]UsedContract, 0)
-	for _, c := range ucs {
-		contracts[types.FileContractID(c.FCID)] = c
 	}
 
 	// stmt to add sector

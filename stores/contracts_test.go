@@ -14,17 +14,6 @@ func TestFetchUsedContracts(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 	defer ss.Close()
 
-	// define helper
-	hasContract := func(ucs []sql.UsedContract, fcid types.FileContractID) bool {
-		t.Helper()
-		for _, uc := range ucs {
-			if types.FileContractID(uc.FCID) == fcid {
-				return true
-			}
-		}
-		return false
-	}
-
 	// add host
 	hk := types.PublicKey{1}
 	if err := ss.addTestHost(types.PublicKey{1}); err != nil {
@@ -44,7 +33,7 @@ func TestFetchUsedContracts(t *testing.T) {
 	}
 
 	// fetch used contracts
-	var ucs []sql.UsedContract
+	var ucs map[types.FileContractID]sql.UsedContract
 	if err := ss.DB().Transaction(context.Background(), func(tx isql.Tx) (err error) {
 		ucs, err = sql.FetchUsedContracts(context.Background(), tx, []types.FileContractID{
 			{1}, // renewed
@@ -56,11 +45,11 @@ func TestFetchUsedContracts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(ucs) != 3 {
 		t.Fatal(err)
-	} else if !hasContract(ucs, types.FileContractID{1}) {
+	} else if _, ok := ucs[types.FileContractID{1}]; !ok {
 		t.Fatal("unexpected result", ucs)
-	} else if !hasContract(ucs, types.FileContractID{2}) {
+	} else if _, ok := ucs[types.FileContractID{2}]; !ok {
 		t.Fatal("unexpected result", ucs)
-	} else if !hasContract(ucs, types.FileContractID{3}) {
+	} else if _, ok := ucs[types.FileContractID{3}]; !ok {
 		t.Fatal("unexpected result", ucs)
 	}
 
@@ -81,9 +70,9 @@ func TestFetchUsedContracts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(ucs) != 2 {
 		t.Fatal(err)
-	} else if !hasContract(ucs, types.FileContractID{1}) {
+	} else if _, ok := ucs[types.FileContractID{1}]; !ok {
 		t.Fatal("unexpected result", ucs)
-	} else if !hasContract(ucs, types.FileContractID{3}) {
+	} else if _, ok := ucs[types.FileContractID{3}]; !ok {
 		t.Fatal("unexpected result", ucs)
 	}
 }
