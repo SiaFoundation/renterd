@@ -583,7 +583,7 @@ func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
 
 func FetchUsedContracts(ctx context.Context, tx sql.Tx, fcids []types.FileContractID) (map[types.FileContractID]UsedContract, error) {
 	if len(fcids) == 0 {
-		return nil, nil
+		return make(map[types.FileContractID]UsedContract), nil
 	}
 
 	// build args
@@ -608,8 +608,8 @@ WHERE (fcid IN (%s) OR renewed_from IN (%s)) AND contracts.archival_reason IS NU
 	}
 	defer rows.Close()
 
-	// build used contracts
-	used := make(map[types.FileContractID]UsedContract, len(fcids))
+	// build map of used contracts
+	usedContracts := make(map[types.FileContractID]UsedContract, len(fcids))
 	for rows.Next() {
 		var c UsedContract
 		var rf FileContractID
@@ -621,9 +621,9 @@ WHERE (fcid IN (%s) OR renewed_from IN (%s)) AND contracts.archival_reason IS NU
 		if _, ok := lookup[c.FCID]; !ok {
 			c.FCID = rf
 		}
-		used[types.FileContractID(c.FCID)] = c
+		usedContracts[types.FileContractID(c.FCID)] = c
 	}
-	return used, nil
+	return usedContracts, nil
 }
 
 func HasMigration(ctx context.Context, tx sql.Tx, id string) (applied bool, err error) {
@@ -2124,7 +2124,7 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 		fcids = append(fcids, s.ContractID)
 	}
 
-	// fetch used contracts
+	// fetch contracts
 	contracts, err := FetchUsedContracts(ctx, tx, fcids)
 	if err != nil {
 		return err
