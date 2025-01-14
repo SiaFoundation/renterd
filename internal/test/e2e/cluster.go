@@ -237,6 +237,19 @@ func newTestLogger(enable bool) *zap.Logger {
 func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	t.Helper()
 
+	//	doneChan := make(chan struct{})
+	//	go func() {
+	//		select {
+	//		case <-time.After(10 * time.Minute):
+	//			fmt.Println("Dumping goroutine stack traces:")
+	//			buf := make([]byte, 1<<20) // 1MB buffer
+	//			stackLen := runtime.Stack(buf, true)
+	//			t.Skipf("%s\n", buf[:stackLen])
+	//		case <-doneChan:
+	//		}
+	//	}()
+	//	t.Cleanup(func() { close(doneChan) })
+
 	// Skip any test that requires a cluster when running short tests.
 	tt := test.NewTT(t)
 
