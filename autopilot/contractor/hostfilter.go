@@ -103,21 +103,18 @@ func (c *Contractor) isUsableContract(cfg api.AutopilotConfig, contract contract
 		renew = false
 	} else {
 		if contract.IsOutOfCollateral() {
-			fmt.Printf("%v should refresh (ooc): remaining: %v - %v, min: %v\n", contract.ID, MinCollateral, contract.Revision.MissedHostValue, contract.ContractPrice)
 			reasons = append(reasons, errContractOutOfCollateral.Error())
 			usable = usable && contract.IsGood() && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}
 		if contract.IsOutOfFunds() {
-			fmt.Printf("%v should refresh (oof)\n", contract.ID)
 			reasons = append(reasons, errContractOutOfFunds.Error())
 			usable = usable && contract.IsGood() && c.shouldForgiveFailedRefresh(contract.ID)
 			refresh = true
 			renew = false
 		}
 		if shouldRenew, secondHalf := isUpForRenewal(cfg, contract.EndHeight(), bh); shouldRenew {
-			fmt.Printf("%v should renew bh: %v, eh: %v, renewWindow: %v\n", contract.ID, bh, contract.EndHeight(), cfg.Contracts.RenewWindow)
 			reasons = append(reasons, fmt.Errorf("%w; second half: %t", errContractUpForRenewal, secondHalf).Error())
 			usable = usable && !secondHalf // only unusable if in second half of renew window
 			refresh = false

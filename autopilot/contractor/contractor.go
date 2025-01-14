@@ -191,17 +191,10 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		contractPrice = scan.V2Settings.Prices.ContractPrice
 		collateral = scan.V2Settings.Prices.Collateral
 		maxCollateral = scan.V2Settings.MaxCollateral
-		if contractPrice.IsZero() {
-			fmt.Println("contractprice2", contractPrice, scan.V2Settings)
-		}
 	} else {
 		contractPrice = scan.Settings.ContractPrice
 		collateral = scan.Settings.Collateral
 		maxCollateral = scan.Settings.MaxCollateral
-		if contractPrice.IsZero() {
-			fmt.Println("contractprice1", contractPrice, scan.Settings)
-			fmt.Println("scanned", host.Scanned, scan.V2Settings)
-		}
 	}
 
 	// check our budget
@@ -221,14 +214,12 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	hostCollateral := collateral.Mul64(expectedStorage).Mul64(ctx.Period())
 	if hostCollateral.Cmp(maxCollateral) > 0 {
 		hostCollateral = maxCollateral
-		fmt.Println("set to max", maxCollateral)
 	}
 
 	// shouldn't go below the minimum immediately so we add some buffer
 	minCollateral := MinCollateral.Mul64(2).Add(contractPrice)
 	if hostCollateral.Cmp(minCollateral) < 0 {
 		hostCollateral = minCollateral
-		fmt.Println("set to min", minCollateral, contractPrice, scan.V2Settings.Prices.ContractPrice, scan.Settings.ContractPrice)
 	}
 
 	// form contract
@@ -237,7 +228,6 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, !utils.IsErr(err, wallet.ErrNotEnoughFunds), err
 	}
-	fmt.Printf("formed contract %v: contract price %v, hostcollateral %v, collateral %v\n", contract.ID, contract.ContractPrice, hostCollateral, collateral)
 
 	logger.Infow("formation succeeded",
 		"fcid", contract.ID,
