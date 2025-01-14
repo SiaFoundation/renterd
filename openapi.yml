@@ -13,12 +13,12 @@ tags:
     description: Bus operations and management
 
 paths:
-  /auth:
+  /api/auth:
     post:
       tags:
         - authentication
-      summary: Create a new authentication token to use with the 'renterd_auth' cookie
-      description: Creates a new authentication token with the specified 'validity' duration. The token can be attached to a request as the `renterd_auth` cookie as an alternative way to Basic Auth for the API.`
+      summary: Create a new authentication token to use within the 'renterd_auth' cookie
+      description: Creates a new authentication token that is returned via the 'renterd_auth' cookie which is set by the server
       parameters:
         - name: validity
           description: The duration in milliseconds for which the token will be valid
@@ -29,17 +29,8 @@ paths:
             type: integer
             format: int64
       responses:
-        "200":
+        "204":
           description: Successfully created a new token
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  token:
-                    type: string
-                    pattern: "^[a-fA-F0-9]{32}$"
-                    description: A hex-encoded string representing the token
         "400":
           description: Bad request
   #############################

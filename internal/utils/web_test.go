@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	_ "net/http/pprof"
@@ -40,7 +38,7 @@ func TestAuth(t *testing.T) {
 		}
 	}
 
-	generateToken := func() string {
+	generateCookie := func() *http.Cookie {
 		t.Helper()
 
 		// fake a server to get the auth token from
@@ -54,20 +52,16 @@ func TestAuth(t *testing.T) {
 		res, err := authSrv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
-		} else if res.StatusCode != http.StatusOK {
-			t.Fatal("expected status code 200, got", res.StatusCode)
+		} else if res.StatusCode != http.StatusNoContent {
+			t.Fatal("expected status code 204, got", res.StatusCode)
 		}
-		b, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatal(err)
+		for _, cookie := range res.Cookies() {
+			if cookie.Name == authCookieName {
+				return cookie
+			}
 		}
-		var resp struct {
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(b, &resp); err != nil {
-			t.Fatal(err)
-		}
-		return resp.Token
+		t.Fatal("cookie not found")
+		return nil
 	}
 
 	// unauthenticated
@@ -79,20 +73,14 @@ func TestAuth(t *testing.T) {
 	})
 
 	// authenticate using cookie
-	token := generateToken()
+	cookie := generateCookie()
 	assertResponse(http.StatusOK, func(req *http.Request) {
-		req.AddCookie(&http.Cookie{
-			Name:  authCookieName,
-			Value: token,
-		})
+		req.AddCookie(cookie)
 	})
 
 	// make sure token expires
-	time.Sleep(time.Second)
+	time.Sleep(time.Duration(cookie.MaxAge) * time.Second)
 	assertResponse(http.StatusUnauthorized, func(req *http.Request) {
-		req.AddCookie(&http.Cookie{
-			Name:  authCookieName,
-			Value: token,
-		})
+		req.AddCookie(cookie)
 	})
 }
