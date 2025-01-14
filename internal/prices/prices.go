@@ -70,10 +70,9 @@ func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPr
 	// grab the current price table
 	p.mu.Lock()
 	prices := p.prices
-	renewTime := p.renewTime
 
 	// figure out whether we should update the price table, if not we can return
-	if !renewTime.IsZero() && time.Now().Before(renewTime) {
+	if !p.renewTime.IsZero() && time.Now().Before(p.renewTime) {
 		p.mu.Unlock()
 		return prices, nil
 	}
