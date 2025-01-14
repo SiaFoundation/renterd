@@ -66,35 +66,29 @@ func (c *PricesCache) Fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPri
 	return prices.fetch(ctx, h)
 }
 
-func (p *cachedPrices) ongoingUpdate() (bool, *pricesUpdate) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	var ongoing bool
-	if p.update == nil {
-		p.update = &pricesUpdate{done: make(chan struct{})}
-	} else {
-		ongoing = true
-	}
-
-	return ongoing, p.update
-}
-
 func (p *cachedPrices) fetch(ctx context.Context, h PricesFetcher) (rhpv4.HostPrices, error) {
 	// grab the current price table
 	p.mu.Lock()
 	prices := p.prices
-	p.mu.Unlock()
+	renewTime := p.renewTime
 
 	// figure out whether we should update the price table, if not we can return
-	if !p.renewTime.IsZero() && time.Now().Before(p.renewTime) {
+	if !renewTime.IsZero() && time.Now().Before(renewTime) {
+		p.mu.Unlock()
 		return prices, nil
 	}
 
-	// figure out whether an update is already ongoing, if there's one ongoing
-	// we can either wait or return early depending on whether the price table
-	// we have is still usable
-	ongoing, update := p.ongoingUpdate()
+	// figure out whether an update is ongoing and register an ongoing update if
+	// not
+	ongoing := p.update != nil
+	if p.update == nil {
+		p.update = &pricesUpdate{done: make(chan struct{})}
+	}
+	update := p.update
+	p.mu.Unlock()
+
+	// if there's one ongoing we can either wait or return early depending on
+	// whether the price table we have is still usable
 	if ongoing && time.Now().Add(priceTableValidityLeeway).Before(prices.ValidUntil) {
 		return prices, nil
 	} else if ongoing {
