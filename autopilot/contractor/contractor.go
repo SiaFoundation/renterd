@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -166,6 +167,16 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	if err != nil {
 		logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
+	}
+
+	// handle edge case where the host is not v2 but has v2 settings which can
+	// happen if we encounter a host's v2 announcement during maintenance
+	if !host.IsV2() && scan.V2Settings != (rhp.HostSettings{}) {
+		host, err = c.db.Host(ctx, hk)
+		if err != nil {
+			logger.With(zap.Error(err)).Error("failed to re-fetch host")
+			return api.ContractMetadata{}, false, err
+		}
 	}
 
 	// fetch consensus state
