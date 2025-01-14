@@ -117,10 +117,23 @@ func AuthHandler(password string) http.Handler {
 		}
 		validity *= time.Millisecond
 
+		// generate token
+		token := authTokens.GenerateNew(validity)
+
+		// set cookie
+		http.SetCookie(w, &http.Cookie{
+			Expires:  time.Now().Add(validity),
+			HttpOnly: true,
+			MaxAge:   int(validity / time.Second),
+			Name:     authCookieName,
+			SameSite: http.SameSiteStrictMode,
+			Value:    token,
+		})
+
 		// send token
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"token": %q}`, authTokens.GenerateNew(validity))))
+		w.Write([]byte(fmt.Sprintf(`{"token": %q}`, token)))
 	}))
 }
 

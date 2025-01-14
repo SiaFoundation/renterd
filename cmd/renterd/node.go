@@ -133,7 +133,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 
 	// add auth route
 	if cfg.HTTP.Password != "" {
-		mux.Sub["/auth"] = utils.TreeMux{Handler: utils.AuthHandler(cfg.HTTP.Password)}
+		mux.Sub["/api/auth"] = utils.TreeMux{Handler: utils.AuthHandler(cfg.HTTP.Password)}
 	}
 
 	// initialise bus
