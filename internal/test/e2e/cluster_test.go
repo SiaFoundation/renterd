@@ -3048,12 +3048,7 @@ func TestV1ToV2Transition(t *testing.T) {
 		archivedContracts, err = cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeArchived})
 		tt.OK(err)
 		if len(archivedContracts) != nHosts-1 {
-			var info string
-			all, _ := cluster.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeAll})
-			for _, c := range all {
-				info += fmt.Sprintf("%v: %v -> %v -> %v (%v)\n", c.HostKey, c.RenewedFrom, c.ID, c.RenewedTo, c.ArchivalReason)
-			}
-			return fmt.Errorf("expected %v archived contracts, got %v \n %s", nHosts-1, len(archivedContracts), info)
+			return fmt.Errorf("expected %v archived contracts, got %v", nHosts-1, len(archivedContracts))
 		}
 		return nil
 	})
