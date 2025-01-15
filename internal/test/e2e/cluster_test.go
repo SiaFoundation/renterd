@@ -2502,7 +2502,7 @@ func TestHostScan(t *testing.T) {
 	assertHost(ls, true, true, 2)
 
 	// close the host to make scans fail
-	tt.OK(host.Close())
+	cluster.RemoveHost(host)
 
 	// scan the host a third time
 	ls = time.Now()
@@ -2878,7 +2878,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	}
 
 	// stop the host
-	tt.OK(hosts[0].Close())
+	cluster.RemoveHost(hosts[0])
 
 	// mine until the contract is expired
 	cluster.mineBlocks(types.VoidAddress, contract.WindowEnd-cs.BlockHeight)
