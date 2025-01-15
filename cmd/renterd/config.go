@@ -8,18 +8,16 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/config"
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 )
 
 // TODO: handle RENTERD_S3_HOST_BUCKET_BASES correctly
@@ -43,97 +41,95 @@ var (
 	hostBasesStr string
 )
 
-func defaultConfig() config.Config {
-	return config.Config{
-		Directory:     ".",
-		Seed:          os.Getenv("RENTERD_SEED"),
-		AutoOpenWebUI: true,
-		Network:       "mainnet",
-		HTTP: config.HTTP{
-			Address:  "localhost:9980",
-			Password: os.Getenv("RENTERD_API_PASSWORD"),
+var cfg = config.Config{
+	Directory:     os.Getenv(dataDirEnvVar),
+	Seed:          os.Getenv(seedEnvVar),
+	AutoOpenWebUI: true,
+	Network:       "mainnet",
+	HTTP: config.HTTP{
+		Address:  "localhost:9980",
+		Password: os.Getenv(apiPasswordEnvVar),
+	},
+	ShutdownTimeout: 5 * time.Minute,
+	Database: config.Database{
+		MySQL: config.MySQL{
+			User:            "renterd",
+			Database:        "renterd",
+			MetricsDatabase: "renterd_metrics",
 		},
-		ShutdownTimeout: 5 * time.Minute,
-		Database: config.Database{
-			MySQL: config.MySQL{
-				User:            "renterd",
-				Database:        "renterd",
-				MetricsDatabase: "renterd_metrics",
-			},
-		},
-		Explorer: config.ExplorerData{
-			URL: "https://api.siascan.com",
-		},
-		Log: config.Log{
-			Level: "",
-			File: config.LogFile{
-				Enabled: true,
-				Format:  "human",
-				Path:    os.Getenv("RENTERD_LOG_FILE"),
-			},
-			StdOut: config.StdOut{
-				Enabled:    true,
-				Format:     "human",
-				EnableANSI: runtime.GOOS != "windows",
-			},
-			Database: config.DatabaseLog{
-				Enabled:                   true,
-				IgnoreRecordNotFoundError: true,
-				SlowThreshold:             500 * time.Millisecond,
-			},
-		},
-		Bus: config.Bus{
-			AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
-			Bootstrap:                     true,
-			GatewayAddr:                   ":9981",
-			UsedUTXOExpiry:                24 * time.Hour,
-			SlabBufferCompletionThreshold: 1 << 12,
-		},
-		Worker: config.Worker{
+	},
+	Explorer: config.ExplorerData{
+		URL: "https://api.siascan.com",
+	},
+	Log: config.Log{
+		Level: "",
+		File: config.LogFile{
 			Enabled: true,
-
-			ID:                     "",
-			AccountsRefillInterval: defaultAccountRefillInterval,
-			BusFlushInterval:       5 * time.Second,
-			CacheExpiry:            5 * time.Minute,
-
-			DownloadMaxOverdrive:     5,
-			DownloadOverdriveTimeout: 3 * time.Second,
-
-			DownloadMaxMemory:      1 << 30, // 1 GiB
-			UploadMaxMemory:        1 << 30, // 1 GiB
-			UploadMaxOverdrive:     5,
-			UploadOverdriveTimeout: 3 * time.Second,
+			Format:  "human",
+			Path:    os.Getenv(logFileEnvVar),
 		},
-		Autopilot: config.Autopilot{
-			Enabled: true,
-
-			Heartbeat: 30 * time.Minute,
-
-			MigratorAccountsRefillInterval:   defaultAccountRefillInterval,
-			MigratorHealthCutoff:             0.75,
-			MigratorNumThreads:               1,
-			MigratorDownloadMaxOverdrive:     5,
-			MigratorDownloadOverdriveTimeout: 3 * time.Second,
-			MigratorUploadMaxOverdrive:       5,
-			MigratorUploadOverdriveTimeout:   3 * time.Second,
-
-			RevisionBroadcastInterval: 7 * 24 * time.Hour,
-			RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
-
-			ScannerBatchSize:  100,
-			ScannerInterval:   4 * time.Hour,
-			ScannerNumThreads: 10,
+		StdOut: config.StdOut{
+			Enabled:    true,
+			Format:     "human",
+			EnableANSI: runtime.GOOS != "windows",
 		},
-		S3: config.S3{
-			Address:     "localhost:8080",
-			Enabled:     true,
-			DisableAuth: false,
+		Database: config.DatabaseLog{
+			Enabled:                   true,
+			IgnoreRecordNotFoundError: true,
+			SlowThreshold:             500 * time.Millisecond,
 		},
-	}
+	},
+	Bus: config.Bus{
+		AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
+		Bootstrap:                     true,
+		GatewayAddr:                   ":9981",
+		UsedUTXOExpiry:                24 * time.Hour,
+		SlabBufferCompletionThreshold: 1 << 12,
+	},
+	Worker: config.Worker{
+		Enabled: true,
+
+		ID:                     "",
+		AccountsRefillInterval: defaultAccountRefillInterval,
+		BusFlushInterval:       5 * time.Second,
+		CacheExpiry:            5 * time.Minute,
+
+		DownloadMaxOverdrive:     5,
+		DownloadOverdriveTimeout: 3 * time.Second,
+
+		DownloadMaxMemory:      1 << 30, // 1 GiB
+		UploadMaxMemory:        1 << 30, // 1 GiB
+		UploadMaxOverdrive:     5,
+		UploadOverdriveTimeout: 3 * time.Second,
+	},
+	Autopilot: config.Autopilot{
+		Enabled: true,
+
+		Heartbeat: 30 * time.Minute,
+
+		MigratorAccountsRefillInterval:   defaultAccountRefillInterval,
+		MigratorHealthCutoff:             0.75,
+		MigratorNumThreads:               1,
+		MigratorDownloadMaxOverdrive:     5,
+		MigratorDownloadOverdriveTimeout: 3 * time.Second,
+		MigratorUploadMaxOverdrive:       5,
+		MigratorUploadOverdriveTimeout:   3 * time.Second,
+
+		RevisionBroadcastInterval: 7 * 24 * time.Hour,
+		RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
+
+		ScannerBatchSize:  100,
+		ScannerInterval:   4 * time.Hour,
+		ScannerNumThreads: 10,
+	},
+	S3: config.S3{
+		Address:     "localhost:8080",
+		Enabled:     true,
+		DisableAuth: false,
+	},
 }
 
-func assertWorkerID(cfg *config.Config) error {
+func assertWorkerID() error {
 	if !cfg.Worker.Enabled {
 		// no worker
 		return nil
@@ -147,45 +143,7 @@ func assertWorkerID(cfg *config.Config) error {
 	return nil
 }
 
-// loadConfig creates a default config and overrides it with the contents of the
-// YAML file (specified by the RENTERD_CONFIG_FILE), CLI flags, and environment
-// variables, in that order.
-func loadConfig() (cfg config.Config, network *consensus.Network, genesis types.Block, err error) {
-	cfg = defaultConfig()
-	if err = parseYamlConfig(&cfg); err != nil {
-		return
-	}
-	parseCLIFlags(&cfg)
-	parseEnvironmentVariables(&cfg)
-
-	// check worker id
-	if err = assertWorkerID(&cfg); err != nil {
-		return
-	}
-
-	// check network
-	switch cfg.Network {
-	case "anagami":
-		network, genesis = chain.TestnetAnagami()
-	case "mainnet":
-		network, genesis = chain.Mainnet()
-	case "zen":
-		network, genesis = chain.TestnetZen()
-	default:
-		err = fmt.Errorf("unknown network '%s'", cfg.Network)
-		return
-	}
-
-	// check explorer
-	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
-		err = fmt.Errorf("explorer is enabled but no URL is set")
-		return
-	}
-
-	return
-}
-
-func sanitizeConfig(cfg *config.Config) error {
+func sanitizeConfig() error {
 	// combine host bucket bases
 	for _, base := range strings.Split(hostBasesStr, ",") {
 		if trimmed := strings.TrimSpace(base); trimmed != "" {
@@ -194,19 +152,18 @@ func sanitizeConfig(cfg *config.Config) error {
 	}
 
 	// check that the API password is set
-	if cfg.HTTP.Password == "" {
-		if disableStdin {
-			return errors.New("API password must be set via environment variable or config file when --env flag is set")
-		}
+	if cfg.HTTP.Password == "" && disableStdin {
+		return errors.New("API password must be set via environment variable or config file when --env flag is set")
+	} else if len(cfg.HTTP.Password) < 4 {
+		setAPIPassword()
 	}
-	setAPIPassword(cfg)
 
 	// check that the seed is set
 	if cfg.Seed == "" && (cfg.Worker.Enabled || cfg.Bus.RemoteAddr == "") { // only worker & bus require a seed
 		if disableStdin {
 			return errors.New("Seed must be set via environment variable or config file when --env flag is set")
 		}
-		setSeedPhrase(cfg)
+		setSeedPhrase()
 	}
 
 	// validate the seed is valid
@@ -225,39 +182,24 @@ func sanitizeConfig(cfg *config.Config) error {
 		cfg.Log.Database.Level = cfg.Log.Level
 	}
 
-	return nil
-}
+	// default data directory
+	cfg.Directory = defaultDataDirectory(cfg.Directory)
 
-func parseYamlConfig(cfg *config.Config) error {
-	configPath := "renterd.yml"
-	if str := os.Getenv("RENTERD_CONFIG_FILE"); str != "" {
-		configPath = str
-	}
-
-	// If the config file doesn't exist, don't try to load it.
-	_, err := os.Stat(configPath)
-	if os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
+	// validate worker settings
+	if err := assertWorkerID(); err != nil {
 		return err
 	}
 
-	f, err := os.Open(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to open config file: %w", err)
+	// validate explorer settings
+	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
+		err := fmt.Errorf("explorer is enabled but no URL is set")
+		checkFatalError("invalid config file", err)
 	}
-	defer f.Close()
 
-	dec := yaml.NewDecoder(f)
-	dec.KnownFields(true)
-
-	if err := dec.Decode(&cfg); err != nil {
-		return fmt.Errorf("failed to decode config file: %w", err)
-	}
 	return nil
 }
 
-func parseCLIFlags(cfg *config.Config) {
+func parseCLIFlags() {
 	// node
 	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
@@ -343,7 +285,7 @@ func parseCLIFlags(cfg *config.Config) {
 	flag.Parse()
 }
 
-func parseEnvironmentVariables(cfg *config.Config) {
+func parseEnvironmentVariables() {
 	// define helper function to parse environment variables
 	parseEnvVar := func(s string, v interface{}) {
 		if env, ok := os.LookupEnv(s); ok {
@@ -514,9 +456,44 @@ func setListenAddress(context string, value *string, allowEmpty bool) {
 	}
 }
 
+func setDataDirectory() {
+	if cfg.Directory == "" {
+		cfg.Directory = "."
+	}
+
+	dir, err := filepath.Abs(cfg.Directory)
+	checkFatalError("failed to get absolute path of data directory", err)
+
+	fmt.Println("The data directory is where renterd will store its metadata and consensus data.")
+	fmt.Println("This directory should be on a fast, reliable storage device, preferably an SSD.")
+	fmt.Println("")
+
+	_, existsErr := os.Stat(filepath.Join(dir, "consensus"))
+	dataExists := existsErr == nil
+	if dataExists {
+		fmt.Println(wrapANSI("\033[33m", "There is existing data in the data directory.", "\033[0m"))
+		fmt.Println(wrapANSI("\033[33m", "If you change your data directory, you will need to manually move consensus, gateway, transactionpool, partial_slabs and (potentially) the db folder to the new directory.", "\033[0m"))
+	}
+
+	if !promptYesNo("Would you like to change the data directory? (Current: " + dir + ")") {
+		return
+	}
+	cfg.Directory = readInput("Enter data directory")
+}
+
 // setSeedPhrase prompts the user to enter a seed phrase if one is not already
 // set via environment variable or config file.
-func setSeedPhrase(cfg *config.Config) {
+func setSeedPhrase() {
+	// prompt user to change seed phrase if one is already set
+	if cfg.Seed != "" {
+		fmt.Println(wrapANSI("\033[33m", "A wallet seed phrase is already set.", "\033[0m"))
+		fmt.Println("If you change your wallet seed phrase, your renter will not be able to access Siacoin associated with this wallet.")
+		fmt.Println("Ensure that you have backed up your wallet seed phrase before continuing.")
+		if !promptYesNo("Would you like to change your wallet seed phrase?") {
+			return
+		}
+	}
+
 	// retry until a valid seed phrase is entered
 	for {
 		fmt.Println("")
@@ -572,10 +549,14 @@ func setSeedPhrase(cfg *config.Config) {
 
 // setAPIPassword prompts the user to enter an API password if one is not
 // already set via environment variable or config file.
-func setAPIPassword(cfg *config.Config) {
-	// return early if the password is already set
+func setAPIPassword() {
+	// prompt user if the password is already set
 	if len(cfg.HTTP.Password) >= 4 {
-		return
+		fmt.Println(wrapANSI("\033[33m", "An admin password is already set.", "\033[0m"))
+		fmt.Println("If you change your admin password, you will need to update any scripts or applications that use the admin API.")
+		if !promptYesNo("Would you like to change your admin password?") {
+			return
+		}
 	}
 
 	// retry until a valid API password is entered
@@ -593,7 +574,7 @@ func setAPIPassword(cfg *config.Config) {
 	}
 }
 
-func setAdvancedConfig(cfg *config.Config) {
+func setAdvancedConfig() {
 	if !promptYesNo("Would you like to configure advanced settings?") {
 		return
 	}
@@ -620,10 +601,10 @@ func setAdvancedConfig(cfg *config.Config) {
 	fmt.Println("The database is used to store the renter's metadata.")
 	fmt.Println("The embedded SQLite database requires no additional configuration and is ideal for testing or demo purposes.")
 	fmt.Println("For production usage, we recommend MySQL, which requires a separate MySQL server.")
-	setStoreConfig(cfg)
+	setStoreConfig()
 }
 
-func setStoreConfig(cfg *config.Config) {
+func setStoreConfig() {
 	store := promptQuestion("Which data store would you like to use?", []string{"mysql", "sqlite"})
 	switch store {
 	case "mysql":
@@ -647,7 +628,7 @@ func setStoreConfig(cfg *config.Config) {
 	}
 }
 
-func setS3Config(cfg *config.Config) {
+func setS3Config() {
 	if !promptYesNo("Would you like to configure S3 settings?") {
 		return
 	} else if !promptYesNo("Would you like to enable the S3 gateway?") {
@@ -665,4 +646,63 @@ func setS3Config(cfg *config.Config) {
 	fmt.Println("The S3 API provides an S3-compatible gateway for uploading data to Sia.")
 	fmt.Println("It should not be exposed to the public internet without setting up a reverse proxy.")
 	setListenAddress("S3 Address", &cfg.S3.Address, true)
+}
+
+// tryLoadConfig tries to load the config file. It will try multiple locations
+// based on GOOS starting with PWD/renterd.yml. If the file does not exist, it will
+// try the next location. If an error occurs while loading the file, it will
+// print the error and exit. If the config is successfully loaded, the path to
+// the config file is returned.
+func tryLoadConfig() string {
+	for _, fp := range tryConfigPaths() {
+		if err := config.LoadFile(fp, &cfg); err == nil {
+			return fp
+		} else if !errors.Is(err, os.ErrNotExist) {
+			checkFatalError("failed to load config file", err)
+		}
+	}
+	return ""
+}
+
+func tryConfigPaths() []string {
+	if str := os.Getenv(configFileEnvVar); str != "" {
+		return []string{str}
+	}
+
+	paths := []string{
+		"renterd.yml",
+	}
+	if str := os.Getenv(dataDirEnvVar); str != "" {
+		paths = append(paths, filepath.Join(str, "renterd.yml"))
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		paths = append(paths, filepath.Join(os.Getenv("APPDATA"), "renterd", "renterd.yml"))
+	case "darwin":
+		paths = append(paths, filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "renterd", "renterd.yml"))
+	case "linux", "freebsd", "openbsd":
+		paths = append(paths,
+			filepath.Join(string(filepath.Separator), "etc", "renterd", "renterd.yml"),
+			filepath.Join(string(filepath.Separator), "var", "lib", "renterd", "renterd.yml"), // old default for the Linux service
+		)
+	}
+	return paths
+}
+
+func configPath() string {
+	if str := os.Getenv(configFileEnvVar); str != "" {
+		return str
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(os.Getenv("APPDATA"), "renterd", "renterd.yml")
+	case "darwin":
+		return filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "renterd", "renterd.yml")
+	case "linux", "freebsd", "openbsd":
+		return filepath.Join(string(filepath.Separator), "etc", "renterd", "renterd.yml")
+	default:
+		return "renterd.yml"
+	}
 }

@@ -39,6 +39,7 @@ ENV PGID=0
 # Renterd env args
 ENV RENTERD_API_PASSWORD=
 ENV RENTERD_SEED=
+ENV RENTERD_DATA_DIR=/data
 ENV RENTERD_CONFIG_FILE=/data/renterd.yml
 ENV RENTERD_NETWORK='mainnet'
 
@@ -50,4 +51,4 @@ VOLUME [ "/data" ]
 USER ${PUID}:${PGID}
 
 # Copy the script and set it as the entrypoint.
-ENTRYPOINT ["renterd", "-env", "-http", ":9980", "-s3.address", ":8080", "-dir", "./data"]
+ENTRYPOINT ["renterd", "-env", "-http", ":9980", "-s3.address", ":8080"]

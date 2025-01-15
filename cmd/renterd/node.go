@@ -71,7 +71,7 @@ type (
 	}
 )
 
-func newNode(cfg config.Config, network *consensus.Network, genesis types.Block) (*node, error) {
+func newNode(cfg config.Config, configPath string, network *consensus.Network, genesis types.Block) (*node, error) {
 	var setupFns, shutdownFns []fn
 
 	// validate config
@@ -96,9 +96,18 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	})
 
 	// print network and version
-	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", network.Name), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
+	header := logger.With(
+		zap.String("version", build.Version()),
+		zap.String("network", network.Name),
+		zap.String("commit", build.Commit()),
+		zap.Time("buildDate", build.BuildTime()),
+	)
+	if configPath != "" {
+		header = header.With(zap.String("config", configPath))
+	}
+	header.Info("renterd")
 	if runtime.GOARCH == "amd64" && !cpu.X86.HasAVX2 {
-		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
+		header.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
 	}
 
 	// initialise a listener and override the HTTP address, we have to do this
@@ -584,4 +593,28 @@ func migrateConsensusDatabase(ctx context.Context, store *stores.SQLStore, conse
 	logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
 	logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	return nil
+}
+
+func defaultDataDirectory(fp string) string {
+	// use the provided path if it's not empty
+	if fp != "" {
+		return fp
+	}
+
+	// check for databases in the current directory
+	if _, err := os.Stat("db.sqlite"); err == nil {
+		return "."
+	}
+
+	// default to the operating system's application directory
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(os.Getenv("APPDATA"), "renterd")
+	case "darwin":
+		return filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "renterd")
+	case "linux", "freebsd", "openbsd":
+		return filepath.Join(string(filepath.Separator), "var", "lib", "renterd")
+	default:
+		return "."
+	}
 }
