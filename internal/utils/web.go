@@ -86,6 +86,8 @@ func Auth(password string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if cookie, err := req.Cookie(authCookieName); err == nil && authTokens.Validate(cookie.Value) {
 				h.ServeHTTP(w, req)
+			} else if err == nil {
+				httpWriteError(w, "Cookie for authentication found but is either invalid or expired", http.StatusUnauthorized)
 			} else {
 				jape.BasicAuth(password)(h).ServeHTTP(w, req)
 			}
@@ -94,27 +96,23 @@ func Auth(password string) func(http.Handler) http.Handler {
 }
 
 func AuthHandler(password string) http.Handler {
+	// NOTE: we use BasicAuth instead of Auth since only basic auth should be
+	// allowed to create a new token
 	return jape.BasicAuth(password)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return // only POST is allowed
 		}
 
-		writeErr := func(msg string, statusCode int) {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(statusCode)
-			w.Write([]byte(msg))
-		}
-
 		// parse validity
 		validityMS := req.FormValue("validity")
 		if validityMS == "" {
-			writeErr("'validity' parameter is missing", http.StatusBadRequest)
+			httpWriteError(w, "'validity' parameter is missing", http.StatusBadRequest)
 			return
 		}
 		var validity time.Duration
 		if _, err := fmt.Sscan(validityMS, &validity); err != nil {
-			writeErr("failed to parse validity", http.StatusBadRequest)
+			httpWriteError(w, "failed to parse validity", http.StatusBadRequest)
 			return
 		}
 		validity *= time.Millisecond
@@ -131,7 +129,7 @@ func AuthHandler(password string) http.Handler {
 				var err error
 				host, _, err = net.SplitHostPort(host)
 				if err != nil {
-					writeErr("failed to split host name from its port", http.StatusBadRequest)
+					httpWriteError(w, "failed to split host name from its port", http.StatusBadRequest)
 					return
 				}
 			}
@@ -215,4 +213,10 @@ func DoRequest(req *http.Request, resp interface{}) (http.Header, int, error) {
 		return r.Header, r.StatusCode, json.NewDecoder(r.Body).Decode(resp)
 	}
 	return r.Header, r.StatusCode, nil
+}
+
+func httpWriteError(w http.ResponseWriter, msg string, statusCode int) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(statusCode)
+	w.Write([]byte(msg))
 }
