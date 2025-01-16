@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	_ "net/http/pprof"
@@ -53,16 +55,28 @@ func TestAuth(t *testing.T) {
 		res, err := authSrv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
-		} else if res.StatusCode != http.StatusNoContent {
-			t.Fatal("expected status code 204, got", res.StatusCode)
+		} else if res.StatusCode != http.StatusOK {
+			t.Fatal("expected status code 200, got", res.StatusCode)
 		}
-		for _, cookie := range res.Cookies() {
-			if cookie.Name == authCookieName {
-				return cookie
+		var cookie *http.Cookie
+		for _, c := range res.Cookies() {
+			if c.Name == authCookieName {
+				cookie = c
 			}
 		}
-		t.Fatal("cookie not found")
-		return nil
+		if cookie == nil {
+			t.Fatal("cookie not found")
+		}
+		body, _ := io.ReadAll(res.Body)
+		var jsonResp struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(body, &jsonResp); err != nil {
+			t.Fatal(err)
+		} else if jsonResp.Token != cookie.Value {
+			t.Fatalf("expected token to be '%s', got '%s'", cookie.Value, jsonResp.Token)
+		}
+		return cookie
 	}
 
 	// unauthenticated
@@ -79,10 +93,19 @@ func TestAuth(t *testing.T) {
 		req.AddCookie(cookie)
 	})
 
+	// authenticate using api key
+	assertResponse(http.StatusOK, func(req *http.Request) {
+		req.URL.RawQuery = authQueryParam + "=" + cookie.Value
+	})
+
 	// make sure token expires
 	time.Sleep(time.Duration(cookie.MaxAge) * time.Second)
 	assertResponse(http.StatusUnauthorized, func(req *http.Request) {
 		req.AddCookie(cookie)
+	})
+
+	assertResponse(http.StatusUnauthorized, func(req *http.Request) {
+		req.URL.RawQuery = authQueryParam + "=" + cookie.Value
 	})
 
 	// authenticate using cookie and custom domain set
