@@ -77,17 +77,29 @@ func (t TreeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.NotFound(w, req)
 }
 
-const authCookieName = "renterd_auth"
+const (
+	authCookieName = "renterd_auth"
+	authQueryParam = "apikey"
+)
 
 // Auth wraps an http.Handler to force authentication with either a basic auth
 // password or a cookie.
 func Auth(password string) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if cookie, err := req.Cookie(authCookieName); err == nil && authTokens.Validate(cookie.Value) {
-				h.ServeHTTP(w, req)
-			} else if err == nil {
-				httpWriteError(w, "Cookie for authentication found but is either invalid or expired", http.StatusUnauthorized)
+			if cookie, err := req.Cookie(authCookieName); err == nil {
+				// cookie found
+				if !authTokens.Validate(cookie.Value) {
+					httpWriteError(w, "Cookie for authentication found but is either invalid or expired", http.StatusUnauthorized)
+				} else {
+					h.ServeHTTP(w, req)
+				}
+			} else if req.URL.Query().Has(authQueryParam) {
+				if !authTokens.Validate(req.URL.Query().Get(authQueryParam)) {
+					httpWriteError(w, "API key for authentication found but is either invalid or expired", http.StatusUnauthorized)
+				} else {
+					h.ServeHTTP(w, req)
+				}
 			} else {
 				jape.BasicAuth(password)(h).ServeHTTP(w, req)
 			}
@@ -149,7 +161,9 @@ func AuthHandler(password string) http.Handler {
 		})
 
 		// send token
-		w.WriteHeader(http.StatusNoContent)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf(`{"token": %q}`, token)))
 	}))
 }
 
