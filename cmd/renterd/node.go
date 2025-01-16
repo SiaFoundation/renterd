@@ -602,7 +602,7 @@ func defaultDataDirectory(fp string) string {
 	}
 
 	// check for databases in the current directory
-	if _, err := os.Stat("db.sqlite"); err == nil {
+	if _, err := os.Stat("db/db.sqlite"); err == nil {
 		return "."
 	}
 

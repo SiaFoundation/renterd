@@ -458,7 +458,7 @@ func setListenAddress(context string, value *string, allowEmpty bool) {
 
 func setDataDirectory() {
 	if cfg.Directory == "" {
-		cfg.Directory = "."
+		cfg.Directory = defaultDataDirectory(cfg.Directory)
 	}
 
 	dir, err := filepath.Abs(cfg.Directory)
@@ -468,9 +468,10 @@ func setDataDirectory() {
 	fmt.Println("This directory should be on a fast, reliable storage device, preferably an SSD.")
 	fmt.Println("")
 
-	_, existsErr := os.Stat(filepath.Join(dir, "consensus"))
-	dataExists := existsErr == nil
-	if dataExists {
+	entries, err := os.ReadDir(dir)
+	checkFatalError("failed to read directory contents", err)
+
+	if len(entries) > 0 {
 		fmt.Println(wrapANSI("\033[33m", "There is existing data in the data directory.", "\033[0m"))
 		fmt.Println(wrapANSI("\033[33m", "If you change your data directory, you will need to manually move consensus, gateway, transactionpool, partial_slabs and (potentially) the db folder to the new directory.", "\033[0m"))
 	}
