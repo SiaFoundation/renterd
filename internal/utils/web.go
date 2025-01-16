@@ -124,8 +124,8 @@ func AuthHandler(password string) http.Handler {
 
 		// get host domain from header
 		var host string
-		if req.Host != "" {
-			host = req.Host
+		if fwdHost := req.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+			host = fwdHost
 			// handle header containing port
 			if strings.Contains(host, ":") {
 				var err error
@@ -140,9 +140,11 @@ func AuthHandler(password string) http.Handler {
 		// set cookie
 		http.SetCookie(w, &http.Cookie{
 			Domain:   host,
+			Expires:  time.Now().Add(validity).UTC(),
 			HttpOnly: true,
 			MaxAge:   int(validity / time.Second),
 			Name:     authCookieName,
+			Path:     "/",
 			SameSite: http.SameSiteStrictMode,
 			Secure:   true,
 			Value:    token,
