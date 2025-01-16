@@ -17,8 +17,8 @@ paths:
     post:
       tags:
         - authentication
-      summary: Create a new authentication token to use within the 'renterd_auth' cookie
-      description: Creates a new authentication token that is returned via the 'renterd_auth' cookie which is set by the server
+      summary: Create a new authentication token
+      description: Creates a new authentication token that is returned via the 'renterd_auth' cookie which is set by the server and the json response body. The token can be used as a cookie or as the 'apikey' query parameter for autentication.
       parameters:
         - name: validity
           description: The duration in milliseconds for which the token will be valid
@@ -29,8 +29,17 @@ paths:
             type: integer
             format: int64
       responses:
-        "204":
+        "200":
           description: Successfully created a new token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    pattern: "^[a-fA-F0-9]{32}$"
+                    description: A hex-encoded string representing the token
         "400":
           description: Bad request
   #############################
