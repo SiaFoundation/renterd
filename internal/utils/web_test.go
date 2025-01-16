@@ -49,7 +49,7 @@ func TestAuth(t *testing.T) {
 			t.Fatal(err)
 		}
 		req.SetBasicAuth("", pw)
-		req.Host = host
+		req.Header.Set("X-Forwarded-Host", host)
 		res, err := authSrv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
