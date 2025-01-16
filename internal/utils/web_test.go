@@ -38,7 +38,7 @@ func TestAuth(t *testing.T) {
 		}
 	}
 
-	generateCookie := func() *http.Cookie {
+	generateCookie := func(host string) *http.Cookie {
 		t.Helper()
 
 		// fake a server to get the auth token from
@@ -49,6 +49,7 @@ func TestAuth(t *testing.T) {
 			t.Fatal(err)
 		}
 		req.SetBasicAuth("", pw)
+		req.Host = host
 		res, err := authSrv.Client().Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -73,7 +74,7 @@ func TestAuth(t *testing.T) {
 	})
 
 	// authenticate using cookie
-	cookie := generateCookie()
+	cookie := generateCookie("")
 	assertResponse(http.StatusOK, func(req *http.Request) {
 		req.AddCookie(cookie)
 	})
@@ -81,6 +82,22 @@ func TestAuth(t *testing.T) {
 	// make sure token expires
 	time.Sleep(time.Duration(cookie.MaxAge) * time.Second)
 	assertResponse(http.StatusUnauthorized, func(req *http.Request) {
+		req.AddCookie(cookie)
+	})
+
+	// authenticate using cookie and custom domain set
+	cookie = generateCookie("foo.com") // without port
+	if cookie.Domain != "foo.com" {
+		t.Fatalf("expected domain to be 'foo.com', got '%s'", cookie.Domain)
+	}
+	assertResponse(http.StatusOK, func(req *http.Request) {
+		req.AddCookie(cookie)
+	})
+	cookie = generateCookie("foo.com:80") // with port
+	if cookie.Domain != "foo.com" {
+		t.Fatalf("expected domain to be 'foo.com', got '%s'", cookie.Domain)
+	}
+	assertResponse(http.StatusOK, func(req *http.Request) {
 		req.AddCookie(cookie)
 	})
 }
