@@ -100,19 +100,21 @@ func AuthHandler(password string) http.Handler {
 			return // only POST is allowed
 		}
 
+		writeErr := func(msg string, statusCode int) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(statusCode)
+			w.Write([]byte(msg))
+		}
+
 		// parse validity
 		validityMS := req.FormValue("validity")
 		if validityMS == "" {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("'validity' parameter is missing"))
+			writeErr("'validity' parameter is missing", http.StatusBadRequest)
 			return
 		}
 		var validity time.Duration
 		if _, err := fmt.Sscan(validityMS, &validity); err != nil {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("failed to parse validity"))
+			writeErr("failed to parse validity", http.StatusBadRequest)
 			return
 		}
 		validity *= time.Millisecond
@@ -120,12 +122,29 @@ func AuthHandler(password string) http.Handler {
 		// generate token
 		token := authTokens.GenerateNew(validity)
 
+		// get host domain from header
+		var host string
+		if req.Host != "" {
+			host = req.Host
+			// handle header containing port
+			if strings.Contains(host, ":") {
+				var err error
+				host, _, err = net.SplitHostPort(host)
+				if err != nil {
+					writeErr("failed to split host name from its port", http.StatusBadRequest)
+					return
+				}
+			}
+		}
+
 		// set cookie
 		http.SetCookie(w, &http.Cookie{
+			Domain:   host,
 			HttpOnly: true,
 			MaxAge:   int(validity / time.Second),
 			Name:     authCookieName,
 			SameSite: http.SameSiteStrictMode,
+			Secure:   true,
 			Value:    token,
 		})
 
