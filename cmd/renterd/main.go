@@ -55,6 +55,9 @@ func main() {
 	// load config file
 	configPath := tryLoadConfig()
 
+	// default data directory
+	cfg.Directory = defaultDataDirectory(cfg.Directory)
+
 	// override config file with CLI flags and/or environment variables
 	parseCLIFlags()
 	parseEnvironmentVariables()
