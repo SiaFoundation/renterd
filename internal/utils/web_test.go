@@ -38,6 +38,19 @@ func TestAuth(t *testing.T) {
 		} else if resp.StatusCode != statusCode {
 			t.Fatalf("expected status code %d, got %d", statusCode, resp.StatusCode)
 		}
+		if len(req.Cookies()) > 0 && resp.StatusCode == http.StatusUnauthorized {
+			var found bool
+			for _, c := range resp.Cookies() {
+				if c.Name != authCookieName || c.Value != "" || c.MaxAge != -1 || c.Expires.UTC().After(time.Now()) {
+					t.Fatalf("expected to find expired cookie, got '%s'", c.Name)
+				}
+				found = true
+				break
+			}
+			if !found {
+				t.Fatal("cookie not found")
+			}
+		}
 	}
 
 	generateCookie := func(host string) *http.Cookie {
