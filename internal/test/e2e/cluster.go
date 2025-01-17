@@ -949,7 +949,10 @@ func (c *TestCluster) MineTransactions(ctx context.Context) error {
 // Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown() {
 	c.tt.Helper()
-	ctx := context.Background()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	c.ShutdownAutopilot(ctx)
 	c.ShutdownS3(ctx)
 	c.ShutdownWorker(ctx)
@@ -957,6 +960,7 @@ func (c *TestCluster) Shutdown() {
 	for _, h := range c.hosts {
 		c.tt.OK(h.Close())
 	}
+
 	c.wg.Wait()
 }
 
