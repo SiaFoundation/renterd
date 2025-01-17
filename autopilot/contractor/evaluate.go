@@ -34,11 +34,11 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	gc := gouging.NewChecker(gs, cs)
 
 	resp.Hosts = uint64(len(hosts))
-	for i, host := range hosts {
+	for i := range hosts {
 		// ignore block height
 		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight
 		hosts[i].V2Settings.Prices.TipHeight = cs.BlockHeight
-		hc := checkHost(gc, scoreHost(host, cfg, gs, rs.Redundancy()), minValidScore, cfg.Contracts.Period)
+		hc := checkHost(gc, scoreHost(hosts[i], cfg, gs, rs.Redundancy()), minValidScore, cfg.Contracts.Period)
 		if hc.UsabilityBreakdown.IsUsable() {
 			resp.Usable++
 			continue
