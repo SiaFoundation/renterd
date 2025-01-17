@@ -367,17 +367,38 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	// create the syncer
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
 
-	// start syncer
-	errChan := make(chan error, 1)
+	// create the syncer context
+	syncerCtx, syncerCancel := context.WithCancel(context.Background())
+	defer syncerCancel()
+
+	// start the syncer
+	syncerErrChan := make(chan error, 1)
 	go func() {
-		errChan <- s.Run(context.Background())
-		close(errChan)
+		syncerErrChan <- s.Run(syncerCtx)
+		close(syncerErrChan)
 	}()
 
-	// create a helper function to wait for syncer to wind down on shutdown
-	syncerShutdown := func(ctx context.Context) error {
+	// close the syncer
+	syncerClose := func(ctx context.Context) (err error) {
+		syncerCancel()
+
+		var closeErr error
+		closeChan := make(chan struct{})
+		go func() {
+			closeErr = s.Close()
+			close(closeChan)
+		}()
+
+		defer func() {
+			select {
+			case <-closeChan:
+				err = errors.Join(err, closeErr)
+			case <-ctx.Done():
+			}
+		}()
+
 		select {
-		case err := <-errChan:
+		case err := <-syncerErrChan:
 			return err
 		case <-ctx.Done():
 			return context.Cause(ctx)
@@ -402,12 +423,11 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 
 	return b, func(ctx context.Context) error {
 		return errors.Join(
-			s.Close(),
 			w.Close(),
 			b.Shutdown(ctx),
+			syncerClose(ctx),
 			sqlStore.Close(),
 			bdb.Close(),
-			syncerShutdown(ctx),
 		)
 	}, nil
 }
