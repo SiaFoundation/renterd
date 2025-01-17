@@ -382,27 +382,24 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	syncerClose := func(ctx context.Context) (err error) {
 		syncerCancel()
 
-		var closeErr error
+		select {
+		case err = <-syncerErrChan:
+			return err
+		case <-ctx.Done():
+			err = context.Cause(ctx)
+		}
+
 		closeChan := make(chan struct{})
 		go func() {
-			closeErr = s.Close()
+			s.Close()
 			close(closeChan)
 		}()
 
-		defer func() {
-			select {
-			case <-closeChan:
-				err = errors.Join(err, closeErr)
-			case <-ctx.Done():
-			}
-		}()
-
 		select {
-		case err := <-syncerErrChan:
-			return err
+		case <-closeChan:
 		case <-ctx.Done():
-			return context.Cause(ctx)
 		}
+		return
 	}
 
 	// create master key - we currently derive the same key used by the workers
