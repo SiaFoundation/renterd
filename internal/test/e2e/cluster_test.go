@@ -41,7 +41,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestObjectsWithNoDelimiter(t *testing.T) {
+func TestE2EObjectsWithNoDelimiter(t *testing.T) {
 	// assertMetadata asserts ModTime, ETag and MimeType are set and then clears
 	// them afterwards so we can compare without having to specify the metadata
 	start := time.Now()
@@ -183,7 +183,7 @@ func TestObjectsWithNoDelimiter(t *testing.T) {
 
 // TestNewTestCluster is a test for creating a cluster of Nodes for testing,
 // making sure that it forms contracts, renews contracts and shuts down.
-func TestNewTestCluster(t *testing.T) {
+func TestE2ENewTestCluster(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -374,7 +374,7 @@ func TestNewTestCluster(t *testing.T) {
 
 // TestObjectsBucket is a test that verifies whether we properly escape bucket
 // names.
-func TestObjectsBucket(t *testing.T) {
+func TestE2EObjectsBucket(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -408,7 +408,7 @@ func TestObjectsBucket(t *testing.T) {
 // objects are uploaded, download and deleted from and to the paths we
 // would expect. It is similar to the TestObjectEntries unit test, but uses
 // the worker and bus client to verify paths are passed correctly.
-func TestObjectsWithDelimiterSlash(t *testing.T) {
+func TestE2EObjectsWithDelimiterSlash(t *testing.T) {
 	// assertMetadata asserts ModTime, ETag and MimeType are set and then clears
 	// them afterwards so we can compare without having to specify the metadata
 	start := time.Now()
@@ -590,7 +590,7 @@ func TestObjectsWithDelimiterSlash(t *testing.T) {
 }
 
 // TestObjectsRename tests renaming objects and downloading them afterwards.
-func TestObjectsRename(t *testing.T) {
+func TestE2EObjectsRename(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -642,7 +642,7 @@ func TestObjectsRename(t *testing.T) {
 
 // TestUploadDownloadEmpty is an integration test that verifies empty objects
 // can be uploaded and download correctly.
-func TestUploadDownloadEmpty(t *testing.T) {
+func TestE2EUploadDownloadEmpty(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -667,7 +667,7 @@ func TestUploadDownloadEmpty(t *testing.T) {
 
 // TestUploadDownloadBasic is an integration test that verifies objects can be
 // uploaded and download correctly.
-func TestUploadDownloadBasic(t *testing.T) {
+func TestE2EUploadDownloadBasic(t *testing.T) {
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -753,7 +753,7 @@ func TestUploadDownloadBasic(t *testing.T) {
 
 // TestUploadDownloadExtended is an integration test that verifies objects can
 // be uploaded and download correctly.
-func TestUploadDownloadExtended(t *testing.T) {
+func TestE2EUploadDownloadExtended(t *testing.T) {
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -868,7 +868,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 
 // TestUploadDownloadSpending is an integration test that verifies the upload
 // and download spending metrics are tracked properly.
-func TestUploadDownloadSpending(t *testing.T) {
+func TestE2EUploadDownloadSpending(t *testing.T) {
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -1013,7 +1013,7 @@ func TestUploadDownloadSpending(t *testing.T) {
 	tt.OK(err)
 }
 
-func TestContractApplyChainUpdates(t *testing.T) {
+func TestE2EContractApplyChainUpdates(t *testing.T) {
 	// create a test cluster without autopilot
 	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
 	defer cluster.Shutdown()
@@ -1069,7 +1069,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 }
 
 // TestEphemeralAccounts tests the use of ephemeral accounts.
-func TestEphemeralAccounts(t *testing.T) {
+func TestE2EEphemeralAccounts(t *testing.T) {
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
@@ -1143,7 +1143,7 @@ func TestEphemeralAccounts(t *testing.T) {
 }
 
 // TestParallelUpload tests uploading multiple files in parallel.
-func TestParallelUpload(t *testing.T) {
+func TestE2EParallelUpload(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -1215,7 +1215,7 @@ func TestParallelUpload(t *testing.T) {
 }
 
 // TestParallelDownload tests downloading a file in parallel.
-func TestParallelDownload(t *testing.T) {
+func TestE2EParallelDownload(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -1259,7 +1259,7 @@ func TestParallelDownload(t *testing.T) {
 
 // TestEphemeralAccountSync verifies that setting the requiresSync flag makes
 // the autopilot resync the balance between renter and host.
-func TestEphemeralAccountSync(t *testing.T) {
+func TestE2EEphemeralAccountSync(t *testing.T) {
 	if mysqlCfg := config.MySQLConfigFromEnv(); mysqlCfg.URI != "" {
 		t.Skip("skipping MySQL suite")
 	}
@@ -1339,7 +1339,7 @@ func TestEphemeralAccountSync(t *testing.T) {
 
 // TestUploadDownloadSameHost uploads a file to the same host through different
 // contracts and tries downloading the file again.
-func TestUploadDownloadSameHost(t *testing.T) {
+func TestE2EUploadDownloadSameHost(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -1390,7 +1390,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "frankenstein", api.DownloadObjectOptions{}))
 }
 
-func TestContractArchival(t *testing.T) {
+func TestE2EContractArchival(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: 1,
@@ -1434,7 +1434,7 @@ func TestContractArchival(t *testing.T) {
 	})
 }
 
-func TestUnconfirmedContractArchival(t *testing.T) {
+func TestE2EUnconfirmedContractArchival(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
@@ -1488,7 +1488,7 @@ func TestUnconfirmedContractArchival(t *testing.T) {
 	})
 }
 
-func TestWalletEvents(t *testing.T) {
+func TestE2EWalletEvents(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -1536,7 +1536,7 @@ func TestWalletEvents(t *testing.T) {
 	}
 }
 
-func TestUploadPacking(t *testing.T) {
+func TestE2EUploadPacking(t *testing.T) {
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -1747,7 +1747,7 @@ func TestUploadPacking(t *testing.T) {
 	assertObjectMetadata("/file2")
 }
 
-func TestWallet(t *testing.T) {
+func TestE2EWallet(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -1823,7 +1823,7 @@ func TestWallet(t *testing.T) {
 	})
 }
 
-func TestSlabBufferStats(t *testing.T) {
+func TestE2ESlabBufferStats(t *testing.T) {
 	// sanity check the default settings
 	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
 		t.Fatal("too few hosts to support the redundancy settings")
@@ -1948,7 +1948,7 @@ func TestSlabBufferStats(t *testing.T) {
 	})
 }
 
-func TestAlerts(t *testing.T) {
+func TestE2EAlerts(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -2058,7 +2058,7 @@ func TestAlerts(t *testing.T) {
 	}
 }
 
-func TestMultipartUploads(t *testing.T) {
+func TestE2EMultipartUploads(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -2195,7 +2195,7 @@ func TestMultipartUploads(t *testing.T) {
 	}
 }
 
-func TestWalletSendUnconfirmed(t *testing.T) {
+func TestE2EWalletSendUnconfirmed(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	b := cluster.Bus
@@ -2254,7 +2254,7 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	})
 }
 
-func TestWalletFormUnconfirmed(t *testing.T) {
+func TestE2EWalletFormUnconfirmed(t *testing.T) {
 	// create cluster without autopilot
 	cfg := clusterOptsDefault
 	cfg.skipSettingAutopilot = true
@@ -2305,7 +2305,7 @@ func TestWalletFormUnconfirmed(t *testing.T) {
 	}
 }
 
-func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
+func TestE2EMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -2381,7 +2381,7 @@ func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
 	}
 }
 
-func TestWalletRedistribute(t *testing.T) {
+func TestE2EWalletRedistribute(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
 	defer cluster.Shutdown()
 
@@ -2436,7 +2436,7 @@ func TestWalletRedistribute(t *testing.T) {
 	}
 }
 
-func TestHostScan(t *testing.T) {
+func TestE2EHostScan(t *testing.T) {
 	// New cluster with autopilot disabled
 	cfg := clusterOptsDefault
 	cfg.skipRunningAutopilot = true
@@ -2565,7 +2565,7 @@ func TestHostScan(t *testing.T) {
 
 // TestDownloadAllHosts makes sure we try to download sectors, from all hosts
 // that a sector is stored on.
-func TestDownloadAllHosts(t *testing.T) {
+func TestE2EDownloadAllHosts(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -2673,7 +2673,7 @@ func TestDownloadAllHosts(t *testing.T) {
 	}
 }
 
-func TestBackup(t *testing.T) {
+func TestE2EBackup(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	bus := cluster.Bus
@@ -2721,7 +2721,7 @@ func TestBackup(t *testing.T) {
 // contracts, renewing contracts and letting these contracts expire. That way,
 // renterd has to resync a chain containing regular transactions, contracts and
 // storage proofs.
-func TestConsensusResync(t *testing.T) {
+func TestE2EConsensusResync(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: false,
@@ -2824,7 +2824,7 @@ func TestConsensusResync(t *testing.T) {
 	}
 }
 
-func TestContractFundsReturnWhenHostOffline(t *testing.T) {
+func TestE2EContractFundsReturnWhenHostOffline(t *testing.T) {
 	// create a test cluster without autopilot
 	cluster := newTestCluster(t, testClusterOptions{skipRunningAutopilot: true})
 	defer cluster.Shutdown()
@@ -2910,7 +2910,7 @@ func TestContractFundsReturnWhenHostOffline(t *testing.T) {
 	})
 }
 
-func TestResyncAccounts(t *testing.T) {
+func TestE2EResyncAccounts(t *testing.T) {
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -2964,7 +2964,7 @@ func TestResyncAccounts(t *testing.T) {
 	})
 }
 
-func TestV1ToV2Transition(t *testing.T) {
+func TestE2EV1ToV2Transition(t *testing.T) {
 	// create a chain manager with a custom network that starts before the v2
 	// allow height
 	network, genesis := testNetwork()
@@ -3136,7 +3136,7 @@ func TestV1ToV2Transition(t *testing.T) {
 	})
 }
 
-func TestDefaultSettingsUploadDownload(t *testing.T) {
+func TestE2EDefaultSettingsUploadDownload(t *testing.T) {
 	// create a test cluster
 	apCfg := test.AutopilotConfig
 	apCfg.Contracts.Amount = uint64(api.DefaultRedundancySettingsTestnet.TotalShards)

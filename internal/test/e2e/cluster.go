@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -529,6 +530,22 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if resp.StatusCode != http.StatusOK {
 		tt.Fatalf("unexpected status code: %v", resp.StatusCode)
 	}
+
+	doneChan := make(chan struct{})
+	go func() {
+		fmt.Println("Dump scheduled")
+		select {
+		case <-time.After(10 * time.Minute):
+			fmt.Println("Dumping goroutine stack traces:")
+			buf := make([]byte, 1<<20) // 1MB buffer
+			stackLen := runtime.Stack(buf, true)
+			os.Stderr.Write(buf[:stackLen])
+			os.Stdout.Write(buf[:stackLen])
+			panic("timed out")
+		case <-doneChan:
+		}
+	}()
+	t.Cleanup(func() { close(doneChan) })
 
 	return cluster
 }

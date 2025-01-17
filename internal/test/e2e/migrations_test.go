@@ -19,7 +19,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestMigrations(t *testing.T) {
+func TestE2EMigrations(t *testing.T) {
 	// configure the cluster to use one extra host
 	rs := test.RedundancySettings
 	cfg := test.AutopilotConfig

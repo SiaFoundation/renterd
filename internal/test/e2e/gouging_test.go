@@ -15,7 +15,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestGouging(t *testing.T) {
+func TestE2EGouging(t *testing.T) {
 	// create a new test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
@@ -143,7 +143,7 @@ func TestGouging(t *testing.T) {
 	})
 }
 
-func TestHostMinVersion(t *testing.T) {
+func TestE2EHostMinVersion(t *testing.T) {
 	// create a new test cluster
 	n := int(test.AutopilotConfig.Contracts.Amount)
 	cluster := newTestCluster(t, testClusterOptions{hosts: n})

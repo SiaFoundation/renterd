@@ -12,7 +12,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 )
 
-func TestFormContract(t *testing.T) {
+func TestE2EFormContract(t *testing.T) {
 	// configure the autopilot not to form any contracts
 	apCfg := test.AutopilotConfig
 	apCfg.Contracts.Amount = 0

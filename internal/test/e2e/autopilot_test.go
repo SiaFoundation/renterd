@@ -11,7 +11,7 @@ import (
 	"go.sia.tech/renterd/internal/utils"
 )
 
-func TestAutopilot(t *testing.T) {
+func TestE2EAutopilot(t *testing.T) {
 	// create test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()

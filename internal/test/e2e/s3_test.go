@@ -27,7 +27,7 @@ var (
 	errBucketNotExists = errors.New("specified bucket does not exist")
 )
 
-func TestS3Basic(t *testing.T) {
+func TestE2ES3Basic(t *testing.T) {
 	start := time.Now()
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -164,7 +164,7 @@ func TestS3Basic(t *testing.T) {
 	tt.AssertContains(err, "NotFound")
 }
 
-func TestS3ObjectMetadata(t *testing.T) {
+func TestE2ES3ObjectMetadata(t *testing.T) {
 	// create cluster
 	opts := testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -277,7 +277,7 @@ func TestS3ObjectMetadata(t *testing.T) {
 	}, head.metadata)
 }
 
-func TestS3Authentication(t *testing.T) {
+func TestE2ES3Authentication(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -349,7 +349,7 @@ func TestS3Authentication(t *testing.T) {
 	assertAuth(s3Unauthenticated, false)
 }
 
-func TestS3List(t *testing.T) {
+func TestE2ES3List(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -510,7 +510,7 @@ func TestS3List(t *testing.T) {
 	}
 }
 
-func TestS3MultipartUploads(t *testing.T) {
+func TestE2ES3MultipartUploads(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -649,7 +649,7 @@ func TestS3MultipartUploads(t *testing.T) {
 // multipart upload. Deleting the regularly uploaded object by e.g. overwriting
 // it, the following call to 'pruneSlabs' would fail. That's because it didn't
 // account for references of multipart uploads when deleting slabs.
-func TestS3MultipartPruneSlabs(t *testing.T) {
+func TestE2ES3MultipartPruneSlabs(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -697,7 +697,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 	tt.OKAll(cluster.S3.PutObject(bucket, "bar", bytes.NewReader(data), putObjectOptions{}))
 }
 
-func TestS3SpecialChars(t *testing.T) {
+func TestE2ES3SpecialChars(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts:         test.RedundancySettings.TotalShards,
 		uploadPacking: true,
@@ -737,7 +737,7 @@ func TestS3SpecialChars(t *testing.T) {
 	}
 }
 
-func TestS3SettingsValidate(t *testing.T) {
+func TestE2ES3SettingsValidate(t *testing.T) {
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()
 

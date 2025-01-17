@@ -13,7 +13,7 @@ import (
 )
 
 // TestSettings is a test for bus settings.
-func TestSettings(t *testing.T) {
+func TestE2ESettings(t *testing.T) {
 	// create cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()

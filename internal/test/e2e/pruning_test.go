@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 )
 
-func TestHostPruning(t *testing.T) {
+func TestE2EHostPruning(t *testing.T) {
 	// create a new test cluster
 	cluster := newTestCluster(t, testClusterOptions{hosts: 1})
 	defer cluster.Shutdown()
@@ -79,7 +79,7 @@ func TestHostPruning(t *testing.T) {
 	})
 }
 
-func TestContractPruning(t *testing.T) {
+func TestE2EContractPruning(t *testing.T) {
 	// create a cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
@@ -126,7 +126,7 @@ func TestContractPruning(t *testing.T) {
 	assertPrunableData(false)
 }
 
-func TestSectorPruning(t *testing.T) {
+func TestE2ESectorPruning(t *testing.T) {
 	// create a cluster
 	opts := clusterOptsDefault
 	cluster := newTestCluster(t, opts)

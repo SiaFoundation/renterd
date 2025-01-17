@@ -14,7 +14,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestMetrics(t *testing.T) {
+func TestE2EMetrics(t *testing.T) {
 	// register start time
 	start := time.Now()
 

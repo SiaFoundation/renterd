@@ -9,7 +9,7 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 )
 
-func TestInteractions(t *testing.T) {
+func TestE2EInteractions(t *testing.T) {
 	// create a new test cluster
 	cluster := newTestCluster(t, clusterOptsDefault)
 	defer cluster.Shutdown()

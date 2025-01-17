@@ -44,7 +44,7 @@ func (r *blockedReader) Read(buf []byte) (n int, err error) {
 	return
 }
 
-func TestUploadingSectorsCache(t *testing.T) {
+func TestE2EUploadingSectorsCache(t *testing.T) {
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,
 	})

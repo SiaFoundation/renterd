@@ -36,8 +36,10 @@ jobs:
 
   test-sqlite: # Run all tests against SQLite
     needs: analyze
-    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@master
+    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@f60ecd901e6edf9172e6f44c6663b47ab3bb4c01
     secrets: inherit
+    with:
+      show-stdout: "true"
 
   test-mysql: # Run all tests against MySQL
     needs: analyze
@@ -59,13 +61,14 @@ jobs:
           mysql version: "8"
           mysql root password: test
       - name: Test
-        uses: SiaFoundation/workflows/.github/actions/go-test@master
+        uses: SiaFoundation/workflows/.github/actions/go-test@f60ecd901e6edf9172e6f44c6663b47ab3bb4c01
         env:
           RENTERD_DB_URI: 127.0.0.1:3800
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
-          go-test-args: "-race;-timeout=20m;-tags=netgo"
+          show-stdout: "true"
+          go-test-args: "-race;-timeout=20m;-tags=netgo;-run=TestE2E;-count=10"
 
   test-sqlite-v2: # Run all tests against SQLite
     needs: analyze
@@ -81,9 +84,10 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: Test
-        uses: SiaFoundation/workflows/.github/actions/go-test@master
+        uses: SiaFoundation/workflows/.github/actions/go-test@f60ecd901e6edf9172e6f44c6663b47ab3bb4c01
         with:
-          go-test-args: "-race;-timeout=20m;-tags=netgo,v2"
+          show-stdout: "true"
+          go-test-args: "-race;-timeout=20m;-tags=netgo,v2;-run=TestE2E;-count=10"
 
   test-mysql-v2: # Run all tests against MySQL
     needs: analyze
@@ -105,13 +109,14 @@ jobs:
           mysql version: "8"
           mysql root password: test
       - name: Test
-        uses: SiaFoundation/workflows/.github/actions/go-test@master
+        uses: SiaFoundation/workflows/.github/actions/go-test@f60ecd901e6edf9172e6f44c6663b47ab3bb4c01
         env:
           RENTERD_DB_URI: 127.0.0.1:3800
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
-          go-test-args: "-race;-timeout=20m;-tags=netgo,v2"
+          show-stdout: "true"
+          go-test-args: "-race;-timeout=20m;-tags=netgo,v2;-run=TestE2E;-count=10"
 
   success: # Use in branch rulesets to ensure all matrix jobs completed successfully
     needs: [test-sqlite, test-mysql, test-sqlite-v2, test-mysql-v2]

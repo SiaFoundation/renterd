@@ -12,7 +12,7 @@ import (
 	"go.sia.tech/renterd/internal/test"
 )
 
-func TestObjectMetadata(t *testing.T) {
+func TestE2EObjectMetadata(t *testing.T) {
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
 		hosts: test.RedundancySettings.TotalShards,

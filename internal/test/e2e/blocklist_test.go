@@ -10,7 +10,7 @@ import (
 	"go.sia.tech/renterd/api"
 )
 
-func TestBlocklist(t *testing.T) {
+func TestE2EBlocklist(t *testing.T) {
 	ctx := context.Background()
 
 	// create a new test cluster
