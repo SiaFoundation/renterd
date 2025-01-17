@@ -87,20 +87,27 @@ const (
 func Auth(password string) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if cookie, err := req.Cookie(authCookieName); err == nil {
-				// cookie found
-				if !authTokens.Validate(cookie.Value) {
-					httpWriteError(w, "Cookie for authentication found but is either invalid or expired", http.StatusUnauthorized)
-				} else {
-					h.ServeHTTP(w, req)
-				}
-			} else if req.URL.Query().Has(authQueryParam) {
+			if req.URL.Query().Has(authQueryParam) {
+				// token found - overrides cookie
 				if !authTokens.Validate(req.URL.Query().Get(authQueryParam)) {
 					httpWriteError(w, "API key for authentication found but is either invalid or expired", http.StatusUnauthorized)
 				} else {
 					h.ServeHTTP(w, req)
 				}
+			} else if cookie, err := req.Cookie(authCookieName); err == nil {
+				// cookie found
+				if !authTokens.Validate(cookie.Value) {
+					// do our best to tell the browser to delete the cookie
+					cookie.Value = ""
+					cookie.MaxAge = -1
+					cookie.Expires = time.Now().Add(-time.Hour).UTC()
+					http.SetCookie(w, cookie)
+					httpWriteError(w, "Cookie for authentication found but is either invalid or expired", http.StatusUnauthorized)
+				} else {
+					h.ServeHTTP(w, req)
+				}
 			} else {
+				// try basic auth
 				jape.BasicAuth(password)(h).ServeHTTP(w, req)
 			}
 		})
