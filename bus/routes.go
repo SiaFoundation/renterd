@@ -210,10 +210,8 @@ func (b *Bus) syncerConnectHandler(jc jape.Context) {
 }
 
 func (b *Bus) consensusStateHandler(jc jape.Context) {
-	cs, err := b.consensusState(jc.Request.Context())
-	if jc.Check("couldn't fetch consensus state", err) != nil {
-		return
-	}
+	cs := b.consensusState()
+
 	api.WriteResponse(jc, cs)
 }
 
@@ -1781,14 +1779,14 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
-func (b *Bus) consensusState(_ context.Context) (api.ConsensusState, error) {
+func (b *Bus) consensusState() api.ConsensusState {
 	cs := b.cm.TipState()
 
 	return api.ConsensusState{
 		BlockHeight:   cs.Index.Height,
 		LastBlockTime: api.TimeRFC3339(cs.PrevTimestamps[0]),
 		Synced:        time.Since(cs.PrevTimestamps[0]) <= 3*time.Hour,
-	}, nil
+	}
 }
 
 func (b *Bus) paramsHandlerGougingGET(jc jape.Context) {
@@ -1810,11 +1808,7 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 		return api.GougingParams{}, err
 	}
 
-	cs, err := b.consensusState(ctx)
-	if err != nil {
-		return api.GougingParams{}, err
-	}
-
+	cs := b.consensusState()
 	return api.GougingParams{
 		ConsensusState:     cs,
 		GougingSettings:    gs,
