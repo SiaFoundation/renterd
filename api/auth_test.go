@@ -1,11 +1,10 @@
-package utils
+package api
 
 import (
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	_ "net/http/pprof"
 	"testing"
 	"time"
 )

@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	cwallet "go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/autopilot/migrator"
@@ -119,7 +120,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	// initialise a web server
-	mux := &utils.TreeMux{Sub: make(map[string]utils.TreeMux)}
+	mux := &api.TreeMux{Sub: make(map[string]api.TreeMux)}
 	srv := &http.Server{Handler: mux}
 	shutdownFns = append(shutdownFns, fn{
 		name: "HTTP Server",
@@ -127,7 +128,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	})
 
 	// initialise auth handler
-	auth := utils.Auth(cfg.HTTP.Password)
+	auth := api.Auth(cfg.HTTP.Password)
 
 	// generate private key from seed
 	var pk types.PrivateKey
@@ -142,7 +143,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 
 	// add auth route
 	if cfg.HTTP.Password != "" {
-		mux.Sub["/api/auth"] = utils.TreeMux{Handler: utils.AuthHandler(cfg.HTTP.Password)}
+		mux.Sub["/api/auth"] = api.TreeMux{Handler: api.AuthHandler(cfg.HTTP.Password)}
 	}
 
 	// initialise bus
@@ -163,7 +164,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 			fn:   shutdownFn,
 		})
 
-		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b.Handler())}
+		mux.Sub["/api/bus"] = api.TreeMux{Handler: auth(b.Handler())}
 		busAddr = cfg.HTTP.Address + "/api/bus"
 		busPassword = cfg.HTTP.Password
 
@@ -188,7 +189,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 			fn:   w.Shutdown,
 		})
 
-		mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.WorkerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
+		mux.Sub["/api/worker"] = api.TreeMux{Handler: api.WorkerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
 
 		if cfg.S3.Enabled {
 			s3Handler, err := s3.New(bc, w, logger, s3.Opts{
@@ -232,7 +233,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 			fn:   ap.Shutdown,
 		})
 
-		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap.Handler())}
+		mux.Sub["/api/autopilot"] = api.TreeMux{Handler: auth(ap.Handler())}
 	}
 
 	return &node{

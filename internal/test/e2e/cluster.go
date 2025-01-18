@@ -361,11 +361,11 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	b, bShutdownFn, cm, bs, err := newTestBus(ctx, cm, genesis, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
-	busAuth := utils.Auth(busPassword)
+	busAuth := api.Auth(busPassword)
 	busServer := &http.Server{
-		Handler: utils.TreeMux{
+		Handler: api.TreeMux{
 			Handler: renterd.Handler(), // ui
-			Sub: map[string]utils.TreeMux{
+			Sub: map[string]api.TreeMux{
 				"/bus": {
 					Handler: busAuth(b.Handler()),
 				},
@@ -382,7 +382,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	w, err := worker.New(workerCfg, workerKey, busClient, logger)
 	tt.OK(err)
 
-	workerServer := http.Server{Handler: utils.WorkerAuth(workerPassword, false)(w.Handler())}
+	workerServer := http.Server{Handler: api.WorkerAuth(workerPassword, false)(w.Handler())}
 	var workerShutdownFns []func(context.Context) error
 	workerShutdownFns = append(workerShutdownFns, workerServer.Shutdown)
 	workerShutdownFns = append(workerShutdownFns, w.Shutdown)
@@ -398,7 +398,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	ap, err := newTestAutopilot(workerKey, apCfg, busClient, logger)
 	tt.OK(err)
 
-	autopilotAuth := utils.Auth(autopilotPassword)
+	autopilotAuth := api.Auth(autopilotPassword)
 	autopilotServer := http.Server{
 		Handler: autopilotAuth(ap.Handler()),
 	}
