@@ -33,7 +33,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -1782,22 +1781,13 @@ func (b *Bus) paramsHandlerUploadGET(jc jape.Context) {
 	})
 }
 
-func (b *Bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
-	index, err := b.cs.ChainIndex(ctx)
-	if err != nil {
-		return api.ConsensusState{}, err
-	}
-
-	var synced bool
-	block, found := b.cm.Block(index.ID)
-	if found {
-		synced = utils.IsSynced(block)
-	}
+func (b *Bus) consensusState(_ context.Context) (api.ConsensusState, error) {
+	cs := b.cm.TipState()
 
 	return api.ConsensusState{
-		BlockHeight:   index.Height,
-		LastBlockTime: api.TimeRFC3339(block.Timestamp),
-		Synced:        synced,
+		BlockHeight:   cs.Index.Height,
+		LastBlockTime: api.TimeRFC3339(cs.PrevTimestamps[0]),
+		Synced:        time.Since(cs.PrevTimestamps[0]) <= 3*time.Hour,
 	}, nil
 }
 
