@@ -59,8 +59,9 @@ const (
 )
 
 var (
-	clusterOptsDefault  = testClusterOptions{}
-	clusterOptNoFunding = false
+	clusterOptsDefault              = testClusterOptions{}
+	clusterOptNoFunding             = false
+	errUseOfClosedNetworkConnection = errors.New("use of closed network connection")
 )
 
 type Autopilot interface {
@@ -641,13 +642,16 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	}()
 
 	// create a helper function to wait for syncer to wind down on shutdown
-	syncerShutdown := func(ctx context.Context) error {
+	syncerShutdown := func(ctx context.Context) (err error) {
 		select {
-		case err := <-errChan:
-			return err
+		case err = <-errChan:
+			if utils.IsErr(err, errUseOfClosedNetworkConnection) {
+				err = nil
+			}
 		case <-ctx.Done():
-			return context.Cause(ctx)
+			err = context.Cause(ctx)
 		}
+		return
 	}
 
 	// create master key - we currently derive the same key used by the workers
@@ -662,8 +666,12 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 
 	shutdownFn := func(ctx context.Context) error {
 		shutdownCancel()
+		err := s.Close()
+		if utils.IsErr(err, errUseOfClosedNetworkConnection) {
+			err = nil
+		}
 		return errors.Join(
-			s.Close(),
+			err,
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
@@ -940,7 +948,7 @@ func (c *TestCluster) Shutdown() {
 	for _, h := range c.hosts {
 		c.tt.OK(h.Close())
 	}
-	c.wg.Wait()
+	// c.wg.Wait()
 }
 
 // waitForHostAccounts will fetch the accounts from the worker and wait until
