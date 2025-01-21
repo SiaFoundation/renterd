@@ -1,8 +1,12 @@
 package config
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type (
@@ -155,4 +159,24 @@ func MySQLConfigFromEnv() MySQL {
 		Database:        os.Getenv("RENTERD_DB_NAME"),
 		MetricsDatabase: os.Getenv("RENTERD_DB_METRICS_NAME"),
 	}
+}
+
+// LoadFile loads the configuration from the provided file path.
+// If the file does not exist, an error is returned.
+// If the file exists but cannot be decoded, the function will attempt
+// to upgrade the config file.
+func LoadFile(fp string, cfg *Config) error {
+	buf, err := os.ReadFile(fp)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	r := bytes.NewReader(buf)
+	dec := yaml.NewDecoder(r)
+	dec.KnownFields(true)
+
+	if err := dec.Decode(cfg); err != nil {
+		return fmt.Errorf("failed to decode config file: %w", err)
+	}
+	return nil
 }

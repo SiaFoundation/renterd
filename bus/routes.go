@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/renterd/internal/prometheus"
 	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
+	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores/sql"
 
 	"go.sia.tech/renterd/internal/gouging"
@@ -33,7 +34,6 @@ import (
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/object"
 	"go.sia.tech/renterd/webhooks"
 	"go.uber.org/zap"
@@ -212,9 +212,10 @@ func (b *Bus) syncerConnectHandler(jc jape.Context) {
 
 func (b *Bus) consensusStateHandler(jc jape.Context) {
 	cs, err := b.consensusState(jc.Request.Context())
-	if jc.Check("couldn't fetch consensus state", err) != nil {
+	if jc.Check("failed to fetch consensus state", err) != nil {
 		return
 	}
+
 	api.WriteResponse(jc, cs)
 }
 
@@ -1793,7 +1794,6 @@ func (b *Bus) consensusState(ctx context.Context) (api.ConsensusState, error) {
 	if found {
 		synced = utils.IsSynced(block)
 	}
-
 	return api.ConsensusState{
 		BlockHeight:   index.Height,
 		LastBlockTime: api.TimeRFC3339(block.Timestamp),
@@ -1824,7 +1824,6 @@ func (b *Bus) gougingParams(ctx context.Context) (api.GougingParams, error) {
 	if err != nil {
 		return api.GougingParams{}, err
 	}
-
 	return api.GougingParams{
 		ConsensusState:     cs,
 		GougingSettings:    gs,

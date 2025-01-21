@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	cwallet "go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/autopilot"
 	"go.sia.tech/renterd/autopilot/contractor"
 	"go.sia.tech/renterd/autopilot/migrator"
@@ -71,7 +72,7 @@ type (
 	}
 )
 
-func newNode(cfg config.Config, network *consensus.Network, genesis types.Block) (*node, error) {
+func newNode(cfg config.Config, configPath string, network *consensus.Network, genesis types.Block) (*node, error) {
 	var setupFns, shutdownFns []fn
 
 	// validate config
@@ -96,9 +97,18 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	})
 
 	// print network and version
-	logger.Info("renterd", zap.String("version", build.Version()), zap.String("network", network.Name), zap.String("commit", build.Commit()), zap.Time("buildDate", build.BuildTime()))
+	header := logger.With(
+		zap.String("version", build.Version()),
+		zap.String("network", network.Name),
+		zap.String("commit", build.Commit()),
+		zap.Time("buildDate", build.BuildTime()),
+	)
+	if configPath != "" {
+		header = header.With(zap.String("config", configPath))
+	}
+	header.Info("renterd")
 	if runtime.GOARCH == "amd64" && !cpu.X86.HasAVX2 {
-		logger.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
+		header.Warn("renterd is running on a system without AVX2 support, performance may be degraded")
 	}
 
 	// initialise a listener and override the HTTP address, we have to do this
@@ -110,7 +120,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	// initialise a web server
-	mux := &utils.TreeMux{Sub: make(map[string]utils.TreeMux)}
+	mux := &api.TreeMux{Sub: make(map[string]api.TreeMux)}
 	srv := &http.Server{Handler: mux}
 	shutdownFns = append(shutdownFns, fn{
 		name: "HTTP Server",
@@ -118,7 +128,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 	})
 
 	// initialise auth handler
-	auth := utils.Auth(cfg.HTTP.Password)
+	auth := api.Auth(cfg.HTTP.Password)
 
 	// generate private key from seed
 	var pk types.PrivateKey
@@ -133,7 +143,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 
 	// add auth route
 	if cfg.HTTP.Password != "" {
-		mux.Sub["/api/auth"] = utils.TreeMux{Handler: utils.AuthHandler(cfg.HTTP.Password)}
+		mux.Sub["/api/auth"] = api.TreeMux{Handler: api.AuthHandler(cfg.HTTP.Password)}
 	}
 
 	// initialise bus
@@ -154,7 +164,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			fn:   shutdownFn,
 		})
 
-		mux.Sub["/api/bus"] = utils.TreeMux{Handler: auth(b.Handler())}
+		mux.Sub["/api/bus"] = api.TreeMux{Handler: auth(b.Handler())}
 		busAddr = cfg.HTTP.Address + "/api/bus"
 		busPassword = cfg.HTTP.Password
 
@@ -179,7 +189,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			fn:   w.Shutdown,
 		})
 
-		mux.Sub["/api/worker"] = utils.TreeMux{Handler: utils.WorkerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
+		mux.Sub["/api/worker"] = api.TreeMux{Handler: api.WorkerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
 
 		if cfg.S3.Enabled {
 			s3Handler, err := s3.New(bc, w, logger, s3.Opts{
@@ -223,7 +233,7 @@ func newNode(cfg config.Config, network *consensus.Network, genesis types.Block)
 			fn:   ap.Shutdown,
 		})
 
-		mux.Sub["/api/autopilot"] = utils.TreeMux{Handler: auth(ap.Handler())}
+		mux.Sub["/api/autopilot"] = api.TreeMux{Handler: auth(ap.Handler())}
 	}
 
 	return &node{
@@ -601,4 +611,28 @@ func migrateConsensusDatabase(ctx context.Context, store *stores.SQLStore, conse
 	logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
 	logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	return nil
+}
+
+func defaultDataDirectory(fp string) string {
+	// use the provided path if it's not empty
+	if fp != "" {
+		return fp
+	}
+
+	// check for databases in the current directory
+	if _, err := os.Stat("db/db.sqlite"); err == nil {
+		return "."
+	}
+
+	// default to the operating system's application directory
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(os.Getenv("APPDATA"), "renterd")
+	case "darwin":
+		return filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "renterd")
+	case "linux", "freebsd", "openbsd":
+		return filepath.Join(string(filepath.Separator), "var", "lib", "renterd")
+	default:
+		return "."
+	}
 }

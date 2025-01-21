@@ -7,6 +7,18 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+)
+
+const (
+	apiPasswordEnvVar = "RENTERD_API_PASSWORD"
+	configFileEnvVar  = "RENTERD_CONFIG_FILE"
+	dataDirEnvVar     = "RENTERD_DATA_DIR"
+	logFileEnvVar     = "RENTERD_LOG_FILE"
+	seedEnvVar        = "RENTERD_SEED"
 )
 
 const (
@@ -40,9 +52,29 @@ on how to configure and use renterd.
 func main() {
 	log.SetFlags(0)
 
-	// load the config
-	cfg, network, genesis, err := loadConfig()
-	checkFatalError("failed to load config", err)
+	// load config file
+	configPath := tryLoadConfig()
+
+	// default data directory
+	cfg.Directory = defaultDataDirectory(cfg.Directory)
+
+	// override config file with CLI flags and/or environment variables
+	parseCLIFlags()
+	parseEnvironmentVariables()
+
+	// check network
+	var network *consensus.Network
+	var genesis types.Block
+	switch cfg.Network {
+	case "anagami":
+		network, genesis = chain.TestnetAnagami()
+	case "mainnet":
+		network, genesis = chain.Mainnet()
+	case "zen":
+		network, genesis = chain.TestnetZen()
+	default:
+		checkFatalError("invalid network settings", fmt.Errorf("unknown network '%s'", cfg.Network))
+	}
 
 	// NOTE: update the usage header when adding new commands
 	if flag.Arg(0) == "version" {
@@ -52,7 +84,7 @@ func main() {
 		cmdSeed()
 		return
 	} else if flag.Arg(0) == "config" {
-		cmdBuildConfig(&cfg)
+		cmdBuildConfig(configPath)
 		return
 	} else if flag.Arg(0) == "sqlite" && flag.Arg(1) == "backup" &&
 		flag.Arg(2) != "" && flag.Arg(3) != "" {
@@ -64,10 +96,10 @@ func main() {
 	}
 
 	// sanitize the config
-	checkFatalError("failed to sanitize config", sanitizeConfig(&cfg))
+	checkFatalError(fmt.Sprintf("failed to sanitize config %q", configPath), sanitizeConfig())
 
 	// create node
-	node, err := newNode(cfg, network, genesis)
+	node, err := newNode(cfg, configPath, network, genesis)
 	checkFatalError("failed to create node", err)
 
 	// start node
