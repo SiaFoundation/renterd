@@ -168,7 +168,8 @@ func (tx *MainDatabaseTx) AddMultipartPart(ctx context.Context, bucket, path, eT
 
 func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
 	_, err := tx.Exec(ctx,
-		"INSERT OR IGNORE INTO syncer_peers (address, first_seen, last_connect, synced_blocks, sync_duration) VALUES (?, ?, ?, ?, ?)",
+		"INSERT OR IGNORE INTO syncer_peers (created_at, address, first_seen, last_connect, synced_blocks, sync_duration) VALUES (?, ?, ?, ?, ?, ?)",
+		time.Now(),
 		addr,
 		ssql.UnixTimeMS(time.Now()),
 		ssql.UnixTimeMS(time.Time{}),
@@ -969,7 +970,7 @@ func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, r
 	}
 
 	if len(add) > 0 {
-		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (entry) VALUES (?) ON CONFLICT(entry) DO UPDATE SET id = id RETURNING id")
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_allowlist_entries (created_at, entry) VALUES (?, ?) ON CONFLICT(entry) DO UPDATE SET id = id RETURNING id")
 		if err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
@@ -987,7 +988,7 @@ func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, r
 		defer joinStmt.Close()
 
 		for _, pk := range add {
-			if res, err := insertStmt.Exec(ctx, ssql.PublicKey(pk)); err != nil {
+			if res, err := insertStmt.Exec(ctx, time.Now(), ssql.PublicKey(pk)); err != nil {
 				return fmt.Errorf("failed to insert host allowlist entry: %w", err)
 			} else if entryID, err := res.LastInsertId(); err != nil {
 				return fmt.Errorf("failed to fetch host allowlist entry id: %w", err)
@@ -1021,7 +1022,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 	}
 
 	if len(add) > 0 {
-		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (entry) VALUES (?) ON CONFLICT(entry) DO UPDATE SET id = id RETURNING id")
+		insertStmt, err := tx.Prepare(ctx, "INSERT INTO host_blocklist_entries (created_at, entry) VALUES (?, ?) ON CONFLICT(entry) DO UPDATE SET id = id RETURNING id")
 		if err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
@@ -1050,7 +1051,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 		defer joinStmt.Close()
 
 		for _, entry := range add {
-			if res, err := insertStmt.Exec(ctx, entry); err != nil {
+			if res, err := insertStmt.Exec(ctx, time.Now(), entry); err != nil {
 				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
 			} else if entryID, err := res.LastInsertId(); err != nil {
 				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
