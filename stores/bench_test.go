@@ -387,13 +387,13 @@ INSERT INTO contract_sectors (db_contract_id, db_sector_id) VALUES (?, ?)`)
 
 	// insert host sectors
 	insertHostSectorStmt, err := db.Prepare(context.Background(), `
-INSERT INTO host_sectors (db_sector_id, db_host_id) VALUES (?, ?)`)
+INSERT INTO host_sectors (updated_at, db_sector_id, db_host_id) VALUES (?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare statement to insert host sectors: %w", err)
 	}
 	defer insertHostSectorStmt.Close()
 	for _, sectorID := range sectorIDs {
-		if _, err := insertHostSectorStmt.Exec(context.Background(), sectorID, hostID); err != nil {
+		if _, err := insertHostSectorStmt.Exec(context.Background(), time.Now(), sectorID, hostID); err != nil {
 			return nil, fmt.Errorf("failed to insert host sector: %w", err)
 		}
 	}

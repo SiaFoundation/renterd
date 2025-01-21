@@ -1929,7 +1929,7 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 	if err := tx.QueryRow(ctx, "SELECT height, block_id FROM consensus_infos WHERE id = ?", sql.ConsensusInfoID).
 		Scan(&height, &id); errors.Is(err, dsql.ErrNoRows) {
 		// init
-		_, err = tx.Exec(ctx, "INSERT INTO consensus_infos (id, height, block_id) VALUES (?, ?, ?)", sql.ConsensusInfoID, 0, Hash256{})
+		_, err = tx.Exec(ctx, "INSERT INTO consensus_infos (created_at, id, height, block_id) VALUES (?, ?, ?, ?)", time.Now(), sql.ConsensusInfoID, 0, Hash256{})
 		return types.ChainIndex{}, err
 	} else if err != nil {
 		return types.ChainIndex{}, err
@@ -2470,7 +2470,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 	defer contractSectorStmt.Close()
 
 	// stmt to insert host_sector
-	hostSectorStmt, err := tx.Prepare(ctx, "INSERT INTO host_sectors (db_host_id, db_sector_id) VALUES (?, ?)")
+	hostSectorStmt, err := tx.Prepare(ctx, "INSERT INTO host_sectors (updated_at, db_host_id, db_sector_id) VALUES (?, ?, ?)")
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare statement to insert host sectors: %w", err)
 	}
@@ -2499,7 +2499,7 @@ func MarkPackedSlabUploaded(ctx context.Context, tx Tx, slab api.UploadedPackedS
 		}
 
 		// insert host sector link
-		if _, err := hostSectorStmt.Exec(ctx, uc.HostID, sectorID); err != nil {
+		if _, err := hostSectorStmt.Exec(ctx, time.Now(), uc.HostID, sectorID); err != nil {
 			return "", fmt.Errorf("failed to insert host sector: %w", err)
 		}
 	}
