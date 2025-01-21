@@ -223,7 +223,9 @@ func (p *Pruner) performContractPruning(ctx context.Context) {
 	}
 
 	// log total pruned
-	log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
+	if total > 0 {
+		log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
+	}
 }
 
 func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
@@ -274,7 +276,7 @@ func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, h
 	// handle logs
 	if res.Error != "" {
 		log.Errorw("unexpected error interrupted pruning", zap.Error(errors.New(res.Error)))
-	} else {
+	} else if res.Pruned > 0 {
 		log.Info("successfully pruned contract")
 	}
 

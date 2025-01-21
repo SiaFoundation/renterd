@@ -382,7 +382,7 @@ func (a *Manager) refillAccounts() {
 				a.mu.Unlock()
 
 				if err != nil && shouldLog {
-					a.logger.Errorw("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
+					a.logger.Warnw("failed to refill account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				} else if refilled {
 					a.logger.Infow("successfully refilled account for host", zap.Stringer("hostKey", contract.HostKey), zap.Error(err))
 				}
@@ -623,7 +623,7 @@ func (a *Account) setBalance(balance *big.Int) {
 	a.acc.RequiresSync = false
 
 	// log account changes
-	a.logger.Infow("account balance was reset",
+	a.logger.Debugw("account balance was reset",
 		zap.Stringer("account", a.acc.ID),
 		zap.Stringer("host", a.acc.HostKey),
 		zap.Stringer("balanceBefore", prevBalance),

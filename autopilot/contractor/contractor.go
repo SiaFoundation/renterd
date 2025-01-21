@@ -825,7 +825,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 
 		// check usability
 		if !host.Checks.UsabilityBreakdown.IsUsable() {
-			logger.Info("unusable host")
+			logger.Debug("unusable host")
 			updateUsability(ctx, host, cm, api.ContractUsabilityBad, host.Checks.UsabilityBreakdown.String())
 			continue
 		}

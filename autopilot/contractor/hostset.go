@@ -72,7 +72,7 @@ func (hs *hostSet) HasRedundantIP(ctx context.Context, host api.Host) bool {
 	// the scanning code will lead to the host being marked as offline.
 	resolvedAddresses, err := hs.resolveHostIP(ctx, host)
 	if err != nil {
-		logger.With(zap.Error(err)).Error("failed to resolve host ips - not redundant")
+		logger.With(zap.Error(err)).Warn("failed to resolve host ips - not redundant")
 		return false
 	}
 

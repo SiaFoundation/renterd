@@ -93,9 +93,9 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 
 		logger = logger.With("elapsed", duration).With(zap.Error(err))
 		if err == nil {
-			logger.Info("successfully scanned host on second try")
+			logger.Debug("successfully scanned host on second try")
 		} else if !isErrHostUnreachable(err) {
-			logger.Infow("failed to scan host")
+			logger.Debugw("failed to scan host")
 		}
 	}
 
