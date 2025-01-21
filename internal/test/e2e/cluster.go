@@ -632,9 +632,11 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
 
 	// start syncer
+	ctx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- s.Run(context.Background())
+		errChan <- s.Run(ctx)
 		close(errChan)
 	}()
 
@@ -659,6 +661,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	}
 
 	shutdownFn := func(ctx context.Context) error {
+		shutdownCancel()
 		return errors.Join(
 			s.Close(),
 			w.Close(),

@@ -378,9 +378,11 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
 
 	// start syncer
+	ctx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- s.Run(context.Background())
+		errChan <- s.Run(ctx)
 		close(errChan)
 	}()
 
@@ -411,6 +413,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 
 	return b, func(ctx context.Context) error {
+		shutdownCancel()
 		return errors.Join(
 			s.Close(),
 			w.Close(),
