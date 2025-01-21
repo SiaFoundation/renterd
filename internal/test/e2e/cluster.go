@@ -631,39 +631,21 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	// create the syncer
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
 
-	// create the syncer context
-	syncerCtx, syncerCancel := context.WithCancel(context.Background())
-	defer syncerCancel()
-
-	// start the syncer
-	syncerErrChan := make(chan error, 1)
+	// start syncer
+	errChan := make(chan error, 1)
 	go func() {
-		syncerErrChan <- s.Run(syncerCtx)
-		close(syncerErrChan)
+		errChan <- s.Run(context.Background())
+		close(errChan)
 	}()
 
-	// close the syncer
-	syncerClose := func(ctx context.Context) (err error) {
-		syncerCancel()
-
+	// create a helper function to wait for syncer to wind down on shutdown
+	syncerShutdown := func(ctx context.Context) error {
 		select {
-		case err = <-syncerErrChan:
+		case err := <-errChan:
 			return err
 		case <-ctx.Done():
-			err = context.Cause(ctx)
+			return context.Cause(ctx)
 		}
-
-		closeChan := make(chan struct{})
-		go func() {
-			s.Close()
-			close(closeChan)
-		}()
-
-		select {
-		case <-closeChan:
-		case <-ctx.Done():
-		}
-		return
 	}
 
 	// create master key - we currently derive the same key used by the workers
@@ -678,10 +660,11 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 
 	shutdownFn := func(ctx context.Context) error {
 		return errors.Join(
-			b.Shutdown(ctx),
+			s.Close(),
 			w.Close(),
-			syncerClose(ctx),
+			b.Shutdown(ctx),
 			sqlStore.Close(),
+			syncerShutdown(ctx),
 		)
 	}
 	return b, shutdownFn, cm, sqlStore, nil
@@ -946,10 +929,7 @@ func (c *TestCluster) MineTransactions(ctx context.Context) error {
 // Shutdown shuts down a TestCluster.
 func (c *TestCluster) Shutdown() {
 	c.tt.Helper()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
+	ctx := context.Background()
 	c.ShutdownAutopilot(ctx)
 	c.ShutdownS3(ctx)
 	c.ShutdownWorker(ctx)
@@ -957,7 +937,6 @@ func (c *TestCluster) Shutdown() {
 	for _, h := range c.hosts {
 		c.tt.OK(h.Close())
 	}
-
 	c.wg.Wait()
 }
 

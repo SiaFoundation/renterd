@@ -377,39 +377,21 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	// create the syncer
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
 
-	// create the syncer context
-	syncerCtx, syncerCancel := context.WithCancel(context.Background())
-	defer syncerCancel()
-
-	// start the syncer
-	syncerErrChan := make(chan error, 1)
+	// start syncer
+	errChan := make(chan error, 1)
 	go func() {
-		syncerErrChan <- s.Run(syncerCtx)
-		close(syncerErrChan)
+		errChan <- s.Run(context.Background())
+		close(errChan)
 	}()
 
-	// close the syncer
-	syncerClose := func(ctx context.Context) (err error) {
-		syncerCancel()
-
+	// create a helper function to wait for syncer to wind down on shutdown
+	syncerShutdown := func(ctx context.Context) error {
 		select {
-		case err = <-syncerErrChan:
+		case err := <-errChan:
 			return err
 		case <-ctx.Done():
-			err = context.Cause(ctx)
+			return context.Cause(ctx)
 		}
-
-		closeChan := make(chan struct{})
-		go func() {
-			s.Close()
-			close(closeChan)
-		}()
-
-		select {
-		case <-closeChan:
-		case <-ctx.Done():
-		}
-		return
 	}
 
 	// create master key - we currently derive the same key used by the workers
@@ -430,11 +412,12 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 
 	return b, func(ctx context.Context) error {
 		return errors.Join(
+			s.Close(),
 			w.Close(),
 			b.Shutdown(ctx),
-			syncerClose(ctx),
 			sqlStore.Close(),
 			bdb.Close(),
+			syncerShutdown(ctx),
 		)
 	}, nil
 }
