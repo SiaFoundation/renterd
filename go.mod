@@ -5,7 +5,7 @@ go 1.23.1
 toolchain go1.23.2
 
 require (
-	github.com/aws/aws-sdk-go v1.55.5
+	github.com/aws/aws-sdk-go v1.55.6
 	github.com/gabriel-vasile/mimetype v1.4.8
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/go-cmp v0.6.0
@@ -14,8 +14,8 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.9.0
-	go.sia.tech/coreutils v0.10.0
+	go.sia.tech/core v0.9.1
+	go.sia.tech/coreutils v0.10.1
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20241218083322-ae9c8a971fe0
 	go.sia.tech/jape v0.12.1
