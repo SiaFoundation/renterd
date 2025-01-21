@@ -12,7 +12,8 @@ import (
 func TestAuth(t *testing.T) {
 	// test server with authenticated route that returns '200 OK'
 	pw := "password"
-	srv := httptest.NewServer(Auth(pw)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	tokens := NewTokenStore()
+	srv := httptest.NewServer(Auth(tokens, pw)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
 	defer srv.Close()
@@ -56,7 +57,7 @@ func TestAuth(t *testing.T) {
 		t.Helper()
 
 		// fake a server to get the auth token from
-		authSrv := httptest.NewServer(AuthHandler(pw))
+		authSrv := httptest.NewServer(AuthHandler(tokens, pw))
 		defer authSrv.Close()
 		req, err := http.NewRequest("POST", authSrv.URL+"?validity=1000", http.NoBody)
 		if err != nil {

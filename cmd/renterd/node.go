@@ -128,7 +128,8 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	})
 
 	// initialise auth handler
-	auth := api.Auth(cfg.HTTP.Password)
+	tokens := api.NewTokenStore()
+	auth := api.Auth(tokens, cfg.HTTP.Password)
 
 	// generate private key from seed
 	var pk types.PrivateKey
@@ -143,7 +144,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 
 	// add auth route
 	if cfg.HTTP.Password != "" {
-		mux.Sub["/api/auth"] = api.TreeMux{Handler: api.AuthHandler(cfg.HTTP.Password)}
+		mux.Sub["/api/auth"] = api.TreeMux{Handler: api.AuthHandler(tokens, cfg.HTTP.Password)}
 	}
 
 	// initialise bus
@@ -189,7 +190,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 			fn:   w.Shutdown,
 		})
 
-		mux.Sub["/api/worker"] = api.TreeMux{Handler: api.WorkerAuth(cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
+		mux.Sub["/api/worker"] = api.TreeMux{Handler: api.WorkerAuth(tokens, cfg.HTTP.Password, cfg.Worker.AllowUnauthenticatedDownloads)(w.Handler())}
 
 		if cfg.S3.Enabled {
 			s3Handler, err := s3.New(bc, w, logger, s3.Opts{

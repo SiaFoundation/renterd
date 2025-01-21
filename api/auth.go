@@ -18,8 +18,6 @@ const (
 	authQueryParam = "apikey"
 )
 
-var authTokens = &TokenStore{tokens: make(map[string]time.Time)}
-
 type TokenStore struct {
 	mu     sync.Mutex
 	tokens map[string]time.Time
@@ -62,19 +60,19 @@ func httpWriteError(w http.ResponseWriter, msg string, statusCode int) {
 
 // Auth wraps an http.Handler to force authentication with either a basic auth
 // password or a cookie.
-func Auth(password string) func(http.Handler) http.Handler {
+func Auth(tokens *TokenStore, password string) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Query().Has(authQueryParam) {
 				// token found - overrides cookie
-				if !authTokens.Validate(req.URL.Query().Get(authQueryParam)) {
+				if !tokens.Validate(req.URL.Query().Get(authQueryParam)) {
 					httpWriteError(w, "API key for authentication found but is either invalid or expired", http.StatusUnauthorized)
 				} else {
 					h.ServeHTTP(w, req)
 				}
 			} else if cookie, err := req.Cookie(authCookieName); err == nil {
 				// cookie found
-				if !authTokens.Validate(cookie.Value) {
+				if !tokens.Validate(cookie.Value) {
 					// do our best to tell the browser to delete the cookie
 					cookie.Value = ""
 					cookie.MaxAge = -1
@@ -92,7 +90,7 @@ func Auth(password string) func(http.Handler) http.Handler {
 	}
 }
 
-func AuthHandler(password string) http.Handler {
+func AuthHandler(tokens *TokenStore, password string) http.Handler {
 	// NOTE: we use BasicAuth instead of Auth since only basic auth should be
 	// allowed to create a new token
 	return jape.BasicAuth(password)(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -115,7 +113,7 @@ func AuthHandler(password string) http.Handler {
 		validity *= time.Millisecond
 
 		// generate token
-		token := authTokens.GenerateNew(validity)
+		token := tokens.GenerateNew(validity)
 
 		// get host domain from header
 		var host string
@@ -154,13 +152,13 @@ func AuthHandler(password string) http.Handler {
 
 // WorkerAuth is a wrapper for Auth that allows unauthenticated downloads if
 // 'unauthenticatedDownloads' is true.
-func WorkerAuth(password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
+func WorkerAuth(tokens *TokenStore, password string, unauthenticatedDownloads bool) func(http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if unauthenticatedDownloads && req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/object/") {
 				h.ServeHTTP(w, req)
 			} else {
-				Auth(password)(h).ServeHTTP(w, req)
+				Auth(tokens, password)(h).ServeHTTP(w, req)
 			}
 		})
 	}
