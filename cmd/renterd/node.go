@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -29,7 +31,6 @@ import (
 	"go.sia.tech/renterd/build"
 	"go.sia.tech/renterd/bus"
 	"go.sia.tech/renterd/config"
-	"go.sia.tech/renterd/internal/utils"
 	"go.sia.tech/renterd/stores"
 	"go.sia.tech/renterd/stores/sql"
 	"go.sia.tech/renterd/stores/sql/mysql"
@@ -41,6 +42,10 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/sys/cpu"
+)
+
+var (
+	errNoSuchHost = errors.New("no such host")
 )
 
 type (
@@ -113,7 +118,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 
 	// initialise a listener and override the HTTP address, we have to do this
 	// first so we know the actual api address if the user specifies port :0
-	l, err := utils.ListenTCP(cfg.HTTP.Address, logger)
+	l, err := listenTCP(cfg.HTTP.Address, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
@@ -207,7 +212,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 				Addr:    cfg.S3.Address,
 				Handler: s3Handler,
 			}
-			s3Listener, err = utils.ListenTCP(cfg.S3.Address, logger)
+			s3Listener, err = listenTCP(cfg.S3.Address, logger)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create listener: %v", err)
 			}
@@ -254,7 +259,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	}, nil
 }
 
-func newAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
+func newAutopilot(masterKey [32]byte, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 
@@ -454,7 +459,7 @@ func (n *node) Run() error {
 		_, port, err := net.SplitHostPort(n.apiListener.Addr().String())
 		if err != nil {
 			n.logger.Debugw("failed to parse API address", zap.Error(err))
-		} else if err := utils.OpenBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
+		} else if err := openBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
 			n.logger.Debugw("failed to open browser", zap.Error(err))
 		}
 	}
@@ -592,7 +597,7 @@ func migrateConsensusDatabase(ctx context.Context, store *stores.SQLStore, conse
 		return err
 	}
 
-	logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", utils.HumanReadableSize(int(oldConsensus.Size()))))
+	logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", humanReadableSize(int(oldConsensus.Size()))))
 	logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
 	return nil
 }
@@ -618,5 +623,49 @@ func defaultDataDirectory(fp string) string {
 		return filepath.Join(string(filepath.Separator), "var", "lib", "renterd")
 	default:
 		return "."
+	}
+}
+
+func humanReadableSize(b int) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB",
+		float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func listenTCP(addr string, logger *zap.Logger) (net.Listener, error) {
+	l, err := net.Listen("tcp", addr)
+	if (errors.Is(err, errNoSuchHost) || err != nil && strings.Contains(err.Error(), errNoSuchHost.Error())) && strings.Contains(addr, "localhost") {
+		// fall back to 127.0.0.1 if 'localhost' doesn't work
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		fallbackAddr := fmt.Sprintf("127.0.0.1:%s", port)
+		logger.Sugar().Warnf("failed to listen on %s, falling back to %s", addr, fallbackAddr)
+		return net.Listen("tcp", fallbackAddr)
+	} else if err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform %q", runtime.GOOS)
 	}
 }
