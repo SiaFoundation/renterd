@@ -95,7 +95,7 @@ func (b *Bus) scanHostV1(ctx context.Context, timeout time.Duration, hostKey typ
 		if err == nil {
 			logger.Debug("successfully scanned host on second try")
 		} else if !isErrHostUnreachable(err) {
-			logger.Debugw("failed to scan host")
+			logger.Debug("failed to scan host")
 		}
 	}
 
