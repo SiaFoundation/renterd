@@ -62,8 +62,9 @@ type (
 		setupFns    []fn
 		shutdownFns []fn
 
-		bus    *bus.Client
-		logger *zap.SugaredLogger
+		bus           *bus.Client
+		logger        *zap.SugaredLogger
+		loggerCloseFn func(context.Context) error
 	}
 
 	fn struct {
@@ -91,10 +92,6 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
-	shutdownFns = append(shutdownFns, fn{
-		name: "Logger",
-		fn:   closeFn,
-	})
 
 	// print network and version
 	header := logger.With(
@@ -250,7 +247,8 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 		bus: bc,
 		cfg: cfg,
 
-		logger: logger.Sugar(),
+		logger:        logger.Sugar(),
+		loggerCloseFn: closeFn,
 	}, nil
 }
 
@@ -484,6 +482,7 @@ func (n *node) Shutdown() error {
 		}
 	}
 
+	errs = append(errs, shutdown(n.loggerCloseFn))
 	return errors.Join(errs...)
 }
 
