@@ -8,17 +8,9 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
 	"go.uber.org/zap"
-)
-
-var (
-	errInvalidHandshake          = errors.New("couldn't read host's handshake")
-	errInvalidHandshakeSignature = errors.New("host's handshake signature was invalid")
-	errInvalidMerkleProof        = errors.New("host supplied invalid Merkle proof")
-	errInvalidSectorRootsRange   = errors.New("number of roots does not match range")
 )
 
 const (
@@ -39,25 +31,20 @@ type (
 )
 
 type Pruner struct {
-	alerter alerts.Alerter
-	bus     Bus
-	logger  *zap.SugaredLogger
+	bus    Bus
+	logger *zap.SugaredLogger
 
 	wg sync.WaitGroup
 
 	mu               sync.Mutex
 	pruning          bool
 	pruningLastStart time.Time
-	pruningAlertIDs  map[types.FileContractID]types.Hash256
 }
 
-func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *Pruner {
+func New(bus Bus, logger *zap.Logger) *Pruner {
 	return &Pruner{
-		alerter: alerter,
-		bus:     bus,
-		logger:  logger.Named("pruner").Sugar(),
-
-		pruningAlertIDs: make(map[types.FileContractID]types.Hash256),
+		bus:    bus,
+		logger: logger.Named("pruner").Sugar(),
 	}
 }
 
@@ -90,29 +77,6 @@ func (p *Pruner) Status() (bool, time.Time) {
 func (p *Pruner) Shutdown(_ context.Context) error {
 	p.wg.Wait()
 	return nil
-}
-
-func (p *Pruner) dismissPruneAlerts(ctx context.Context, prunable []api.ContractPrunableData) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// use a sane timeout
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
-	// fetch contract ids that are prunable
-	prunableIDs := make(map[types.FileContractID]struct{})
-	for _, contract := range prunable {
-		prunableIDs[contract.ID] = struct{}{}
-	}
-
-	// dismiss alerts for contracts that are no longer prunable
-	for fcid, alertID := range p.pruningAlertIDs {
-		if _, ok := prunableIDs[fcid]; !ok {
-			p.alerter.DismissAlerts(ctx, alertID)
-			delete(p.pruningAlertIDs, fcid)
-		}
-	}
 }
 
 func (p *Pruner) fetchPrunableContracts(ctx context.Context) (prunable []api.ContractPrunableData, _ error) {
@@ -177,9 +141,6 @@ func (p *Pruner) performContractPruning(ctx context.Context) {
 	}
 	log.Debugf("found %d prunable contracts", len(prunable))
 
-	// dismiss alerts for contracts that are no longer prunable
-	p.dismissPruneAlerts(ctx, prunable)
-
 	// loop prunable contracts
 	var total uint64
 	for _, contract := range prunable {
@@ -199,24 +160,6 @@ func (p *Pruner) performContractPruning(ctx context.Context) {
 			log.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
 			continue
 		}
-
-		// handle alerts
-		p.mu.Lock()
-		alertID := alerts.IDForContract(alertPruningID, contract.ID)
-		if shouldSendPruneAlert(err, h.Settings.Version, h.Settings.Release) {
-			if err := p.alerter.RegisterAlert(ctx, newContractPruningFailedAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, contract.ID, err)); err != nil {
-				log.Errorf("failed to register alert: %v", err)
-			} else {
-				p.pruningAlertIDs[contract.ID] = alertID // store id to dismiss stale alerts
-			}
-		} else {
-			if err := p.alerter.DismissAlerts(ctx, alertID); err != nil {
-				log.Errorf("failed to dismiss alert: %v", err)
-			} else {
-				delete(p.pruningAlertIDs, contract.ID)
-			}
-		}
-		p.mu.Unlock()
 
 		// adjust total
 		total += n
@@ -293,18 +236,4 @@ func humanReadableSize(b int) string {
 	}
 	return fmt.Sprintf("%.1f %ciB",
 		float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func shouldSendPruneAlert(err error, version, release string) bool {
-	oldHost := (utils.VersionCmp(version, "1.6.0") < 0 || version == "1.6.0" && release == "")
-	sectorRootsIssue := utils.IsErr(err, errInvalidSectorRootsRange) && oldHost
-	merkleRootIssue := utils.IsErr(err, errInvalidMerkleProof) && oldHost
-	return err != nil && !(sectorRootsIssue || merkleRootIssue ||
-		utils.IsErr(err, utils.ErrConnectionRefused) ||
-		utils.IsErr(err, utils.ErrConnectionTimedOut) ||
-		utils.IsErr(err, utils.ErrConnectionResetByPeer) ||
-		utils.IsErr(err, errInvalidHandshakeSignature) ||
-		utils.IsErr(err, errInvalidHandshake) ||
-		utils.IsErr(err, utils.ErrNoRouteToHost) ||
-		utils.IsErr(err, utils.ErrNoSuchHost))
 }
