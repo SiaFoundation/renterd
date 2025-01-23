@@ -615,6 +615,8 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	// create the syncer
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")),
 		syncer.WithSendBlocksTimeout(2*time.Second),
+		syncer.WithPeerDiscoveryInterval(100*time.Millisecond),
+		syncer.WithSyncInterval(100*time.Millisecond),
 		syncer.WithRPCTimeout(2*time.Second),
 	)
 
@@ -922,7 +924,11 @@ func (c *TestCluster) Shutdown() {
 	c.ShutdownWorker(ctx)
 	c.ShutdownBus(ctx)
 	for _, h := range c.hosts {
-		c.tt.OK(h.Close())
+		c.wg.Add(1)
+		go func() {
+			c.tt.OK(h.Close())
+			c.wg.Done()
+		}()
 	}
 	c.wg.Wait()
 }

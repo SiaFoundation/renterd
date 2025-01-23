@@ -171,7 +171,12 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
-	}, syncer.WithPeerDiscoveryInterval(100*time.Millisecond), syncer.WithSyncInterval(100*time.Millisecond))
+	},
+		syncer.WithSendBlocksTimeout(2*time.Second),
+		syncer.WithPeerDiscoveryInterval(100*time.Millisecond),
+		syncer.WithSyncInterval(100*time.Millisecond),
+		syncer.WithRPCTimeout(2*time.Second),
+	)
 	syncErrChan := make(chan error, 1)
 	syncerCtx, syncerCancel := context.WithCancel(context.Background())
 	defer func() {
