@@ -91,6 +91,7 @@ func (h *Host) Close() error {
 	h.index.Close()
 	h.wallet.Close()
 	h.contracts.Close()
+	h.contractsV2.Close()
 	h.storage.Close()
 	h.store.Close()
 	h.syncerCancel()
