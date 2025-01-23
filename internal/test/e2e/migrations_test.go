@@ -123,9 +123,9 @@ func TestMigrations(t *testing.T) {
 		t.Fatal("unexpected", ress)
 	}
 
-	// remove all hosts to ensure migrations fail
-	for _, h := range cluster.hosts {
-		cluster.RemoveHost(h)
+	// remove all hosts except for one to cause migrations to fail
+	for len(cluster.hosts) > 1 {
+		cluster.RemoveHost(cluster.hosts[0])
 	}
 
 	// fetch alerts and collect object ids until we found two

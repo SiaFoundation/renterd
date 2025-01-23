@@ -623,7 +623,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	// start syncer
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- s.Run(context.Background())
+		errChan <- s.Run()
 		close(errChan)
 	}()
 

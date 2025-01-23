@@ -41,8 +41,7 @@ type Host struct {
 	dir     string
 	privKey types.PrivateKey
 
-	s            *syncer.Syncer
-	syncerCancel context.CancelFunc
+	s *syncer.Syncer
 
 	store       *sqlite.Store
 	wallet      *wallet.SingleAddressWallet
@@ -94,7 +93,6 @@ func (h *Host) Close() error {
 	h.contractsV2.Close()
 	h.storage.Close()
 	h.store.Close()
-	h.syncerCancel()
 	h.s.Close()
 	return nil
 }
@@ -179,13 +177,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		syncer.WithRPCTimeout(2*time.Second),
 	)
 	syncErrChan := make(chan error, 1)
-	syncerCtx, syncerCancel := context.WithCancel(context.Background())
-	defer func() {
-		if err != nil {
-			syncerCancel()
-		}
-	}()
-	go func() { syncErrChan <- s.Run(syncerCtx) }()
+	go func() { syncErrChan <- s.Run() }()
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
@@ -256,8 +248,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		dir:     dir,
 		privKey: privKey,
 
-		s:            s,
-		syncerCancel: syncerCancel,
+		s: s,
 
 		store:       db,
 		wallet:      wallet,
