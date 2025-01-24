@@ -41,8 +41,7 @@ type Host struct {
 	dir     string
 	privKey types.PrivateKey
 
-	s            *syncer.Syncer
-	syncerCancel context.CancelFunc
+	s *syncer.Syncer
 
 	store       *sqlite.Store
 	wallet      *wallet.SingleAddressWallet
@@ -91,9 +90,10 @@ func (h *Host) Close() error {
 	h.index.Close()
 	h.wallet.Close()
 	h.contracts.Close()
+	h.contractsV2.Close()
+	h.registry.Close()
 	h.storage.Close()
 	h.store.Close()
-	h.syncerCancel()
 	h.s.Close()
 	return nil
 }
@@ -171,15 +171,11 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		GenesisID:  genesisBlock.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
-	}, syncer.WithPeerDiscoveryInterval(100*time.Millisecond), syncer.WithSyncInterval(100*time.Millisecond))
-	syncErrChan := make(chan error, 1)
-	syncerCtx, syncerCancel := context.WithCancel(context.Background())
-	defer func() {
-		if err != nil {
-			syncerCancel()
-		}
-	}()
-	go func() { syncErrChan <- s.Run(syncerCtx) }()
+	},
+		syncer.WithSendBlocksTimeout(2*time.Second),
+		syncer.WithRPCTimeout(2*time.Second),
+	)
+	go s.Run()
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
@@ -250,8 +246,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		dir:     dir,
 		privKey: privKey,
 
-		s:            s,
-		syncerCancel: syncerCancel,
+		s: s,
 
 		store:       db,
 		wallet:      wallet,
