@@ -82,6 +82,7 @@ type TestCluster struct {
 	busShutdownFns       []func(context.Context) error
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
+	listenerShutdownFns  []func() error
 
 	network      *consensus.Network
 	genesisBlock types.Block
@@ -316,15 +317,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	workerListener, err := net.Listen("tcp", "127.0.0.1:0")
 	tt.OK(err)
-	tt.Cleanup(func() { workerListener.Close() })
 
 	s3Listener, err := net.Listen("tcp", "127.0.0.1:0")
 	tt.OK(err)
-	tt.Cleanup(func() { s3Listener.Close() })
 
 	autopilotListener, err := net.Listen("tcp", "127.0.0.1:0")
 	tt.OK(err)
-	tt.Cleanup(func() { autopilotListener.Close() })
 
 	busAddr := fmt.Sprintf("http://%s/bus", busListener.Addr().String())
 	workerAddr := "http://" + workerListener.Addr().String()
@@ -431,6 +429,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		busShutdownFns:       busShutdownFns,
 		autopilotShutdownFns: autopilotShutdownFns,
 		s3ShutdownFns:        s3ShutdownFns,
+		listenerShutdownFns: []func() error{
+			autopilotListener.Close,
+			s3Listener.Close,
+			workerListener.Close,
+			busListener.Close,
+		},
 	}
 
 	// Spin up the servers.
@@ -926,6 +930,9 @@ func (c *TestCluster) Shutdown() {
 	c.ShutdownS3(ctx)
 	c.ShutdownWorker(ctx)
 	c.ShutdownBus(ctx)
+	for _, fn := range c.listenerShutdownFns {
+		fn()
+	}
 	for _, h := range c.hosts {
 		c.wg.Add(1)
 		go func() {
