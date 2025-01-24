@@ -622,8 +622,6 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	// create the syncer
 	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")),
 		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithPeerDiscoveryInterval(100*time.Millisecond),
-		syncer.WithSyncInterval(100*time.Millisecond),
 		syncer.WithRPCTimeout(2*time.Second),
 	)
 

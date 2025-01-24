@@ -173,12 +173,9 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		NetAddress: l.Addr().String(),
 	},
 		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithPeerDiscoveryInterval(100*time.Millisecond),
-		syncer.WithSyncInterval(100*time.Millisecond),
 		syncer.WithRPCTimeout(2*time.Second),
 	)
-	syncErrChan := make(chan error, 1)
-	go func() { syncErrChan <- s.Run() }()
+	go s.Run()
 
 	log := zap.NewNop()
 	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
