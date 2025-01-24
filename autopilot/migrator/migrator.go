@@ -324,6 +324,16 @@ OUTER:
 
 		// return if there are no slabs to migrate
 		if len(toMigrate) == 0 {
+			res, err := m.alerts.Alerts(ctx, alerts.AlertsOpts{Offset: 0, Limit: -1})
+			if err != nil {
+				m.logger.Errorf("failed to get alerts: %v", err)
+				return
+			}
+			for _, id := range filterMigrationFailedAlertIDs(res.Alerts) {
+				if err := m.alerts.DismissAlerts(ctx, id); err != nil {
+					m.logger.Errorf("failed to dismiss alert: %v", err)
+				}
+			}
 			return
 		}
 

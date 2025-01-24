@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/alerts"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/utils"
@@ -17,11 +18,27 @@ var (
 	alertOngoingMigrationsID = alerts.RandomAlertID() // constant until restarted
 )
 
+func filterMigrationFailedAlertIDs(a []alerts.Alert) (ids []types.Hash256) {
+	for _, alert := range a {
+		var sk object.EncryptionKey
+		if val, ok := alert.Data["slabKey"]; !ok {
+			continue
+		} else if sks, ok := val.(string); !ok {
+			continue
+		} else if err := sk.UnmarshalText([]byte(sks)); err != nil {
+			continue
+		} else if alert.ID == alerts.IDForSlab(alertMigrationID, sk) {
+			ids = append(ids, alert.ID)
+		}
+	}
+	return
+}
+
 func newMigrationFailedAlert(slabKey object.EncryptionKey, health float64, objects []api.ObjectMetadata, err error) alerts.Alert {
 	data := map[string]interface{}{
 		"error":   err.Error(),
 		"health":  health,
-		"slabKey": slabKey.String(),
+		"slabKey": slabKey.String(), // used to clear migration alerts
 		"hint":    "Migration failures can be temporary, but if they persist it can eventually lead to data loss and should therefor be taken very seriously.",
 	}
 
