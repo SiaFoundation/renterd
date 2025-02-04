@@ -21,9 +21,7 @@ var (
 func filterMigrationFailedAlertIDs(a []alerts.Alert) (ids []types.Hash256) {
 	for _, alert := range a {
 		var sk object.EncryptionKey
-		if val, ok := alert.Data["slabKey"]; !ok {
-			continue
-		} else if sks, ok := val.(string); !ok {
+		if sks, ok := alert.Data["slabKey"].(string); !ok {
 			continue
 		} else if err := sk.UnmarshalText([]byte(sks)); err != nil {
 			continue
