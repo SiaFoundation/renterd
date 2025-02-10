@@ -384,7 +384,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	// start syncer
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- s.Run(context.Background())
+		errChan <- s.Run()
 		close(errChan)
 	}()
 

@@ -148,12 +148,6 @@ func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	if err := checkBlockHeight(gc.consensusState, hs.Prices.TipHeight, uint64(gs.HostBlockHeightLeeway)); err != nil {
 		errs = append(errs, err)
 	}
-	if hs.Validity < time.Duration(gs.MinPriceTableValidity) {
-		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
-	}
-	if hs.Validity < time.Duration(gs.MinPriceTableValidity) {
-		errs = append(errs, fmt.Errorf("price table validity is less than %v: %v", gs.MinPriceTableValidity, hs.Validity))
-	}
 	if gougingErr := errsToStr(errs...); gougingErr != "" {
 		gb.GougingErr = fmt.Sprintf("%v: %s", ErrPriceTableGouging, gougingErr)
 	}

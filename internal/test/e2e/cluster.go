@@ -82,6 +82,7 @@ type TestCluster struct {
 	busShutdownFns       []func(context.Context) error
 	autopilotShutdownFns []func(context.Context) error
 	s3ShutdownFns        []func(context.Context) error
+	listenerShutdownFns  []func() error
 
 	network      *consensus.Network
 	genesisBlock types.Block
@@ -428,6 +429,12 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 		busShutdownFns:       busShutdownFns,
 		autopilotShutdownFns: autopilotShutdownFns,
 		s3ShutdownFns:        s3ShutdownFns,
+		listenerShutdownFns: []func() error{
+			autopilotListener.Close,
+			s3Listener.Close,
+			workerListener.Close,
+			busListener.Close,
+		},
 	}
 
 	// Spin up the servers.
@@ -613,12 +620,15 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	}
 
 	// create the syncer
-	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")), syncer.WithSendBlocksTimeout(time.Minute))
+	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")),
+		syncer.WithSendBlocksTimeout(2*time.Second),
+		syncer.WithRPCTimeout(2*time.Second),
+	)
 
 	// start syncer
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- s.Run(context.Background())
+		errChan <- s.Run()
 		close(errChan)
 	}()
 
@@ -918,8 +928,15 @@ func (c *TestCluster) Shutdown() {
 	c.ShutdownS3(ctx)
 	c.ShutdownWorker(ctx)
 	c.ShutdownBus(ctx)
+	for _, fn := range c.listenerShutdownFns {
+		fn()
+	}
 	for _, h := range c.hosts {
-		c.tt.OK(h.Close())
+		c.wg.Add(1)
+		go func() {
+			c.tt.OK(h.Close())
+			c.wg.Done()
+		}()
 	}
 	c.wg.Wait()
 }

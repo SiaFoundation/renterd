@@ -2064,7 +2064,7 @@ func TestMultipartUploads(t *testing.T) {
 		uploadPacking: true,
 	})
 	defer cluster.Shutdown()
-	defer cluster.Shutdown()
+
 	b := cluster.Bus
 	w := cluster.Worker
 	tt := cluster.tt

@@ -5,6 +5,8 @@ info:
   description: API that caters to both casual users seeking straightforward data storage and developers requiring a robust API for building apps on Sia
 
 tags:
+  - name: authentication
+    description: API authentication
   - name: autopilot
     description: Autopilot configuration and operations
   - name: worker
@@ -18,16 +20,14 @@ paths:
       tags:
         - authentication
       summary: Create a new authentication token
-      description: Creates a new authentication token that is returned via the 'renterd_auth' cookie which is set by the server and the json response body. The token can be used as a cookie or as the 'apikey' query parameter for autentication.
+      description: Creates a new authentication token that is returned via the 'renterd_auth' cookie which is set by the server and the json response body. The token can be used as a cookie or as the 'apikey' query parameter for authentication.
       parameters:
         - name: validity
           description: The duration in milliseconds for which the token will be valid
-          example: 10000
           in: query
           required: true
           schema:
-            type: integer
-            format: int64
+            $ref: "#/components/schemas/DurationMS"
       responses:
         "200":
           description: Successfully created a new token
@@ -42,6 +42,7 @@ paths:
                     description: A hex-encoded string representing the token
         "400":
           description: Bad request
+
   #############################
   #
   # Autopilot routes
@@ -309,11 +310,11 @@ paths:
                   download:
                     allOf:
                       - $ref: "#/components/schemas/MemoryStatus"
-                      - description: The memory status for for downloads
+                      - description: The memory status for downloads
                   upload:
                     allOf:
                       - $ref: "#/components/schemas/MemoryStatus"
-                      - description: The memory status for for uploads
+                      - description: The memory status for uploads
 
   /worker/multipart/{key}:
     put:
@@ -327,9 +328,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            minLength: 1
+            $ref: "#/components/schemas/ObjectKey"
         - name: bucket
           description: The name of the bucket the multipart upload belongs to
           in: query
@@ -341,36 +340,27 @@ paths:
           in: query
           required: true
           schema:
-            allOf:
-              - $ref: "#/components/schemas/MultipartUploadID"
-              - example: 7aaac83c6d553865755286c326e852a68300bebf7feea1b435d61bd3610bf82b
+            $ref: "#/components/schemas/MultipartUploadID"
         - name: partnumber
           description: The part number of the part being uploaded
-          example: 0
           in: query
           required: true
           schema:
-            type: integer
-            format: uint32
+            $ref: "#/components/schemas/MultipartPartNumber"
         - name: minshards
           description: Used to override the minimum number of shards the part should be split into.
-          example: 10
           in: query
           required: false
           schema:
-            type: integer
-            format: uint32
+            $ref: "#/components/schemas/RedundancySettingsMinShards"
         - name: totalshards
           description: Used to override the total number of shards the part should be split into.
-          example: 30
           in: query
           required: false
           schema:
-            type: integer
-            format: uint32
+            $ref: "#/components/schemas/RedundancySettingsTotalShards"
         - name: encryptionoffset
           description: The offset of the part within the final object. This is required unless the upload was explicitly created to not be encrypted before erasure coding.
-          example: 0
           in: query
           required: false
           schema:
@@ -409,9 +399,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            minLength: 1
+            $ref: "#/components/schemas/ObjectKey"
         - name: bucket
           description: The name of the bucket the object belongs to
           in: query
@@ -488,9 +476,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            minLength: 1
+            $ref: "#/components/schemas/ObjectKey"
         - name: bucket
           description: The name of the bucket the object belongs to
           in: query
@@ -499,27 +485,22 @@ paths:
             $ref: "#/components/schemas/BucketName"
         - name: minshards
           description: Used to override the minimum number of shards the object should be split into.
-          example: 10
           in: query
           required: false
           schema:
-            type: integer
-            format: uint32
+            $ref: "#/components/schemas/RedundancySettingsMinShards"
         - name: totalshards
           description: Used to override the total number of shards the object should be split into.
-          example: 30
           in: query
           required: false
           schema:
-            type: integer
-            format: uint32
+            $ref: "#/components/schemas/RedundancySettingsTotalShards"
         - name: mimetype
           description: The MIME type of the object
-          example: "text/plain"
           in: query
           required: false
           schema:
-            type: string
+            $ref: "#/components/schemas/MimeType"
       requestBody:
         content:
           application/octet-stream:
@@ -551,12 +532,9 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            minLength: 1
+            $ref: "#/components/schemas/ObjectKey"
         - name: bucket
           description: The name of the bucket the object belongs to
-          example: "myBucket"
           in: query
           required: true
           schema:
@@ -584,10 +562,9 @@ paths:
                     - $ref: "#/components/schemas/BucketName"
                     - description: The name of the bucket the objects belong to
                 prefix:
-                  type: string
-                  example: "folder/"
-                  minLength: 1
-                  description: The prefix of the objects to delete
+                  allOf:
+                    - $ref: "#/components/schemas/ObjectKey"
+                    - description: The prefix of the objects to delete
       responses:
         "200":
           description: Successfully removed objects
@@ -1260,16 +1237,16 @@ paths:
         - bus
       summary: Archive contracts
       requestBody:
+        description: >
+                A mapping of file contract IDs (keys) to archive reasons (values).
+                Keys must match the pattern `^fcid:[0-9a-fA-F]{64}$`.
         content:
           application/json:
             schema:
               type: object
-              description: A mapping of file contract IDs to archive reasons.
               additionalProperties:
-                $ref: "#/components/schemas/FileContractID"
-              example:
-                "fcid:fd887808d78b3c8c6c04d1bbc14a0f6ebc2f546514e3a4b79102e31da712423c": "custom reason"
-                "fcid:82ffce83b89817e876194a07f1b4442052e2bb4932ca80a6a51753d86da3d840": "custom reason"
+                type: string
+                description: The reason for archiving the contract
       responses:
         "200":
           description: Contracts archived successfully
@@ -1503,9 +1480,7 @@ paths:
                    - $ref: "#/components/schemas/DurationMS"
                    - description: The duration of the lock in milliseconds
                 priority:
-                  type: integer
-                  format: int
-                  example: 80
+                  $ref: "#/components/schemas/Priority"
       responses:
         "200":
           description: Contract lock acquired
@@ -1844,7 +1819,6 @@ paths:
                 addressContains:
                   type: string
                   description: The host's net address to search for
-                  example: "foo.com"
                 keyIn:
                   type: array
                   items:
@@ -2287,14 +2261,11 @@ paths:
                 bucket:
                   $ref: "#/components/schemas/BucketName"
                 key:
-                  type: string
-                  description: The key of the object to upload
-                  example: "folder/file"
-                  minLength: 1
+                  allOf:
+                    - $ref: "#/components/schemas/ObjectKey"
+                    - description: The key of the object to upload
                 mimeType:
-                  type: string
-                  description: The MIME type of the object
-                  example: "text/plain"
+                  $ref: "#/components/schemas/MimeType"
                 metadata:
                   $ref: "#/components/schemas/ObjectUserMetadata"
                 disableClientSideEncryption:
@@ -2331,13 +2302,9 @@ paths:
                 bucket:
                   $ref: "#/components/schemas/BucketName"
                 key:
-                  type: string
-                  description: The key of the object
-                  example: "folder/file"
-                  minLength: 1
+                  $ref: "#/components/schemas/ObjectKey"
                 uploadID:
-                  type: string
-                  description: The ID of the multipart upload to abort
+                  $ref: "#/components/schemas/MultipartUploadID"
       responses:
         "200":
           description: Successfully aborted multipart upload
@@ -2361,10 +2328,7 @@ paths:
                 bucket:
                   $ref: "#/components/schemas/BucketName"
                 key:
-                  type: string
-                  description: The key of the object
-                  example: "folder/file"
-                  minLength: 1
+                  $ref: "#/components/schemas/ObjectKey"
                 uploadID:
                     allOf:
                       - $ref: "#/components/schemas/UploadID"
@@ -2406,17 +2370,11 @@ paths:
                 eTag:
                   $ref: "#/components/schemas/ETag"
                 key:
-                  type: string
-                  description: The key of the object
-                  example: "folder/file"
-                  minLength: 1
+                  $ref: "#/components/schemas/ObjectKey"
                 uploadID:
                   $ref: "#/components/schemas/UploadID"
                 partNumber:
-                  type: integer
-                  description: The number of this part (1-10000)
-                  minimum: 1
-                  maximum: 10000
+                  $ref: "#/components/schemas/MultipartPartNumber"
                 slices:
                   type: array
                   items:
@@ -2567,10 +2525,7 @@ paths:
                 bucket:
                   $ref: "#/components/schemas/BucketName"
                 key:
-                  type: string
-                  description: The key of the object
-                  example: "folder/file"
-                  minLength: 1
+                  $ref: "#/components/schemas/ObjectKey"
                 uploadID:
                     allOf:
                       - $ref: "#/components/schemas/UploadID"
@@ -2826,13 +2781,14 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            pattern: ".*" # greedy match
+            allOf:
+              - $ref: "#/components/schemas/ObjectKey"
+              - pattern: ".*" # greedy match
           description: The key of the object to fetch
         - name: bucket
           in: query
           required: true
+          description: The name of the bucket the object is in
           schema:
             $ref: "#/components/schemas/BucketName"
         - name: onlymetadata
@@ -2862,9 +2818,9 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            pattern: ".*" # greedy match
+            allOf:
+              - $ref: "#/components/schemas/ObjectKey"
+              - pattern: ".*" # greedy match
           description: The key of the object
       requestBody:
         content:
@@ -2901,9 +2857,9 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            example: "folder/file"
-            pattern: ".*" # greedy match
+            allOf:
+              - $ref: "#/components/schemas/ObjectKey"
+              - pattern: ".*" # greedy match
           description: The key of the object to delete
         - name: bucket
           in: query
@@ -3198,13 +3154,9 @@ paths:
                     - $ref: "#/components/schemas/DurationMS"
                     - description: Duration in milliseconds to lock the slabs
                 minShards:
-                  type: integer
-                  format: uint8
-                  description: Minimum number of shards required
+                  $ref: "#/components/schemas/RedundancySettingsMinShards"
                 totalShards:
-                  type: integer
-                  format: uint8
-                  description: Total number of shards to split into
+                  $ref: "#/components/schemas/RedundancySettingsTotalShards"
                 limit:
                   type: integer
                   description: Maximum number of packed slabs to return
@@ -3326,15 +3278,12 @@ paths:
           in: query
           required: true
           schema:
-            type: integer
-            minimum: 1
-            description: Minimum number of shards required
+            $ref: "#/components/schemas/RedundancySettingsMinShards"
         - name: totalshards
           in: query
           required: true
           schema:
-            type: integer
-            description: Total number of shards
+            $ref: "#/components/schemas/RedundancySettingsTotalShards"
       requestBody:
         content:
           application/octet-stream:
@@ -5584,6 +5533,11 @@ components:
           example: 1073741824
           minimum: 1
 
+    MimeType:
+      type: string
+      description: The MIME type of the object
+      example: "text/plain"
+
     MultipartUpload:
       type: object
       properties:
@@ -5608,8 +5562,7 @@ components:
       type: object
       properties:
         partNumber:
-          type: integer
-          description: The number of this part
+          $ref: "#/components/schemas/MultipartPartNumber"
         lastModified:
           type: string
           format: date-time
@@ -5625,103 +5578,22 @@ components:
       type: object
       properties:
         partNumber:
-          type: integer
-          description: The number of this part
+          $ref: "#/components/schemas/MultipartPartNumber"
         eTag:
           $ref: "#/components/schemas/ETag"
 
-    Object:
-      type: object
-      allOf:
-        - type: object
-          properties:
-            metadata:
-              $ref: "#/components/schemas/ObjectUserMetadata"
-        - $ref: "#/components/schemas/ObjectMetadata"
-        - type: object
-          properties:
-            encryptionKey:
-              $ref: "#/components/schemas/EncryptionKey"
-            slabs:
-              type: array
-              items:
-                $ref: "#/components/schemas/SlabSlice"
-
-    ObjectMetadata:
-      type: object
-      properties:
-        bucket:
-          $ref: "#/components/schemas/BucketName"
-        etag:
-          allOf:
-            - $ref: "#/components/schemas/ETag"
-            - description: The ETag of the object
-        health:
-          type: number
-          format: float
-          description: The health of the object
-        modTime:
-          type: string
-          format: date-time
-          description: When the object was last modified
-        key:
-          type: string
-          description: The key of the object
-        size:
-          type: integer
-          format: int64
-          description: The size of the object in bytes
-        mimeType:
-          type: string
-          description: The MIME type of the object
-
-    ObjectUserMetadata:
-      type: object
-      additionalProperties:
-        type: string
-      description: User-defined metadata about an object provided through X-Sia-Meta- headers
-
-    PackedSlab:
-      type: object
-      properties:
-        bufferID:
-          type: integer
-          format: uint
-          description: ID of the buffer containing the slab
-        data:
-          type: string
-          format: binary
-          description: The slab data
-        encryptionKey:
-          $ref: "#/components/schemas/EncryptionKey"
-
-    Pin:
-      type: object
-      properties:
-        pinned:
-          type: boolean
-          description: Whether pin is enabled
-        value:
-          type: number
-          format: float64
-          description: The value of the underlying currency to which the setting is pinned
-
-    PinnedSettings:
-      type: object
-      properties:
-        currency:
-          $ref: "#/components/schemas/Currency"
-        threshold:
-          type: number
-          format: float64
-          description: A percentage between 0 and 1 that determines when the pinned settings are updated based on the exchange rate at the time
-        gougingSettingsPins:
-          $ref: "#/components/schemas/GougingSettingsPins"
+    MultipartPartNumber:
+      type: integer
+      description: The number of this part
+      minimum: 1
+      maximum: 10000
+      example: 123
 
     MultipartUploadID:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
       description: A unique identifier for a multipart upload
+      example: "7aaac83c6d553865755286c326e852a68300bebf7feea1b435d61bd3610bf82b"
 
     Network:
       type: object
@@ -5854,21 +5726,125 @@ components:
                 - description: The height at which V2 consensus types are required
                 - example: 1025000
 
+    Object:
+      type: object
+      allOf:
+        - type: object
+          properties:
+            metadata:
+              $ref: "#/components/schemas/ObjectUserMetadata"
+        - $ref: "#/components/schemas/ObjectMetadata"
+        - type: object
+          properties:
+            encryptionKey:
+              $ref: "#/components/schemas/EncryptionKey"
+            slabs:
+              type: array
+              items:
+                $ref: "#/components/schemas/SlabSlice"
+
+    ObjectKey:
+      type: string
+      example: "folder/file"
+      minLength: 1
+
+    ObjectMetadata:
+      type: object
+      properties:
+        bucket:
+          $ref: "#/components/schemas/BucketName"
+        etag:
+          allOf:
+            - $ref: "#/components/schemas/ETag"
+            - description: The ETag of the object
+        health:
+          type: number
+          format: float
+          description: The health of the object
+        modTime:
+          type: string
+          format: date-time
+          description: When the object was last modified
+        key:
+          type: string
+          description: The key of the object
+        size:
+          type: integer
+          format: int64
+          description: The size of the object in bytes
+        mimeType:
+          type: string
+          description: The MIME type of the object
+
+    ObjectUserMetadata:
+      type: object
+      additionalProperties:
+        type: string
+      description: User-defined metadata about an object provided through X-Sia-Meta- headers
+
+    PackedSlab:
+      type: object
+      properties:
+        bufferID:
+          type: integer
+          format: uint
+          description: ID of the buffer containing the slab
+        data:
+          type: string
+          format: binary
+          description: The slab data
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+
+    Pin:
+      type: object
+      properties:
+        pinned:
+          type: boolean
+          description: Whether pin is enabled
+        value:
+          type: number
+          format: float64
+          description: The value of the underlying currency to which the setting is pinned
+
+    PinnedSettings:
+      type: object
+      properties:
+        currency:
+          $ref: "#/components/schemas/Currency"
+        threshold:
+          type: number
+          format: float64
+          description: A percentage between 0 and 1 that determines when the pinned settings are updated based on the exchange rate at the time
+        gougingSettingsPins:
+          $ref: "#/components/schemas/GougingSettingsPins"
+
+    Priority:
+      type: integer
+      format: int
+      example: 80
+
     RedundancySettings:
       type: object
       properties:
         minShards:
-          type: integer
-          minimum: 1
-          format: int32
-          description: The number of data shards a piece of an object gets erasure-coded into
-          default: 10
+          $ref: "#/components/schemas/RedundancySettingsMinShards"
         totalShards:
-          type: integer
-          minimum: 2
-          format: int32
-          description: The number of total data shards a piece of an object gets erasure-coded into
-          default: 30
+          $ref: "#/components/schemas/RedundancySettingsTotalShards"
+
+    RedundancySettingsMinShards:
+      type: integer
+      minimum: 1
+      format: uint8
+      description: The number of data shards a piece of an object gets erasure-coded into
+      default: 10
+
+    RedundancySettingsTotalShards:
+      type: integer
+      minimum: 2
+      format: uint8
+      description: The number of total data shards a piece of an object gets erasure-coded into
+      default: 30
 
     Revision:
       type: object
@@ -5951,11 +5927,9 @@ components:
             - $ref: "#/components/schemas/EncryptionKey"
             - description: The encryption key used to encrypt the slab's shards
         minShards:
-          type: integer
-          format: uint8
-          minimum: 1
-          maximum: 255
-          description: The number of data shards the slab is split into
+          allOf:
+            - $ref: "#/components/schemas/RedundancySettingsMinShards"
+            - description: The number of data shards the slab is split into
 
     SlabSlice:
       type: object
