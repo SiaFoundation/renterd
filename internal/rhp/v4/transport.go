@@ -92,7 +92,7 @@ func (t *transport) Dial(ctx context.Context, dialer Dialer, hk types.PublicKey,
 		}
 
 		// upgrade conn
-		newTransport, err := rhp.UpgradeConn(ctx, conn, hk)
+		newTransport, err := rhp.UpgradeConnSiamux(ctx, conn, hk)
 		if err != nil {
 			return nil, fmt.Errorf("UpgradeConn: %w: %w (%v)", ErrDialTransport, err, time.Since(start))
 		}

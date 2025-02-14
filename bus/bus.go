@@ -140,7 +140,7 @@ type (
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
-		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign []types.Hash256, err error)
+		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign [][]types.Hash256, err error)
 		RedistributeV2(outputs int, amount, feePerByte types.Currency) (txns []types.V2Transaction, toSign [][]int, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
