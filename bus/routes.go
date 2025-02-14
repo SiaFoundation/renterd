@@ -511,7 +511,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 
 		for i := 0; i < len(txns); i++ {
-			b.w.SignTransaction(&txns[i], toSign, types.CoveredFields{WholeTransaction: true})
+			b.w.SignTransaction(&txns[i], toSign[i], types.CoveredFields{WholeTransaction: true})
 			ids = append(ids, txns[i].ID())
 		}
 
