@@ -89,7 +89,7 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 
 	// skip maintenance if wallet balance is too low
 	if numOutputs < 10 {
-		w.logger.Warnf("wallet maintenance skipped, wallet balance %v is too low to redistribute into meaningful outputs", balance)
+		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into 10 outputs, so the balance should be at least %v", balance, amount, amount.Mul64(10))
 		return nil
 	}
 
