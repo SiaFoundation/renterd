@@ -1,7 +1,6 @@
 package contractor
 
 import (
-	"fmt"
 	"math"
 	"math/big"
 	"time"
@@ -68,7 +67,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	var collateral, maxCollateral types.Currency
 	var egressPrice, ingressPrice, storagePrice types.Currency
 	var remainingStorage uint64
-	var version string
+	var version float64
 	if h.IsV2() {
 		appendCost := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost()
 		uploadCost := h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize).RenterCost()
@@ -78,8 +77,8 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 		egressPrice = h.V2Settings.Prices.RPCReadSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
 		ingressPrice = h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
 		storagePrice = h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost().Div64(rhpv2.SectorSize)
-		remainingStorage = h.V2Settings.RemainingStorage
-		version = fmt.Sprintf("%d.%d.%d", h.V2Settings.ProtocolVersion[0], h.V2Settings.ProtocolVersion[1], h.V2Settings.ProtocolVersion[2])
+		remainingStorage = h.V2Settings.RemainingStorage * rhpv2.SectorSize
+		version = 1.0 // v2 only has one version
 	} else {
 		var overflow bool
 		uploadSectorCost = h.PriceTable.AppendSectorCost(cfg.Contracts.Period).Storage
@@ -95,7 +94,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 		}
 		storagePrice = h.PriceTable.WriteStoreCost
 		remainingStorage = h.Settings.RemainingStorage
-		version = h.Settings.Version
+		version = clampScore(versionScore(h.Settings.Version, cfg.Hosts.MinProtocolVersion))
 	}
 
 	return api.HostScoreBreakdown{
@@ -105,7 +104,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 		Prices:           clampScore(priceAdjustmentScore(egressPrice, ingressPrice, storagePrice, gs)),
 		StorageRemaining: clampScore(storageRemainingScore(remainingStorage, h.StoredData, allocationPerHost)),
 		Uptime:           clampScore(uptimeScore(h)),
-		Version:          clampScore(versionScore(version, cfg.Hosts.MinProtocolVersion)),
+		Version:          version,
 	}
 }
 
