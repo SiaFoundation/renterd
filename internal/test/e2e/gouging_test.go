@@ -150,6 +150,10 @@ func TestHostMinVersion(t *testing.T) {
 	defer cluster.Shutdown()
 	tt := cluster.tt
 
+	if cluster.cm.Tip().Height >= cluster.network.HardforkV2.AllowHeight {
+		t.Skip("only runs against v1 network")
+	}
+
 	// set min version to a high value
 	hosts := test.AutopilotConfig.Hosts
 	hosts.MinProtocolVersion = "99.99.99"

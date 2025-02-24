@@ -192,9 +192,7 @@ func TestHostScoreV2(t *testing.T) {
 	h2 = newHost(test.NewV2HostSettings()) // reset
 	h2.V2Settings.ProtocolVersion = [3]uint8{0, 0, 0}
 	if hostScore(cfg, gs, h1, redundancy).Score() != hostScore(cfg, gs, h2, redundancy).Score() {
-		s1 := hostScore(cfg, gs, h1, redundancy).Score()
-		s2 := hostScore(cfg, gs, h2, redundancy).Score()
-		t.Fatal("unexpected", s1, s2)
+		t.Fatal("unexpected")
 	}
 
 	// assert remaining storage affects the score.
