@@ -9,6 +9,7 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/renterd/internal/utils"
 )
 
@@ -92,7 +93,7 @@ func (t *transport) Dial(ctx context.Context, dialer Dialer, hk types.PublicKey,
 		}
 
 		// upgrade conn
-		newTransport, err := rhp.UpgradeConnSiamux(ctx, conn, hk)
+		newTransport, err := siamux.Upgrade(ctx, conn, hk)
 		if err != nil {
 			return nil, fmt.Errorf("UpgradeConn: %w: %w (%v)", ErrDialTransport, err, time.Since(start))
 		}

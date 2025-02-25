@@ -20,7 +20,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
@@ -2651,7 +2651,7 @@ func fillInV2Addresses(ctx context.Context, tx sql.Tx, hostIDs []int64, assignFn
 		}
 		var addrs []string
 		for _, addr := range netAddrs {
-			if addr.Protocol == rhp4.ProtocolTCPSiaMux {
+			if addr.Protocol == siamux.Protocol {
 				addrs = append(addrs, addr.Address)
 			}
 		}

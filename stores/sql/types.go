@@ -17,7 +17,7 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/internal/rhp/v4"
 	"go.sia.tech/renterd/object"
@@ -541,7 +541,7 @@ func (p *ChainProtocol) Scan(value interface{}) error {
 
 	switch protocol {
 	case chainProtocolTCPSiaMux:
-		*p = ChainProtocol(rhp4.ProtocolTCPSiaMux)
+		*p = ChainProtocol(siamux.Protocol)
 	default:
 		return fmt.Errorf("invalid protocol: %d", protocol)
 	}
@@ -551,7 +551,7 @@ func (p *ChainProtocol) Scan(value interface{}) error {
 // Value returns an Unsigned64 value, implements driver.Valuer interface.
 func (p ChainProtocol) Value() (driver.Value, error) {
 	switch chain.Protocol(p) {
-	case rhp4.ProtocolTCPSiaMux:
+	case siamux.Protocol:
 		return int64(chainProtocolTCPSiaMux), nil
 	default:
 		return nil, fmt.Errorf("invalid ChainProtocol value: %v", p)
