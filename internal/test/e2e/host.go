@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
@@ -25,7 +26,6 @@ import (
 	"go.sia.tech/hostd/host/storage"
 	"go.sia.tech/hostd/index"
 	"go.sia.tech/hostd/persist/sqlite"
-	"go.sia.tech/hostd/rhp"
 	rhpv2 "go.sia.tech/hostd/rhp/v2"
 	rhpv3 "go.sia.tech/hostd/rhp/v3"
 	"go.uber.org/zap"
@@ -240,7 +240,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 	contractsV2 := testutil.NewEphemeralContractor(cm)
 	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
-	go rhp.ServeRHP4SiaMux(rhp4Listener, rhpv4, log.Named("rhp4"))
+	go siamux.Serve(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
 		dir:     dir,

@@ -11,7 +11,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/stores/sql"
@@ -173,7 +173,7 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 		chain.ForEachV2HostAnnouncement(b, func(hk types.PublicKey, addrs []chain.NetAddress) {
 			filtered := make(map[chain.Protocol][]chain.NetAddress)
 			for _, addr := range addrs {
-				if addr.Address == "" || addr.Protocol != rhp4.ProtocolTCPSiaMux {
+				if addr.Address == "" || addr.Protocol != siamux.Protocol {
 					continue
 				} else if len(filtered[addr.Protocol]) < maxAddrsPerProtocol {
 					filtered[addr.Protocol] = append(filtered[addr.Protocol], addr)
