@@ -1172,7 +1172,9 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 	toArchive := make(map[types.FileContractID]string)
 
 	for _, contract := range contracts {
+		baseLogger.Debugw("considering v1 contract for migration", "fcid", contract.ID, "hostKey", contract.HostKey)
 		if contract.V2 {
+			baseLogger.Debugw("skipping v1 contract, already on v2", "fcid", contract.ID, "v2fcid", contract.ID)
 			continue // nothing to do
 		} else if other, exists := hostsWithV2Contract[contract.HostKey]; exists {
 			baseLogger.Debugw("no need to migrate v1 contract, already have v2 contract", "fcid", contract.ID, "v2fcid", other)
@@ -1194,6 +1196,7 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 			continue
 		}
 
+		contractLogger.Debug("successfully migrated v1 contract to v2")
 		// remember for archival
 		toArchive[contract.ID] = "migrated to v2"
 	}
