@@ -91,6 +91,14 @@ func (ctx *mCtx) WantedContracts() uint64 {
 	return ctx.state.AP.Contracts.Amount
 }
 
+func (ctx *mCtx) WithTimeout(t time.Duration) (*mCtx, context.CancelFunc) {
+	tCtx, cancel := context.WithTimeout(ctx.ctx, t)
+	return &mCtx{
+		ctx:   tCtx,
+		state: ctx.state,
+	}, cancel
+}
+
 func (state *MaintenanceState) ContractsConfig() api.ContractsConfig {
 	return state.AP.Contracts
 }
