@@ -1181,11 +1181,14 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 			continue // nothing more to do
 		}
 
-		host, err := bus.Host(ctx, contract.HostKey)
+		tCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		host, err := bus.Host(tCtx, contract.HostKey)
 		if err != nil {
+			cancel()
 			logger.Errorw("failed to fetch host for v1 contract", "fcid", contract.ID, "hk", contract.HostKey, zap.Error(err))
 			continue
 		}
+		cancel()
 
 		// form a new contract with the same host
 		_, _, err = cr.formContract(ctx, hs, host, InitialContractFunding, logger)
