@@ -1168,35 +1168,35 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 			v1Cnt++
 		}
 	}
-	baseLogger.Debug("found v1 contracts to migrate", "n", v1Cnt)
+	baseLogger.Debugw("found v1 contracts to migrate", "n", v1Cnt)
 	toArchive := make(map[types.FileContractID]string)
 
 	for _, contract := range contracts {
-		baseLogger.Debugw("considering v1 contract for migration", "fcid", contract.ID, "hostKey", contract.HostKey)
+		contractLogger := baseLogger.With("contractID", contract.ID).With("hostKey", contract.HostKey)
+
 		if contract.V2 {
-			baseLogger.Debugw("skipping v1 contract, already on v2", "fcid", contract.ID, "v2fcid", contract.ID)
+			contractLogger.Debug("already V2")
 			continue // nothing to do
 		} else if other, exists := hostsWithV2Contract[contract.HostKey]; exists {
-			baseLogger.Debugw("no need to migrate v1 contract, already have v2 contract", "fcid", contract.ID, "v2fcid", other)
+			contractLogger.Debugw("already have other V2 contract", "V2ContractID", other)
 			toArchive[contract.ID] = fmt.Sprintf("already on v2 with %v", other)
 			continue // nothing more to do
 		}
 
-		contractLogger := baseLogger.With("contractID", contract.ID).With("hostKey", contract.HostKey)
 		host, err := bus.Host(ctx, contract.HostKey)
 		if err != nil {
-			contractLogger.With(zap.Error(err)).Error("failed to fetch host for v1 contract")
+			contractLogger.Errorw("failed to fetch host for v1 contract", zap.Error(err))
 			continue
 		}
 
 		// form a new contract with the same host
-		_, _, err = cr.formContract(ctx, hs, host, InitialContractFunding, logger)
+		_, _, err = cr.formContract(ctx, hs, host, InitialContractFunding, contractLogger)
 		if err != nil {
-			contractLogger.With(zap.Error(err)).Error("failed to form a v2 contract with the host")
+			contractLogger.Errorw("failed to form a v2 contract with the host", zap.Error(err))
 			continue
 		}
 
-		contractLogger.Debug("successfully migrated v1 contract to v2")
+		contractLogger.Info("migration successful")
 		// remember for archival
 		toArchive[contract.ID] = "migrated to v2"
 	}
@@ -1204,7 +1204,7 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 	// archive contracts
 	err = bus.ArchiveContracts(ctx, toArchive)
 	if err != nil {
-		baseLogger.With(zap.Error(err)).Error("failed to archive migrated contract")
+		baseLogger.Errorw("failed to archive migrated contract", zap.Error(err))
 	}
 }
 
