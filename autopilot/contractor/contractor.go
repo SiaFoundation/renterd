@@ -1194,7 +1194,7 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 			continue
 		}
 
-		logger.Info("migration successful", "fcid", contract.ID, "hk", contract.HostKey)
+		logger.Infow("migration successful", "fcid", contract.ID, "hk", contract.HostKey)
 		// remember for archival
 		toArchive[contract.ID] = "migrated to v2"
 	}
