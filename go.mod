@@ -8,21 +8,21 @@ require (
 	github.com/aws/aws-sdk-go v1.55.6
 	github.com/gabriel-vasile/mimetype v1.4.8
 	github.com/go-sql-driver/mysql v1.9.0
-	github.com/google/go-cmp v0.6.0
+	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
 	github.com/klauspost/reedsolomon v1.12.4
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.10.3-0.20250225045648-07b92f8cf455
-	go.sia.tech/coreutils v0.11.2-0.20250225051012-d01f7fa285c7
+	go.sia.tech/core v0.10.3
+	go.sia.tech/coreutils v0.12.0
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20250225054618-c17f8d0bcfae
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.77.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.34.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/sys v0.30.0
 	golang.org/x/term v0.29.0
 	golang.org/x/time v0.10.0
