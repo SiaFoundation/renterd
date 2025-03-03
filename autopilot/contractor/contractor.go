@@ -157,7 +157,9 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 }
 
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
-	logger = logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+	ctx, cancel := ctx.WithTimeout(time.Minute)
+	defer cancel()
 
 	// convenience variables
 	hk := host.PublicKey
@@ -1174,19 +1176,17 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 			toArchive[contract.ID] = struct{}{}
 			continue // nothing more to do
 		}
-		logger = logger.With("contractID", contract.ID).
-			With("hostKey", contract.HostKey)
 
 		host, err := bus.Host(ctx, contract.HostKey)
 		if err != nil {
-			logger.Error("failed to fetch host for v1 contract")
+			logger.Errorw("failed to fetch host for v1 contract", zap.Error(err))
 			continue
 		}
 
 		// form a new contract with the same host
 		_, _, err = cr.formContract(ctx, hs, host, InitialContractFunding, logger)
 		if err != nil {
-			logger.Errorf("failed to form a v2 contract with the host")
+			logger.Errorw("failed to form a v2 contract with the host", zap.Error(err))
 			continue
 		}
 
@@ -1199,7 +1199,7 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 		if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
 			id: "migrated to v2",
 		}); err != nil {
-			logger.Errorf("failed to archive migrated contract")
+			logger.With(zap.Error(err)).Errorf("failed to archive migrated contract")
 			continue
 		}
 	}
