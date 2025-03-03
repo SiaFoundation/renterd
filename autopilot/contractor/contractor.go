@@ -165,7 +165,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	hk := host.PublicKey
 
 	// fetch host settings
-	scan, err := hs.ScanHost(ctx, hk, 0)
+	scan, err := hs.ScanHost(ctx, hk, 30*time.Second)
 	if err != nil {
 		logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
@@ -1199,7 +1199,7 @@ func performV2ContractMigration(ctx *mCtx, bus Database, cr contractReviser, cs 
 		if err := bus.ArchiveContracts(ctx, map[types.FileContractID]string{
 			id: "migrated to v2",
 		}); err != nil {
-			logger.With(zap.Error(err)).Errorf("failed to archive migrated contract")
+			logger.Errorw("failed to archive migrated contract", zap.Error(err))
 			continue
 		}
 	}
