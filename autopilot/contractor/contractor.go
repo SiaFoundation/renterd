@@ -159,11 +159,14 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hk", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 
+	tCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	// convenience variables
 	hk := host.PublicKey
 
 	// fetch host settings
-	scan, err := hs.ScanHost(ctx, hk, 0)
+	scan, err := hs.ScanHost(tCtx, hk, 0)
 	if err != nil {
 		logger.Infow(err.Error(), "hk", hk)
 		return api.ContractMetadata{}, true, err
@@ -172,7 +175,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	// handle edge case where the host is not v2 but has v2 settings which can
 	// happen if we encounter a host's v2 announcement during maintenance
 	if !host.IsV2() && scan.V2Settings != (rhp.HostSettings{}) {
-		host, err = c.db.Host(ctx, hk)
+		host, err = c.db.Host(tCtx, hk)
 		if err != nil {
 			logger.With(zap.Error(err)).Error("failed to re-fetch host")
 			return api.ContractMetadata{}, false, err
@@ -180,7 +183,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	}
 
 	// fetch consensus state
-	cs, err := c.cs.ConsensusState(ctx)
+	cs, err := c.cs.ConsensusState(tCtx)
 	if err != nil {
 		return api.ContractMetadata{}, false, err
 	}
@@ -223,7 +226,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	}
 
 	// form contract
-	contract, err := c.cm.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
+	contract, err := c.cm.FormContract(tCtx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
 	if err != nil {
 		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, !utils.IsErr(err, wallet.ErrNotEnoughFunds), err
