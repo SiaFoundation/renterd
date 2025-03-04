@@ -27,16 +27,24 @@ type (
 		bus     Bus
 		logger  *zap.SugaredLogger
 
+		minNumOutputs     uint64
+		desiredNumOutputs uint64
+
 		mu                sync.Mutex
 		maintenanceTxnIDs []types.TransactionID
 	}
 )
 
-func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger) *walletMaintainer {
+func New(alerter alerts.Alerter, bus Bus, minNumOutputs, desiredNumOutputs uint64, logger *zap.Logger) *walletMaintainer {
+	if desiredNumOutputs < minNumOutputs || minNumOutputs == 0 || desiredNumOutputs == 0 {
+		panic("invalid wallet settings") // developer error
+	}
 	return &walletMaintainer{
-		alerter: alerter,
-		bus:     bus,
-		logger:  logger.Named("wallet").Sugar(),
+		alerter:           alerter,
+		bus:               bus,
+		minNumOutputs:     minNumOutputs,
+		desiredNumOutputs: desiredNumOutputs,
+		logger:            logger.Named("wallet").Sugar(),
 	}
 }
 
@@ -79,17 +87,13 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 		}
 	}
 
-	// calculate num outputs
-	const maxOutputs = 100
+	// calculate number of outputs
 	amount := contractor.InitialContractFunding.Mul64(10)
-	numOutputs := balance.Div(amount).Big().Uint64()
-	if numOutputs > maxOutputs {
-		numOutputs = maxOutputs
-	}
+	numOutputs := min(balance.Div(amount).Big().Uint64(), w.desiredNumOutputs)
 
 	// skip maintenance if wallet balance is too low
-	if numOutputs < 10 {
-		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into 10 outputs, so the balance should be at least %v", balance, amount, amount.Mul64(10))
+	if numOutputs < w.minNumOutputs {
+		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.minNumOutputs, amount.Mul64(w.minNumOutputs))
 		return nil
 	}
 

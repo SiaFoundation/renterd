@@ -1391,9 +1391,15 @@ func TestUploadDownloadSameHost(t *testing.T) {
 }
 
 func TestContractArchival(t *testing.T) {
+	// create a config with a short contract period and renew window
+	cfg := test.AutopilotConfig
+	cfg.Contracts.Period = 24
+	cfg.Contracts.RenewWindow = 8
+
 	// create a test cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts: 1,
+		autopilotConfig: &cfg,
+		hosts:           1,
 	})
 	defer cluster.Shutdown()
 	tt := cluster.tt
@@ -1409,10 +1415,10 @@ func TestContractArchival(t *testing.T) {
 	cluster.RemoveHost(cluster.hosts[0])
 
 	// mine until the contract is archived
-	endHeight := contracts[0].WindowEnd
+	archiveHeight := contracts[0].WindowStart
 	cs, err := cluster.Bus.ConsensusState(context.Background())
 	tt.OK(err)
-	cluster.MineBlocks(endHeight - cs.BlockHeight + 1)
+	cluster.MineBlocks(archiveHeight - cs.BlockHeight + 1)
 
 	// check that we have 0 contracts
 	tt.Retry(100, 100*time.Millisecond, func() error {
@@ -2762,7 +2768,7 @@ func TestConsensusResync(t *testing.T) {
 	// let them expire - we don't check for errors when mining since a few blocks
 	// might be invalid due to a race when broadcasting revisions while mining
 	// blocks rapidly
-	for i := 0; i < int(2*test.AutopilotConfig.Contracts.Period); i++ {
+	for range int(2 * test.AutopilotConfig.Contracts.Period) {
 		b, ok := coreutils.MineBlock(cluster.cm, types.Address{}, 5*time.Second)
 		if !ok {
 			continue
