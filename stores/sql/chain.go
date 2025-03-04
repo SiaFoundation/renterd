@@ -5,12 +5,19 @@ import (
 	dsql "database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/api"
 	"go.sia.tech/renterd/internal/sql"
 	"go.uber.org/zap"
+)
+
+const (
+	// updateWalletOutputsBatchSize is the number of outputs to update in a
+	// single batch.
+	updateWalletOutputsBatchSize = 500
 )
 
 var (
@@ -120,7 +127,17 @@ func UpdateWalletSiacoinElementProofs(ctx context.Context, tx sql.Tx, updater wa
 	for i := range se {
 		updater.UpdateElementProof(&se[i].StateElement)
 	}
-	return updateSiacoinStateElements(ctx, tx, se)
+
+	for len(se) > 0 {
+		batchsize := min(len(se), updateWalletOutputsBatchSize)
+		batch := se[:batchsize]
+		if err := updateSiacoinStateElements(ctx, tx, batch); err != nil {
+			return fmt.Errorf("failed to update state elements: %w", err)
+		}
+		se = se[batchsize:]
+	}
+
+	return nil
 }
 
 func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []SiacoinStateElement, err error) {
@@ -141,16 +158,32 @@ func getSiacoinStateElements(ctx context.Context, tx sql.Tx) (elements []Siacoin
 }
 
 func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []SiacoinStateElement) error {
-	updateStmt, err := tx.Prepare(ctx, "UPDATE wallet_outputs SET leaf_index = ?, merkle_proof= ? WHERE output_id = ?")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to update state elements: %w", err)
+	if len(elements) == 0 {
+		return nil
 	}
-	defer updateStmt.Close()
 
+	// build qb
+	var qb strings.Builder
+	qb.WriteString("UPDATE wallet_outputs SET leaf_index = CASE output_id ")
+	qb.WriteString(strings.Repeat("WHEN ? THEN ? ", len(elements)))
+	qb.WriteString("ELSE leaf_index END, merkle_proof = CASE output_id ")
+	qb.WriteString(strings.Repeat("WHEN ? THEN ? ", len(elements)))
+	qb.WriteString("ELSE merkle_proof END WHERE output_id IN (")
+	qb.WriteString(strings.Repeat("?, ", len(elements)-1) + "?")
+	qb.WriteString(")")
+	query := qb.String()
+
+	// build args
+	var a1, a2, a3 []any
 	for _, el := range elements {
-		if _, err := updateStmt.Exec(ctx, el.LeafIndex, MerkleProof{el.MerkleProof}, el.ID); err != nil {
-			return fmt.Errorf("failed to update state element '%v': %w", el.ID, err)
-		}
+		a1 = append(a1, el.ID, el.LeafIndex)
+		a2 = append(a2, el.ID, MerkleProof{el.MerkleProof})
+		a3 = append(a3, el.ID)
+	}
+
+	_, err := tx.Exec(ctx, query, append(a1, append(a2, a3...)...)...)
+	if err != nil {
+		return fmt.Errorf("failed to update state elements: %w", err)
 	}
 	return nil
 }
