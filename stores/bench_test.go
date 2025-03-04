@@ -114,6 +114,52 @@ func BenchmarkPruneHostSectors(b *testing.B) {
 	}
 }
 
+type noopUpdater struct{}
+
+func (n noopUpdater) UpdateElementProof(*types.StateElement) {
+	// do nothing
+}
+
+// BenchmarkUpdateWalletProofElements benchmarks updating wallet proof elements.
+//
+// 254135490 ns/op | M1 Max | SQLite
+// 254135490 ns/op | M1 Max | MySQL
+func BenchmarkUpdateWalletProofElements(b *testing.B) {
+	db, err := newTestMysqlDB(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	// db, err := newTestDB(context.Background(), b.TempDir())
+	// if err != nil {
+	// 	b.Fatal(err)
+	// }
+
+	stmt, err := db.DB().Prepare(context.Background(), "INSERT INTO wallet_outputs (output_id, leaf_index, merkle_proof) VALUES (?, ?, ?)")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer stmt.Close()
+
+	for i := range 10000 {
+		_, err := stmt.Exec(context.Background(), sql.Hash256(frand.Entropy256()), uint64(i), sql.MerkleProof{Hashes: []types.Hash256{frand.Entropy256()}})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+			return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+				tx.UpdateWalletSiacoinElementProofs(&noopUpdater{})
+				return nil
+			})
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkPruneSlabs benchmarks pruning unreferenced slabs from a database
 // containing 100 TiB worth of slabs of which 50% are prunable in batches that
 // reflect our batchsize in production.
@@ -491,7 +537,7 @@ func newTestDB(ctx context.Context, dir string) (*sqlite.MainDatabase, error) {
 }
 
 func newTestMysqlDB(ctx context.Context) (*mysql.MainDatabase, error) {
-	db, err := mysql.Open("root", "test", "localhost:3306", "")
+	db, err := mysql.Open("root", "root", "localhost:3306", "")
 	if err != nil {
 		return nil, err
 	}
