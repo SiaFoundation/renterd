@@ -13,6 +13,15 @@ import (
 	"go.uber.org/zap"
 )
 
+type WalletMaintainerOption func(*walletMaintainer)
+
+func WithNumOutputs(minNumOutputs, desiredNumOutputs uint64) WalletMaintainerOption {
+	return func(w *walletMaintainer) {
+		w.minNumOutputs = minNumOutputs
+		w.desiredNumOutputs = desiredNumOutputs
+	}
+}
+
 type (
 	Bus interface {
 		Wallet(ctx context.Context) (api.WalletResponse, error)
@@ -35,17 +44,18 @@ type (
 	}
 )
 
-func New(alerter alerts.Alerter, bus Bus, minNumOutputs, desiredNumOutputs uint64, logger *zap.Logger) *walletMaintainer {
-	if desiredNumOutputs < minNumOutputs || minNumOutputs == 0 || desiredNumOutputs == 0 {
-		panic("invalid wallet settings") // developer error
-	}
-	return &walletMaintainer{
+func New(alerter alerts.Alerter, bus Bus, logger *zap.Logger, opts ...WalletMaintainerOption) *walletMaintainer {
+	w := &walletMaintainer{
 		alerter:           alerter,
 		bus:               bus,
-		minNumOutputs:     minNumOutputs,
-		desiredNumOutputs: desiredNumOutputs,
+		minNumOutputs:     10,
+		desiredNumOutputs: 100,
 		logger:            logger.Named("wallet").Sugar(),
 	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
 }
 
 func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api.AutopilotConfig) error {

@@ -560,7 +560,7 @@ func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.
 
 	c := contractor.New(bus, bus, bus, bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
 	p := pruner.New(bus, l)
-	w := walletmaintainer.New(a, bus, 5, 5, l)
+	w := walletmaintainer.New(a, bus, l, walletmaintainer.WithNumOutputs(5, 5))
 
 	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }
