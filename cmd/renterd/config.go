@@ -109,7 +109,7 @@ var cfg = config.Config{
 
 		MigratorAccountsRefillInterval:   defaultAccountRefillInterval,
 		MigratorHealthCutoff:             0.75,
-		MigratorNumThreads:               1,
+		MigratorNumThreads:               4,
 		MigratorDownloadMaxOverdrive:     5,
 		MigratorDownloadOverdriveTimeout: 3 * time.Second,
 		MigratorUploadMaxOverdrive:       5,
