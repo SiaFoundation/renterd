@@ -1,3 +1,11 @@
+## 2.0.1 (2025-03-07)
+
+### Fixes
+
+- Fix default S3 address in README.md
+- Fix issue with remaining storage and version scoring for v2 hosts
+- Improve logging in v2 migration code and fix scan during migration not timing out
+
 ## 2.0.0 (2025-02-18)
 
 This version of `renterd` introduces full v2 support for the renting software. This means it contains all the required changes to support the hardfork later this year which also makes this a major version increase since it introduces breaking changes.

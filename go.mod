@@ -1,4 +1,4 @@
-module go.sia.tech/renterd // v2.0.0
+module go.sia.tech/renterd // v2.0.1
 
 go 1.23.1
 
@@ -15,17 +15,17 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.10.3
-	go.sia.tech/coreutils v0.12.0
+	go.sia.tech/coreutils v0.12.1-0.20250306145921-362f2554d5ca
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20250225054618-c17f8d0bcfae
 	go.sia.tech/jape v0.12.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.77.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.35.0
-	golang.org/x/sys v0.30.0
-	golang.org/x/term v0.29.0
-	golang.org/x/time v0.10.0
+	golang.org/x/crypto v0.36.0
+	golang.org/x/sys v0.31.0
+	golang.org/x/term v0.30.0
+	golang.org/x/time v0.11.0
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/frand v1.5.1
 )
@@ -54,7 +54,7 @@ require (
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/mod v0.22.0 // indirect
 	golang.org/x/net v0.34.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.28.0 // indirect
 )
