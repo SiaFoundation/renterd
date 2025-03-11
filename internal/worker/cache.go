@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 const (

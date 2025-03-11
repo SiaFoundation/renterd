@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 type (

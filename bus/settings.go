@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/stores/sql"
 )
 
 func (b Bus) gougingSettings(ctx context.Context) (api.GougingSettings, error) {

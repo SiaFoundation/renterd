@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/host"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/host"
 	"go.uber.org/zap"
 )
 

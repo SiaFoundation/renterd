@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/v2/alerts"
 )
 
 var (

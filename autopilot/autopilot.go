@@ -11,11 +11,11 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/autopilot/contractor"
-	"go.sia.tech/renterd/autopilot/scanner"
-	"go.sia.tech/renterd/build"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/autopilot/contractor"
+	"go.sia.tech/renterd/v2/autopilot/scanner"
+	"go.sia.tech/renterd/v2/build"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
 

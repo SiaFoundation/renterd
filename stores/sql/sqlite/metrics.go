@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"time"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/sql"
-	ssql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/sql"
+	ssql "go.sia.tech/renterd/v2/stores/sql"
 	"lukechampine.com/frand"
 
 	"go.uber.org/zap"

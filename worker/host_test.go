@@ -13,11 +13,11 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/host"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	"go.sia.tech/renterd/internal/test"
-	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/host"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	"go.sia.tech/renterd/v2/internal/test"
+	"go.sia.tech/renterd/v2/internal/test/mocks"
 	"lukechampine.com/frand"
 )
 

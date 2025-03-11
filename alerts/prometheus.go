@@ -1,6 +1,6 @@
 package alerts
 
-import "go.sia.tech/renterd/internal/prometheus"
+import "go.sia.tech/renterd/v2/internal/prometheus"
 
 // PrometheusMetric implements prometheus.Marshaller.
 func (a Alert) PrometheusMetric() (metrics []prometheus.Metric) {

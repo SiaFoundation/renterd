@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 const (

@@ -9,9 +9,9 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/object"
+	"go.sia.tech/renterd/v2/webhooks"
 )
 
 // The database interfaces define all methods that a SQL database must implement

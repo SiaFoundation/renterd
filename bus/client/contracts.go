@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 // AddContract adds the provided contract to the metadata store, if the contract

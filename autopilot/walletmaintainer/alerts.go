@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
+	"go.sia.tech/renterd/v2/alerts"
 )
 
 var (

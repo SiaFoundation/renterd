@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/v2/webhooks"
 )
 
 func TestWebhooks(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 // AddUploadingSectors adds the given sectors to the upload with given id.

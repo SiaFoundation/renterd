@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	_ "github.com/go-sql-driver/mysql"
-	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/v2/internal/sql"
 )
 
 var deadlockMsgs = []string{

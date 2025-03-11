@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/stores/sql"
 )
 
 // ChainIndex returns the last stored chain index.

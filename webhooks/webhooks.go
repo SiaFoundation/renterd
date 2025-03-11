@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
 

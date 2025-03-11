@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/alerts"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/utils"
+	"go.sia.tech/renterd/v2/object"
 )
 
 var (

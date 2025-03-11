@@ -10,9 +10,9 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/v2/api"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	"go.sia.tech/renterd/v2/internal/test/mocks"
 	"go.uber.org/zap"
 )
 

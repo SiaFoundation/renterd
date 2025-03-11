@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"time"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/utils"
+	"go.sia.tech/renterd/v2/object"
 )
 
 // AddPartialSlab adds a partial slab to the bus.

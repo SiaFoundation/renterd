@@ -10,11 +10,11 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/download"
-	"go.sia.tech/renterd/internal/test"
-	"go.sia.tech/renterd/internal/upload"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/download"
+	"go.sia.tech/renterd/v2/internal/test"
+	"go.sia.tech/renterd/v2/internal/upload"
+	"go.sia.tech/renterd/v2/object"
 	"lukechampine.com/frand"
 )
 

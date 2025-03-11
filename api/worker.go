@@ -12,7 +12,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/internal/memory"
+	"go.sia.tech/renterd/v2/internal/memory"
 )
 
 var (

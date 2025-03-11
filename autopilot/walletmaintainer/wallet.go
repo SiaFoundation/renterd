@@ -7,9 +7,9 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/autopilot/contractor"
+	"go.sia.tech/renterd/v2/alerts"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/autopilot/contractor"
 	"go.uber.org/zap"
 )
 

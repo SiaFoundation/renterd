@@ -4,8 +4,8 @@ import (
 	"errors"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/gouging"
 )
 
 var ErrMissingRequiredFields = errors.New("missing required fields in configuration, amount must be set")

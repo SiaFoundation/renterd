@@ -2,7 +2,7 @@ package api
 
 import (
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/object"
 )
 
 type (

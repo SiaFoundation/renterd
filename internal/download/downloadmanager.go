@@ -13,13 +13,13 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/download/downloader"
-	"go.sia.tech/renterd/internal/hosts"
-	"go.sia.tech/renterd/internal/memory"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/download/downloader"
+	"go.sia.tech/renterd/v2/internal/hosts"
+	"go.sia.tech/renterd/v2/internal/memory"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	"go.sia.tech/renterd/v2/internal/utils"
+	"go.sia.tech/renterd/v2/object"
 	"go.uber.org/zap"
 )
 

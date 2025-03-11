@@ -3,7 +3,7 @@ package mocks
 import (
 	"context"
 
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 type s3Mock struct{}

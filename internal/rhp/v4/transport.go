@@ -10,7 +10,7 @@ import (
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 type transportPool struct {

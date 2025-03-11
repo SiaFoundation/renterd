@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 type (
