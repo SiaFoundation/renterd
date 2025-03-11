@@ -12,10 +12,10 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
-	"go.sia.tech/renterd/internal/test"
-	sql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/gouging"
+	"go.sia.tech/renterd/v2/internal/test"
+	sql "go.sia.tech/renterd/v2/stores/sql"
 )
 
 // TestSQLHostDB tests the basic functionality of SQLHostDB using an in-memory

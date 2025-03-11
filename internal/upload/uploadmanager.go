@@ -15,12 +15,12 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/hosts"
-	"go.sia.tech/renterd/internal/memory"
-	"go.sia.tech/renterd/internal/upload/uploader"
-	"go.sia.tech/renterd/internal/utils"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/hosts"
+	"go.sia.tech/renterd/v2/internal/memory"
+	"go.sia.tech/renterd/v2/internal/upload/uploader"
+	"go.sia.tech/renterd/v2/internal/utils"
+	"go.sia.tech/renterd/v2/object"
 	"go.uber.org/zap"
 )
 

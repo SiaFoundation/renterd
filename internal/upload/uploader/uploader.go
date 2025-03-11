@@ -9,11 +9,11 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/hosts"
-	"go.sia.tech/renterd/internal/locking"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/hosts"
+	"go.sia.tech/renterd/v2/internal/locking"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
 

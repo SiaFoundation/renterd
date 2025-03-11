@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"go.sia.tech/coreutils/syncer"
-	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/stores/sql"
 )
 
 var (

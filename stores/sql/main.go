@@ -23,11 +23,11 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/rhp/v4"
-	"go.sia.tech/renterd/internal/sql"
-	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/internal/sql"
+	"go.sia.tech/renterd/v2/object"
+	"go.sia.tech/renterd/v2/webhooks"
 	"lukechampine.com/frand"
 )
 

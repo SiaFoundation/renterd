@@ -10,9 +10,9 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/internal/host"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/host"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 const (

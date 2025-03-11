@@ -3,8 +3,8 @@ package stores
 import (
 	"context"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/stores/sql/sqlite"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/stores/sql/sqlite"
 )
 
 func (s *SQLStore) Backup(ctx context.Context, dbID, destPath string) error {

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/gouging"
 )
 
 type (

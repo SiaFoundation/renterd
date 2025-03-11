@@ -13,9 +13,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
-	isql "go.sia.tech/renterd/internal/sql"
-	ssql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	isql "go.sia.tech/renterd/v2/internal/sql"
+	ssql "go.sia.tech/renterd/v2/stores/sql"
 	"go.uber.org/zap"
 )
 

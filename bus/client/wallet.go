@@ -6,7 +6,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 // SendSiacoins is a helper method that sends siacoins to the given address.

@@ -16,7 +16,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/config"
+	"go.sia.tech/renterd/v2/config"
 	"golang.org/x/term"
 )
 

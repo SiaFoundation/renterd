@@ -3,8 +3,8 @@ package stores
 import (
 	"context"
 
-	"go.sia.tech/renterd/api"
-	sql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	sql "go.sia.tech/renterd/v2/stores/sql"
 )
 
 // Accounts returns all accounts from the db.

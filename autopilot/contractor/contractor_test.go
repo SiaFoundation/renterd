@@ -7,7 +7,7 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )

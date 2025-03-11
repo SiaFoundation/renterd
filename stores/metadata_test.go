@@ -17,12 +17,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/config"
-	isql "go.sia.tech/renterd/internal/sql"
-	"go.sia.tech/renterd/internal/test"
-	"go.sia.tech/renterd/object"
-	sql "go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/config"
+	isql "go.sia.tech/renterd/v2/internal/sql"
+	"go.sia.tech/renterd/v2/internal/test"
+	"go.sia.tech/renterd/v2/object"
+	sql "go.sia.tech/renterd/v2/stores/sql"
 	"lukechampine.com/frand"
 )
 

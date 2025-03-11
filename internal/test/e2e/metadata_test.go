@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/test"
 )
 
 func TestObjectMetadata(t *testing.T) {

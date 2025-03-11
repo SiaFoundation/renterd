@@ -5,8 +5,8 @@ import (
 	"net"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
 

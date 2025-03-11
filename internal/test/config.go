@@ -5,7 +5,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 var (

@@ -2,7 +2,7 @@ package api
 
 import (
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/internal/prometheus"
+	"go.sia.tech/renterd/v2/internal/prometheus"
 )
 
 func WriteResponse(jc jape.Context, resp prometheus.Marshaller) {

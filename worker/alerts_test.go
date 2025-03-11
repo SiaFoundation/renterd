@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/alerts"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 // TestUploadFailedAlertErrorSet is a test to verify that an upload failing with

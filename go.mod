@@ -1,4 +1,4 @@
-module go.sia.tech/renterd // v2.0.1
+module go.sia.tech/renterd/v2 // v2.0.1
 
 go 1.23.1
 

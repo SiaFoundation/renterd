@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/url"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/object"
 )
 
 // AddObject stores the provided object under the given path.

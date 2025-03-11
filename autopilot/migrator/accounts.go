@@ -7,10 +7,10 @@ import (
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
-	"go.sia.tech/renterd/internal/locking"
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/gouging"
+	"go.sia.tech/renterd/v2/internal/locking"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 )
 
 const (

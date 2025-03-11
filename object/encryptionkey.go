@@ -11,7 +11,7 @@ import (
 	"io"
 	"math"
 
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )

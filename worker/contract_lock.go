@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/internal/locking"
+	"go.sia.tech/renterd/v2/internal/locking"
 )
 
 type ContractLocker interface {

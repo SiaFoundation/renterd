@@ -1,6 +1,6 @@
 package api
 
-import "go.sia.tech/renterd/webhooks"
+import "go.sia.tech/renterd/v2/webhooks"
 
 type WebhookResponse struct {
 	Webhooks []webhooks.Webhook          `json:"webhooks"`

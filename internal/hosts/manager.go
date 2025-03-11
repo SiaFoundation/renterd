@@ -8,21 +8,21 @@ import (
 	"net"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/accounts"
-	"go.sia.tech/renterd/internal/contracts"
-	"go.sia.tech/renterd/internal/gouging"
-	"go.sia.tech/renterd/internal/host"
-	"go.sia.tech/renterd/internal/prices"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/accounts"
+	"go.sia.tech/renterd/v2/internal/contracts"
+	"go.sia.tech/renterd/v2/internal/gouging"
+	"go.sia.tech/renterd/v2/internal/host"
+	"go.sia.tech/renterd/v2/internal/prices"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 
-	rhp3 "go.sia.tech/renterd/internal/rhp/v3"
-	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
+	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 
 	rhp "go.sia.tech/coreutils/rhp/v4"
 )

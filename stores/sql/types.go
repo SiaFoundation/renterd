@@ -19,8 +19,8 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/internal/rhp/v4"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/object"
 )
 
 const (

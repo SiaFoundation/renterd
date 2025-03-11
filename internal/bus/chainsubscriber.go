@@ -13,9 +13,9 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/stores/sql"
-	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/stores/sql"
+	"go.sia.tech/renterd/v2/webhooks"
 	"go.uber.org/zap"
 )
 

@@ -9,10 +9,10 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	cRHP4 "go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/renterd/api"
-	ibus "go.sia.tech/renterd/internal/bus"
-	"go.sia.tech/renterd/internal/gouging"
-	rhp2 "go.sia.tech/renterd/internal/rhp/v2"
+	"go.sia.tech/renterd/v2/api"
+	ibus "go.sia.tech/renterd/v2/internal/bus"
+	"go.sia.tech/renterd/v2/internal/gouging"
+	rhp2 "go.sia.tech/renterd/v2/internal/rhp/v2"
 )
 
 func (b *Bus) pruneContractV1(ctx context.Context, rk types.PrivateKey, cm api.ContractMetadata, hostIP string, gc gouging.Checker, pendingUploads map[types.Hash256]struct{}) (api.ContractPruneResponse, error) {

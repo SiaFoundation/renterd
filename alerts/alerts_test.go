@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/v2/webhooks"
 	"go.uber.org/zap"
 )
 

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"go.sia.tech/jape"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 )
 
 // A Client provides methods for interacting with an autopilot.

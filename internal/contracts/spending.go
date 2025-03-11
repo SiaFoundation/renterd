@@ -8,7 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 	"go.uber.org/zap"
 )
 

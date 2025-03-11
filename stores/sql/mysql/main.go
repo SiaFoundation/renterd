@@ -15,13 +15,13 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/object"
-	ssql "go.sia.tech/renterd/stores/sql"
-	"go.sia.tech/renterd/webhooks"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/object"
+	ssql "go.sia.tech/renterd/v2/stores/sql"
+	"go.sia.tech/renterd/v2/webhooks"
 	"lukechampine.com/frand"
 
-	"go.sia.tech/renterd/internal/sql"
+	"go.sia.tech/renterd/v2/internal/sql"
 
 	"go.uber.org/zap"
 )

@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
+	"go.sia.tech/renterd/v2/api"
 	"go.uber.org/zap"
 )
 

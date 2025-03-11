@@ -8,9 +8,9 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
 

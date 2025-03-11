@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"go.sia.tech/gofakes3"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
 

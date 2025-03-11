@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/bus/client"
-	"go.sia.tech/renterd/internal/test"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/bus/client"
+	"go.sia.tech/renterd/v2/internal/test"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 func TestAutopilot(t *testing.T) {

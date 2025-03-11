@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/test/mocks"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/test/mocks"
 )
 
 func TestDownloaderStopped(t *testing.T) {

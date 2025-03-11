@@ -12,8 +12,8 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/stores/sql"
 )
 
 type passthroughProofUpdater struct {

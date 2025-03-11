@@ -8,10 +8,10 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/gouging"
-	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
-	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/gouging"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/internal/test"
 )
 
 var cfg = api.AutopilotConfig{

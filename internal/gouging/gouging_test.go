@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/rhp/v4"
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"

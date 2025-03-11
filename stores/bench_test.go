@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	isql "go.sia.tech/renterd/internal/sql"
-	"go.sia.tech/renterd/object"
-	"go.sia.tech/renterd/stores/sql"
-	"go.sia.tech/renterd/stores/sql/mysql"
-	"go.sia.tech/renterd/stores/sql/sqlite"
+	"go.sia.tech/renterd/v2/api"
+	isql "go.sia.tech/renterd/v2/internal/sql"
+	"go.sia.tech/renterd/v2/object"
+	"go.sia.tech/renterd/v2/stores/sql"
+	"go.sia.tech/renterd/v2/stores/sql/mysql"
+	"go.sia.tech/renterd/v2/stores/sql/sqlite"
 	"go.uber.org/zap"
 
 	"lukechampine.com/frand"

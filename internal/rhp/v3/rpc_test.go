@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	rhpv3 "go.sia.tech/core/rhp/v3"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 func TestWrapRPCErr(t *testing.T) {

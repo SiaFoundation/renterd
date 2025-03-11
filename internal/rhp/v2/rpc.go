@@ -7,7 +7,7 @@ import (
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/internal/utils"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 // rpcFormContract forms a contract with a host.

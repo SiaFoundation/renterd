@@ -8,8 +8,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/internal/test"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/test"
 )
 
 // TestSettings is a test for bus settings.

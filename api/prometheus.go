@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/internal/prometheus"
+	"go.sia.tech/renterd/v2/internal/prometheus"
 )
 
 // See https://prometheus.io/docs/practices/naming/ for naming conventions

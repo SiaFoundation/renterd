@@ -8,8 +8,8 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/api"
-	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/api"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"lukechampine.com/frand"
 )
 

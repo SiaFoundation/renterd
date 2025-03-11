@@ -10,9 +10,9 @@ import (
 	"github.com/montanaflynn/stats"
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/api"
-	"go.sia.tech/renterd/stores/sql"
+	"go.sia.tech/renterd/v2/alerts"
+	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/stores/sql"
 	"go.uber.org/zap"
 )
 

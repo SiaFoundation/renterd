@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/alerts"
-	"go.sia.tech/renterd/object"
+	"go.sia.tech/renterd/v2/alerts"
+	"go.sia.tech/renterd/v2/object"
 )
 
 func TestFilterMigrationFailedAlertIDs(t *testing.T) {

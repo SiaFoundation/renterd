@@ -6,7 +6,7 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
-	rhp4 "go.sia.tech/renterd/internal/rhp/v4"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 )
 
 var (
