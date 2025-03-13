@@ -269,7 +269,7 @@ paths:
       tags:
         - worker
       summary: Reset drift for a worker's account
-      description: Resets the drift for the specified account to 0.
+      description: Resets the drift for the specified account to 0. Drift is the accumulated delta between the worker's expected balance and the host's actual balance. Used to track if a host is trying to cheat the renter over time.
       parameters:
         - name: id
           in: path
@@ -525,7 +525,7 @@ paths:
       tags:
         - worker
       summary: Delete an object
-      description: Deletes an object from the local database. The object is not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
+      description: Deletes an object from the database. The data is not removed from the network immediately. Instead, the autopilot prunes data from the contracts periodically, after that happens the host is no longer obliged to store the data and it's effectively removed from the network.
       parameters:
         - name: key
           description: The key of the file to delete
@@ -550,7 +550,7 @@ paths:
       tags:
         - worker
       summary: Delete a batch of objects with a given prefix
-      description: Deletes all objects with the provided prefix from the local database. The objects are not removed from the network immediately. Instead, the autopilot prunes data from the network periodically.
+      description: Deletes all objects with the provided prefix from the database. The data is not removed from the network immediately. Instead, the autopilot prunes data from the contracts periodically, after that happens the host is no longer obliged to store the data and it's effectively removed from the network.
       requestBody:
         content:
           application/json:
@@ -714,7 +714,7 @@ paths:
           required: false
           schema:
             type: string
-          description: The owner of the account
+          description: The owner of the account. This is usually the id of the worker that maintains the account.
       description: Returns all accounts.
       responses:
         "200":
@@ -877,7 +877,7 @@ paths:
       tags:
         - bus
       summary: Dismiss alerts
-      description: Dismisses the specified alerts.
+      description: Dismisses the alerts that correspond to the IDs in the request body.
       requestBody:
         content:
           application/json:
@@ -957,7 +957,7 @@ paths:
       tags:
         - bus
       summary: Get all buckets
-      description: Returns all known buckets.
+      description: Returns all known buckets. Every object is attached to a bucket and every bucket can have its own set of access policies.
       responses:
         "200":
           description: Successfully retrieved buckets
@@ -983,11 +983,7 @@ paths:
                 name:
                   $ref: "#/components/schemas/BucketName"
                 policy:
-                  type: object
-                  properties:
-                    publicReadAccess:
-                      type: boolean
-                      description: Whether the bucket is publicly readable
+                  $ref: "#/components/schemas/BucketPolicy"
       responses:
         "200":
           description: Successfully saved buckets
@@ -1012,7 +1008,7 @@ paths:
       tags:
         - bus
       summary: Update bucket policy
-      description: Updates the policy of the specified bucket.
+      description: Updates the policy of the specified bucket. The policy can be used to configure public read access to the bucket.
       parameters:
         - name: name
           in: path
@@ -1053,7 +1049,7 @@ paths:
       tags:
         - bus
       summary: Get bucket
-      description: Returns the specified bucket.
+      description: Returns metadata about the specified bucket.
       parameters:
         - name: name
           in: path
@@ -1074,7 +1070,7 @@ paths:
       tags:
         - bus
       summary: Delete bucket
-      description: Deletes the specified bucket.
+      description: Deletes the specified bucket. A bucket can only be deleted if it is empty.
       parameters:
         - name: name
           in: path
@@ -1107,7 +1103,7 @@ paths:
       tags:
         - bus
       summary: Accept block
-      description: Accepts a block from the consensus set.
+      description: Adds the block to the chain manager and broadcasts the block header.
       requestBody:
         content:
           application/json:
@@ -1138,7 +1134,7 @@ paths:
       tags:
         - bus
       summary: Get siafund fee
-      description: Returns the siafund fee for the specified payout.
+      description: Returns the siafund fee for a contract with the specified payout.
       parameters:
         - name: payout
           in: path
@@ -1161,7 +1157,7 @@ paths:
       tags:
         - bus
       summary: Get consensus state
-      description: Returns the current consensus state.
+      description: Returns the current block height and the time at which the last block got mined, along with a boolean indicating whether the node is synced. A node is considered synced if the last block time is less than three hours ago.
       responses:
         "200":
           description: Successfully retrieved consensus state
@@ -1177,6 +1173,7 @@ paths:
       tags:
         - bus
       summary: Get all contracts
+      description: Returns the metadata of the contracts that match the provided filter mode.
       parameters:
         - name: filtermode
           in: query
@@ -1208,7 +1205,8 @@ paths:
     put:
       tags:
         - bus
-      summary: Add a contract
+      summary: Update a contract
+      description: Updates the specified contract with the provided metadata, if the contract does not exist it is added.
       requestBody:
         content:
           application/json:
@@ -1225,6 +1223,7 @@ paths:
       tags:
         - bus
       summary: Archives all contracts
+      description: Archives all contracts. Archiving a contract means that all the data that was stored in that contract has to be migrated.
       responses:
         "200":
           description: All contracts where archived successfully
@@ -1236,6 +1235,7 @@ paths:
       tags:
         - bus
       summary: Archive contracts
+      description: Archives the contracts with the specified reasons. Archiving a contract means that all the data that was stored in that contract has to be migrated.
       requestBody:
         description: >
                 A mapping of file contract IDs (keys) to archive reasons (values).
@@ -1258,6 +1258,7 @@ paths:
       tags:
         - bus
       summary: Form a new contract
+      description: Forms a new contract with the provided metadata. This endpoint is usually called by the autopilot but also allows to form contracts manually.
       requestBody:
         content:
           application/json:
@@ -1324,6 +1325,7 @@ paths:
       tags:
         - bus
       summary: Get prunable contract data
+      description: Returns a list of all contracts that indicates how many bytes can be pruned from each contract. If objects are removed, they are removed from the database first and foremost. It is only when the contracts are pruned that hosts are no longer obligated to store the sectors, which effectively removes the data from the network.
       responses:
         "200":
           description: Prunable contract data
@@ -1352,6 +1354,7 @@ paths:
       tags:
         - bus
       summary: Get renewed contract
+      description: Returns the metadata of contract that was renewed from the contract with given contract ID.
       parameters:
         - name: id
           in: path
@@ -1373,6 +1376,7 @@ paths:
       tags:
         - bus
       summary: Record contract spending
+      description: Records the spending of a contract. This is used to keep track of how much was spent on sector deletions, funding ephemeral accounts, listing sector roots, and storing sectors.
       requestBody:
         content:
           application/json:
@@ -1425,6 +1429,7 @@ paths:
       tags:
         - bus
       summary: Get contract by ID
+      description: Returns the metadata of the contract with the specified ID.
       parameters:
         - name: id
           in: path
@@ -1444,7 +1449,7 @@ paths:
     delete:
       tags:
         - bus
-      summary: Archive contract with archival reason 'removed'
+      summary: Archive contract with archival reason 'removed'. Archiving a contract means that all the data that was stored in that contract has to be migrated.
       parameters:
         - name: id
           in: path
@@ -1461,7 +1466,7 @@ paths:
     post:
       tags:
         - bus
-      summary: Acquire contract lock
+      summary: Acquire contract lock. This lock is used to prevent multiple operations on the same contract from happening at the same time. Usually any operation that requires an update to the contract's revision needs to acquire the lock.
       parameters:
         - name: id
           in: path
@@ -1493,7 +1498,7 @@ paths:
     get:
       tags:
         - bus
-      summary: Get contract ancestors
+      summary: Get contract ancestors. A contract's ancestors are the contracts that were formed before it. If a contract is renewed, the existing contract is considered an ancestor of the new contract.
       parameters:
         - name: id
           in: path
@@ -1523,6 +1528,7 @@ paths:
       tags:
         - bus
       summary: Broadcast contract's revision
+      description: Broadcasting a contract's revision is the process of creating a signed transaction that includes the contract's revision and broadcasting that transaction to the network for it to be taken up in a block.
       parameters:
         - name: id
           in: path
@@ -1540,6 +1546,7 @@ paths:
       tags:
         - bus
       summary: Keep contract lock alive
+      description: When a contract lock gets acquired, a certain timeout is applied. This lock can be kept alive by sending a keepalive request. If the lock is not kept alive, it will be released automatically after the timeout.
       parameters:
         - name: id
           in: path
@@ -1570,6 +1577,7 @@ paths:
       tags:
         - bus
       summary: Get latest contract revision
+      description: Returns the latest revision of the contract with the specified ID.
       parameters:
         - name: id
           in: path
@@ -1593,6 +1601,7 @@ paths:
       tags:
         - bus
       summary: Prune contract data
+      description: Pruning a contract means that we compare the contract's sectors on the host with the contract's sectors in the database. Every sector in the contract that is not accounted for in our database will be pruned and thus deleted from the contract on the host side. This effectively removes the data from the network.
       parameters:
         - name: id
           in: path
@@ -1639,6 +1648,7 @@ paths:
       tags:
         - bus
       summary: Renew contract
+      description: If a contract is nearing its end height, or if it is running out of funds, it can be renewed, or refreshed, respecitively. If a contract is not renewed in due time, it will be archived and the data will need to be migrated to a different host.
       parameters:
         - name: id
           in: path
@@ -1700,6 +1710,7 @@ paths:
       tags:
         - bus
       summary: Get contract sector roots
+      description: Returns the sector roots of the contract from the database. These are not necessarily the same as the sector roots from the contract on the host.
       parameters:
         - name: id
           in: path
@@ -1721,6 +1732,7 @@ paths:
       tags:
         - bus
       summary: Get contract size
+      description: Returns the size of the contract as reported by the file contract revision, as well as the amount of data that can be removed from the contract through pruning.
       parameters:
         - name: id
           in: path
@@ -1744,6 +1756,7 @@ paths:
       tags:
         - bus
       summary: Update contract usability
+      description: Updates the usability of the contract with the provided ID. A contract can be marked as either 'good' or 'bad'. If a contract is considered bad, all of the data in that contract needs to be migrated to 'good' contracts to ensure all of the data remains healthy and the files continue to be accessible.
       parameters:
         - name: id
           in: path
@@ -1771,7 +1784,7 @@ paths:
       tags:
         - bus
       summary: Get usable hosts
-      description: Returns a list of hosts that pass the gouging checks
+      description: Returns the metadata of all hosts that are deemed usable. A host is usable if it passed the gouging checks, which are a series of checks performed on the host's prices to ensure they are within reason.
       responses:
         "200":
           description: List of usable hosts
@@ -1843,7 +1856,7 @@ paths:
       tags:
         - bus
       summary: Get host allowlist
-      description: Returns the list of allowed host public keys
+      description: Returns the list of allowed host public keys. If the allowlist is empty, all hosts are allowed. If the allowlist is not empty, only hosts with public keys that are in the allowlist are allowed and used to form contracts with.
       responses:
         "200":
           description: List of allowed host public keys
@@ -1889,7 +1902,7 @@ paths:
       tags:
         - bus
       summary: Get host blocklist
-      description: Returns the list of blocked host net addresses
+      description: Returns the list of blocked host net addresses. If a host is blocked, it will not be used to form contracts with
       responses:
         "200":
           description: List of blocked host net addresses
@@ -1936,7 +1949,7 @@ paths:
       tags:
         - bus
       summary: Remove offline hosts
-      description: Removes hosts that have been offline for the specified duration
+      description: Removes hosts that have been offline for the specified duration or have had too many consecutive scan failures
       requestBody:
         content:
           application/json:
@@ -1998,7 +2011,7 @@ paths:
       tags:
         - bus
       summary: Update host check
-      description: Updates host checks for a specific host
+      description: Updates host checks for a specific host. Host checks include gouging checks, but also other checks that score the host in relation to other hosts
       parameters:
         - name: hostkey
           in: path
@@ -2024,7 +2037,7 @@ paths:
       tags:
         - bus
       summary: Reset lost sectors
-      description: Resets the lost sectors counter for a specific host
+      description: Resets the lost sectors counter for a specific host. The lost sector count is incremented if a host is unable to provide a sector that the renter thought was stored on the host.
       parameters:
         - name: hostkey
           in: path
@@ -2091,6 +2104,7 @@ paths:
       tags:
         - bus
       summary: Get metrics
+      description: Returns the metrics for the specified key
       parameters:
         - name: key
           in: path
@@ -2964,7 +2978,7 @@ paths:
       tags:
         - bus
       summary: Get gouging settings
-      description: Returns the current gouging settings.
+      description: Returns the current gouging settings. The gouging settings are used to define boundaries for various fields that we check host prices against when trying to detect price gouging.
       responses:
         "200":
           description: Successfully retrieved gouging settings
@@ -2997,7 +3011,7 @@ paths:
       tags:
         - bus
       summary: Get pinned settings
-      description: Returns the current pinned settings.
+      description: Returns the current pinned settings. Pinned settings allow pinning currency settings against an underlying fiat currency to allow expressing them in a more stable currency.
       responses:
         "200":
           description: Successfully retrieved pinned settings
@@ -3069,7 +3083,7 @@ paths:
       tags:
         - bus
       summary: Get upload settings
-      description: Returns the current upload settings.
+      description: Returns the current upload settings. Upload settings allow configuring various parameters for uploads, such as whether packing is enabled, or the redundancy with which data is stored on the Sia network.
       responses:
         "200":
           description: Successfully retrieved upload settings
@@ -3102,7 +3116,7 @@ paths:
       tags:
         - bus
       summary: Get slab buffers info
-      description: Returns information about all slab buffers.
+      description: Returns information about all slab buffers. A slab buffer is an on-disk buffer that's used when upload packing is enabled. If a buffer reaches the size of a slab it is uploaded to the network.
       responses:
         "200":
           description: Successfully retrieved slab buffers
@@ -3877,7 +3891,7 @@ paths:
       tags:
         - bus
       summary: Register webhook
-      description: Registers a new webhook.
+      description: Registers a new webhook. Alerts is the only system that uses webhooks.
       requestBody:
         content:
           application/json:
@@ -4314,15 +4328,25 @@ components:
       type: object
       properties:
         contractPrice:
-          $ref: "#/components/schemas/Currency"
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost to the renter for forming, renewing, or refreshing a contract. Paid up front and covers the cost of the revision and storage proof transaction the host broadcasts at the end of the contract.
         collateral:
-          $ref: "#/components/schemas/Currency"
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The amount of Hastings the host will risk per byte of storage per block.
         storagePrice:
-          $ref: "#/components/schemas/Currency"
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost per byte of storage per block.
         ingressPrice:
-          $ref: "#/components/schemas/Currency"
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost per byte of data uploaded from the host
         egressPrice:
-          $ref: "#/components/schemas/Currency"
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost per byte of data downloaded from the host
         tipHeight:
           type: integer
           format: uint64
@@ -4330,6 +4354,7 @@ components:
         validUntil:
           type: string
           format: date-time
+          description: The time at which these prices will no longer be honored by the host.
         signature:
           $ref: "#/components/schemas/Signature"
 
@@ -5049,6 +5074,14 @@ components:
       pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
       description: The name of the bucket.
       example: "default"
+
+    BucketPolicy:
+      type: object
+      description: Defines access rules and permissions for a bucket.
+      properties:
+        publicReadAccess:
+          type: boolean
+          description: Configures public read access to all the objects in the bucket.
 
     BuildState:
       type: object
