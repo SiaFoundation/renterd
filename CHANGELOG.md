@@ -1,3 +1,12 @@
+## 2.0.2 (2025-03-14)
+
+### Fixes
+
+- docs: add descriptions to all routes and schemas
+- Increase default number of migrator threads
+- Redistribute wallet into 100 outputs instead of 10.
+- Update go import path to v2
+
 ## 2.0.1 (2025-03-07)
 
 ### Fixes
