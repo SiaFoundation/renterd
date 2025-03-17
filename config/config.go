@@ -176,6 +176,10 @@ func LoadFile(fp string, cfg *Config) error {
 	dec.KnownFields(true)
 
 	if err := dec.Decode(cfg); err != nil {
+		r.Reset(buf)
+		if upgradeErr := updateConfigV111(fp, r, cfg); upgradeErr == nil {
+			return nil
+		}
 		return fmt.Errorf("failed to decode config file: %w", err)
 	}
 	return nil
