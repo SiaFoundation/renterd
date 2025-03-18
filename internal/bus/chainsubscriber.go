@@ -425,7 +425,7 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 			s.wallet.SignV2Inputs(&txn, toSign)
 
 			basis, set, err := s.cm.V2TransactionSet(basis, txn)
-			if err != il {
+			if err != nil {
 				s.logger.Errorf("failed to get transaction set: %w", err)
 				return
 			}
