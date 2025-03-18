@@ -46,6 +46,7 @@ var (
 
 type (
 	ChainManager interface {
+		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		RecommendedFee() types.Currency
@@ -423,8 +424,14 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 			}
 			s.wallet.SignV2Inputs(&txn, toSign)
 
+			basis, set, err := s.cm.V2TransactionSet(basis, txn)
+			if err != il {
+				s.logger.Errorf("failed to get transaction set: %w", err)
+				return
+			}
+
 			// verify txn and broadcast it
-			_, err = s.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
+			_, err = s.cm.AddV2PoolTransactions(basis, set)
 			if err != nil &&
 				(strings.Contains(err.Error(), "has already been resolved") ||
 					strings.Contains(err.Error(), "not present in the accumulator")) {
