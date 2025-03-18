@@ -235,6 +235,9 @@ func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
 func (c *Client) object(ctx context.Context, bucket, key string, opts api.DownloadObjectOptions) (_ io.ReadCloser, _ http.Header, err error) {
 	values := url.Values{}
 	values.Set("bucket", bucket)
+	if opts.Download != nil {
+		values.Set("dl", fmt.Sprint(*opts.Download))
+	}
 	key += "?" + values.Encode()
 
 	c.c.Custom("GET", fmt.Sprintf("/object/%s", key), nil, (*[]api.ObjectMetadata)(nil))
@@ -293,12 +296,13 @@ func parseObjectResponseHeaders(header http.Header) (api.HeadObjectResponse, err
 		return api.HeadObjectResponse{}, fmt.Errorf("failed to parse Last-Modified header: %w", err)
 	}
 	return api.HeadObjectResponse{
-		ContentType:  header.Get("Content-Type"),
-		Etag:         trimEtag(header.Get("ETag")),
-		LastModified: api.TimeRFC3339(modTime),
-		Range:        r,
-		Size:         size,
-		Metadata:     api.ExtractObjectUserMetadataFrom(headers),
+		ContentDisposition: header.Get("Content-Disposition"),
+		ContentType:        header.Get("Content-Type"),
+		Etag:               trimEtag(header.Get("ETag")),
+		LastModified:       api.TimeRFC3339(modTime),
+		Range:              r,
+		Size:               size,
+		Metadata:           api.ExtractObjectUserMetadataFrom(headers),
 	}, nil
 }
 
