@@ -2172,6 +2172,8 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	} else if !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
+	} else if gor.ContentType != "application/octet-stream" {
+		t.Fatalf("unexpected content type: %v", gor.ContentType)
 	}
 
 	// Download a range of the object
@@ -2185,6 +2187,8 @@ func TestMultipartUploads(t *testing.T) {
 		t.Fatal(err)
 	} else if expectedData := data1[:1]; !bytes.Equal(data, expectedData) {
 		t.Fatal("unexpected data:", cmp.Diff(data, expectedData))
+	} else if gor.ContentType != "application/octet-stream" {
+		t.Fatalf("unexpected content type: %v", gor.ContentType)
 	}
 
 	// Check objects stats.

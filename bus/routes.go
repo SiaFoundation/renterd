@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -2156,6 +2158,13 @@ func (b *Bus) multipartHandlerCreatePOST(jc jape.Context) {
 		key = object.NoOpKey
 	} else {
 		key = object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted)
+	}
+
+	if req.MimeType == "" {
+		req.MimeType = mime.TypeByExtension(filepath.Ext(req.Key))
+		if req.MimeType == "" {
+			req.MimeType = "application/octet-stream"
+		}
 	}
 
 	resp, err := b.store.CreateMultipartUpload(jc.Request.Context(), req.Bucket, req.Key, key, req.MimeType, req.Metadata)
