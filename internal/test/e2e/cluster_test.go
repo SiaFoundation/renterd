@@ -751,6 +751,58 @@ func TestUploadDownloadBasic(t *testing.T) {
 	})
 }
 
+// TestDownloadContentDisposition is a test to verify the
+// Content-Disposition is set correctly upon download.
+func TestUploadDownloadContentDisposition(t *testing.T) {
+	// sanity check the default settings
+	if test.AutopilotConfig.Contracts.Amount < uint64(test.RedundancySettings.MinShards) {
+		t.Fatal("too few hosts to support the redundancy settings")
+	}
+
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts: test.RedundancySettings.TotalShards,
+	})
+	defer cluster.Shutdown()
+
+	w := cluster.Worker
+	tt := cluster.tt
+
+	// prepare a file
+	data := make([]byte, 128)
+	tt.OKAll(frand.Read(data))
+
+	// upload the data
+	path := fmt.Sprintf("data_%v", len(data))
+	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, path, api.UploadObjectOptions{}))
+
+	// download data
+	dl := false
+	headResp, err := w.HeadObject(context.Background(), testBucket, path, api.HeadObjectOptions{Download: &dl})
+	tt.OK(err)
+	if headResp.ContentDisposition != "" {
+		t.Fatal("expected empty content disposition")
+	}
+	getResp, err := w.GetObject(context.Background(), testBucket, path, api.DownloadObjectOptions{Download: &dl})
+	tt.OK(err)
+	if getResp.ContentDisposition != "" {
+		t.Fatal("expected empty content disposition")
+	}
+
+	// again with dl=true
+	dl = true
+	headResp, err = w.HeadObject(context.Background(), testBucket, path, api.HeadObjectOptions{Download: &dl})
+	tt.OK(err)
+	if headResp.ContentDisposition != "attachment" {
+		t.Fatal("expected attachment", headResp.ContentDisposition)
+	}
+	getResp, err = w.GetObject(context.Background(), testBucket, path, api.DownloadObjectOptions{Download: &dl})
+	tt.OK(err)
+	if getResp.ContentDisposition != "attachment" {
+		t.Fatal("expected attachment", getResp.ContentDisposition)
+	}
+}
+
 // TestUploadDownloadExtended is an integration test that verifies objects can
 // be uploaded and download correctly.
 func TestUploadDownloadExtended(t *testing.T) {

@@ -93,12 +93,13 @@ type (
 
 	// HeadObjectResponse is the response type for the HEAD /worker/object endpoint.
 	HeadObjectResponse struct {
-		ContentType  string
-		Etag         string
-		LastModified TimeRFC3339
-		Range        *ContentRange
-		Size         int64
-		Metadata     ObjectUserMetadata
+		ContentDisposition string
+		ContentType        string
+		Etag               string
+		LastModified       TimeRFC3339
+		Range              *ContentRange
+		Size               int64
+		Metadata           ObjectUserMetadata
 	}
 
 	// ObjectsResponse is the response type for the /bus/objects endpoint.
@@ -200,11 +201,13 @@ type (
 	}
 
 	HeadObjectOptions struct {
-		Range *DownloadRange
+		Download *bool
+		Range    *DownloadRange
 	}
 
 	DownloadObjectOptions struct {
-		Range *DownloadRange
+		Download *bool
+		Range    *DownloadRange
 	}
 
 	GetObjectOptions struct {
@@ -279,6 +282,9 @@ func (opts DownloadObjectOptions) ApplyHeaders(h http.Header) {
 }
 
 func (opts HeadObjectOptions) Apply(values url.Values) {
+	if opts.Download != nil {
+		values.Set("dl", fmt.Sprint(*opts.Download))
+	}
 }
 
 func (opts HeadObjectOptions) ApplyHeaders(h http.Header) {

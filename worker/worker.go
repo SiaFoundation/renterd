@@ -300,6 +300,14 @@ func (w *Worker) objectHandlerHEAD(jc jape.Context) {
 		return
 	}
 
+	// check whether the caller wants to force a download
+	var dl bool
+	if jc.DecodeForm("dl", &dl) != nil {
+		return
+	} else if dl {
+		jc.ResponseWriter.Header().Set("Content-Disposition", "attachment")
+	}
+
 	// serve the content to ensure we're setting the exact same headers as we
 	// would for a GET request
 	serveContent(jc.ResponseWriter, jc.Request, path, bytes.NewReader(nil), *hor)
@@ -349,6 +357,14 @@ func (w *Worker) objectHandlerGET(jc jape.Context) {
 		return
 	}
 	defer gor.Content.Close()
+
+	// check whether the caller wants to force a download
+	var dl bool
+	if jc.DecodeForm("dl", &dl) != nil {
+		return
+	} else if dl {
+		jc.ResponseWriter.Header().Set("Content-Disposition", "attachment")
+	}
 
 	// serve the content
 	serveContent(jc.ResponseWriter, jc.Request, key, gor.Content, gor.HeadObjectResponse)
