@@ -406,6 +406,13 @@ paths:
           required: true
           schema:
             $ref: "#/components/schemas/BucketName"
+        - name: dl
+          description: If '1' or 'true', forces the 'Content-Disposition' header of the response to be set to 'attachment'
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "dl=1"
         - name: Range
           in: header
           description: The range of bytes to download. If not provided, the entire object will be downloaded.
