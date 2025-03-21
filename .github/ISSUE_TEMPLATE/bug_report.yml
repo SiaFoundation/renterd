@@ -37,7 +37,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: What version of reneterd are you running? If you are running from source, please provide the commit hash.
+      description: What version of renterd are you running? If you are running from source, please provide the commit hash.
       placeholder: v1.0.0
     validations:
       required: true
