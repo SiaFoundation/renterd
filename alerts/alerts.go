@@ -211,16 +211,8 @@ func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	offset, limit := opts.Offset, opts.Limit
 	resp := AlertsResponse{}
-
-	if offset >= len(m.alerts) {
-		return resp, nil
-	} else if limit == -1 {
-		limit = len(m.alerts)
-	}
-
-	alerts := make([]Alert, 0, len(m.alerts))
+	filtered := make([]Alert, 0, len(m.alerts))
 	for _, a := range m.alerts {
 		if a.Severity == SeverityInfo {
 			resp.Totals.Info++
@@ -234,17 +226,25 @@ func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, er
 		if opts.Severity != 0 && a.Severity != opts.Severity {
 			continue // filter by severity
 		}
-		alerts = append(alerts, a)
+		filtered = append(filtered, a)
 	}
-	sort.Slice(alerts, func(i, j int) bool {
-		return alerts[i].Timestamp.After(alerts[j].Timestamp)
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].Timestamp.After(filtered[j].Timestamp)
 	})
-	alerts = alerts[offset:]
-	if limit < len(alerts) {
-		alerts = alerts[:limit]
+
+	// handle offset
+	if opts.Offset >= len(filtered) {
+		return resp, nil
+	}
+	filtered = filtered[opts.Offset:]
+
+	// handle limit
+	if opts.Limit > 0 && opts.Limit < len(filtered) {
+		filtered = filtered[:opts.Limit]
 		resp.HasMore = true
 	}
-	resp.Alerts = alerts
+
+	resp.Alerts = filtered
 	return resp, nil
 }
 
