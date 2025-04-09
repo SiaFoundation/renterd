@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.sia.tech/renterd/v2/config"
 	"go.uber.org/zap"
@@ -109,4 +110,25 @@ func humanEncoder(showColors bool) zapcore.Encoder {
 	cfg.StacktraceKey = ""
 	cfg.CallerKey = ""
 	return zapcore.NewConsoleEncoder(cfg)
+}
+
+type migrationLogger struct {
+	lastProgressReport time.Time
+	logger             *zap.Logger
+}
+
+func newChainMigrationLogger(log *zap.Logger) *migrationLogger {
+	return &migrationLogger{logger: log.Named("chainMigration")}
+}
+
+func (l *migrationLogger) Printf(format string, v ...any) {
+	l.logger.Info(fmt.Sprintf(format, v...))
+}
+
+func (l *migrationLogger) SetProgress(percentage float64) {
+	if time.Since(l.lastProgressReport) < time.Second {
+		return
+	}
+	l.logger.Info("migration progress", zap.Float64("percentage", percentage))
+	l.lastProgressReport = time.Now()
 }

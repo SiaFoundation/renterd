@@ -2853,7 +2853,7 @@ func TestConsensusResync(t *testing.T) {
 
 	// start with fresh chain store
 	network, genesis := testNetwork()
-	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 	tt.OK(err)
 	newCluster := newTestCluster(t, testClusterOptions{
 		cm:        chain.NewManager(store, state),
@@ -3032,7 +3032,7 @@ func TestV1ToV2Transition(t *testing.T) {
 	network, genesis := testNetwork()
 	network.HardforkV2.AllowHeight = 100
 	network.HardforkV2.RequireHeight = 200 // 100 blocks after the allow height
-	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
