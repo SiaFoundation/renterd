@@ -224,7 +224,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
 	}
 
-	idx, err := index.NewManager(db, cm, contracts, wallet, settings, storage, index.WithLog(log.Named("index")), index.WithBatchSize(0)) // off-by-one
+	idx, err := index.NewManager(db, cm, contracts, wallet, settings, storage, index.WithLog(log.Named("index")), index.WithBatchSize(1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create index manager: %w", err)
 	}
