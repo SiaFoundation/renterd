@@ -15,7 +15,7 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.10.5
-	go.sia.tech/coreutils v0.12.2-0.20250317235740-9e6e9fe76b2e
+	go.sia.tech/coreutils v0.12.2-0.20250409091611-6adf24cb30dd
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20250225054618-c17f8d0bcfae
 	go.sia.tech/jape v0.12.1
@@ -43,7 +43,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.50.0 // indirect
+	github.com/quic-go/quic-go v0.50.1 // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect

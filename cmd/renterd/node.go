@@ -327,7 +327,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 
 	// create chain manager
-	store, state, err := chain.NewDBStore(bdb, network, genesis)
+	store, state, err := chain.NewDBStore(bdb, network, genesis, newChainMigrationLogger(logger))
 	if err != nil {
 		return nil, nil, err
 	}
