@@ -79,14 +79,14 @@ type (
 
 		hk              types.PublicKey
 		signalNewUpload chan struct{}
+		stoppedChan     chan struct{}
 		shutdownCtx     context.Context
 
-		mu      sync.Mutex
-		expiry  uint64
-		fcid    types.FileContractID
-		host    api.HostInfo
-		queue   []*SectorUploadReq
-		stopped bool
+		mu     sync.Mutex
+		expiry uint64
+		fcid   types.FileContractID
+		host   api.HostInfo
+		queue  []*SectorUploadReq
 
 		// stats related field
 		consecutiveFailures uint64
@@ -108,6 +108,7 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		hk:              hi.PublicKey,
 		shutdownCtx:     ctx,
 		signalNewUpload: make(chan struct{}, 1),
+		stoppedChan:     make(chan struct{}),
 
 		// stats
 		statsSectorUploadEstimateInMS:    utils.NewDataPoints(10 * time.Minute),
@@ -164,14 +165,18 @@ outer:
 	for {
 		// wait for work
 		select {
-		case <-u.signalNewUpload:
+		case <-u.stoppedChan:
+			return
 		case <-u.shutdownCtx.Done():
 			return
+		case <-u.signalNewUpload:
 		}
 
 		for {
 			// check if we are stopped
 			select {
+			case <-u.stoppedChan:
+				return
 			case <-u.shutdownCtx.Done():
 				return
 			default:
@@ -270,28 +275,30 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 
 func (u *Uploader) Stop(err error) {
 	u.mu.Lock()
-	u.stopped = true
+	if u.isStopped() {
+		u.mu.Unlock()
+		return
+	}
+	close(u.stoppedChan)
 	u.mu.Unlock()
 
 	for {
 		req := u.pop()
 		if req == nil {
-			continue
+			break
 		}
 		req.Cancel(u.hk, err)
 	}
 }
 
 func (u *Uploader) Enqueue(req *SectorUploadReq) bool {
-	u.mu.Lock()
 	// check for stopped
-	if u.stopped {
-		u.mu.Unlock()
-		go req.Cancel(u.hk, ErrStopped) // don't block the caller
+	if u.isStopped() {
 		return false
 	}
 
 	// enqueue the request
+	u.mu.Lock()
 	u.queue = append(u.queue, req)
 	u.mu.Unlock()
 
@@ -313,6 +320,15 @@ func (u *Uploader) Estimate() float64 {
 	// calculate estimated time
 	numSectors := float64(len(u.queue) + 1)
 	return numSectors * estimateP90
+}
+
+func (u *Uploader) isStopped() bool {
+	select {
+	case <-u.stoppedChan:
+		return true
+	default:
+		return false
+	}
 }
 
 // execute executes the sector upload request, if the upload was successful it

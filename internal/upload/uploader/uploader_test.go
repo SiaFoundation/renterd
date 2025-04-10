@@ -25,22 +25,33 @@ func TestUploaderStopped(t *testing.T) {
 	md := c.Metadata()
 
 	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, md.ID, md.WindowEnd, zap.NewNop().Sugar())
-	ul.Stop(errors.New("test"))
 
-	req := SectorUploadReq{
+	// enqueue a request
+	respChan := make(chan SectorUploadResp, 1)
+	if ok := ul.Enqueue(&SectorUploadReq{
+		UploadCtx:    context.Background(),
 		SectorCtx:    context.Background(),
-		ResponseChan: make(chan SectorUploadResp),
+		ResponseChan: respChan,
+	}); !ok {
+		t.Fatal("failed to enqueue request")
 	}
 
-	ul.Enqueue(&req)
+	// stop the uploader
+	ul.Stop(ErrStopped)
 
-	select {
-	case res := <-req.ResponseChan:
-		if !errors.Is(res.Err, ErrStopped) {
-			t.Fatal("expected error response")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("no response")
+	// assert we received a response indicating the uploader was stopped
+	resp := <-respChan
+	if !errors.Is(resp.Err, ErrStopped) {
+		t.Fatal("expected error to be ErrStopped", resp.Err)
+	}
+
+	// enqueue another request
+	if ok := ul.Enqueue(&SectorUploadReq{
+		UploadCtx:    context.Background(),
+		SectorCtx:    context.Background(),
+		ResponseChan: respChan,
+	}); ok {
+		t.Fatal("expected enqueue to fail")
 	}
 }
 
@@ -190,7 +201,12 @@ func TestUploaderQueue(t *testing.T) {
 		ResponseChan: respChan,
 	}
 
-	go ul.Start()
+	stoppedChan := make(chan struct{})
+	go func() {
+		ul.Start()
+		close(stoppedChan)
+	}()
+
 	ul.Enqueue(req1) // expect normal response
 	ul.Enqueue(req2) // expect cancel response
 	ul.Enqueue(req3) // expect no response
@@ -202,5 +218,12 @@ func TestUploaderQueue(t *testing.T) {
 		t.Fatal("unexpected response", r1)
 	} else if r2 := <-respChan; r2.FCID != (types.FileContractID{}) || r2.HK != hk || r2.Err != nil || !reflect.DeepEqual(r2.Req, req2) {
 		t.Fatal("unexpected response", r2)
+	}
+
+	ul.Stop(ErrStopped)
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("uploader did not stop in time")
+	case <-stoppedChan: // asserts the uploader stopped
 	}
 }

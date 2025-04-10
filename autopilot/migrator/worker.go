@@ -190,7 +190,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	err = m.uploadManager.UploadShards(ctx, s, shardIndices, shards, allowed, bh, mem)
+	err = m.uploadManager.UploadShards(ctx, s, shards, allowed, bh, mem)
 	if err != nil {
 		m.logger.Debugw("slab migration failed",
 			zap.Error(err),

@@ -445,7 +445,7 @@ func (mgr *Manager) UploadPackedSlab(ctx context.Context, rs api.RedundancySetti
 	return nil
 }
 
-func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, hosts []HostInfo, bh uint64, mem memory.Memory) (err error) {
+func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shards [][]byte, hosts []HostInfo, bh uint64, mem memory.Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -563,7 +563,7 @@ func (mgr *Manager) refreshUploaders(hosts []HostInfo, bh uint64) {
 
 		// stop uploaders that expired
 		if uploader.Expired(bh) {
-			uploader.Stop(ErrContractExpired)
+			go uploader.Stop(ErrContractExpired) // unblock caller
 			continue
 		}
 
