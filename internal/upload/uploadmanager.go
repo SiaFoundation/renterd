@@ -107,7 +107,8 @@ type (
 	}
 
 	slabUpload struct {
-		uploadID api.UploadID
+		uploadCtx context.Context
+		uploadID  api.UploadID
 
 		maxOverdrive  uint64
 		lastOverdrive time.Time
@@ -627,7 +628,8 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 
 	// create slab upload
 	return &slabUpload{
-		uploadID: u.id,
+		uploadCtx: ctx,
+		uploadID:  u.id,
 
 		maxOverdrive: maxOverdrive,
 		mem:          mem,
@@ -694,7 +696,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	roots := make([]types.Hash256, len(shards))
 	for sI := range shards {
 		s := slab.sectors[sI]
-		requests[sI] = uploader.NewUploadRequest(s.ctx, s.data, sI, respChan, s.root, false)
+		requests[sI] = uploader.NewUploadRequest(ctx, s.ctx, s.data, sI, respChan, s.root, false)
 		roots[sI] = slab.sectors[sI].root
 	}
 
@@ -851,6 +853,12 @@ func (s *slabUpload) launch(req *uploader.SectorUploadReq) error {
 		return ErrNoCandidateUploader
 	}
 
+	// enqueue the req
+	ok := candidate.uploader.Enqueue(req)
+	if !ok {
+		return nil
+	}
+
 	// update the candidate
 	candidate.req = req
 	if req.Overdrive {
@@ -861,8 +869,6 @@ func (s *slabUpload) launch(req *uploader.SectorUploadReq) error {
 	s.numInflight++
 	s.numLaunched++
 
-	// enqueue the req
-	candidate.uploader.Enqueue(req)
 	return nil
 }
 
@@ -888,7 +894,7 @@ func (s *slabUpload) nextRequest(responseChan chan uploader.SectorUploadResp) *u
 		return nil
 	}
 
-	return uploader.NewUploadRequest(nextSector.ctx, nextSector.data, nextSector.index, responseChan, nextSector.root, true)
+	return uploader.NewUploadRequest(s.uploadCtx, nextSector.ctx, nextSector.data, nextSector.index, responseChan, nextSector.root, true)
 }
 
 func (s *slabUpload) receive(resp uploader.SectorUploadResp) (bool, bool) {

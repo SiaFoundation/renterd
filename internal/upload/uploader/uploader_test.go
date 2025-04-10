@@ -28,7 +28,7 @@ func TestUploaderStopped(t *testing.T) {
 	ul.Stop(errors.New("test"))
 
 	req := SectorUploadReq{
-		Ctx:          context.Background(),
+		SectorCtx:    context.Background(),
 		ResponseChan: make(chan SectorUploadResp),
 	}
 
@@ -156,5 +156,51 @@ func TestRefreshUploader(t *testing.T) {
 	// assert host info got updated
 	if !reflect.DeepEqual(ul.host, update) {
 		t.Fatal("host info was not updated", ul.host, update)
+	}
+}
+
+func TestUploaderQueue(t *testing.T) {
+	// mock dependencies
+	cs := mocks.NewContractStore()
+	hm := mocks.NewHostManager()
+	cl := mocks.NewContractLocker()
+
+	// create uploader
+	hk := types.PublicKey{1}
+	fcid := types.FileContractID{1}
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{PublicKey: hk}, fcid, 0, zap.NewNop().Sugar())
+
+	respChan := make(chan SectorUploadResp, 3)
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req1 := &SectorUploadReq{
+		UploadCtx:    context.Background(), // slab upload ongoing
+		SectorCtx:    context.Background(), // sector not finished
+		ResponseChan: respChan,
+	}
+	req2 := &SectorUploadReq{
+		UploadCtx:    context.Background(), // slab upload ongoing
+		SectorCtx:    cancelledCtx,         // sector got finished
+		ResponseChan: respChan,
+	}
+	req3 := &SectorUploadReq{
+		UploadCtx:    cancelledCtx, // slab upload finished
+		SectorCtx:    cancelledCtx, // sector also finished
+		ResponseChan: respChan,
+	}
+
+	go ul.Start()
+	ul.Enqueue(req1) // expect normal response
+	ul.Enqueue(req2) // expect cancel response
+	ul.Enqueue(req3) // expect no response
+	time.Sleep(100 * time.Millisecond)
+
+	if len(respChan) != 2 {
+		t.Fatal("response channel was not filled", len(respChan))
+	} else if r1 := <-respChan; r1.FCID != fcid || r1.HK != hk || r1.Err != nil || !reflect.DeepEqual(r1.Req, req1) {
+		t.Fatal("unexpected response", r1)
+	} else if r2 := <-respChan; r2.FCID != (types.FileContractID{}) || r2.HK != hk || r2.Err != nil || !reflect.DeepEqual(r2.Req, req2) {
+		t.Fatal("unexpected response", r2)
 	}
 }
