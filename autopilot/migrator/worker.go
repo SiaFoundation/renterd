@@ -3,6 +3,7 @@ package migrator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
@@ -17,6 +18,10 @@ import (
 )
 
 func (m *Migrator) migrateSlab(ctx context.Context, key object.EncryptionKey) error {
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	// fetch slab
 	slab, err := m.ss.Slab(ctx, key)
 	if err != nil {

@@ -752,20 +752,23 @@ loop:
 					buffer = append(buffer, resp.Req)
 				}
 			} else if resp.Err == nil && !used {
+				// relaunch buffered request or overdrive a sector
 				if len(buffer) > 0 {
-					// relaunch buffered upload request
 					if err := slab.launch(buffer[0]); err == nil {
 						buffer = buffer[1:]
 					}
 				} else if slab.canOverdrive(overdriveTimeout) {
-					// or try overdriving a sector
 					_ = slab.launch(slab.nextRequest(respChan))
 				}
 			}
 		case <-timer.C:
-			// try overdriving a sector
-			if slab.canOverdrive(overdriveTimeout) {
-				_ = slab.launch(slab.nextRequest(respChan)) // ignore result
+			// relaunch buffered request or overdrive a sector
+			if len(buffer) > 0 {
+				if err := slab.launch(buffer[0]); err == nil {
+					buffer = buffer[1:]
+				}
+			} else if slab.canOverdrive(overdriveTimeout) {
+				_ = slab.launch(slab.nextRequest(respChan))
 			}
 		}
 
