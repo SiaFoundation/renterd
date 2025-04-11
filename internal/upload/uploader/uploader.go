@@ -191,11 +191,11 @@ outer:
 				if req == nil {
 					return true
 				}
-				defer req.Finish(u.hk, u.fcid, errors.New("stopped"))
 
 				// skip if upload is done
 				select {
 				case <-req.Ctx.Done():
+					req.Finish(u.hk, u.fcid, context.Canceled)
 					return false
 				default:
 				}

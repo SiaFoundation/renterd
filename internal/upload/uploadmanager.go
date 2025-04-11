@@ -733,19 +733,21 @@ loop:
 		case resp := <-respChan:
 			// receive the response
 			used, done := slab.receive(resp)
+
+			// if the upload is done, we don't need to launch more requests or
+			// overdrive workers
 			if done {
 				cancel()
 				timer.Stop()
 			}
 			select {
 			case <-ctx.Done():
-				// upload is done, we don't need to launch more requests
 				continue loop
 			default:
 			}
 
 			// relaunch non-overdrive uploads
-			if resp.Err != nil && !resp.Req.Overdrive {
+			if resp.Err != nil && !errors.Is(resp.Err, context.Canceled) && !resp.Req.Overdrive {
 				if err := slab.launch(resp.Req); err != nil {
 					// a failure to relaunch non-overdrive uploads is bad, but
 					// we need to keep them around because an overdrive upload
