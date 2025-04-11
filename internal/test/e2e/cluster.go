@@ -350,7 +350,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if cm == nil {
 		// create chain manager
 		network, genesis := testNetwork()
-		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 		tt.OK(err)
 		cm = chain.NewManager(store, state)
 	}
