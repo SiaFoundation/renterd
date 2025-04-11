@@ -40,8 +40,12 @@ type (
 )
 
 type (
+	queuedSectorUploadReq struct {
+		*SectorUploadReq
+		finishOnce sync.Once
+	}
+
 	SectorUploadReq struct {
-		finishOnce   sync.Once
 		Ctx          context.Context
 		Data         *[rhpv2.SectorSize]byte
 		Idx          int
@@ -85,7 +89,7 @@ type (
 		expiry uint64
 		fcid   types.FileContractID
 		host   api.HostInfo
-		queue  []*SectorUploadReq
+		queue  []*queuedSectorUploadReq
 
 		// stats related field
 		consecutiveFailures uint64
@@ -117,7 +121,7 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		expiry: endHeight,
 		fcid:   fcid,
 		host:   hi,
-		queue:  make([]*SectorUploadReq, 0),
+		queue:  make([]*queuedSectorUploadReq, 0),
 	}
 }
 
@@ -202,7 +206,7 @@ outer:
 				elapsed := time.Since(start)
 				if errors.Is(err, rhp3.ErrMaxRevisionReached) {
 					if u.tryRefresh(req.Ctx) {
-						u.Enqueue(req)
+						u.Enqueue(req.SectorUploadReq)
 						return true
 					}
 				}
@@ -295,10 +299,11 @@ func (u *Uploader) Enqueue(req *SectorUploadReq) bool {
 	if u.isStopped() {
 		return false
 	}
-
 	// enqueue the request
 	u.mu.Lock()
-	u.queue = append(u.queue, req)
+	u.queue = append(u.queue, &queuedSectorUploadReq{
+		SectorUploadReq: req,
+	})
 	u.mu.Unlock()
 
 	// signal there's work
@@ -332,7 +337,7 @@ func (u *Uploader) isStopped() bool {
 
 // execute executes the sector upload request, if the upload was successful it
 // returns the time it took to upload the sector to the host
-func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
+func (u *Uploader) execute(req *queuedSectorUploadReq) (_ time.Duration, err error) {
 	// grab fields
 	u.mu.Lock()
 	host := u.host
@@ -375,7 +380,7 @@ func (u *Uploader) execute(req *SectorUploadReq) (_ time.Duration, err error) {
 	return time.Since(start), nil
 }
 
-func (u *Uploader) pop() *SectorUploadReq {
+func (u *Uploader) pop() *queuedSectorUploadReq {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -445,14 +450,14 @@ func (u *Uploader) tryRefresh(ctx context.Context) bool {
 	return true
 }
 
-func (req *SectorUploadReq) Finish(hk types.PublicKey, fcid types.FileContractID, err error) {
+func (req *queuedSectorUploadReq) Finish(hk types.PublicKey, fcid types.FileContractID, err error) {
 	req.finishOnce.Do(func() {
 		select {
 		case req.ResponseChan <- SectorUploadResp{
 			FCID: fcid,
 			HK:   hk,
 			Err:  err,
-			Req:  req,
+			Req:  req.SectorUploadReq,
 		}:
 		}
 	})

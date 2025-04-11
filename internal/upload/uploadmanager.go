@@ -727,17 +727,21 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	start := time.Now()
 
 	// collect responses
-	var used bool
-	var done bool
 loop:
 	for slab.numInflight > 0 {
 		select {
 		case resp := <-respChan:
 			// receive the response
-			used, done = slab.receive(resp)
+			used, done := slab.receive(resp)
 			if done {
 				cancel()
+				timer.Stop()
+			}
+			select {
+			case <-ctx.Done():
+				// upload is done, we don't need to launch more requests
 				continue loop
+			default:
 			}
 
 			// relaunch non-overdrive uploads
