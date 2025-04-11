@@ -99,7 +99,7 @@ func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 }
 
 func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
-	return nil
+	return errors.New("implement when needed")
 }
 
 func (h *Host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {

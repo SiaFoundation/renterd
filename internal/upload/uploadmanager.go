@@ -107,8 +107,7 @@ type (
 	}
 
 	slabUpload struct {
-		uploadCtx context.Context
-		uploadID  api.UploadID
+		uploadID api.UploadID
 
 		maxOverdrive  uint64
 		lastOverdrive time.Time
@@ -563,7 +562,7 @@ func (mgr *Manager) refreshUploaders(hosts []HostInfo, bh uint64) {
 
 		// stop uploaders that expired
 		if uploader.Expired(bh) {
-			go uploader.Stop(ErrContractExpired) // unblock caller
+			uploader.Stop(ErrContractExpired)
 			continue
 		}
 
@@ -589,8 +588,8 @@ func (mgr *Manager) refreshUploaders(hosts []HostInfo, bh uint64) {
 }
 
 func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan uploader.SectorUploadResp) {
-	// prepare response channel
-	responseChan := make(chan uploader.SectorUploadResp)
+	// prepare buffered response channel
+	responseChan := make(chan uploader.SectorUploadResp, len(shards)+int(maxOverdrive))
 
 	// prepare sectors
 	var wg sync.WaitGroup
@@ -628,8 +627,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 
 	// create slab upload
 	return &slabUpload{
-		uploadCtx: ctx,
-		uploadID:  u.id,
+		uploadID: u.id,
 
 		maxOverdrive: maxOverdrive,
 		mem:          mem,
@@ -696,7 +694,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	roots := make([]types.Hash256, len(shards))
 	for sI := range shards {
 		s := slab.sectors[sI]
-		requests[sI] = uploader.NewUploadRequest(ctx, s.ctx, s.data, sI, respChan, s.root, false)
+		requests[sI] = uploader.NewUploadRequest(s.ctx, s.data, sI, respChan, s.root, false)
 		roots[sI] = slab.sectors[sI].root
 	}
 
@@ -726,10 +724,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	start := time.Now()
 
 	// collect responses
-	var used bool
-	var done bool
 loop:
-	for slab.numInflight > 0 && !done {
+	for slab.numInflight > 0 {
 		select {
 		case <-u.shutdownCtx.Done():
 			return nil, 0, 0, ErrShuttingDown
@@ -737,13 +733,13 @@ loop:
 			return nil, 0, 0, context.Cause(ctx)
 		case resp := <-respChan:
 			// receive the response
-			used, done = slab.receive(resp)
+			used, done := slab.receive(resp)
 			if done {
 				break loop
 			}
 
 			// relaunch non-overdrive uploads
-			if resp.Err != nil && !resp.Req.Overdrive {
+			if resp.Err != nil && !errors.Is(resp.Err, context.Canceled) && !resp.Req.Overdrive {
 				if err := slab.launch(resp.Req); err != nil {
 					// a failure to relaunch non-overdrive uploads is bad, but
 					// we need to keep them around because an overdrive upload
@@ -897,7 +893,7 @@ func (s *slabUpload) nextRequest(responseChan chan uploader.SectorUploadResp) *u
 		return nil
 	}
 
-	return uploader.NewUploadRequest(s.uploadCtx, nextSector.ctx, nextSector.data, nextSector.index, responseChan, nextSector.root, true)
+	return uploader.NewUploadRequest(nextSector.ctx, nextSector.data, nextSector.index, responseChan, nextSector.root, true)
 }
 
 func (s *slabUpload) receive(resp uploader.SectorUploadResp) (bool, bool) {

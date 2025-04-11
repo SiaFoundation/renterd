@@ -29,8 +29,7 @@ func TestUploaderStopped(t *testing.T) {
 	// enqueue a request
 	respChan := make(chan SectorUploadResp, 1)
 	if ok := ul.Enqueue(&SectorUploadReq{
-		UploadCtx:    context.Background(),
-		SectorCtx:    context.Background(),
+		Ctx:          context.Background(),
 		ResponseChan: respChan,
 	}); !ok {
 		t.Fatal("failed to enqueue request")
@@ -47,8 +46,7 @@ func TestUploaderStopped(t *testing.T) {
 
 	// enqueue another request
 	if ok := ul.Enqueue(&SectorUploadReq{
-		UploadCtx:    context.Background(),
-		SectorCtx:    context.Background(),
+		Ctx:          context.Background(),
 		ResponseChan: respChan,
 	}); ok {
 		t.Fatal("expected enqueue to fail")
@@ -186,18 +184,11 @@ func TestUploaderQueue(t *testing.T) {
 	cancel()
 
 	req1 := &SectorUploadReq{
-		UploadCtx:    context.Background(), // slab upload ongoing
-		SectorCtx:    context.Background(), // sector not finished
+		Ctx:          context.Background(), // sector not finished
 		ResponseChan: respChan,
 	}
 	req2 := &SectorUploadReq{
-		UploadCtx:    context.Background(), // slab upload ongoing
-		SectorCtx:    cancelledCtx,         // sector got finished
-		ResponseChan: respChan,
-	}
-	req3 := &SectorUploadReq{
-		UploadCtx:    cancelledCtx, // slab upload finished
-		SectorCtx:    cancelledCtx, // sector also finished
+		Ctx:          cancelledCtx, // sector got finished
 		ResponseChan: respChan,
 	}
 
@@ -207,16 +198,15 @@ func TestUploaderQueue(t *testing.T) {
 		close(stoppedChan)
 	}()
 
-	ul.Enqueue(req1) // expect normal response
-	ul.Enqueue(req2) // expect cancel response
-	ul.Enqueue(req3) // expect no response
+	ul.Enqueue(req1)
+	ul.Enqueue(req2)
 	time.Sleep(100 * time.Millisecond)
 
 	if len(respChan) != 2 {
 		t.Fatal("response channel was not filled", len(respChan))
-	} else if r1 := <-respChan; r1.FCID != fcid || r1.HK != hk || r1.Err != nil || !reflect.DeepEqual(r1.Req, req1) {
+	} else if r1 := <-respChan; r1.FCID != fcid || r1.HK != hk || r1.Err == nil || !reflect.DeepEqual(r1.Req, req1) {
 		t.Fatal("unexpected response", r1)
-	} else if r2 := <-respChan; r2.FCID != (types.FileContractID{}) || r2.HK != hk || r2.Err != nil || !reflect.DeepEqual(r2.Req, req2) {
+	} else if r2 := <-respChan; r2.FCID != fcid || r2.HK != hk || !errors.Is(r2.Err, context.Canceled) || !reflect.DeepEqual(r2.Req, req2) {
 		t.Fatal("unexpected response", r2)
 	}
 
