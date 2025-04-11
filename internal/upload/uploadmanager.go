@@ -444,7 +444,7 @@ func (mgr *Manager) UploadPackedSlab(ctx context.Context, rs api.RedundancySetti
 	return nil
 }
 
-func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shardIndices []int, shards [][]byte, hosts []HostInfo, bh uint64, mem memory.Memory) (err error) {
+func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shards [][]byte, hosts []HostInfo, bh uint64, mem memory.Memory) (err error) {
 	// cancel all in-flight requests when the upload is done
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -588,8 +588,8 @@ func (mgr *Manager) refreshUploaders(hosts []HostInfo, bh uint64) {
 }
 
 func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64) (*slabUpload, chan uploader.SectorUploadResp) {
-	// prepare response channel
-	responseChan := make(chan uploader.SectorUploadResp)
+	// prepare buffered response channel
+	responseChan := make(chan uploader.SectorUploadResp, len(shards)+int(maxOverdrive))
 
 	// prepare sectors
 	var wg sync.WaitGroup
@@ -724,10 +724,8 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	start := time.Now()
 
 	// collect responses
-	var used bool
-	var done bool
 loop:
-	for slab.numInflight > 0 && !done {
+	for slab.numInflight > 0 {
 		select {
 		case <-u.shutdownCtx.Done():
 			return nil, 0, 0, ErrShuttingDown
@@ -735,13 +733,13 @@ loop:
 			return nil, 0, 0, context.Cause(ctx)
 		case resp := <-respChan:
 			// receive the response
-			used, done = slab.receive(resp)
+			used, done := slab.receive(resp)
 			if done {
 				break loop
 			}
 
 			// relaunch non-overdrive uploads
-			if resp.Err != nil && !resp.Req.Overdrive {
+			if resp.Err != nil && !errors.Is(resp.Err, context.Canceled) && !resp.Req.Overdrive {
 				if err := slab.launch(resp.Req); err != nil {
 					// a failure to relaunch non-overdrive uploads is bad, but
 					// we need to keep them around because an overdrive upload
@@ -750,20 +748,23 @@ loop:
 					buffer = append(buffer, resp.Req)
 				}
 			} else if resp.Err == nil && !used {
+				// relaunch buffered request or overdrive a sector
 				if len(buffer) > 0 {
-					// relaunch buffered upload request
 					if err := slab.launch(buffer[0]); err == nil {
 						buffer = buffer[1:]
 					}
 				} else if slab.canOverdrive(overdriveTimeout) {
-					// or try overdriving a sector
 					_ = slab.launch(slab.nextRequest(respChan))
 				}
 			}
 		case <-timer.C:
-			// try overdriving a sector
-			if slab.canOverdrive(overdriveTimeout) {
-				_ = slab.launch(slab.nextRequest(respChan)) // ignore result
+			// relaunch buffered request or overdrive a sector
+			if len(buffer) > 0 {
+				if err := slab.launch(buffer[0]); err == nil {
+					buffer = buffer[1:]
+				}
+			} else if slab.canOverdrive(overdriveTimeout) {
+				_ = slab.launch(slab.nextRequest(respChan))
 			}
 		}
 
@@ -851,6 +852,12 @@ func (s *slabUpload) launch(req *uploader.SectorUploadReq) error {
 		return ErrNoCandidateUploader
 	}
 
+	// enqueue the req
+	ok := candidate.uploader.Enqueue(req)
+	if !ok {
+		return nil
+	}
+
 	// update the candidate
 	candidate.req = req
 	if req.Overdrive {
@@ -861,8 +868,6 @@ func (s *slabUpload) launch(req *uploader.SectorUploadReq) error {
 	s.numInflight++
 	s.numLaunched++
 
-	// enqueue the req
-	candidate.uploader.Enqueue(req)
 	return nil
 }
 

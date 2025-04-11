@@ -357,7 +357,7 @@ func TestMigrateLostSector(t *testing.T) {
 
 	// migrate the shard away from the bad host
 	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, []int{0}, shards, hosts, 0, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, shards, hosts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestUploadShards(t *testing.T) {
 
 	// migrate those shards away from bad hosts
 	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
-	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, badIndices, shards, hosts, 0, mem)
+	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, shards, hosts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
 	}
