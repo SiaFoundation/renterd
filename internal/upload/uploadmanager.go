@@ -690,6 +690,7 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 
 	// prepare the upload
 	slab, respChan := u.newSlabUpload(ctx, shards, candidates, mem, maxOverdrive)
+	defer close(respChan)
 
 	// prepare requests
 	requests := make([]*uploader.SectorUploadReq, len(shards))
@@ -729,17 +730,14 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	var used bool
 	var done bool
 loop:
-	for slab.numInflight > 0 && !done {
+	for slab.numInflight > 0 {
 		select {
-		case <-u.shutdownCtx.Done():
-			return nil, 0, 0, ErrShuttingDown
-		case <-ctx.Done():
-			return nil, 0, 0, context.Cause(ctx)
 		case resp := <-respChan:
 			// receive the response
 			used, done = slab.receive(resp)
 			if done {
-				break loop
+				cancel()
+				continue loop
 			}
 
 			// relaunch non-overdrive uploads

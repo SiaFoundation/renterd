@@ -29,8 +29,7 @@ func TestUploaderStopped(t *testing.T) {
 	// enqueue a request
 	respChan := make(chan SectorUploadResp, 1)
 	if ok := ul.Enqueue(&SectorUploadReq{
-		UploadCtx:    context.Background(),
-		SectorCtx:    context.Background(),
+		Ctx:          context.Background(),
 		ResponseChan: respChan,
 	}); !ok {
 		t.Fatal("failed to enqueue request")
@@ -47,8 +46,7 @@ func TestUploaderStopped(t *testing.T) {
 
 	// enqueue another request
 	if ok := ul.Enqueue(&SectorUploadReq{
-		UploadCtx:    context.Background(),
-		SectorCtx:    context.Background(),
+		Ctx:          context.Background(),
 		ResponseChan: respChan,
 	}); ok {
 		t.Fatal("expected enqueue to fail")
@@ -186,18 +184,15 @@ func TestUploaderQueue(t *testing.T) {
 	cancel()
 
 	req1 := &SectorUploadReq{
-		UploadCtx:    context.Background(), // slab upload ongoing
-		SectorCtx:    context.Background(), // sector not finished
+		Ctx:          context.Background(), // sector not finished
 		ResponseChan: respChan,
 	}
 	req2 := &SectorUploadReq{
-		UploadCtx:    context.Background(), // slab upload ongoing
-		SectorCtx:    cancelledCtx,         // sector got finished
+		Ctx:          cancelledCtx, // sector got finished
 		ResponseChan: respChan,
 	}
 	req3 := &SectorUploadReq{
-		UploadCtx:    cancelledCtx, // slab upload finished
-		SectorCtx:    cancelledCtx, // sector also finished
+		Ctx:          cancelledCtx, // sector also finished
 		ResponseChan: respChan,
 	}
 
@@ -212,12 +207,14 @@ func TestUploaderQueue(t *testing.T) {
 	ul.Enqueue(req3) // expect no response
 	time.Sleep(100 * time.Millisecond)
 
-	if len(respChan) != 2 {
+	if len(respChan) != 3 {
 		t.Fatal("response channel was not filled", len(respChan))
 	} else if r1 := <-respChan; r1.FCID != fcid || r1.HK != hk || r1.Err != nil || !reflect.DeepEqual(r1.Req, req1) {
 		t.Fatal("unexpected response", r1)
-	} else if r2 := <-respChan; r2.FCID != (types.FileContractID{}) || r2.HK != hk || r2.Err != nil || !reflect.DeepEqual(r2.Req, req2) {
+	} else if r2 := <-respChan; r2.FCID != fcid || r2.HK != hk || r2.Err == nil || !reflect.DeepEqual(r2.Req, req2) {
 		t.Fatal("unexpected response", r2)
+	} else if r3 := <-respChan; r3.FCID != fcid || r3.HK != hk || r3.Err == nil || !reflect.DeepEqual(r3.Req, req3) {
+		t.Fatal("unexpected response", r3)
 	}
 
 	ul.Stop(ErrStopped)
