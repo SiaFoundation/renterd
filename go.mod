@@ -7,7 +7,7 @@ toolchain go1.24.1
 require (
 	github.com/aws/aws-sdk-go v1.55.6
 	github.com/gabriel-vasile/mimetype v1.4.8
-	github.com/go-sql-driver/mysql v1.9.1
+	github.com/go-sql-driver/mysql v1.9.2
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
 	github.com/klauspost/reedsolomon v1.12.4
