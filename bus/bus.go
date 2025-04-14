@@ -334,7 +334,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
+func New(cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
@@ -360,6 +360,8 @@ func New(ctx context.Context, cfg config.Bus, masterKey [32]byte, am AlertManage
 	}
 
 	// initialize autopilot config
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
 	err = store.InitAutopilotConfig(ctx)
 	if err != nil {
 		return nil, err
