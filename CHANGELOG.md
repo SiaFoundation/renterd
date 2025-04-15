@@ -1,3 +1,21 @@
+## 2.1.0 (2025-04-15)
+
+### Features
+
+- Add dl query param to download endpoint to be able to change the Content-Disposition to "attachment"
+
+### Fixes
+
+- Add compate code to migrate the config from v1.1.1 to v2.0.1
+- Add missing descriptions to all routes and schemas
+- Include unconfirmed parents of transactions when broadcasting revisions for expired contracts
+- Fix missing inferred MimeType for objects uploaded via multipart uploads
+- Fix out of bounds panic in alerts manager
+- Increase default number of migrator threads
+- Redistribute wallet into 100 outputs instead of 10.
+- Remove context from bus initialisation
+- Update go import path to v2
+
 ## 2.0.1 (2025-03-07)
 
 ### Fixes
