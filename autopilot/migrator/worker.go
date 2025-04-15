@@ -3,6 +3,7 @@ package migrator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
 
@@ -17,6 +18,10 @@ import (
 )
 
 func (m *Migrator) migrateSlab(ctx context.Context, key object.EncryptionKey) error {
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	// fetch slab
 	slab, err := m.ss.Slab(ctx, key)
 	if err != nil {
@@ -190,7 +195,7 @@ SHARDS:
 	}
 
 	// migrate the shards
-	err = m.uploadManager.UploadShards(ctx, s, shardIndices, shards, allowed, bh, mem)
+	err = m.uploadManager.UploadShards(ctx, s, shards, allowed, bh, mem)
 	if err != nil {
 		m.logger.Debugw("slab migration failed",
 			zap.Error(err),
