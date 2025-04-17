@@ -862,6 +862,9 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 	if newCollateral.Cmp(settings.MaxCollateral) > 0 {
 		newCollateral = settings.MaxCollateral
 	}
+	if max := rhpv4.MaxHostCollateral(settings.Prices, renterFunds); newCollateral.Cmp(max) > 0 {
+		newCollateral = max
+	}
 	if newCollateral.Cmp(minNewCollateral) < 0 {
 		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v (max: %v)", newCollateral, minNewCollateral, settings.MaxCollateral)
 	}
