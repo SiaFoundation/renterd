@@ -24,7 +24,7 @@ func New(addr, password string) *Client {
 }
 
 func (c *Client) Backup(ctx context.Context, database, dstPath string) (err error) {
-	err = c.c.WithContext(ctx).POST("/system/sqlite3/backup", api.BackupRequest{
+	err = c.c.POST(ctx, "/system/sqlite3/backup", api.BackupRequest{
 		Database: database,
 		Path:     dstPath,
 	}, nil)
@@ -33,14 +33,14 @@ func (c *Client) Backup(ctx context.Context, database, dstPath string) (err erro
 
 // ScanHost scans a host, returning its current settings and prices.
 func (c *Client) ScanHost(ctx context.Context, hostKey types.PublicKey, timeout time.Duration) (resp api.HostScanResponse, err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/host/%s/scan", hostKey), api.HostScanRequest{
+	err = c.c.POST(ctx, fmt.Sprintf("/host/%s/scan", hostKey), api.HostScanRequest{
 		Timeout: api.DurationMS(timeout),
 	}, &resp)
 	return
 }
 
 // State returns the current state of the bus.
-func (c *Client) State() (state api.BusStateResponse, err error) {
-	err = c.c.GET("/state", &state)
+func (c *Client) State(ctx context.Context) (state api.BusStateResponse, err error) {
+	err = c.c.GET(ctx, "/state", &state)
 	return
 }

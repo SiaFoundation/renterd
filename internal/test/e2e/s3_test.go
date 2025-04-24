@@ -683,7 +683,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 
 	// Block until the buffer is uploaded.
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		buffers, err := cluster.Bus.SlabBuffers()
+		buffers, err := cluster.Bus.SlabBuffers(context.Background())
 		tt.OK(err)
 		if len(buffers) != 1 {
 			return fmt.Errorf("expected 1 slab buffer, got %d", len(buffers))

@@ -152,12 +152,8 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	// initialise bus
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
-		// ensure we don't hang indefinitely
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
 		// create bus
-		b, shutdownFn, err := newBus(ctx, cfg, pk, network, genesis, logger)
+		b, shutdownFn, err := newBus(cfg, pk, network, genesis, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -281,7 +277,7 @@ func newAutopilot(masterKey [32]byte, cfg config.Autopilot, bus *bus.Client, l *
 	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }
 
-func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
+func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
 	// create store
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, cfg, pk, logger)
@@ -309,7 +305,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 
 	// migrate consensus database if necessary
-	migrateConsensusDatabase(ctx, sqlStore, consensusDir, logger)
+	migrateConsensusDatabase(sqlStore, consensusDir, logger)
 
 	// reset chain state if blockchain.db does not exist to make sure deleting
 	// it forces a resync
@@ -327,7 +323,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 
 	// create chain manager
-	store, state, err := chain.NewDBStore(bdb, network, genesis)
+	store, state, err := chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(logger.Named("chaindb")))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -411,7 +407,7 @@ func newBus(ctx context.Context, cfg config.Config, pk types.PrivateKey, network
 	}
 
 	// create bus
-	b, err := bus.New(ctx, cfg.Bus, masterKey, alertsMgr, wh, cm, s, w, sqlStore, explorerURL, logger)
+	b, err := bus.New(cfg.Bus, masterKey, alertsMgr, wh, cm, s, w, sqlStore, explorerURL, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}
@@ -574,7 +570,10 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 	}, nil
 }
 
-func migrateConsensusDatabase(ctx context.Context, store *stores.SQLStore, consensusDir string, logger *zap.Logger) error {
+func migrateConsensusDatabase(store *stores.SQLStore, consensusDir string, logger *zap.Logger) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	oldConsensus, err := os.Stat(filepath.Join(consensusDir, "consensus.db"))
 	if os.IsNotExist(err) {
 		return nil

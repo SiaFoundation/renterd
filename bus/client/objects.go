@@ -12,7 +12,7 @@ import (
 // AddObject stores the provided object under the given path.
 func (c *Client) AddObject(ctx context.Context, bucket, path string, o object.Object, opts api.AddObjectOptions) (err error) {
 	path = api.ObjectKeyEscape(path)
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/object/%s", path), api.AddObjectRequest{
+	err = c.c.PUT(ctx, fmt.Sprintf("/object/%s", path), api.AddObjectRequest{
 		Bucket:   bucket,
 		Object:   o,
 		ETag:     opts.ETag,
@@ -25,7 +25,7 @@ func (c *Client) AddObject(ctx context.Context, bucket, path string, o object.Ob
 // CopyObject copies the object from the source bucket and path to the
 // destination bucket and path.
 func (c *Client) CopyObject(ctx context.Context, srcBucket, dstBucket, srcKey, dstKey string, opts api.CopyObjectOptions) (om api.ObjectMetadata, err error) {
-	err = c.c.WithContext(ctx).POST("/objects/copy", api.CopyObjectsRequest{
+	err = c.c.POST(ctx, "/objects/copy", api.CopyObjectsRequest{
 		SourceBucket:      srcBucket,
 		DestinationBucket: dstBucket,
 		SourceKey:         srcKey,
@@ -42,13 +42,13 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, key string) (err erro
 	values.Set("bucket", bucket)
 
 	key = api.ObjectKeyEscape(key)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/object/%s?"+values.Encode(), key))
+	err = c.c.DELETE(ctx, fmt.Sprintf("/object/%s?"+values.Encode(), key))
 	return
 }
 
 // RemoveObjects removes objects with given prefix.
 func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err error) {
-	err = c.c.WithContext(ctx).POST("/objects/remove", api.ObjectsRemoveRequest{
+	err = c.c.POST(ctx, "/objects/remove", api.ObjectsRemoveRequest{
 		Bucket: bucket,
 		Prefix: prefix,
 	}, nil)
@@ -64,7 +64,7 @@ func (c *Client) Object(ctx context.Context, bucket, key string, opts api.GetObj
 	key = api.ObjectKeyEscape(key)
 	key += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/object/%s", key), &res)
+	err = c.c.GET(ctx, fmt.Sprintf("/object/%s", key), &res)
 	return
 }
 
@@ -76,7 +76,7 @@ func (c *Client) Objects(ctx context.Context, prefix string, opts api.ListObject
 	prefix = api.ObjectKeyEscape(prefix)
 	prefix += "?" + values.Encode()
 
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/objects/%s", prefix), &resp)
+	err = c.c.GET(ctx, fmt.Sprintf("/objects/%s", prefix), &resp)
 	return
 }
 
@@ -86,7 +86,7 @@ func (c *Client) ObjectsStats(ctx context.Context, opts api.ObjectsStatsOpts) (o
 	if opts.Bucket != "" {
 		values.Set("bucket", opts.Bucket)
 	}
-	err = c.c.WithContext(ctx).GET("/stats/objects?"+values.Encode(), &osr)
+	err = c.c.GET(ctx, "/stats/objects?"+values.Encode(), &osr)
 	return
 }
 
@@ -101,7 +101,7 @@ func (c *Client) RenameObjects(ctx context.Context, bucket, from, to string, for
 }
 
 func (c *Client) renameObjects(ctx context.Context, bucket, from, to, mode string, force bool) (err error) {
-	err = c.c.WithContext(ctx).POST("/objects/rename", api.ObjectsRenameRequest{
+	err = c.c.POST(ctx, "/objects/rename", api.ObjectsRenameRequest{
 		Bucket: bucket,
 		Force:  force,
 		From:   from,

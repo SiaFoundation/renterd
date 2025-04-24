@@ -21,22 +21,22 @@ func NewClient(addr, password string) *Client {
 }
 
 // State returns the current state of the autopilot.
-func (c *Client) State() (state api.AutopilotStateResponse, err error) {
-	err = c.c.GET("/state", &state)
+func (c *Client) State(ctx context.Context) (state api.AutopilotStateResponse, err error) {
+	err = c.c.GET(ctx, "/state", &state)
 	return
 }
 
 // Trigger triggers an iteration of the autopilot's main loop.
-func (c *Client) Trigger(forceScan bool) (_ bool, err error) {
+func (c *Client) Trigger(ctx context.Context, forceScan bool) (_ bool, err error) {
 	var resp api.AutopilotTriggerResponse
-	err = c.c.POST("/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)
+	err = c.c.POST(ctx, "/trigger", api.AutopilotTriggerRequest{ForceScan: forceScan}, &resp)
 	return resp.Triggered, err
 }
 
 // EvaluateConfig evaluates an autopilot config using the given gouging and
 // redundancy settings.
 func (c *Client) EvaluateConfig(ctx context.Context, cfg api.AutopilotConfig, gs api.GougingSettings, rs api.RedundancySettings) (resp api.ConfigEvaluationResponse, err error) {
-	err = c.c.WithContext(ctx).POST("/config/evaluate", api.ConfigEvaluationRequest{
+	err = c.c.POST(ctx, "/config/evaluate", api.ConfigEvaluationRequest{
 		AutopilotConfig:    cfg,
 		GougingSettings:    gs,
 		RedundancySettings: rs,

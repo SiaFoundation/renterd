@@ -1,24 +1,24 @@
 module go.sia.tech/renterd/v2 // v2.0.1
 
-go 1.23.1
+go 1.23.2
 
-toolchain go1.24.1
+toolchain go1.24.2
 
 require (
-	github.com/aws/aws-sdk-go v1.55.6
-	github.com/gabriel-vasile/mimetype v1.4.8
-	github.com/go-sql-driver/mysql v1.9.1
+	github.com/aws/aws-sdk-go v1.55.7
+	github.com/gabriel-vasile/mimetype v1.4.9
+	github.com/go-sql-driver/mysql v1.9.2
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
 	github.com/klauspost/reedsolomon v1.12.4
-	github.com/mattn/go-sqlite3 v1.14.27
+	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.10.5
-	go.sia.tech/coreutils v0.12.2-0.20250317235740-9e6e9fe76b2e
+	go.sia.tech/core v0.11.0
+	go.sia.tech/coreutils v0.13.1
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20250225054618-c17f8d0bcfae
-	go.sia.tech/jape v0.12.1
+	go.sia.tech/jape v0.13.0
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.79.0
 	go.uber.org/zap v1.27.0
@@ -43,7 +43,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.50.0 // indirect
+	github.com/quic-go/quic-go v0.51.0 // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
@@ -51,10 +51,9 @@ require (
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/net v0.37.0 // indirect
+	golang.org/x/net v0.39.0 // indirect
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	golang.org/x/tools v0.31.0 // indirect
+	golang.org/x/tools v0.32.0 // indirect
 )

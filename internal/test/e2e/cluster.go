@@ -350,7 +350,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if cm == nil {
 		// create chain manager
 		network, genesis := testNetwork()
-		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 		tt.OK(err)
 		cm = chain.NewManager(store, state)
 	}
@@ -359,7 +359,7 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 
 	// Create bus.
 	busDir := filepath.Join(dir, "bus")
-	b, bShutdownFn, cm, bs, err := newTestBus(ctx, cm, genesis, busDir, busCfg, dbCfg, wk, logger)
+	b, bShutdownFn, cm, bs, err := newTestBus(cm, genesis, busDir, busCfg, dbCfg, wk, logger)
 	tt.OK(err)
 
 	tokens := api.NewTokenStore()
@@ -565,7 +565,7 @@ func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.
 	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }
 
-func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
+func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
 	// create store config
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, dir, cfg.SlabBufferCompletionThreshold, cfgDb, pk, logger)
@@ -647,7 +647,7 @@ func newTestBus(ctx context.Context, cm *chain.Manager, genesisBlock types.Block
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
 	// create bus
-	b, err := bus.New(ctx, cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", logger)
+	b, err := bus.New(cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
