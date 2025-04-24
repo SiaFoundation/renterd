@@ -1,8 +1,8 @@
 module go.sia.tech/renterd/v2 // v2.0.1
 
-go 1.23.1
+go 1.23.2
 
-toolchain go1.24.1
+toolchain go1.24.2
 
 require (
 	github.com/aws/aws-sdk-go v1.55.7
@@ -18,7 +18,7 @@ require (
 	go.sia.tech/coreutils v0.13.1
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd v1.1.3-0.20250225054618-c17f8d0bcfae
-	go.sia.tech/jape v0.12.1
+	go.sia.tech/jape v0.13.0
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.79.0
 	go.uber.org/zap v1.27.0

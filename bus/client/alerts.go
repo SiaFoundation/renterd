@@ -19,7 +19,7 @@ func (c *Client) Alerts(ctx context.Context, opts alerts.AlertsOpts) (resp alert
 	if opts.Severity != 0 {
 		values.Set("severity", opts.Severity.String())
 	}
-	err = c.c.WithContext(ctx).GET("/alerts?"+values.Encode(), &resp)
+	err = c.c.GET(ctx, "/alerts?"+values.Encode(), &resp)
 	return
 }
 
@@ -33,10 +33,10 @@ func (c *Client) dismissAlerts(ctx context.Context, all bool, ids ...types.Hash2
 	if all {
 		values.Set("all", fmt.Sprint(true))
 	}
-	return c.c.WithContext(ctx).POST("/alerts/dismiss?"+values.Encode(), ids, nil)
+	return c.c.POST(ctx, "/alerts/dismiss?"+values.Encode(), ids, nil)
 }
 
 // RegisterAlert registers the given alert.
 func (c *Client) RegisterAlert(ctx context.Context, alert alerts.Alert) error {
-	return c.c.WithContext(ctx).POST("/alerts/register", alert, nil)
+	return c.c.POST(ctx, "/alerts/register", alert, nil)
 }

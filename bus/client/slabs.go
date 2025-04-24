@@ -31,7 +31,7 @@ func (c *Client) AddPartialSlab(ctx context.Context, data []byte, minShards, tot
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.SetBasicAuth("", c.c.Password)
 	var apsr api.AddPartialSlabResponse
 	_, _, err = utils.DoRequest(req, &apsr)
 	if err != nil {
@@ -56,7 +56,7 @@ func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey,
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.SetBasicAuth("", c.c.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (c *Client) FetchPartialSlab(ctx context.Context, key object.EncryptionKey,
 
 // MarkPackedSlabsUploaded marks the given slabs as uploaded.
 func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.UploadedPackedSlab) (err error) {
-	err = c.c.WithContext(ctx).POST("/slabbuffer/done", api.PackedSlabsRequestPOST{
+	err = c.c.POST(ctx, "/slabbuffer/done", api.PackedSlabsRequestPOST{
 		Slabs: slabs,
 	}, nil)
 	return
@@ -80,7 +80,7 @@ func (c *Client) MarkPackedSlabsUploaded(ctx context.Context, slabs []api.Upload
 
 // PackedSlabsForUpload returns packed slabs that are ready to upload.
 func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.Duration, minShards, totalShards uint8, limit int) (slabs []api.PackedSlab, err error) {
-	err = c.c.WithContext(ctx).POST("/slabbuffer/fetch", api.PackedSlabsRequestGET{
+	err = c.c.POST(ctx, "/slabbuffer/fetch", api.PackedSlabsRequestGET{
 		LockingDuration: api.DurationMS(lockingDuration),
 		MinShards:       minShards,
 		TotalShards:     totalShards,
@@ -91,18 +91,18 @@ func (c *Client) PackedSlabsForUpload(ctx context.Context, lockingDuration time.
 
 // RefreshHealth recomputes the cached health of all slabs.
 func (c *Client) RefreshHealth(ctx context.Context) error {
-	return c.c.WithContext(ctx).POST("/slabs/refreshhealth", nil, nil)
+	return c.c.POST(ctx, "/slabs/refreshhealth", nil, nil)
 }
 
 // Slab returns the slab with the given key from the bus.
 func (c *Client) Slab(ctx context.Context, key object.EncryptionKey) (slab object.Slab, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/slab/%s", key), &slab)
+	err = c.c.GET(ctx, fmt.Sprintf("/slab/%s", key), &slab)
 	return
 }
 
 // SlabBuffers returns information about the number of objects and their size.
-func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
-	err = c.c.GET("/slabbuffers", &buffers)
+func (c *Client) SlabBuffers(ctx context.Context) (buffers []api.SlabBuffer, err error) {
+	err = c.c.GET(ctx, "/slabbuffers", &buffers)
 	return
 }
 
@@ -111,7 +111,7 @@ func (c *Client) SlabBuffers() (buffers []api.SlabBuffer, err error) {
 // given 'set'.
 func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, limit int) (slabs []api.UnhealthySlab, err error) {
 	var usr api.SlabsForMigrationResponse
-	err = c.c.WithContext(ctx).POST("/slabs/migration", api.MigrationSlabsRequest{HealthCutoff: healthCutoff, Limit: limit}, &usr)
+	err = c.c.POST(ctx, "/slabs/migration", api.MigrationSlabsRequest{HealthCutoff: healthCutoff, Limit: limit}, &usr)
 	if err != nil {
 		return
 	}
@@ -121,6 +121,6 @@ func (c *Client) SlabsForMigration(ctx context.Context, healthCutoff float64, li
 // UpdateSlab updates a slab with given key, adding the given contract sector
 // links to the database.
 func (c *Client) UpdateSlab(ctx context.Context, key object.EncryptionKey, sectors []api.UploadedSector) (err error) {
-	err = c.c.WithContext(ctx).PUT(fmt.Sprintf("/slab/%s", key), sectors)
+	err = c.c.PUT(ctx, fmt.Sprintf("/slab/%s", key), sectors)
 	return
 }

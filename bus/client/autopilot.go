@@ -26,7 +26,7 @@ func WithHostsConfig(cfg api.HostsConfig) UpdateAutopilotOption {
 
 // Autopilot returns the autopilot configuration.
 func (c *Client) AutopilotConfig(ctx context.Context) (ap api.AutopilotConfig, err error) {
-	err = c.c.WithContext(ctx).GET("/autopilot", &ap)
+	err = c.c.GET(ctx, "/autopilot", &ap)
 	return
 }
 
@@ -36,5 +36,5 @@ func (c *Client) UpdateAutopilotConfig(ctx context.Context, opts ...UpdateAutopi
 	for _, opt := range opts {
 		opt(&req)
 	}
-	return c.c.WithContext(ctx).PUT("/autopilot", req)
+	return c.c.PUT(ctx, "/autopilot", req)
 }

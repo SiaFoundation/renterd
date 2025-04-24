@@ -11,7 +11,7 @@ import (
 
 // SendSiacoins is a helper method that sends siacoins to the given address.
 func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types.Currency, useUnconfirmedTxns bool) (txnID types.TransactionID, err error) {
-	err = c.c.WithContext(ctx).POST("/wallet/send", api.WalletSendRequest{
+	err = c.c.POST(ctx, "/wallet/send", api.WalletSendRequest{
 		Address:          addr,
 		Amount:           amt,
 		SubtractMinerFee: false,
@@ -22,14 +22,14 @@ func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types
 
 // Wallet calls the /wallet endpoint on the bus.
 func (c *Client) Wallet(ctx context.Context) (resp api.WalletResponse, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet", &resp)
+	err = c.c.GET(ctx, "/wallet", &resp)
 	return
 }
 
 // WalletPending returns the txpool transactions that are relevant to the
 // wallet.
 func (c *Client) WalletPending(ctx context.Context) (resp []wallet.Event, err error) {
-	err = c.c.WithContext(ctx).GET("/wallet/pending", &resp)
+	err = c.c.GET(ctx, "/wallet/pending", &resp)
 	return
 }
 
@@ -42,7 +42,7 @@ func (c *Client) WalletRedistribute(ctx context.Context, outputs int, amount typ
 		Outputs: outputs,
 	}
 
-	err = c.c.WithContext(ctx).POST("/wallet/redistribute", req, &ids)
+	err = c.c.POST(ctx, "/wallet/redistribute", req, &ids)
 	return
 }
 
@@ -52,6 +52,6 @@ func (c *Client) WalletEvents(ctx context.Context, opts ...api.WalletTransaction
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.c.WithContext(ctx).GET("/wallet/events?"+values.Encode(), &resp)
+	err = c.c.GET(ctx, "/wallet/events?"+values.Encode(), &resp)
 	return
 }

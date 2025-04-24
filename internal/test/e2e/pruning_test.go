@@ -54,7 +54,7 @@ func TestHostPruning(t *testing.T) {
 	recordFailedInteractions(9, h1.PublicKey())
 
 	// trigger the autopilot
-	tt.OKAll(a.Trigger(true))
+	tt.OKAll(a.Trigger(context.Background(), true))
 
 	// assert the host was not pruned
 	hostss, err := b.Hosts(context.Background(), api.HostOptions{})
@@ -72,7 +72,7 @@ func TestHostPruning(t *testing.T) {
 		hostss, err = b.Hosts(context.Background(), api.HostOptions{})
 		tt.OK(err)
 		if len(hostss) != 0 {
-			a.Trigger(true) // trigger autopilot
+			a.Trigger(context.Background(), true) // trigger autopilot
 			return fmt.Errorf("host was not pruned, %+v", hostss[0].Interactions)
 		}
 		return nil
