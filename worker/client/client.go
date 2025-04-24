@@ -32,19 +32,19 @@ func New(addr, password string) *Client {
 
 // Account returns the account id for a given host.
 func (c *Client) Account(ctx context.Context, hostKey types.PublicKey) (account api.Account, err error) {
-	err = c.c.WithContext(ctx).GET(fmt.Sprintf("/account/%s", hostKey), &account)
+	err = c.c.GET(ctx, fmt.Sprintf("/account/%s", hostKey), &account)
 	return
 }
 
 // Accounts returns all accounts.
 func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err error) {
-	err = c.c.WithContext(ctx).GET("/accounts", &accounts)
+	err = c.c.GET(ctx, "/accounts", &accounts)
 	return
 }
 
 // ResetDrift resets the drift of an account to zero.
 func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
-	err = c.c.WithContext(ctx).POST(fmt.Sprintf("/account/%s/resetdrift", id), nil, nil)
+	err = c.c.POST(ctx, fmt.Sprintf("/account/%s/resetdrift", id), nil, nil)
 	return
 }
 
@@ -54,7 +54,7 @@ func (c *Client) DeleteObject(ctx context.Context, bucket, key string) (err erro
 	values.Set("bucket", bucket)
 
 	key = api.ObjectKeyEscape(key)
-	err = c.c.WithContext(ctx).DELETE(fmt.Sprintf("/object/%s?"+values.Encode(), key))
+	err = c.c.DELETE(ctx, fmt.Sprintf("/object/%s?"+values.Encode(), key))
 	return
 }
 
@@ -75,8 +75,8 @@ func (c *Client) DownloadObject(ctx context.Context, w io.Writer, bucket, key st
 }
 
 // DownloadStats returns download statistics.
-func (c *Client) DownloadStats() (resp api.DownloadStatsResponse, err error) {
-	err = c.c.GET("/stats/downloads", &resp)
+func (c *Client) DownloadStats(ctx context.Context) (resp api.DownloadStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/downloads", &resp)
 	return
 }
 
@@ -95,7 +95,7 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string, opts api.He
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.SetBasicAuth("", c.c.Password)
 	opts.ApplyHeaders(req.Header)
 
 	headers, statusCode, err := utils.DoRequest(req, nil)
@@ -143,13 +143,13 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 
 // Memory requests the /memory endpoint.
 func (c *Client) Memory(ctx context.Context) (resp api.MemoryResponse, err error) {
-	err = c.c.WithContext(ctx).GET("/memory", &resp)
+	err = c.c.GET(ctx, "/memory", &resp)
 	return
 }
 
 // RemoveObjects removes the object with given prefix.
 func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err error) {
-	err = c.c.WithContext(ctx).POST("/objects/remove", api.ObjectsRemoveRequest{
+	err = c.c.POST(ctx, "/objects/remove", api.ObjectsRemoveRequest{
 		Bucket: bucket,
 		Prefix: prefix,
 	}, nil)
@@ -157,8 +157,8 @@ func (c *Client) RemoveObjects(ctx context.Context, bucket, prefix string) (err 
 }
 
 // State returns the current state of the worker.
-func (c *Client) State() (state api.WorkerStateResponse, err error) {
-	err = c.c.GET("/state", &state)
+func (c *Client) State(ctx context.Context) (state api.WorkerStateResponse, err error) {
+	err = c.c.GET(ctx, "/state", &state)
 	return
 }
 
@@ -182,7 +182,7 @@ func (c *Client) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.SetBasicAuth("", c.c.Password)
 	if opts.ContentLength != 0 {
 		req.ContentLength = opts.ContentLength
 	} else if req.ContentLength, err = sizeFromSeeker(r); err != nil {
@@ -212,7 +212,7 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.SetBasicAuth("", c.c.Password)
 	opts.ApplyHeaders(req.Header)
 	if opts.ContentLength != 0 {
 		req.ContentLength = opts.ContentLength
@@ -227,8 +227,8 @@ func (c *Client) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 }
 
 // UploadStats returns the upload stats.
-func (c *Client) UploadStats() (resp api.UploadStatsResponse, err error) {
-	err = c.c.GET("/stats/uploads", &resp)
+func (c *Client) UploadStats(ctx context.Context) (resp api.UploadStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/uploads", &resp)
 	return
 }
 
@@ -245,7 +245,7 @@ func (c *Client) object(ctx context.Context, bucket, key string, opts api.Downlo
 	if err != nil {
 		panic(err)
 	}
-	req.SetBasicAuth("", c.c.WithContext(ctx).Password)
+	req.SetBasicAuth("", c.c.Password)
 	opts.ApplyHeaders(req.Header)
 
 	resp, err := http.DefaultClient.Do(req)

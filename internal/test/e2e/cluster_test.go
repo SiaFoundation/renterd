@@ -350,7 +350,7 @@ func TestNewTestCluster(t *testing.T) {
 	}
 
 	// Fetch the autopilot state
-	state, err := cluster.Autopilot.State()
+	state, err := cluster.Autopilot.State(context.Background())
 	tt.OK(err)
 	if time.Time(state.StartTime).IsZero() {
 		t.Fatal("autopilot should have start time")
@@ -1482,7 +1482,7 @@ func TestContractArchival(t *testing.T) {
 			// trigger contract maintenance again, there's an NDF where we use
 			// the keep leeway because we can't fetch the revision preventing
 			// the contract from being archived
-			_, err := cluster.Autopilot.Trigger(false)
+			_, err := cluster.Autopilot.Trigger(context.Background(), false)
 			tt.OK(err)
 
 			cs, _ := cluster.Bus.ConsensusState(context.Background())
@@ -1710,7 +1710,7 @@ func TestUploadPacking(t *testing.T) {
 	uploadDownload("file4", data4)
 	download("file4", data4, 0, int64(len(data4)))
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		buffers, err := b.SlabBuffers()
+		buffers, err := b.SlabBuffers(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1944,7 +1944,7 @@ func TestSlabBufferStats(t *testing.T) {
 	})
 
 	// check the slab buffers
-	buffers, err := b.SlabBuffers()
+	buffers, err := b.SlabBuffers(context.Background())
 	tt.OK(err)
 	if len(buffers) != 1 {
 		t.Fatal("expected 1 slab buffer, got", len(buffers))
@@ -1997,7 +1997,7 @@ func TestSlabBufferStats(t *testing.T) {
 
 	// check the slab buffers, again a retry loop to avoid NDFs
 	tt.Retry(100, 100*time.Millisecond, func() error {
-		buffers, err = b.SlabBuffers()
+		buffers, err = b.SlabBuffers(context.Background())
 		tt.OK(err)
 		if len(buffers) != 0 {
 			return fmt.Errorf("expected 0 slab buffers, got %d", len(buffers))

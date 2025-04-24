@@ -13,13 +13,13 @@ import (
 func (c *Client) Accounts(ctx context.Context, owner string) (accounts []api.Account, err error) {
 	values := url.Values{}
 	values.Set("owner", owner)
-	err = c.c.WithContext(ctx).GET("/accounts?"+values.Encode(), &accounts)
+	err = c.c.GET(ctx, "/accounts?"+values.Encode(), &accounts)
 	return
 }
 
 func (c *Client) FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error) {
 	var resp api.AccountsFundResponse
-	err := c.c.WithContext(ctx).POST("/accounts/fund", api.AccountsFundRequest{
+	err := c.c.POST(ctx, "/accounts/fund", api.AccountsFundRequest{
 		AccountID:  account,
 		Amount:     amount,
 		ContractID: fcid,
@@ -29,7 +29,7 @@ func (c *Client) FundAccount(ctx context.Context, account rhpv3.Account, fcid ty
 
 // UpdateAccounts saves all accounts.
 func (c *Client) UpdateAccounts(ctx context.Context, accounts []api.Account) (err error) {
-	err = c.c.WithContext(ctx).POST("/accounts", api.AccountsSaveRequest{
+	err = c.c.POST(ctx, "/accounts", api.AccountsSaveRequest{
 		Accounts: accounts,
 	}, nil)
 	return
