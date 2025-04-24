@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/stores/sql"
-	"go.sia.tech/renterd/v2/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -63,14 +62,6 @@ type (
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
 	}
 
-	WebhookManager interface {
-		webhooks.Broadcaster
-		Delete(context.Context, webhooks.Webhook) error
-		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
-		Register(context.Context, webhooks.Webhook) error
-		Shutdown(context.Context) error
-	}
-
 	Wallet interface {
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
@@ -82,7 +73,6 @@ type (
 		cm     ChainManager
 		cs     ChainStore
 		s      Syncer
-		wm     WebhookManager
 		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
@@ -100,14 +90,13 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be stopped by calling Shutdown.
-func NewChainSubscriber(whm WebhookManager, cm ChainManager, cs ChainStore, s Syncer, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
+func NewChainSubscriber(cm ChainManager, cs ChainStore, s Syncer, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	logger = logger.Named("chainsubscriber")
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &chainSubscriber{
 		cm:     cm,
 		cs:     cs,
 		s:      s,
-		wm:     whm,
 		logger: logger.Sugar(),
 
 		announcementMaxAge: announcementMaxAge,

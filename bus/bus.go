@@ -37,7 +37,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.sia.tech/renterd/v2/object"
 	"go.sia.tech/renterd/v2/stores/sql"
-	"go.sia.tech/renterd/v2/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -72,7 +71,6 @@ func NewClient(addr, password string) *Client {
 type (
 	AlertManager interface {
 		alerts.Alerter
-		RegisterWebhookBroadcaster(b webhooks.Broadcaster)
 	}
 
 	ChainManager interface {
@@ -150,14 +148,6 @@ type (
 		UnconfirmedEvents() ([]wallet.Event, error)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)
-	}
-
-	WebhooksManager interface {
-		webhooks.Broadcaster
-		Delete(context.Context, webhooks.Webhook) error
-		Info() ([]webhooks.Webhook, []webhooks.WebhookQueueInfo)
-		Register(context.Context, webhooks.Webhook) error
-		Shutdown(context.Context) error
 	}
 
 	// Store is a collection of stores used by the bus.
@@ -311,15 +301,14 @@ type Bus struct {
 	startTime       time.Time
 	masterKey       utils.MasterKey
 
-	alerts      alerts.Alerter
-	alertMgr    AlertManager
-	pinMgr      PinManager
-	webhooksMgr WebhooksManager
-	cm          ChainManager
-	cs          ChainSubscriber
-	s           Syncer
-	w           Wallet
-	store       Store
+	alerts   alerts.Alerter
+	alertMgr AlertManager
+	pinMgr   PinManager
+	cm       ChainManager
+	cs       ChainSubscriber
+	s        Syncer
+	w        Wallet
+	store    Store
 
 	rhp2Client *rhp2.Client
 	rhp3Client *rhp3.Client
@@ -334,7 +323,7 @@ type Bus struct {
 }
 
 // New returns a new Bus
-func New(cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
+func New(cfg config.Bus, masterKey [32]byte, am AlertManager, cm ChainManager, s Syncer, w Wallet, store Store, explorerURL string, l *zap.Logger) (_ *Bus, err error) {
 	l = l.Named("bus")
 	dialer := rhp.NewFallbackDialer(store, net.Dialer{}, l)
 
@@ -349,10 +338,9 @@ func New(cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager
 		explorer: ibus.NewExplorer(explorerURL),
 		store:    store,
 
-		alerts:      alerts.WithOrigin(am, "bus"),
-		alertMgr:    am,
-		webhooksMgr: wm,
-		logger:      l.Sugar(),
+		alerts:   alerts.WithOrigin(am, "bus"),
+		alertMgr: am,
+		logger:   l.Sugar(),
 
 		rhp2Client: rhp2.New(dialer, l),
 		rhp3Client: rhp3.New(dialer, l),
@@ -378,7 +366,7 @@ func New(cfg config.Bus, masterKey [32]byte, am AlertManager, wm WebhooksManager
 
 	// create chain subscriber
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b.cs = ibus.NewChainSubscriber(wm, cm, store, b.s, w, announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(cm, store, b.s, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
@@ -516,11 +504,6 @@ func (b *Bus) Handler() http.Handler {
 		"GET  /wallet/pending":      b.walletPendingHandler,
 		"POST /wallet/redistribute": b.walletRedistributeHandler,
 		"POST /wallet/send":         b.walletSendSiacoinsHandler,
-
-		"GET    /webhooks":        b.webhookHandlerGet,
-		"POST   /webhooks":        b.webhookHandlerPost,
-		"POST   /webhooks/action": b.webhookActionHandlerPost,
-		"POST   /webhook/delete":  b.webhookHandlerDelete,
 	})
 }
 
@@ -528,7 +511,6 @@ func (b *Bus) Handler() http.Handler {
 func (b *Bus) Shutdown(ctx context.Context) error {
 	return errors.Join(
 		b.walletMetricsRecorder.Shutdown(ctx),
-		b.webhooksMgr.Shutdown(ctx),
 		b.pinMgr.Shutdown(ctx),
 		b.cs.Shutdown(ctx),
 	)

@@ -35,7 +35,6 @@ import (
 	"go.sia.tech/renterd/v2/stores/sql"
 	"go.sia.tech/renterd/v2/stores/sql/mysql"
 	"go.sia.tech/renterd/v2/stores/sql/sqlite"
-	"go.sia.tech/renterd/v2/webhooks"
 	"go.sia.tech/renterd/v2/worker"
 	"go.sia.tech/renterd/v2/worker/s3"
 	"go.sia.tech/web/renterd"
@@ -289,15 +288,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		return nil, nil, err
 	}
 
-	// create webhooks manager
-	wh, err := webhooks.NewManager(sqlStore, logger)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// hookup webhooks <-> alerts
-	alertsMgr.RegisterWebhookBroadcaster(wh)
-
 	// create consensus directory
 	consensusDir := filepath.Join(cfg.Directory, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
@@ -407,7 +397,7 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	}
 
 	// create bus
-	b, err := bus.New(cfg.Bus, masterKey, alertsMgr, wh, cm, s, w, sqlStore, explorerURL, logger)
+	b, err := bus.New(cfg.Bus, masterKey, alertsMgr, cm, s, w, sqlStore, explorerURL, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create bus: %w", err)
 	}

@@ -1245,8 +1245,8 @@ paths:
       description: Archives the contracts with the specified reasons. Archiving a contract means that all the data that was stored in that contract has to be migrated.
       requestBody:
         description: >
-                A mapping of file contract IDs (keys) to archive reasons (values).
-                Keys must match the pattern `^fcid:[0-9a-fA-F]{64}$`.
+          A mapping of file contract IDs (keys) to archive reasons (values).
+          Keys must match the pattern `^fcid:[0-9a-fA-F]{64}$`.
         content:
           application/json:
             schema:
@@ -1422,9 +1422,9 @@ paths:
                       - $ref: "#/components/schemas/Currency"
                       - description: The amount of siacoins that the host will receive if the contract resolves missed
                   validRenterPayout:
-                      allOf:
-                        - $ref: "#/components/schemas/Currency"
-                        - description: The amount of siacoins that the renter will receive if the contract resolves valid.
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins that the renter will receive if the contract resolves valid.
       responses:
         "200":
           description: Spending recorded successfully
@@ -1484,13 +1484,12 @@ paths:
         content:
           application/json:
             schema:
-              type:
-                object
+              type: object
               properties:
                 duration:
                   allOf:
-                   - $ref: "#/components/schemas/DurationMS"
-                   - description: The duration of the lock in milliseconds
+                    - $ref: "#/components/schemas/DurationMS"
+                    - description: The duration of the lock in milliseconds
                 priority:
                   $ref: "#/components/schemas/Priority"
       responses:
@@ -1564,8 +1563,7 @@ paths:
         content:
           application/json:
             schema:
-              type:
-                object
+              type: object
               properties:
                 duration:
                   allOf:
@@ -1800,7 +1798,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/HostInfo'
+                  $ref: "#/components/schemas/HostInfo"
         "500":
           description: Internal server error
     post:
@@ -1842,7 +1840,7 @@ paths:
                 keyIn:
                   type: array
                   items:
-                    $ref: '#/components/schemas/PublicKey'
+                    $ref: "#/components/schemas/PublicKey"
                 maxLastScan:
                   type: string
                   format: date-time
@@ -1854,7 +1852,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Host'
+                  $ref: "#/components/schemas/Host"
         "500":
           description: Internal server error
 
@@ -1872,7 +1870,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/PublicKey'
+                  $ref: "#/components/schemas/PublicKey"
         "500":
           description: Internal server error
     put:
@@ -1889,11 +1887,11 @@ paths:
                 add:
                   type: array
                   items:
-                    $ref: '#/components/schemas/PublicKey'
+                    $ref: "#/components/schemas/PublicKey"
                 remove:
                   type: array
                   items:
-                    $ref: '#/components/schemas/PublicKey'
+                    $ref: "#/components/schemas/PublicKey"
                 clear:
                   type: boolean
       responses:
@@ -1999,7 +1997,7 @@ paths:
           in: path
           description: Public key of the host
           schema:
-            $ref: '#/components/schemas/PublicKey'
+            $ref: "#/components/schemas/PublicKey"
           required: true
       responses:
         "200":
@@ -2007,7 +2005,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HostInfo'
+                $ref: "#/components/schemas/HostInfo"
         "404":
           description: Host not found
         "500":
@@ -2024,13 +2022,13 @@ paths:
           in: path
           description: Public key of the host
           schema:
-            $ref: '#/components/schemas/PublicKey'
+            $ref: "#/components/schemas/PublicKey"
           required: true
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HostChecks'
+              $ref: "#/components/schemas/HostChecks"
       responses:
         "200":
           description: Host check updated successfully
@@ -2050,7 +2048,7 @@ paths:
           in: path
           description: Public key of the host
           schema:
-            $ref: '#/components/schemas/PublicKey'
+            $ref: "#/components/schemas/PublicKey"
           required: true
       responses:
         "200":
@@ -2069,7 +2067,7 @@ paths:
           in: path
           description: Public key of the host
           schema:
-            $ref: '#/components/schemas/PublicKey'
+            $ref: "#/components/schemas/PublicKey"
           required: true
       requestBody:
         content:
@@ -2079,8 +2077,8 @@ paths:
               properties:
                 timeout:
                   allOf:
-                  - $ref: '#/components/schemas/DurationMS'
-                  - description: Scan timeout in milliseconds
+                    - $ref: "#/components/schemas/DurationMS"
+                    - description: Scan timeout in milliseconds
       responses:
         "200":
           description: Host scan results
@@ -2091,16 +2089,16 @@ paths:
                 properties:
                   ping:
                     allOf:
-                      - $ref: '#/components/schemas/DurationMS'
+                      - $ref: "#/components/schemas/DurationMS"
                       - description: Round trip time in milliseconds
                   scanError:
                     type: string
                   settings:
-                    $ref: '#/components/schemas/HostSettings'
+                    $ref: "#/components/schemas/HostSettings"
                   priceTable:
-                    $ref: '#/components/schemas/HostPriceTable'
+                    $ref: "#/components/schemas/HostPriceTable"
                   v2Settings:
-                    $ref: '#/components/schemas/HostV2Settings'
+                    $ref: "#/components/schemas/HostV2Settings"
         "500":
           description: Internal server error
         "503":
@@ -2139,7 +2137,7 @@ paths:
           required: true
           schema:
             allOf:
-              - $ref: '#/components/schemas/DurationMS'
+              - $ref: "#/components/schemas/DurationMS"
               - description: Interval duration in milliseconds
         - name: contractid
           in: query
@@ -2351,9 +2349,9 @@ paths:
                 key:
                   $ref: "#/components/schemas/ObjectKey"
                 uploadID:
-                    allOf:
-                      - $ref: "#/components/schemas/UploadID"
-                      - description: The ID of the multipart upload
+                  allOf:
+                    - $ref: "#/components/schemas/UploadID"
+                    - description: The ID of the multipart upload
                 parts:
                   type: array
                   items:
@@ -2548,9 +2546,9 @@ paths:
                 key:
                   $ref: "#/components/schemas/ObjectKey"
                 uploadID:
-                    allOf:
-                      - $ref: "#/components/schemas/UploadID"
-                      - description: The ID of the multipart upload
+                  allOf:
+                    - $ref: "#/components/schemas/UploadID"
+                    - description: The ID of the multipart upload
                 partNumberMarker:
                   type: integer
                   description: Part number to start listing from
@@ -3799,38 +3797,38 @@ paths:
           description: Internal server error
 
   /bus/wallet/redistribute:
-      post:
-        tags:
+    post:
+      tags:
         - bus
-        summary: Redistribute wallet funds
-        description: Redistributes the wallet's funds into desired number of outputs of requested value.
-        requestBody:
+      summary: Redistribute wallet funds
+      description: Redistributes the wallet's funds into desired number of outputs of requested value.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outputs:
+                  type: integer
+                  format: uint64
+                  description: The number of outputs to redistribute the wallet's funds into
+                amount:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The value of each output
+      responses:
+        "200":
+          description: Successfully redistributed wallet funds
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  outputs:
-                    type: integer
-                    format: uint64
-                    description: The number of outputs to redistribute the wallet's funds into
-                  amount:
-                    allOf:
-                      - $ref: "#/components/schemas/Currency"
-                      - description: The value of each output
-        responses:
-          "200":
-            description: Successfully redistributed wallet funds
-            content:
-              application/json:
-                schema:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/TransactionID"
-          "400":
-            description: Malformed request
-          "500":
-            description: Internal server error
+                type: array
+                items:
+                  $ref: "#/components/schemas/TransactionID"
+        "400":
+          description: Malformed request
+        "500":
+          description: Internal server error
 
   /bus/wallet/send:
     post:
@@ -3869,80 +3867,6 @@ paths:
                   - description: The ID of the transaction
         "400":
           description: Malformed request
-        "500":
-          description: Internal server error
-
-  /bus/webhooks:
-    get:
-      tags:
-        - bus
-      summary: Get webhooks
-      description: Returns all registered webhooks and their queue information.
-      responses:
-        "200":
-          description: Successfully retrieved webhooks
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  queues:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/WebhookQueueInfo"
-                  webhooks:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Webhook"
-    post:
-      tags:
-        - bus
-      summary: Register webhook
-      description: Registers a new webhook. Alerts is the only system that uses webhooks.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/Webhook"
-      responses:
-        "200":
-          description: Successfully registered webhook
-        "500":
-          description: Internal server error
-
-  /bus/webhooks/action:
-    post:
-      tags:
-        - bus
-      summary: Broadcast webhook action
-      description: Broadcasts a webhook event to registered webhooks.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/WebhookEvent"
-      responses:
-        "200":
-          description: Successfully broadcast action
-        "500":
-          description: Internal server error
-
-  /bus/webhook/delete:
-    post:
-      tags:
-        - bus
-      summary: Delete webhook
-      description: Deletes a registered webhook.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/Webhook"
-      responses:
-        "200":
-          description: Successfully deleted webhook
-        "404":
-          description: Webhook not found
         "500":
           description: Internal server error
 
@@ -4384,107 +4308,107 @@ components:
             - description: The host's current block height.
         updatepricetablecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost to fetch a new price table from the host.
         accountbalancecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost to fetch the balance of an ephemeral account.
         fundaccountcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost to fund an ephemeral account on the host.
         latestrevisioncost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost to retrieve the latest revision of a contract.
         subscriptionmemorycost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost of storing a byte of data for a subscription period.
         subscriptionnotificationcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost of a single notification on top of bandwidth charges.
         initbasecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The base cost incurred when starting an MDM program.
         memorytimecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte per time for the memory consumed by a program.
         downloadbandwidthcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte for download bandwidth.
         uploadbandwidthcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte for upload bandwidth.
         dropsectorsbasecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The base cost of performing a DropSectors instruction.
         dropsectorsunitcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The unit cost per sector for performing a DropSectors instruction.
         hassectorbasecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost for executing the HasSector command.
         readbasecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The base cost of performing a Read instruction.
         readlengthcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte read during a Read instruction.
         renewcontractcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost for renewing a contract.
         revisionbasecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The base cost for performing a Revision command.
         swapsectorcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost of swapping two full sectors by root.
         writebasecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The base cost per write operation.
         writelengthcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte written during a Write instruction.
         writestorecost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte/block of additional storage.
         txnfeeminrecommended:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The minimum recommended transaction fee.
         txnfeemaxrecommended:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The maximum recommended transaction fee.
         contractprice:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The additional fee charged by the host to form or renew a contract.
         collateralcost:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The cost per byte for the collateral promised by the host.
         maxcollateral:
           allOf:
-            - $ref: '#/components/schemas/Currency'
+            - $ref: "#/components/schemas/Currency"
             - description: The maximum amount of collateral the host is willing to put into a contract.
         maxduration:
           description: Maximum duration (in blocks) for which the host is willing to form a contract.
@@ -4858,8 +4782,8 @@ components:
             - description: Indicates which fields of the transaction are covered by the signature
         signature:
           allOf:
-          - $ref: "#/components/schemas/Signature"
-          - description: The signature of the transaction
+            - $ref: "#/components/schemas/Signature"
+            - description: The signature of the transaction
 
     UnlockConditions:
       type: object
@@ -5250,7 +5174,7 @@ components:
       type: string
       pattern: '^(W/)?".*?"$'
       description: An ETag representing a resource
-      example: "W/\"33a64df551425fcc55e4d42a148795d9f25f89d4\""
+      example: 'W/"33a64df551425fcc55e4d42a148795d9f25f89d4"'
 
     Event:
       type: object
@@ -5401,7 +5325,7 @@ components:
           description: Whether the host has been scanned
         blocked:
           type: boolean
-          description:  Whether the host is blocked
+          description: Whether the host is blocked
         checks:
           $ref: "#/components/schemas/HostChecks"
         storedData:
@@ -5419,11 +5343,11 @@ components:
       type: object
       properties:
         gougingBreakdown:
-          $ref: '#/components/schemas/HostGougingBreakdown'
+          $ref: "#/components/schemas/HostGougingBreakdown"
         scoreBreakdown:
-          $ref: '#/components/schemas/HostScoreBreakdown'
+          $ref: "#/components/schemas/HostScoreBreakdown"
         usabilityBreakdown:
-          $ref: '#/components/schemas/HostUsabilityBreakdown'
+          $ref: "#/components/schemas/HostUsabilityBreakdown"
 
     HostGougingBreakdown:
       type: object
@@ -5976,7 +5900,7 @@ components:
       description: A contiguous region within a slab
       properties:
         slab:
-         $ref: "#/components/schemas/Slab"
+          $ref: "#/components/schemas/Slab"
         offset:
           type: integer
           format: uint32
@@ -6037,9 +5961,9 @@ components:
           type: boolean
           description: Whether upload packing is enabled
         slabBufferMaxSizeSoft:
-              type: integer
-              format: int64
-              description: Maximum size for slab buffers
+          type: integer
+          format: int64
+          description: Maximum size for slab buffers
 
     WalletMetric:
       type: object
