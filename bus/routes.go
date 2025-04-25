@@ -1182,7 +1182,11 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	// use RHP4 if we're passed the V2 hardfork allow height
 	var contract api.ContractMetadata
 	if b.isPassedV2AllowHeight() {
-		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
+		if c.EndHeight() == rrr.EndHeight {
+			contract, err = b.refreshContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
+		} else {
+			contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
+		}
 	} else {
 		contract, err = b.renewContractV1(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
 		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
