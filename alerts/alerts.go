@@ -12,7 +12,6 @@ import (
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/object"
-	"go.sia.tech/renterd/v2/webhooks"
 	"lukechampine.com/frand"
 )
 
@@ -30,10 +29,6 @@ const (
 	severityWarningStr  = "warning"
 	severityErrorStr    = "error"
 	severityCriticalStr = "critical"
-
-	webhookModule        = "alerts"
-	webhookEventDismiss  = "dismiss"
-	webhookEventRegister = "register"
 )
 
 type (
@@ -64,8 +59,7 @@ type (
 	Manager struct {
 		mu sync.Mutex
 		// alerts is a map of alert IDs to their current alert.
-		alerts             map[types.Hash256]Alert
-		webhookBroadcaster webhooks.Broadcaster
+		alerts map[types.Hash256]Alert
 	}
 
 	AlertsOpts struct {
@@ -168,14 +162,8 @@ func (m *Manager) RegisterAlert(ctx context.Context, alert Alert) error {
 
 	m.mu.Lock()
 	m.alerts[alert.ID] = alert
-	wb := m.webhookBroadcaster
 	m.mu.Unlock()
-
-	return wb.BroadcastAction(ctx, webhooks.Event{
-		Module:  webhookModule,
-		Event:   webhookEventRegister,
-		Payload: alert,
-	})
+	return nil
 }
 
 // DismissAlerts implements the Alerter interface.
@@ -193,17 +181,8 @@ func (m *Manager) DismissAlerts(ctx context.Context, ids ...types.Hash256) error
 	if len(m.alerts) == 0 {
 		m.alerts = make(map[types.Hash256]Alert) // reclaim memory
 	}
-	wb := m.webhookBroadcaster
 	m.mu.Unlock()
-
-	if len(dismissed) == 0 {
-		return nil // don't fire webhook to avoid spam
-	}
-	return wb.BroadcastAction(ctx, webhooks.Event{
-		Module:  webhookModule,
-		Event:   webhookEventDismiss,
-		Payload: dismissed,
-	})
+	return nil
 }
 
 // Alerts returns the host's active alerts.
@@ -248,20 +227,10 @@ func (m *Manager) Alerts(_ context.Context, opts AlertsOpts) (AlertsResponse, er
 	return resp, nil
 }
 
-func (m *Manager) RegisterWebhookBroadcaster(b webhooks.Broadcaster) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.webhookBroadcaster.(*webhooks.NoopBroadcaster); !ok {
-		panic("webhook broadcaster already registered")
-	}
-	m.webhookBroadcaster = b
-}
-
 // NewManager initializes a new alerts manager.
 func NewManager() *Manager {
 	return &Manager{
-		alerts:             make(map[types.Hash256]Alert),
-		webhookBroadcaster: &webhooks.NoopBroadcaster{},
+		alerts: make(map[types.Hash256]Alert),
 	}
 }
 

@@ -27,7 +27,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/sql"
 	"go.sia.tech/renterd/v2/object"
-	"go.sia.tech/renterd/v2/webhooks"
 	"lukechampine.com/frand"
 )
 
@@ -565,18 +564,6 @@ func DeleteMetadata(ctx context.Context, tx sql.Tx, objID int64) error {
 func DeleteSetting(ctx context.Context, tx sql.Tx, key string) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM settings WHERE `key` = ?", key); err != nil {
 		return fmt.Errorf("failed to delete setting '%s': %w", key, err)
-	}
-	return nil
-}
-
-func DeleteWebhook(ctx context.Context, tx sql.Tx, wh webhooks.Webhook) error {
-	res, err := tx.Exec(ctx, "DELETE FROM webhooks WHERE module = ? AND event = ? AND url = ?", wh.Module, wh.Event, wh.URL)
-	if err != nil {
-		return fmt.Errorf("failed to delete webhook: %w", err)
-	} else if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	} else if n == 0 {
-		return webhooks.ErrWebhookNotFound
 	}
 	return nil
 }
@@ -2148,27 +2135,6 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 		})
 	}
 	return tx.UpsertContractSectors(ctx, upsert)
-}
-
-func Webhooks(ctx context.Context, tx sql.Tx) ([]webhooks.Webhook, error) {
-	rows, err := tx.Query(ctx, "SELECT module, event, url, headers FROM webhooks")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch webhooks: %w", err)
-	}
-	defer rows.Close()
-
-	var whs []webhooks.Webhook
-	for rows.Next() {
-		var webhook webhooks.Webhook
-		var headers string
-		if err := rows.Scan(&webhook.Module, &webhook.Event, &webhook.URL, &headers); err != nil {
-			return nil, fmt.Errorf("failed to scan webhook: %w", err)
-		} else if err := json.Unmarshal([]byte(headers), &webhook.Headers); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
-		}
-		whs = append(whs, webhook)
-	}
-	return whs, nil
 }
 
 func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {

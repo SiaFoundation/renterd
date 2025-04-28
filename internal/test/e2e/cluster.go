@@ -41,7 +41,6 @@ import (
 	"go.sia.tech/renterd/v2/stores/sql"
 	"go.sia.tech/renterd/v2/stores/sql/mysql"
 	"go.sia.tech/renterd/v2/stores/sql/sqlite"
-	"go.sia.tech/renterd/v2/webhooks"
 	"go.sia.tech/renterd/v2/worker/s3"
 	"go.sia.tech/web/renterd"
 	"go.uber.org/zap"
@@ -579,15 +578,6 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 		return nil, nil, nil, nil, err
 	}
 
-	// create webhooks manager
-	wh, err := webhooks.NewManager(sqlStore, logger)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	// hookup webhooks <-> alerts
-	alertsMgr.RegisterWebhookBroadcaster(wh)
-
 	// create consensus directory
 	consensusDir := filepath.Join(dir, "consensus")
 	if err := os.MkdirAll(consensusDir, 0700); err != nil {
@@ -647,7 +637,7 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
 	// create bus
-	b, err := bus.New(cfg, masterKey, alertsMgr, wh, cm, s, w, sqlStore, "", logger)
+	b, err := bus.New(cfg, masterKey, alertsMgr, cm, s, w, sqlStore, "", logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

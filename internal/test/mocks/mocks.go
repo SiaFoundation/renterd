@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/memory"
-	"go.sia.tech/renterd/v2/webhooks"
 )
 
 type accountsMock struct{}
@@ -63,22 +62,19 @@ type busMock struct {
 	*settingStoreMock
 	*syncerMock
 	*s3Mock
-	*webhookBroadcasterMock
-	*webhookStoreMock
 }
 
 func NewBus(cs *ContractStore, hs *HostStore, os *ObjectStore) *busMock {
 	return &busMock{
-		alerterMock:            &alerterMock{},
-		accountsMock:           &accountsMock{},
-		Chain:                  &Chain{},
-		ContractLocker:         NewContractLocker(),
-		ContractStore:          cs,
-		HostStore:              hs,
-		ObjectStore:            os,
-		settingStoreMock:       &settingStoreMock{},
-		syncerMock:             &syncerMock{},
-		webhookBroadcasterMock: &webhookBroadcasterMock{},
+		alerterMock:      &alerterMock{},
+		accountsMock:     &accountsMock{},
+		Chain:            &Chain{},
+		ContractLocker:   NewContractLocker(),
+		ContractStore:    cs,
+		HostStore:        hs,
+		ObjectStore:      os,
+		settingStoreMock: &settingStoreMock{},
+		syncerMock:       &syncerMock{},
 	}
 }
 
@@ -178,22 +174,4 @@ func (*syncerMock) BroadcastTransaction(context.Context, []types.Transaction) er
 
 func (*syncerMock) SyncerPeers(context.Context) ([]string, error) {
 	return nil, nil
-}
-
-var _ webhooks.Broadcaster = (*webhookBroadcasterMock)(nil)
-
-type webhookBroadcasterMock struct{}
-
-func (*webhookBroadcasterMock) BroadcastAction(context.Context, webhooks.Event) error {
-	return nil
-}
-
-type webhookStoreMock struct{}
-
-func (*webhookStoreMock) RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
-	return nil
-}
-
-func (*webhookStoreMock) UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error {
-	return nil
 }

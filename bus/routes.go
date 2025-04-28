@@ -37,7 +37,6 @@ import (
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/build"
 	"go.sia.tech/renterd/v2/object"
-	"go.sia.tech/renterd/v2/webhooks"
 	"go.uber.org/zap"
 )
 
@@ -1925,16 +1924,6 @@ func (b *Bus) hostsCheckHandlerPUT(jc jape.Context) {
 	}
 }
 
-func (b *Bus) broadcastAction(e webhooks.Event) {
-	log := b.logger.With("event", e.Event).With("module", e.Module)
-	err := b.webhooksMgr.BroadcastAction(context.Background(), e)
-	if err != nil {
-		log.With(zap.Error(err)).Error("failed to broadcast action")
-	} else {
-		log.Debug("successfully broadcast action")
-	}
-}
-
 func (b *Bus) consensusPayoutContractTaxHandlerGET(jc jape.Context) {
 	var payout types.Currency
 	if jc.DecodeParam("payout", (*api.ParamCurrency)(&payout)) != nil {
@@ -1984,54 +1973,6 @@ func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
 		b.sectors.FinishUpload(id)
-	}
-}
-
-func (b *Bus) webhookActionHandlerPost(jc jape.Context) {
-	var action webhooks.Event
-	if jc.Check("failed to decode action", jc.Decode(&action)) != nil {
-		return
-	}
-	b.broadcastAction(action)
-}
-
-func (b *Bus) webhookHandlerDelete(jc jape.Context) {
-	var wh webhooks.Webhook
-	if jc.Decode(&wh) != nil {
-		return
-	}
-	err := b.webhooksMgr.Delete(jc.Request.Context(), wh)
-	if errors.Is(err, webhooks.ErrWebhookNotFound) {
-		jc.Error(fmt.Errorf("webhook for URL %v and event %v.%v not found", wh.URL, wh.Module, wh.Event), http.StatusNotFound)
-		return
-	} else if jc.Check("failed to delete webhook", err) != nil {
-		return
-	}
-}
-
-func (b *Bus) webhookHandlerGet(jc jape.Context) {
-	webhooks, queueInfos := b.webhooksMgr.Info()
-	jc.Encode(api.WebhookResponse{
-		Queues:   queueInfos,
-		Webhooks: webhooks,
-	})
-}
-
-func (b *Bus) webhookHandlerPost(jc jape.Context) {
-	var req webhooks.Webhook
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	err := b.webhooksMgr.Register(jc.Request.Context(), webhooks.Webhook{
-		Event:   req.Event,
-		Module:  req.Module,
-		URL:     req.URL,
-		Headers: req.Headers,
-	})
-	if err != nil {
-		jc.Error(fmt.Errorf("failed to add Webhook: %w", err), http.StatusInternalServerError)
-		return
 	}
 }
 

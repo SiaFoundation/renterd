@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/sql"
 	"go.sia.tech/renterd/v2/object"
 	ssql "go.sia.tech/renterd/v2/stores/sql"
-	"go.sia.tech/renterd/v2/webhooks"
 	"lukechampine.com/frand"
 
 	"go.uber.org/zap"
@@ -179,23 +178,6 @@ func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
 	return err
 }
 
-func (tx *MainDatabaseTx) AddWebhook(ctx context.Context, wh webhooks.Webhook) error {
-	headers := "{}"
-	if len(wh.Headers) > 0 {
-		h, err := json.Marshal(wh.Headers)
-		if err != nil {
-			return fmt.Errorf("failed to marshal headers: %w", err)
-		}
-		headers = string(h)
-	}
-	_, err := tx.Exec(ctx, "INSERT INTO webhooks (created_at, module, event, url, headers) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET headers = EXCLUDED.headers",
-		time.Now(), wh.Module, wh.Event, wh.URL, headers)
-	if err != nil {
-		return fmt.Errorf("failed to insert webhook: %w", err)
-	}
-	return nil
-}
-
 func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error) {
 	return ssql.AncestorContracts(ctx, tx, fcid, startHeight)
 }
@@ -345,10 +327,6 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 
 func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
 	return ssql.DeleteSetting(ctx, tx, key)
-}
-
-func (tx *MainDatabaseTx) DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error {
-	return ssql.DeleteWebhook(ctx, tx, wh)
 }
 
 func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error) {
@@ -1195,10 +1173,6 @@ func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) (
 
 func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, err error) {
 	return ssql.WalletEventCount(ctx, tx.Tx)
-}
-
-func (tx *MainDatabaseTx) Webhooks(ctx context.Context) ([]webhooks.Webhook, error) {
-	return ssql.Webhooks(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, slices object.SlabSlices) error {
