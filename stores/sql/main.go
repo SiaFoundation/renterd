@@ -2817,11 +2817,15 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	}
 
 	// add object query args
-	args := []any{
-		path + "%", utf8.RuneCountInString(path), path, // case-sensitive object_id LIKE
-		path,                             // exclude exact path
-		utf8.RuneCountInString(path) + 1, // exclude dirs
+	var args []any
+	if bucket != "" {
+		args = append(args, bucket)
 	}
+	args = append(args,
+		path+"%", utf8.RuneCountInString(path), path, // case-sensitive object_id LIKE
+		path,                           // exclude exact path
+		utf8.RuneCountInString(path)+1, // exclude dirs
+	)
 
 	var slabKeyObjExpr string
 	if slabEncryptionKey != (object.EncryptionKey{}) {
@@ -2832,6 +2836,11 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	// add directory query args
 	args = append(args,
 		utf8.RuneCountInString(path), utf8.RuneCountInString(path)+1,
+	)
+	if bucket != "" {
+		args = append(args, bucket)
+	}
+	args = append(args,
 		path+"%", utf8.RuneCountInString(path), path, // case-sensitive object_id LIKE
 		utf8.RuneCountInString(path), utf8.RuneCountInString(path)+1, path,
 		utf8.RuneCountInString(path), utf8.RuneCountInString(path)+1,
@@ -2894,9 +2903,11 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	args = append(args, markerArgs...)
 
 	// apply bucket
+	bucketObjExpr := "1 = 1 AND"
+	bucketDirExpr := "1 = 1 AND"
 	if bucket != "" {
-		whereExprs = append(whereExprs, "b.name = ?")
-		args = append(args, bucket)
+		bucketObjExpr = "b.name = ? AND"
+		bucketDirExpr = "b.name = ? AND"
 	}
 
 	// apply prefix
@@ -2930,7 +2941,9 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	FROM (
 		SELECT o.db_bucket_id, o.object_id, o.size, o.health, o.mime_type, o.created_at, o.etag
 		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		WHERE
+			%s
 			o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND
 			o.object_id != ? AND
 			INSTR(SUBSTR(o.object_id, ?), "/") = 0
@@ -2941,7 +2954,9 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 
 		SELECT MIN(o.db_bucket_id), MIN(SUBSTR(o.object_id, 1, ?+INSTR(SUBSTR(o.object_id, ?), "/"))) as object_id, SUM(o.size) as size, MIN(o.health), '' as mime_type, MAX(o.created_at), '' as etag
 		FROM objects o
+		INNER JOIN buckets b ON b.id = o.db_bucket_id
 		WHERE
+			%s
 			o.object_id LIKE ? AND SUBSTR(o.object_id, 1, ?) = ? AND
 			SUBSTR(o.object_id, 1, ?+INSTR(SUBSTR(o.object_id, ?), "/")) != ?
 			%s
@@ -2953,11 +2968,14 @@ func listObjectsSlashDelim(ctx context.Context, tx Tx, bucket, prefix, sortBy, s
 	LIMIT ?
 `,
 		tx.SelectObjectMetadataExpr(),
+		bucketObjExpr,
 		slabKeyObjExpr,
+		bucketDirExpr,
 		slabKeyDirExpr,
 		whereExpr,
 		strings.Join(orderByExprs, ", "),
 	)
+
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return api.ObjectsResponse{}, fmt.Errorf("failed to fetch objects: %w", err)
