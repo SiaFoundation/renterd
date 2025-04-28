@@ -854,13 +854,23 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 	}
 	prices := settings.Prices
 
+	// raise the renterFunds if they are too low to reach minNewCollateral
+	if minRenterFunds := rhpv4.MinRenterAllowance(prices, minNewCollateral); renterFunds.Cmp(minRenterFunds) < 0 {
+		renterFunds = minRenterFunds
+	}
+
 	// target the max collateral the host is willing to accept for the renterFunds
 	collateral := rhpv4.MaxHostCollateral(prices, renterFunds)
 
 	// cap the collateral at the per-contract MaxCollateral of the host
 	totalCollateral := collateral.Add(rev.TotalCollateral)
 	if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
-		collateral = collateral.Sub(totalCollateral.Sub(settings.MaxCollateral))
+		excess := totalCollateral.Sub(settings.MaxCollateral)
+		if excess.Cmp(collateral) > 0 {
+			collateral = types.ZeroCurrency
+		} else {
+			collateral = collateral.Sub(totalCollateral.Sub(settings.MaxCollateral))
+		}
 	}
 
 	// make sure the new remaining collateral is at least the minimum
