@@ -814,7 +814,7 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 	}, nil
 }
 
-func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
+func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
@@ -834,53 +834,106 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 	if gb := gc.CheckV2(settings); gb.Gouging() {
 		return api.ContractMetadata{}, errors.New(gb.String())
 	}
+	prices := settings.Prices
 
-	// determine the new collateral we want the host to put into the
-	// renewed/refreshed contract
-	newCollateral := settings.Prices.Collateral.Mul64(expectedNewStorage).Mul64(endHeight - cs.Index.Height)
-	if newCollateral.Cmp(minNewCollateral) < 0 {
-		newCollateral = minNewCollateral
-	}
-	if newCollateral.Cmp(settings.MaxCollateral) > 0 {
-		newCollateral = settings.MaxCollateral
-	}
-	if hostMax := rhpv4.MaxHostCollateral(settings.Prices, renterFunds); newCollateral.Cmp(hostMax) > 0 {
-		newCollateral = hostMax
-	}
-	if newCollateral.Cmp(minNewCollateral) < 0 {
-		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v (max: %v)", newCollateral, minNewCollateral, settings.MaxCollateral)
+	// raise the renterFunds if they are too low to reach minNewCollateral
+	if minRenterFunds := rhpv4.MinRenterAllowance(prices, minNewCollateral); renterFunds.Cmp(minRenterFunds) < 0 {
+		renterFunds = minRenterFunds
 	}
 
-	var contract cRhp4.ContractRevision
-	if c.EndHeight() == endHeight {
-		// when refreshing, the 'collateral' is added on top of the existing
-		// collateral so we account for that by subtracting the rolled over
-		// value
-		collateral := types.ZeroCurrency
-		if rev.MissedHostValue.Cmp(newCollateral) < 0 {
-			collateral = newCollateral.Sub(rev.MissedHostValue)
+	// target the max collateral the host is willing to accept for the renterFunds
+	collateral := rhpv4.MaxHostCollateral(prices, renterFunds)
+
+	// cap the collateral at the per-contract MaxCollateral of the host
+	totalCollateral := collateral.Add(rev.TotalCollateral)
+	if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
+		excess := totalCollateral.Sub(settings.MaxCollateral)
+		if excess.Cmp(collateral) > 0 {
+			collateral = types.ZeroCurrency
+		} else {
+			collateral = collateral.Sub(excess)
 		}
-		// refresh
-		var res cRhp4.RPCRefreshContractResult
-		res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
-			ContractID: c.ID,
-			Allowance:  renterFunds,
-			Collateral: collateral,
-		})
-		contract = res.Contract
-	} else {
-		var res cRhp4.RPCRenewContractResult
-		res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
-			ContractID:  c.ID,
-			Allowance:   renterFunds,
-			Collateral:  newCollateral,
-			ProofHeight: endHeight,
-		})
-		contract = res.Contract
 	}
+
+	// make sure the new remaining collateral is at least the minimum
+	if collateral.Cmp(minNewCollateral) < 0 {
+		return api.ContractMetadata{}, fmt.Errorf("new collateral %v is less than minimum %v (max: %v)", collateral, minNewCollateral, settings.MaxCollateral)
+	}
+
+	var res cRhp4.RPCRefreshContractResult
+	res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
+		ContractID: c.ID,
+		Allowance:  renterFunds,
+		Collateral: collateral,
+	})
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
+	contract := res.Contract
+
+	return api.ContractMetadata{
+		ID:                 contract.ID,
+		HostKey:            h.PublicKey,
+		RenewedFrom:        c.ID,
+		StartHeight:        cs.Index.Height,
+		State:              api.ContractStatePending,
+		WindowStart:        contract.Revision.ProofHeight,
+		WindowEnd:          contract.Revision.ExpirationHeight,
+		ContractPrice:      settings.Prices.ContractPrice,
+		InitialRenterFunds: contract.Revision.RenterOutput.Value,
+		Usability:          api.ContractUsabilityGood,
+		V2:                 true,
+	}, nil
+}
+
+func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+	// derive the renter key
+	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
+	signer := ibus.NewFormContractSigner(b.w, renterKey)
+
+	// fetch the revision
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+
+	// fetch prices and check them
+	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.V2SiamuxAddr())
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
+	if gb := gc.CheckV2(settings); gb.Gouging() {
+		return api.ContractMetadata{}, errors.New(gb.String())
+	}
+	prices := settings.Prices
+
+	// target the max collateral the host is willing to accept for the renterFunds
+	collateral := rhpv4.MaxHostCollateral(prices, renterFunds)
+
+	// cap the collateral at the per-contract MaxCollateral of the host
+	riskedCollateral := prices.Collateral.Mul64(rev.Filesize).Mul64(rev.ExpirationHeight - prices.TipHeight)
+	totalCollateral := collateral.Add(riskedCollateral)
+	if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
+		excess := totalCollateral.Sub(settings.MaxCollateral)
+		if excess.Cmp(collateral) > 0 {
+			collateral = types.ZeroCurrency
+		} else {
+			collateral = collateral.Sub(excess)
+		}
+	}
+
+	var res cRhp4.RPCRenewContractResult
+	res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
+		ContractID:  c.ID,
+		Allowance:   renterFunds,
+		Collateral:  collateral,
+		ProofHeight: endHeight,
+	})
+	if err != nil {
+		return api.ContractMetadata{}, err
+	}
+	contract := res.Contract
 
 	return api.ContractMetadata{
 		ID:                 contract.ID,
