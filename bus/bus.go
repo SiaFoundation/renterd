@@ -124,10 +124,10 @@ type (
 
 	Syncer interface {
 		Addr() string
-		BroadcastHeader(h types.BlockHeader)
-		BroadcastV2BlockOutline(bo gateway.V2BlockOutline)
-		BroadcastTransactionSet([]types.Transaction)
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
+		BroadcastHeader(h types.BlockHeader) error
+		BroadcastV2BlockOutline(bo gateway.V2BlockOutline) error
+		BroadcastTransactionSet([]types.Transaction) error
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 		Peers() []*syncer.Peer
 	}
@@ -600,7 +600,9 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		}
 
 		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(basis, txnSet)
+		if err := b.s.BroadcastV2TransactionSet(basis, txnSet); err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
+		}
 		return txn.ID(), nil
 	} else {
 		// fetch revision
@@ -633,7 +635,9 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		}
 
 		// broadcast the transaction
-		b.s.BroadcastTransactionSet(txnset)
+		if err := b.s.BroadcastTransactionSet(txnset); err != nil {
+			return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
+		}
 		return txn.ID(), nil
 	}
 }
