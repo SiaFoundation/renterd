@@ -590,46 +590,9 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 		return nil, nil, nil, nil, err
 	}
 
-	// create syncer, peers will reject us if our hostname is empty or
-	// unspecified, so use loopback
-	l, err := net.Listen("tcp", cfg.GatewayAddr)
+	s, err := newTestSyncer(cm, sqlStore, genesisBlock.ID(), cfg.GatewayAddr, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
-	}
-	syncerAddr := l.Addr().String()
-	host, port, _ := net.SplitHostPort(syncerAddr)
-	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
-		syncerAddr = net.JoinHostPort("127.0.0.1", port)
-	}
-
-	// create header
-	header := gateway.Header{
-		GenesisID:  genesisBlock.ID(),
-		UniqueID:   gateway.GenerateUniqueID(),
-		NetAddress: syncerAddr,
-	}
-
-	// create the syncer
-	s := syncer.New(l, cm, sqlStore, header, syncer.WithLogger(logger.Named("syncer")),
-		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithRPCTimeout(2*time.Second),
-	)
-
-	// start syncer
-	errChan := make(chan error, 1)
-	go func() {
-		errChan <- s.Run()
-		close(errChan)
-	}()
-
-	// create a helper function to wait for syncer to wind down on shutdown
-	syncerShutdown := func(ctx context.Context) error {
-		select {
-		case err := <-errChan:
-			return err
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		}
 	}
 
 	// create master key - we currently derive the same key used by the workers
@@ -648,7 +611,6 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-			syncerShutdown(ctx),
 		)
 	}
 	return b, shutdownFn, cm, sqlStore, nil
@@ -1152,4 +1114,76 @@ func buildStoreConfig(am alerts.Alerter, dir string, slabBufferCompletionThresho
 		LongQueryDuration: cfg.DatabaseLog.SlowThreshold,
 		LongTxDuration:    cfg.DatabaseLog.SlowThreshold,
 	}, nil
+}
+
+type TestSyncer struct {
+	s *syncer.Syncer
+}
+
+func newTestSyncer(cm syncer.ChainManager, store syncer.PeerStore, genesisID types.BlockID, addr string, logger *zap.Logger) (*TestSyncer, error) {
+	// create syncer, peers will reject us if our hostname is empty or
+	// unspecified, so use loopback
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	syncerAddr := l.Addr().String()
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+
+	// create header
+	header := gateway.Header{
+		GenesisID:  genesisID,
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
+	}
+
+	// create the syncer
+	s := syncer.New(l, cm, store, header, syncer.WithLogger(logger.Named("syncer")),
+		syncer.WithSendBlocksTimeout(2*time.Second),
+		syncer.WithRPCTimeout(2*time.Second),
+	)
+	go s.Run()
+	return &TestSyncer{s: s}, nil
+}
+
+func (s *TestSyncer) Addr() string {
+	return s.s.Addr()
+}
+
+func (s *TestSyncer) BroadcastHeader(bh types.BlockHeader) error {
+	return ignoreErrNoPeers(s.s.BroadcastHeader(bh))
+}
+
+func (s *TestSyncer) BroadcastV2BlockOutline(outline gateway.V2BlockOutline) error {
+	return ignoreErrNoPeers(s.s.BroadcastV2BlockOutline(outline))
+}
+
+func (s *TestSyncer) BroadcastTransactionSet(txns []types.Transaction) error {
+	return ignoreErrNoPeers(s.s.BroadcastTransactionSet(txns))
+}
+
+func (s *TestSyncer) BroadcastV2TransactionSet(basis types.ChainIndex, txns []types.V2Transaction) error {
+	return ignoreErrNoPeers(s.s.BroadcastV2TransactionSet(basis, txns))
+}
+
+func (s *TestSyncer) Close() error {
+	return s.s.Close()
+}
+
+func (s *TestSyncer) Connect(ctx context.Context, addr string) (*syncer.Peer, error) {
+	return s.s.Connect(ctx, addr)
+}
+
+func (s *TestSyncer) Peers() []*syncer.Peer {
+	return s.s.Peers()
+}
+
+func ignoreErrNoPeers(err error) error {
+	if errors.Is(err, syncer.ErrNoPeers) {
+		return nil
+	}
+	return err
 }
