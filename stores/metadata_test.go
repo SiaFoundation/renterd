@@ -1481,6 +1481,53 @@ func TestObjectsSubstring(t *testing.T) {
 	}
 }
 
+// TestObjectsDelimiterRegression is a little regression test that asserts
+// objects with similar object_id, but that live in different buckets, can be
+// retrieved both with and without a delimiter.
+func TestObjectsDelimiterRegression(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+	defer ss.Close()
+
+	// create two buckets
+	buckets := []string{"foo", "bar"}
+	for _, b := range buckets {
+		if err := ss.CreateBucket(context.Background(), b, api.BucketPolicy{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create an object with the same path in both buckets
+	for _, b := range buckets {
+		if err := ss.UpdateObjectBlocking(context.Background(), b, "/1/foo.txt", testETag, testMimeType, testMetadata, newTestObject(1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert both files show up if no delimiter is specified
+	var delimiter string
+	for _, b := range buckets {
+		if res, err := ss.Objects(context.Background(), b, "", "", delimiter, "", "", "", -1, object.EncryptionKey{}); err != nil {
+			t.Fatal(err)
+		} else if len(res.Objects) != 1 {
+			t.Fatal("expected 1 object, got", len(res.Objects))
+		} else if res.Objects[0].Key != "/1/foo.txt" {
+			t.Fatal("expected /1/foo.txt, got", res.Objects[0].Key)
+		}
+	}
+
+	// assert both files show up if the delimiter is set to /
+	delimiter = "/"
+	for _, b := range buckets {
+		if res, err := ss.Objects(context.Background(), b, "", "", delimiter, "", "", "", -1, object.EncryptionKey{}); err != nil {
+			t.Fatal(err)
+		} else if len(res.Objects) != 1 {
+			t.Fatal("expected 1 object, got", len(res.Objects), b)
+		} else if res.Objects[0].Key != "/1/" {
+			t.Fatal("expected /1/, got", res.Objects[0].Key)
+		}
+	}
+}
+
 // TestSlabsForMigration tests the functionality of SlabsForMigration.
 func TestSlabsForMigration(t *testing.T) {
 	// create db
