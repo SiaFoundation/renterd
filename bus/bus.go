@@ -869,7 +869,7 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 		if excess.Cmp(collateral) > 0 {
 			collateral = types.ZeroCurrency
 		} else {
-			collateral = collateral.Sub(totalCollateral.Sub(settings.MaxCollateral))
+			collateral = collateral.Sub(excess)
 		}
 	}
 
@@ -937,7 +937,7 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 		if excess.Cmp(collateral) > 0 {
 			collateral = types.ZeroCurrency
 		} else {
-			collateral = collateral.Sub(totalCollateral.Sub(settings.MaxCollateral))
+			collateral = collateral.Sub(excess)
 		}
 	}
 
