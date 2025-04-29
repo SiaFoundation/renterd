@@ -25,22 +25,31 @@ func TestUploaderStopped(t *testing.T) {
 	md := c.Metadata()
 
 	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, md.ID, md.WindowEnd, zap.NewNop().Sugar())
-	ul.Stop(errors.New("test"))
 
-	req := SectorUploadReq{
+	// enqueue a request
+	respChan := make(chan SectorUploadResp, 1)
+	if ok := ul.Enqueue(&SectorUploadReq{
 		Ctx:          context.Background(),
-		ResponseChan: make(chan SectorUploadResp),
+		ResponseChan: respChan,
+	}); !ok {
+		t.Fatal("failed to enqueue request")
 	}
 
-	ul.Enqueue(&req)
+	// stop the uploader
+	ul.Stop(ErrStopped)
 
-	select {
-	case res := <-req.ResponseChan:
-		if !errors.Is(res.Err, ErrStopped) {
-			t.Fatal("expected error response")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("no response")
+	// assert we received a response indicating the uploader was stopped
+	resp := <-respChan
+	if !errors.Is(resp.Err, ErrStopped) {
+		t.Fatal("expected error to be ErrStopped", resp.Err)
+	}
+
+	// enqueue another request
+	if ok := ul.Enqueue(&SectorUploadReq{
+		Ctx:          context.Background(),
+		ResponseChan: respChan,
+	}); ok {
+		t.Fatal("expected enqueue to fail")
 	}
 }
 
@@ -156,5 +165,55 @@ func TestRefreshUploader(t *testing.T) {
 	// assert host info got updated
 	if !reflect.DeepEqual(ul.host, update) {
 		t.Fatal("host info was not updated", ul.host, update)
+	}
+}
+
+func TestUploaderQueue(t *testing.T) {
+	// mock dependencies
+	cs := mocks.NewContractStore()
+	hm := mocks.NewHostManager()
+	cl := mocks.NewContractLocker()
+
+	// create uploader
+	hk := types.PublicKey{1}
+	fcid := types.FileContractID{1}
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{PublicKey: hk}, fcid, 0, zap.NewNop().Sugar())
+
+	respChan := make(chan SectorUploadResp, 3)
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req1 := &SectorUploadReq{
+		Ctx:          context.Background(), // sector not finished
+		ResponseChan: respChan,
+	}
+	req2 := &SectorUploadReq{
+		Ctx:          cancelledCtx, // sector got finished
+		ResponseChan: respChan,
+	}
+
+	stoppedChan := make(chan struct{})
+	go func() {
+		ul.Start()
+		close(stoppedChan)
+	}()
+
+	ul.Enqueue(req1)
+	ul.Enqueue(req2)
+	time.Sleep(100 * time.Millisecond)
+
+	if len(respChan) != 2 {
+		t.Fatal("response channel was not filled", len(respChan))
+	} else if r1 := <-respChan; r1.FCID != fcid || r1.HK != hk || r1.Err == nil || !reflect.DeepEqual(r1.Req, req1) {
+		t.Fatal("unexpected response", r1)
+	} else if r2 := <-respChan; r2.FCID != fcid || r2.HK != hk || !errors.Is(r2.Err, context.Canceled) || !reflect.DeepEqual(r2.Req, req2) {
+		t.Fatal("unexpected response", r2)
+	}
+
+	ul.Stop(ErrStopped)
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("uploader did not stop in time")
+	case <-stoppedChan: // asserts the uploader stopped
 	}
 }
