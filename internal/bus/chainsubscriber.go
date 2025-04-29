@@ -59,7 +59,7 @@ type (
 	}
 
 	Syncer interface {
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 	}
 
 	Wallet interface {
@@ -425,14 +425,17 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 				(strings.Contains(err.Error(), "has already been resolved") ||
 					strings.Contains(err.Error(), "not present in the accumulator")) {
 				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
-				s.logger.With(zap.Error(err)).Debug("failed to broadcast contract expiration txn")
+				s.logger.With(zap.Error(err)).Debug("failed to add contract expiration txn to pool")
 				return
 			} else if err != nil {
-				s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
+				s.logger.With(zap.Error(err)).Error("failed to add contract expiration txn to pool")
 				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 				return
 			}
-			s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
+			if err := s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn}); err != nil {
+				s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
+				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+			}
 		}(fce)
 	}
 }

@@ -26,7 +26,7 @@ import (
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/hostd/host/accounts"
+	"go.sia.tech/hostd/v2/host/accounts"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/autopilot/contractor"

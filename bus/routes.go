@@ -185,9 +185,13 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 	}
 
 	if block.V2 == nil {
-		b.s.BroadcastHeader(block.Header())
+		if jc.Check("failed to broadcast header", b.s.BroadcastHeader(block.Header())) != nil {
+			return
+		}
 	} else {
-		b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))
+		if jc.Check("failed to broadcast block outline", b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))) != nil {
+			return
+		}
 	}
 }
 
@@ -263,7 +267,10 @@ func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	b.s.BroadcastTransactionSet(txnSet)
+	err = b.s.BroadcastTransactionSet(txnSet)
+	if jc.Check("couldn't broadcast transaction set", err) != nil {
+		return
+	}
 }
 
 func (b *Bus) bucketsHandlerGET(jc jape.Context) {
@@ -442,7 +449,9 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 			return
 		}
 		// broadcast the transaction
-		b.s.BroadcastV2TransactionSet(basis, txnset)
+		if jc.Check("failed to broadcast transaction set", b.s.BroadcastV2TransactionSet(basis, txnset)) != nil {
+			return
+		}
 		jc.Encode(txn.ID())
 	} else {
 		// build transaction
@@ -466,7 +475,10 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 			return
 		}
 		// broadcast the transaction
-		b.s.BroadcastTransactionSet(txnset)
+		if jc.Check("failed to broadcast transaction set", b.s.BroadcastTransactionSet(txnset)) != nil {
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
+			return
+		}
 		jc.Encode(txn.ID())
 	}
 }
