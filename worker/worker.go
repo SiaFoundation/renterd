@@ -38,7 +38,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/utils"
 	iworker "go.sia.tech/renterd/v2/internal/worker"
 	"go.sia.tech/renterd/v2/object"
-	"go.sia.tech/renterd/v2/webhooks"
 	"go.sia.tech/renterd/v2/worker/client"
 	"go.uber.org/zap"
 )
@@ -69,7 +68,6 @@ type (
 	Bus interface {
 		alerts.Alerter
 		gouging.ConsensusState
-		webhooks.Broadcaster
 
 		AccountFunder
 		accounts.Store
@@ -79,7 +77,6 @@ type (
 		HostStore
 		ObjectStore
 		SettingStore
-		WebhookStore
 
 		Syncer
 	}
@@ -137,11 +134,6 @@ type (
 	Syncer interface {
 		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 		SyncerPeers(ctx context.Context) (resp []string, err error)
-	}
-
-	WebhookStore interface {
-		RegisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
-		UnregisterWebhook(ctx context.Context, webhook webhooks.Webhook) error
 	}
 )
 
