@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/object"
-	"go.sia.tech/renterd/v2/webhooks"
 )
 
 // The database interfaces define all methods that a SQL database must implement
@@ -65,10 +64,6 @@ type (
 
 		// AddPeer adds a peer to the store.
 		AddPeer(ctx context.Context, addr string) error
-
-		// AddWebhook adds a new webhook to the database. If the webhook already
-		// exists, it is updated.
-		AddWebhook(ctx context.Context, wh webhooks.Webhook) error
 
 		// AncestorContracts returns all ancestor contracts of the contract up
 		// until the given start height.
@@ -148,11 +143,6 @@ type (
 
 		// DeleteSetting deletes the setting with the given key.
 		DeleteSetting(ctx context.Context, key string) error
-
-		// DeleteWebhook deletes the webhook with the matching module, event and
-		// URL of the provided webhook. If the webhook doesn't exist,
-		// webhooks.ErrWebhookNotFound is returned.
-		DeleteWebhook(ctx context.Context, wh webhooks.Webhook) error
 
 		// FileContractElement returns the up-to-date file contract element for
 		// a given contract id.
@@ -371,9 +361,6 @@ type (
 
 		// WalletEventCount returns the total number of events in the database.
 		WalletEventCount(ctx context.Context) (uint64, error)
-
-		// Webhooks returns all registered webhooks.
-		Webhooks(ctx context.Context) ([]webhooks.Webhook, error)
 	}
 
 	MetricsDatabase interface {
