@@ -933,7 +933,12 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 	riskedCollateral := prices.Collateral.Mul64(rev.Filesize).Mul64(rev.ExpirationHeight - prices.TipHeight)
 	totalCollateral := collateral.Add(riskedCollateral)
 	if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
-		collateral = collateral.Sub(totalCollateral.Sub(settings.MaxCollateral))
+		excess := totalCollateral.Sub(settings.MaxCollateral)
+		if excess.Cmp(collateral) > 0 {
+			collateral = types.ZeroCurrency
+		} else {
+			collateral = collateral.Sub(totalCollateral.Sub(settings.MaxCollateral))
+		}
 	}
 
 	var res cRhp4.RPCRenewContractResult
