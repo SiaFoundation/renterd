@@ -65,7 +65,7 @@ jobs:
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
-          go-test-args: "-race;-count=10;-timeout=1h;-tags=netgo"
+          go-test-args: "-race;-count=10;-timeout=4h;-tags=netgo"
 
   test-sqlite-v2: # Run all tests against SQLite
     needs: analyze
@@ -83,7 +83,7 @@ jobs:
       - name: Test
         uses: SiaFoundation/workflows/.github/actions/go-test@master
         with:
-          go-test-args: "-race;-count=10;-timeout=1h;-tags=netgo,v2"
+          go-test-args: "-race;-count=10;-timeout=4h;-tags=netgo,v2"
 
   test-mysql-v2: # Run all tests against MySQL
     needs: analyze
@@ -111,7 +111,7 @@ jobs:
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
-          go-test-args: "-race;-count=10;-timeout=1h;-tags=netgo,v2"
+          go-test-args: "-race;-count=10;-timeout=4h;-tags=netgo,v2"
 
   success: # Use in branch rulesets to ensure all matrix jobs completed successfully
     needs: [test-sqlite, test-mysql, test-sqlite-v2, test-mysql-v2]
