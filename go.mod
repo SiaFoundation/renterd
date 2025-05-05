@@ -18,7 +18,7 @@ require (
 	go.sia.tech/coreutils v0.13.2
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd/v2 v2.1.0-beta.4.0.20250429094021-8048e92a76dd
-	go.sia.tech/jape v0.13.1
+	go.sia.tech/jape v0.14.0
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.79.0
 	go.uber.org/zap v1.27.0
