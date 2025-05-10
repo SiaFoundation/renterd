@@ -504,6 +504,8 @@ func (b *Bus) Handler() http.Handler {
 		"GET  /wallet/pending":      b.walletPendingHandler,
 		"POST /wallet/redistribute": b.walletRedistributeHandler,
 		"POST /wallet/send":         b.walletSendSiacoinsHandler,
+
+		"GET /renterkey": b.renterKeyHandler,
 	})
 }
 

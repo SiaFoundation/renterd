@@ -17,19 +17,19 @@ type (
 // to derive individual account keys from.
 func (key *MasterKey) DeriveAccountsKey(workerID string) AccountsKey {
 	keyPath := fmt.Sprintf("accounts/%s", workerID)
-	return AccountsKey(key.deriveSubKey(keyPath))
+	return AccountsKey(key.DeriveSubKey(keyPath))
 }
 
 // DeriveAccountsKey derives an upload key from a masterkey which is used
 // to encrypt/decrypt files for uploading.
 func (key *MasterKey) DeriveUploadKey() UploadKey {
-	return UploadKey(key.deriveSubKey("uploads"))
+	return UploadKey(key.DeriveSubKey("uploads"))
 }
 
 // DeriveContractKey derives a contract key from a masterkey which is used to
 // form, renew and revise contracts.
 func (key *MasterKey) DeriveContractKey(hostKey types.PublicKey) types.PrivateKey {
-	seed := blake2b.Sum256(append(key.deriveSubKey("renterkey"), hostKey[:]...))
+	seed := blake2b.Sum256(append(key.DeriveSubKey("renterkey"), hostKey[:]...))
 	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
 		seed[i] = 0
@@ -45,10 +45,10 @@ func (key *UploadKey) DeriveKey(salt *[32]byte) [32]byte {
 	return sum
 }
 
-// deriveSubKey can be used to derive a sub-masterkey from the worker's
+// DeriveSubKey can be used to derive a sub-masterkey from the worker's
 // masterkey to use for a specific purpose. Such as deriving more keys for
 // ephemeral accounts.
-func (key *MasterKey) deriveSubKey(purpose string) types.PrivateKey {
+func (key *MasterKey) DeriveSubKey(purpose string) types.PrivateKey {
 	seed := blake2b.Sum256(append(key[:], []byte(purpose)...))
 	pk := types.NewPrivateKeyFromSeed(seed[:])
 	for i := range seed {
