@@ -2332,3 +2332,10 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	// return the contract
 	jc.Encode(metadata)
 }
+
+func (b *Bus) renterKeyHandler(jc jape.Context) {
+	rk := b.masterKey.DeriveSubKey("renterkey")
+	jc.Encode(api.RenterKeyResponse{
+		RenterKey: rk,
+	})
+}

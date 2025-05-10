@@ -100,4 +100,9 @@ type (
 		Contracts *ContractsConfig `json:"contracts"`
 		Hosts     *HostsConfig     `json:"hosts"`
 	}
+
+	// RenterKeyResponse is the response type for the /renterkey endpoint.
+	RenterKeyResponse struct {
+		RenterKey types.PrivateKey `json:"renterKey"`
+	}
 )
