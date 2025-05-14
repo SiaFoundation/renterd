@@ -16,7 +16,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.12.0
 	go.sia.tech/coreutils v0.13.4-0.20250512154444-5fc127e81fc2
-	go.sia.tech/gofakes3 v0.0.5
+	go.sia.tech/gofakes3 v0.0.6-0.20250514102445-39ad30e8aa3b
 	go.sia.tech/hostd/v2 v2.1.0
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/mux v1.4.0
@@ -41,6 +41,7 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
+	github.com/minio/xxml v0.0.3 // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.51.0 // indirect
