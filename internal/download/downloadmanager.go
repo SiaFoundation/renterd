@@ -270,6 +270,7 @@ func (mgr *Manager) DownloadObject(ctx context.Context, w io.Writer, o object.Ob
 	// collect the response, responses might come in out of order so we keep
 	// them in a map and return what we can when we can
 	responses := make(map[int]*slabDownloadResponse)
+	seen := make(map[int]struct{})
 	var respIndex int
 outer:
 	for {
@@ -296,16 +297,29 @@ outer:
 				return resp.err
 			}
 
+			_, ok := seen[resp.index]
+			if ok {
+				mgr.logger.Errorw("duplicate slab index",
+					zap.Int("index", resp.index),
+					zap.Error(resp.err),
+				)
+				return fmt.Errorf("duplicate slab index: %v", resp.index)
+			}
+			seen[resp.index] = struct{}{}
+
 			responses[resp.index] = resp
 			for {
 				if next, exists := responses[respIndex]; exists {
 					s := slabs[respIndex]
 					if s.PartialSlab {
 						// Partial slab.
-						_, err = bw.Write(s.Data)
+						n, err := bw.Write(s.Data)
 						if err != nil {
 							mgr.logger.Errorf("failed to send partial slab", respIndex, err)
 							return err
+						} else if n != int(s.Length) {
+							mgr.logger.Errorf("incomplete partial slab: %v/%v", n, s.Length)
+							return fmt.Errorf("incomplete partial slab: %v/%v", n, s.Length)
 						}
 					} else {
 						// Regular slab.
