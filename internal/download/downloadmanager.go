@@ -161,7 +161,7 @@ func (mgr *Manager) DownloadObject(ctx context.Context, w io.Writer, o object.Ob
 		}
 		if slab != nil {
 			slabs[i].SlabSlice.Slab = *slab
-			slabs[i].PartialSlab = slab.IsPartial()
+			slabs[i].PartialSlab = false
 		} else {
 			slabs[i].Data = data
 		}
@@ -188,7 +188,11 @@ func (mgr *Manager) DownloadObject(ctx context.Context, w io.Writer, o object.Ob
 	// buffer the writer we recover to making sure that we don't hammer the
 	// response writer with tiny writes
 	bw := bufio.NewWriter(cw)
-	defer bw.Flush()
+	defer func() {
+		if err := bw.Flush(); err != nil {
+			mgr.logger.Errorw("failed to flush buffer writer", zap.Error(err))
+		}
+	}()
 
 	// create response chan and ensure it's closed properly
 	var wg sync.WaitGroup
@@ -311,6 +315,11 @@ outer:
 							return fmt.Errorf("incomplete partial slab: %v/%v", n, s.Length)
 						}
 					} else {
+						// No shards to recover.
+						if len(next.shards) == 0 {
+							mgr.logger.Errorf("no shards to recover for slab %v", respIndex)
+							return fmt.Errorf("no shards to recover for slab %v", respIndex)
+						}
 						// Regular slab.
 						slabs[respIndex].Decrypt(next.shards)
 						err := slabs[respIndex].Recover(bw, next.shards)
