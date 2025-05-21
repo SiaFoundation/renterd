@@ -85,7 +85,7 @@ func (c *Client) VerifySector(ctx context.Context, prices rhp4.HostPrices, token
 // FreeSectors removes sectors from a contract.
 func (c *Client) FreeSectors(ctx context.Context, hk types.PublicKey, hostIP string, cs consensus.State, prices rhp4.HostPrices, sk types.PrivateKey, contract rhp.ContractRevision, indices []uint64) (res rhp.RPCFreeSectorsResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
-		res, err = rhp.RPCFreeSectors(ctx, t, cs, prices, sk, contract, indices)
+		res, err = rhp.RPCFreeSectors(ctx, t, sk, cs, prices, contract, indices)
 		return
 	})
 	return res, err
@@ -101,7 +101,7 @@ func (c *Client) AppendSectors(ctx context.Context, hk types.PublicKey, hostIP s
 		// NOTE: immediately append the sector for the time being, eventually
 		// this will be a 2-step process where uploads are unblocked as soon as
 		// the sector is on the host, but not yet added to the contract
-		res, err = rhp.RPCAppendSectors(ctx, t, cs, prices, sk, contract, roots)
+		res, err = rhp.RPCAppendSectors(ctx, t, sk, cs, prices, contract, roots)
 		return
 	})
 	return res, err
