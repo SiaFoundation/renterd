@@ -1,3 +1,9 @@
+## 2.1.1 (2025-05-21)
+
+### Fixes
+
+- Add hardening against writing incomplete partial slab data.
+
 ## 2.1.0 (2025-04-29)
 
 ### Features
