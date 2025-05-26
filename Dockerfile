@@ -1,5 +1,5 @@
 # Helper image to build renterd.
-FROM golang:1.23 AS builder
+FROM golang:1.24 AS builder
 
 # Define arguments for build tags and to skip running go generate.
 ARG BUILD_RUN_GO_GENERATE='true'

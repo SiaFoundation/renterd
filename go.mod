@@ -14,8 +14,8 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.12.5
-	go.sia.tech/coreutils v0.14.1-0.20250526014037-adeefa95f18f
+	go.sia.tech/core v0.13.0
+	go.sia.tech/coreutils v0.15.0
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/hostd/v2 v2.2.0-beta.1.0.20250526014750-8b90382760f8
 	go.sia.tech/jape v0.14.0
@@ -43,7 +43,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
-	github.com/quic-go/quic-go v0.51.0 // indirect
+	github.com/quic-go/quic-go v0.52.0 // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
