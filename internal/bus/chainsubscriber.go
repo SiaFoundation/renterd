@@ -64,7 +64,7 @@ type (
 
 	Wallet interface {
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
-		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}
