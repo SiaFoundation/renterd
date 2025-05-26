@@ -77,6 +77,53 @@ type (
 	}
 )
 
+// migrateConsensusDB checks if the consensus database needs to be migrated
+// to match the new v2 commitment.
+func migrateConsensusDB(fp string, n *consensus.Network, genesis types.Block, log *zap.Logger) error {
+	bdb, err := coreutils.OpenBoltChainDB(fp)
+	if err != nil {
+		return fmt.Errorf("failed to open consensus database: %w", err)
+	}
+	defer bdb.Close()
+
+	dbstore, tipState, err := chain.NewDBStore(bdb, n, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
+	if err != nil {
+		return fmt.Errorf("failed to create chain store: %w", err)
+	} else if tipState.Index.Height < n.HardforkV2.AllowHeight {
+		log.Debug("chain is still on v1 -- no migration needed")
+		return nil // no migration needed, the chain is still on v1
+	}
+
+	log.Debug("checking for v2 commitment migration")
+	b, _, ok := dbstore.Block(tipState.Index.ID)
+	if !ok {
+		return fmt.Errorf("failed to get tip block %q", tipState.Index)
+	} else if b.V2 == nil {
+		log.Debug("tip block is not a v2 block -- skipping commitment migration")
+		return nil
+	}
+
+	parentState, ok := dbstore.State(b.ParentID)
+	if !ok {
+		return fmt.Errorf("failed to get parent state for tip block %q", b.ParentID)
+	}
+	commitment := parentState.Commitment(b.MinerPayouts[0].Address, b.Transactions, b.V2Transactions())
+	log = log.With(zap.Stringer("tip", b.ID()), zap.Stringer("commitment", b.V2.Commitment), zap.Stringer("expected", commitment))
+	if b.V2.Commitment == commitment {
+		log.Debug("tip block commitment matches parent state -- no migration needed")
+		return nil
+	}
+	// reset the database if the commitment is not a merkle root
+	log.Debug("resetting consensus database for new v2 commitment")
+	if err := bdb.Close(); err != nil {
+		return fmt.Errorf("failed to close old consensus database: %w", err)
+	} else if err := os.RemoveAll(fp); err != nil {
+		return fmt.Errorf("failed to remove old consensus database: %w", err)
+	}
+	log.Debug("consensus database reset")
+	return nil
+}
+
 func newNode(cfg config.Config, configPath string, network *consensus.Network, genesis types.Block) (*node, error) {
 	var setupFns, shutdownFns []fn
 
@@ -304,6 +351,10 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		if err := sqlStore.ResetChainState(context.Background()); err != nil {
 			return nil, nil, err
 		}
+	}
+
+	if err := migrateConsensusDB(chainPath, network, genesis, logger.Named("migrate")); err != nil {
+		return nil, nil, fmt.Errorf("failed to migrate consensus database: %w", err)
 	}
 
 	// create chain database
