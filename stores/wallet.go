@@ -2,6 +2,7 @@ package stores
 
 import (
 	"context"
+	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -48,4 +49,16 @@ func (s *SQLStore) WalletEventCount() (count uint64, err error) {
 		return
 	})
 	return
+}
+
+func (s *SQLStore) LockUTXOs(scois []types.SiacoinOutputID, until time.Time) error {
+	return nil
+}
+
+func (s *SQLStore) LockedUTXOs(t time.Time) ([]types.SiacoinOutputID, error) {
+	return nil, nil
+}
+
+func (s *SQLStore) ReleaseUTXOs(scois []types.SiacoinOutputID) error {
+	return nil
 }

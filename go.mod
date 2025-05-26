@@ -1,8 +1,8 @@
 module go.sia.tech/renterd/v2 // v2.1.0
 
-go 1.23.2
+go 1.24.2
 
-toolchain go1.24.2
+toolchain go1.24.3
 
 require (
 	github.com/aws/aws-sdk-go v1.55.7
@@ -15,9 +15,9 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.12.5
-	go.sia.tech/coreutils v0.14.0
+	go.sia.tech/coreutils v0.14.1-0.20250526014037-adeefa95f18f
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/hostd/v2 v2.1.0
+	go.sia.tech/hostd/v2 v2.2.0-beta.1.0.20250526014750-8b90382760f8
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.79.0
