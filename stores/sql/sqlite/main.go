@@ -1175,6 +1175,31 @@ func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, e
 	return ssql.WalletEventCount(ctx, tx.Tx)
 }
 
+func (tx *MainDatabaseTx) WalletLockOutputs(ctx context.Context, scois []types.SiacoinOutputID, until time.Time) error {
+	stmt, err := tx.Prepare(ctx, `INSERT INTO wallet_locked_outputs (created_at, output_id, unlock_timestamp) VALUES (?, ?, ?) ON CONFLICT (output_id) DO UPDATE SET unlock_timestamp=EXCLUDED.unlock_timestamp`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement to lock outputs: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, id := range scois {
+		if _, err := stmt.Exec(ctx, time.Now(), ssql.Hash256(id), ssql.UnixTimeMS(until)); err != nil {
+			return fmt.Errorf("failed to lock output %s: %w", id, err)
+		}
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM wallet_locked_outputs WHERE unlock_timestamp < ?`, ssql.UnixTimeMS(time.Now()))
+	return err
+}
+
+func (tx *MainDatabaseTx) WalletLockedOutputs(ctx context.Context, threshold time.Time) ([]types.SiacoinOutputID, error) {
+	return ssql.WalletLockedOutputs(ctx, tx.Tx, threshold)
+}
+
+func (tx *MainDatabaseTx) WalletReleaseOutputs(ctx context.Context, scois []types.SiacoinOutputID) error {
+	return ssql.WalletReleaseOutputs(ctx, tx.Tx, scois)
+}
+
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, slices object.SlabSlices) error {
 	if (objID == nil) == (partID == nil) {
 		return errors.New("exactly one of objID and partID must be set")
