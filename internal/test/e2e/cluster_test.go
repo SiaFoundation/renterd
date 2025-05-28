@@ -3077,8 +3077,8 @@ func TestV1ToV2Transition(t *testing.T) {
 	for _, c := range contracts {
 		if c.V2 {
 			t.Fatal("should not have formed v2 contracts")
-		} else if c.EndHeight() != network.HardforkV2.RequireHeight-1 {
-			t.Fatalf("expected proof height to be %v, got %v", network.HardforkV2.RequireHeight-1, c.EndHeight())
+		} else if c.EndHeight() != network.HardforkV2.RequireHeight-defaultHostSettings.WindowSize-1 {
+			t.Fatalf("expected proof height to be %v, got %v", network.HardforkV2.RequireHeight-defaultHostSettings.WindowSize-1, c.EndHeight())
 		}
 		contractHosts[c.HostKey] = struct{}{}
 	}
@@ -3291,15 +3291,15 @@ func TestContractFormationAndRenewalV2EndHeightCap(t *testing.T) {
 	contract := contracts[0]
 
 	// verify startHeight and endHeight of the contract.
-	if contract.EndHeight() != network.HardforkV2.RequireHeight-1 {
-		t.Fatalf("expected contract end height to be %v, got %v", network.HardforkV2.RequireHeight-1, contract.EndHeight())
+	if contract.WindowEnd != network.HardforkV2.RequireHeight-1 {
+		t.Fatalf("expected contract end height to be %v, got %v", network.HardforkV2.RequireHeight-1, contract.WindowEnd)
 	}
 
 	// manually trigger a renewal
 	renewed, err := cluster.Bus.RenewContract(context.Background(), contract.ID, 200, contract.InitialRenterFunds, types.ZeroCurrency, 1000)
 	if err != nil {
 		t.Fatal(err)
-	} else if renewed.EndHeight() != network.HardforkV2.RequireHeight-1 {
-		t.Fatalf("expected renewed contract to have end height %v, got %v", network.HardforkV2.RequireHeight-1, renewed.EndHeight())
+	} else if renewed.WindowEnd != network.HardforkV2.RequireHeight-1 {
+		t.Fatalf("expected renewed contract to have end height %v, got %v", network.HardforkV2.RequireHeight-1, renewed.WindowEnd)
 	}
 }
