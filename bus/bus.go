@@ -643,6 +643,13 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {
+	// cap v1 formations to the v2 require height since the host won't allow us to
+	// form contracts beyond that
+	v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+	if endHeight >= v2ReqHeight {
+		endHeight = v2ReqHeight - 1
+	}
+
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
