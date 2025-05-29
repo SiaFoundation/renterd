@@ -3077,8 +3077,8 @@ func TestV1ToV2Transition(t *testing.T) {
 	for _, c := range contracts {
 		if c.V2 {
 			t.Fatal("should not have formed v2 contracts")
-		} else if c.EndHeight() != network.HardforkV2.RequireHeight-1 {
-			t.Fatalf("expected proof height to be %v, got %v", network.HardforkV2.RequireHeight-1, c.EndHeight())
+		} else if c.EndHeight() != network.HardforkV2.RequireHeight-defaultHostSettings.WindowSize-1 {
+			t.Fatalf("expected proof height to be %v, got %v", network.HardforkV2.RequireHeight-defaultHostSettings.WindowSize-1, c.EndHeight())
 		}
 		contractHosts[c.HostKey] = struct{}{}
 	}
@@ -3254,5 +3254,52 @@ func TestDefaultSettingsUploadDownload(t *testing.T) {
 	_, err = cluster.S3.PutObject(testBucket, s3Path, bytes.NewReader(data), putObjectOptions{})
 	if err == nil || !strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatal("expected access denied error")
+	}
+}
+
+func TestContractFormationAndRenewalV2EndHeightCap(t *testing.T) {
+	// custom network that starts before the v2 allow height with only 10 blocks
+	// between the allow and require height
+	network, genesis := testNetwork()
+	network.HardforkV2.AllowHeight = 50
+	network.HardforkV2.RequireHeight = 60 // 100 blocks after the allow height
+	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cm := chain.NewManager(store, state)
+
+	cfg := clusterOptsDefault
+	cfg.autopilotConfig = &api.DefaultAutopilotConfig
+	cfg.cm = cm
+	cfg.hosts = 1
+
+	// make sure the period is greater then the require height to trigger the
+	// cap
+	if cfg.autopilotConfig.Contracts.Period < network.HardforkV2.RequireHeight {
+		t.Fatal("autopilot config period should be greater than the require height for this test")
+	}
+
+	cluster := newTestCluster(t, cfg)
+	defer cluster.Shutdown()
+
+	// add a host & wait for contracts to form
+	contracts := cluster.WaitForContracts()
+	if len(contracts) != 1 {
+		t.Fatal("expected 1 contract, got", len(contracts))
+	}
+	contract := contracts[0]
+
+	// verify startHeight and endHeight of the contract.
+	if contract.WindowEnd != network.HardforkV2.RequireHeight-1 {
+		t.Fatalf("expected contract end height to be %v, got %v", network.HardforkV2.RequireHeight-1, contract.WindowEnd)
+	}
+
+	// manually trigger a renewal
+	renewed, err := cluster.Bus.RenewContract(context.Background(), contract.ID, 200, contract.InitialRenterFunds, types.ZeroCurrency, 1000)
+	if err != nil {
+		t.Fatal(err)
+	} else if renewed.WindowEnd != network.HardforkV2.RequireHeight-1 {
+		t.Fatalf("expected renewed contract to have end height %v, got %v", network.HardforkV2.RequireHeight-1, renewed.WindowEnd)
 	}
 }
