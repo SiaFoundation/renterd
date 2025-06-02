@@ -1,4 +1,4 @@
-module go.sia.tech/renterd/v2 // v2.1.0
+module go.sia.tech/renterd/v2 // v2.2.1
 
 go 1.24.2
 
@@ -15,9 +15,9 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.13.1
-	go.sia.tech/coreutils v0.15.1-0.20250602133524-256ddd07493d
+	go.sia.tech/coreutils v0.15.2
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/hostd/v2 v2.2.0-beta.1.0.20250526014750-8b90382760f8
+	go.sia.tech/hostd/v2 v2.2.3
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.79.0

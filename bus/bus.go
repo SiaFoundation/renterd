@@ -643,6 +643,13 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 }
 
 func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {
+	// cap v1 formations to the v2 require height since the host won't allow us to
+	// form contracts beyond that
+	v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+	if endHeight >= v2ReqHeight-hostSettings.WindowSize {
+		endHeight = v2ReqHeight - hostSettings.WindowSize - 1
+	}
+
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(hostKey)
 
@@ -738,6 +745,13 @@ func (b *Bus) isPassedV2AllowHeight() bool {
 
 func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
 	return func(pt rhpv3.HostPriceTable) ([]types.Hash256, []types.Transaction, types.Currency, rhp3.DiscardTxnFn, error) {
+		// cap v1 renewals to the v2 require height since the host won't allow us to
+		// form contracts beyond that
+		v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
+		if endHeight >= v2ReqHeight-pt.WindowSize {
+			endHeight = v2ReqHeight - pt.WindowSize - 1
+		}
+
 		// create the final revision from the provided revision
 		finalRevision := revision
 		finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
@@ -781,13 +795,6 @@ func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevisi
 func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
-
-	// cap v1 renewals to the v2 require height since the host won't allow us to
-	// form contracts beyond that
-	v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
-	if endHeight >= v2ReqHeight {
-		endHeight = v2ReqHeight - 1
-	}
 
 	// fetch the revision
 	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, hs.SiamuxAddr())

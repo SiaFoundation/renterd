@@ -1,3 +1,19 @@
+## 2.2.1 (2025-05-29)
+
+### Fixes
+
+- Cap endheight for contract formation of v1 contracts to 1 block before v2 require height.
+
+## 2.2.0 (2025-05-27)
+
+### Features
+
+- Added automatic migration for v2 commitments.
+
+### Fixes
+
+- Add hardening against writing incomplete partial slab data.
+
 ## 2.1.0 (2025-04-29)
 
 ### Features
