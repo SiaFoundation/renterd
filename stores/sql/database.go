@@ -304,7 +304,7 @@ type (
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
 		// UnspentSiacoinElements returns all wallet outputs in the database.
-		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
+		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, types.ChainIndex, error)
 
 		// UpdateAutopilotConfig updates the autopilot config in the database.
 		UpdateAutopilotConfig(ctx context.Context, ap api.AutopilotConfig) error

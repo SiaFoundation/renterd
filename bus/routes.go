@@ -363,10 +363,15 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
+	tip, err := b.w.Tip()
+	if jc.Check("couldn't fetch wallet tip", err) != nil {
+		return
+	}
+
 	api.WriteResponse(jc, api.WalletResponse{
 		Balance:    balance,
 		Address:    address,
-		ScanHeight: b.w.Tip().Height,
+		ScanHeight: tip.Height,
 	})
 }
 

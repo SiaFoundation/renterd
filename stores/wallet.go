@@ -24,9 +24,9 @@ func (s *SQLStore) Tip() (ci types.ChainIndex, err error) {
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
-func (s *SQLStore) UnspentSiacoinElements() (elements []types.SiacoinElement, err error) {
-	err = s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
-		elements, err = tx.UnspentSiacoinElements(context.Background())
+func (s *SQLStore) UnspentSiacoinElements() (elements []types.SiacoinElement, tip types.ChainIndex, err error) {
+	err = s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) (err error) {
+		elements, tip, err = tx.UnspentSiacoinElements(context.Background())
 		return
 	})
 	return

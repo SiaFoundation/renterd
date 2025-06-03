@@ -924,7 +924,7 @@ func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
 	return ssql.Tip(ctx, tx.Tx)
 }
 
-func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, err error) {
+func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (elements []types.SiacoinElement, tip types.ChainIndex, err error) {
 	return ssql.UnspentSiacoinElements(ctx, tx.Tx)
 }
 
