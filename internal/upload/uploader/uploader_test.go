@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/test/mocks"
 	"go.uber.org/zap"
 )
@@ -55,12 +55,12 @@ func TestUploaderStopped(t *testing.T) {
 
 func TestHandleSectorUpload(t *testing.T) {
 	ms := time.Millisecond
-	ss := float64(rhpv2.SectorSize)
+	ss := float64(rhpv4.SectorSize)
 	overdrive := true
 	regular := false
 
 	errHostError := errors.New("some host error")
-	errSectorUploadFinishedAndDial := fmt.Errorf("%w;%w", rhp3.ErrDialTransport, ErrSectorUploadFinished)
+	errSectorUploadFinishedAndDial := fmt.Errorf("%w;%w", rhp4.ErrDialTransport, ErrSectorUploadFinished)
 
 	cases := []struct {
 		// input
@@ -79,9 +79,9 @@ func TestHandleSectorUpload(t *testing.T) {
 		{nil, ms, ms, regular, true, false, 1, ss},
 		{nil, ms, ms, overdrive, true, false, 1, ss},
 
-		// renewed contract case
-		{rhp3.ErrMaxRevisionReached, 0, ms, regular, false, false, 0, 0},
-		{rhp3.ErrMaxRevisionReached, 0, ms, overdrive, false, false, 0, 0},
+		// bad request
+		{rhpv4.ErrTokenExpired, 0, ms, regular, false, false, 0, 0},
+		{rhpv4.ErrTokenExpired, 0, ms, overdrive, false, false, 0, 0},
 
 		// context canceled case
 		{context.Canceled, 0, ms, regular, false, false, 0, 0},
@@ -94,8 +94,8 @@ func TestHandleSectorUpload(t *testing.T) {
 		{errSectorUploadFinishedAndDial, ms, 1001 * ms, overdrive, false, true, 10010, 0},
 
 		// payment failure case
-		{rhp3.ErrFailedToCreatePayment, 0, ms, regular, false, false, 3600000, 0},
-		{rhp3.ErrFailedToCreatePayment, 0, ms, overdrive, false, false, 3600000, 0},
+		{rhpv4.ErrNotEnoughFunds, 0, ms, regular, false, false, 3600000, 0},
+		{rhpv4.ErrNotEnoughFunds, 0, ms, overdrive, false, false, 3600000, 0},
 
 		// host failure
 		{errHostError, ms, ms, regular, false, true, 3600000, 0},
@@ -123,8 +123,8 @@ func TestRefreshUploader(t *testing.T) {
 
 	// create contract
 	hi := api.HostInfo{
-		PublicKey:  types.PublicKey{1},
-		SiamuxAddr: "localhost:1234",
+		PublicKey:         types.PublicKey{1},
+		V2SiamuxAddresses: []string{"localhost:1234"},
 	}
 	c := cs.AddContract(hi.PublicKey).Metadata()
 
@@ -159,7 +159,7 @@ func TestRefreshUploader(t *testing.T) {
 
 	// refresh uploader with new host info
 	update := hi
-	update.SiamuxAddr = "localhost:5678"
+	update.V2SiamuxAddresses = []string{"localhost:5678"}
 	ul.Refresh(&update, cr.ID, cr.WindowEnd)
 
 	// assert host info got updated

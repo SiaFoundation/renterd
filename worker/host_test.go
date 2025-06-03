@@ -9,13 +9,10 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/host"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 	"go.sia.tech/renterd/v2/internal/test"
 	"go.sia.tech/renterd/v2/internal/test/mocks"
 	"lukechampine.com/frand"
@@ -25,7 +22,6 @@ type (
 	testHost struct {
 		*mocks.Host
 		*mocks.Contract
-		hptFn       func() api.HostPriceTable
 		pFn         func() rhpv4.HostPrices
 		uploadDelay time.Duration
 	}
@@ -79,25 +75,14 @@ func (hm *testHostManager) addHost(h *testHost) {
 }
 
 func newTestHost(h *mocks.Host, c *mocks.Contract) *testHost {
-	return newTestHostCustom(h, c, newTestHostPriceTable, newTestHostPrices)
+	return newTestHostCustom(h, c, newTestHostPrices)
 }
 
-func newTestHostCustom(h *mocks.Host, c *mocks.Contract, hptFn func() api.HostPriceTable, pFn func() rhpv4.HostPrices) *testHost {
+func newTestHostCustom(h *mocks.Host, c *mocks.Contract, pFn func() rhpv4.HostPrices) *testHost {
 	return &testHost{
 		Host:     h,
 		Contract: c,
 		pFn:      pFn,
-		hptFn:    hptFn,
-	}
-}
-
-func newTestHostPriceTable() api.HostPriceTable {
-	var uid rhpv3.SettingsID
-	frand.Read(uid[:])
-
-	return api.HostPriceTable{
-		HostPriceTable: rhpv3.HostPriceTable{UID: uid, HostBlockHeight: 100, Validity: time.Minute},
-		Expiry:         time.Now().Add(time.Minute),
 	}
 }
 
@@ -119,16 +104,16 @@ func (h *testHost) PublicKey() types.PublicKey {
 func (h *testHost) DownloadSector(ctx context.Context, w io.Writer, root types.Hash256, offset, length uint64) error {
 	sector, exist := h.Contract.Sector(root)
 	if !exist {
-		return rhp3.ErrSectorNotFound
+		return rhpv4.ErrSectorNotFound
 	}
-	if offset+length > rhpv2.SectorSize {
+	if offset+length > rhpv4.SectorSize {
 		return mocks.ErrSectorOutOfBounds
 	}
 	_, err := w.Write(sector[offset : offset+length])
 	return err
 }
 
-func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
+func (h *testHost) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv4.SectorSize]byte) error {
 	h.Contract.AddSector(sectorRoot, sector)
 	if h.uploadDelay > 0 {
 		select {
@@ -144,16 +129,8 @@ func (h *testHost) FetchRevision(ctx context.Context, fcid types.FileContractID)
 	return h.Contract.Revision(), nil
 }
 
-func (h *testHost) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
-	return h.hptFn(), types.ZeroCurrency, nil
-}
-
 func (h *testHost) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
 	return h.pFn(), nil
-}
-
-func (h *testHost) PriceTableUnpaid(ctx context.Context) (api.HostPriceTable, error) {
-	return h.hptFn(), nil
 }
 
 func (h *testHost) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
@@ -180,7 +157,7 @@ func TestHost(t *testing.T) {
 
 	// download entire sector
 	var buf bytes.Buffer
-	err = h.DownloadSector(context.Background(), &buf, root, 0, rhpv2.SectorSize)
+	err = h.DownloadSector(context.Background(), &buf, root, 0, rhpv4.SectorSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), sector[:]) {
@@ -197,7 +174,7 @@ func TestHost(t *testing.T) {
 	}
 
 	// try downloading out of bounds
-	err = h.DownloadSector(context.Background(), &buf, root, rhpv2.SectorSize, 64)
+	err = h.DownloadSector(context.Background(), &buf, root, rhpv4.SectorSize, 64)
 	if !errors.Is(err, mocks.ErrSectorOutOfBounds) {
 		t.Fatal("expected out of bounds error", err)
 	}

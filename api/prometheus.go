@@ -100,317 +100,321 @@ func (b Bucket) PrometheusMetric() (metrics []prometheus.Metric) {
 		}}
 }
 
+// TODO: fix
 func (host Host) PrometheusMetric() (metrics []prometheus.Metric) {
-	priceTableLabels := map[string]any{
-		"net_address": host.NetAddress,
-		"uid":         host.PriceTable.UID.String(),
-		"expiry":      host.PriceTable.Expiry.Local().Format(time.RFC3339),
-	}
-	settingsLabels := map[string]any{
-		"net_address": host.NetAddress,
-		"version":     host.Settings.Version,
-		"siamux_port": host.Settings.SiaMuxPort,
-	}
-	netAddressLabel := map[string]any{
-		"net_address": host.NetAddress,
-	}
-
-	return []prometheus.Metric{
-		// price table
-		{
-			Name:   "renterd_host_pricetable_validity",
-			Labels: priceTableLabels,
-			Value:  float64(host.PriceTable.Validity.Milliseconds()),
-		},
-		{
-			Name:   "renterd_host_pricetable_hostblockheight",
-			Labels: priceTableLabels,
-			Value:  float64(host.PriceTable.HostBlockHeight),
-		},
-		{
-			Name:   "renterd_host_pricetable_updatepricetablecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.UpdatePriceTableCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_accountbalancecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.AccountBalanceCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_fundaccountcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.FundAccountCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_latestrevisioncost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.LatestRevisionCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_subscriptionmemorycost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.SubscriptionMemoryCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_subscriptionnotificationcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.SubscriptionNotificationCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_initbasecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.InitBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_memorytimecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.MemoryTimeCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_downloadbandwidthcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.DownloadBandwidthCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_uploadbandwidthcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.UploadBandwidthCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_dropsectorsbasecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.DropSectorsBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_dropsectorsunitcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.DropSectorsUnitCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_hassectorbasecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.HasSectorBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_readbasecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.ReadBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_readlengthcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.ReadLengthCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_renewcontractcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.RenewContractCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_revisionbasecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.RevisionBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_swapsectorcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.SwapSectorBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_writebasecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.WriteBaseCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_writelengthcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.WriteLengthCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_writestorecost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.WriteStoreCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_txnfeeminrecommended",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.TxnFeeMinRecommended.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_txnfeemaxrecommended",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.TxnFeeMaxRecommended.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_contractprice",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.ContractPrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_collateralcost",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.CollateralCost.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_maxcollateral",
-			Labels: priceTableLabels,
-			Value:  host.PriceTable.MaxCollateral.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_pricetable_maxduration",
-			Labels: priceTableLabels,
-			Value:  float64(host.PriceTable.MaxDuration),
-		},
-		{
-			Name:   "renterd_host_pricetable_windowsize",
-			Labels: priceTableLabels,
-			Value:  float64(host.PriceTable.WindowSize),
-		},
-
-		// settings
-		{
-			Name:   "renterd_host_settings_acceptingcontracts",
-			Labels: settingsLabels,
-			Value:  boolToFloat(host.Settings.AcceptingContracts),
-		},
-		{
-			Name:   "renterd_host_settings_baserpcprice",
-			Labels: settingsLabels,
-			Value:  host.Settings.BaseRPCPrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_collateral",
-			Labels: settingsLabels,
-			Value:  host.Settings.Collateral.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_contractprice",
-			Labels: settingsLabels,
-			Value:  host.Settings.ContractPrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_downloadbandwidthprice",
-			Labels: settingsLabels,
-			Value:  host.Settings.DownloadBandwidthPrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_ephemeralaccountexpiry",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.EphemeralAccountExpiry.Milliseconds()),
-		},
-		{
-			Name:   "renterd_host_settings_maxcollateral",
-			Labels: settingsLabels,
-			Value:  host.Settings.MaxCollateral.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_maxdownloadbatchsize",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.MaxDownloadBatchSize),
-		},
-		{
-			Name:   "renterd_host_settings_maxduration",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.MaxDuration),
-		},
-		{
-			Name:   "renterd_host_settings_maxephemeralaccountbalance",
-			Labels: settingsLabels,
-			Value:  host.Settings.MaxEphemeralAccountBalance.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_maxrevisebatchsize",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.MaxReviseBatchSize),
-		},
-		{
-			Name:   "renterd_host_settings_remainingstorage",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.RemainingStorage),
-		},
-		{
-			Name:   "renterd_host_settings_revisionnumber",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.RevisionNumber),
-		},
-		{
-			Name:   "renterd_host_settings_sectoraccessprice",
-			Labels: settingsLabels,
-			Value:  host.Settings.SectorAccessPrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_sectorsize",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.SectorSize),
-		},
-		{
-			Name:   "renterd_host_settings_storageprice",
-			Labels: settingsLabels,
-			Value:  host.Settings.StoragePrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_totalstorage",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.TotalStorage),
-		},
-		{
-			Name:   "renterd_host_settings_uploadbandwidthprice",
-			Labels: settingsLabels,
-			Value:  host.Settings.UploadBandwidthPrice.Siacoins(),
-		},
-		{
-			Name:   "renterd_host_settings_windowsize",
-			Labels: settingsLabels,
-			Value:  float64(host.Settings.WindowSize),
-		},
-
-		// interactions
-		{
-			Name:   "renterd_host_scanned",
-			Labels: netAddressLabel,
-			Value:  1,
-		},
-		{
-			Name:   "renterd_host_interactions_totalscans",
-			Labels: netAddressLabel,
-			Value:  float64(host.Interactions.TotalScans),
-		},
-		{
-			Name:   "renterd_host_interactions_lastscansuccess",
-			Labels: netAddressLabel,
-			Value:  boolToFloat(host.Interactions.LastScanSuccess),
-		},
-		{
-			Name:   "renterd_host_interactions_lostsectors",
-			Labels: netAddressLabel,
-			Value:  float64(host.Interactions.LostSectors),
-		},
-		{
-			Name:   "renterd_host_interactions_secondtolastscansuccess",
-			Labels: netAddressLabel,
-			Value:  boolToFloat(host.Interactions.SecondToLastScanSuccess),
-		},
-		{
-			Name:   "renterd_host_interactions_uptime",
-			Labels: netAddressLabel,
-			Value:  float64(host.Interactions.Uptime.Milliseconds()),
-		},
-		{
-			Name:   "renterd_host_interactions_downtime",
-			Labels: netAddressLabel,
-			Value:  float64(host.Interactions.Downtime.Milliseconds()),
-		},
-		{
-			Name:   "renterd_host_interactions_successfulinteractions",
-			Labels: netAddressLabel,
-			Value:  float64(host.Interactions.SuccessfulInteractions),
-		},
-		{
-			Name:   "renterd_host_interactions_failedinteractions",
-			Labels: netAddressLabel,
-			Value:  float64(host.Interactions.FailedInteractions),
-		}}
+	return nil
+	//	priceTableLabels := map[string]any{
+	//		"net_address": host.NetAddress,
+	//		"uid":         host.PriceTable.UID.String(),
+	//		"expiry":      host.PriceTable.Expiry.Local().Format(time.RFC3339),
+	//	}
+	//
+	//	settingsLabels := map[string]any{
+	//		"net_address": host.NetAddress,
+	//		"version":     host.Settings.Version,
+	//		"siamux_port": host.Settings.SiaMuxPort,
+	//	}
+	//
+	//	netAddressLabel := map[string]any{
+	//		"net_address": host.NetAddress,
+	//	}
+	//
+	//	return []prometheus.Metric{
+	//		// price table
+	//		{
+	//			Name:   "renterd_host_pricetable_validity",
+	//			Labels: priceTableLabels,
+	//			Value:  float64(host.PriceTable.Validity.Milliseconds()),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_hostblockheight",
+	//			Labels: priceTableLabels,
+	//			Value:  float64(host.PriceTable.HostBlockHeight),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_updatepricetablecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.UpdatePriceTableCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_accountbalancecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.AccountBalanceCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_fundaccountcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.FundAccountCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_latestrevisioncost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.LatestRevisionCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_subscriptionmemorycost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.SubscriptionMemoryCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_subscriptionnotificationcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.SubscriptionNotificationCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_initbasecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.InitBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_memorytimecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.MemoryTimeCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_downloadbandwidthcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.DownloadBandwidthCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_uploadbandwidthcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.UploadBandwidthCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_dropsectorsbasecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.DropSectorsBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_dropsectorsunitcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.DropSectorsUnitCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_hassectorbasecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.HasSectorBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_readbasecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.ReadBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_readlengthcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.ReadLengthCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_renewcontractcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.RenewContractCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_revisionbasecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.RevisionBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_swapsectorcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.SwapSectorBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_writebasecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.WriteBaseCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_writelengthcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.WriteLengthCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_writestorecost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.WriteStoreCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_txnfeeminrecommended",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.TxnFeeMinRecommended.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_txnfeemaxrecommended",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.TxnFeeMaxRecommended.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_contractprice",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.ContractPrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_collateralcost",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.CollateralCost.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_maxcollateral",
+	//			Labels: priceTableLabels,
+	//			Value:  host.PriceTable.MaxCollateral.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_maxduration",
+	//			Labels: priceTableLabels,
+	//			Value:  float64(host.PriceTable.MaxDuration),
+	//		},
+	//		{
+	//			Name:   "renterd_host_pricetable_windowsize",
+	//			Labels: priceTableLabels,
+	//			Value:  float64(host.PriceTable.WindowSize),
+	//		},
+	//
+	//		// settings
+	//		{
+	//			Name:   "renterd_host_settings_acceptingcontracts",
+	//			Labels: settingsLabels,
+	//			Value:  boolToFloat(host.Settings.AcceptingContracts),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_baserpcprice",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.BaseRPCPrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_collateral",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.Collateral.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_contractprice",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.ContractPrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_downloadbandwidthprice",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.DownloadBandwidthPrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_ephemeralaccountexpiry",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.EphemeralAccountExpiry.Milliseconds()),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_maxcollateral",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.MaxCollateral.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_maxdownloadbatchsize",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.MaxDownloadBatchSize),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_maxduration",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.MaxDuration),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_maxephemeralaccountbalance",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.MaxEphemeralAccountBalance.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_maxrevisebatchsize",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.MaxReviseBatchSize),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_remainingstorage",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.RemainingStorage),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_revisionnumber",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.RevisionNumber),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_sectoraccessprice",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.SectorAccessPrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_sectorsize",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.SectorSize),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_storageprice",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.StoragePrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_totalstorage",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.TotalStorage),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_uploadbandwidthprice",
+	//			Labels: settingsLabels,
+	//			Value:  host.Settings.UploadBandwidthPrice.Siacoins(),
+	//		},
+	//		{
+	//			Name:   "renterd_host_settings_windowsize",
+	//			Labels: settingsLabels,
+	//			Value:  float64(host.Settings.WindowSize),
+	//		},
+	//
+	//		// interactions
+	//		{
+	//			Name:   "renterd_host_scanned",
+	//			Labels: netAddressLabel,
+	//			Value:  1,
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_totalscans",
+	//			Labels: netAddressLabel,
+	//			Value:  float64(host.Interactions.TotalScans),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_lastscansuccess",
+	//			Labels: netAddressLabel,
+	//			Value:  boolToFloat(host.Interactions.LastScanSuccess),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_lostsectors",
+	//			Labels: netAddressLabel,
+	//			Value:  float64(host.Interactions.LostSectors),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_secondtolastscansuccess",
+	//			Labels: netAddressLabel,
+	//			Value:  boolToFloat(host.Interactions.SecondToLastScanSuccess),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_uptime",
+	//			Labels: netAddressLabel,
+	//			Value:  float64(host.Interactions.Uptime.Milliseconds()),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_downtime",
+	//			Labels: netAddressLabel,
+	//			Value:  float64(host.Interactions.Downtime.Milliseconds()),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_successfulinteractions",
+	//			Labels: netAddressLabel,
+	//			Value:  float64(host.Interactions.SuccessfulInteractions),
+	//		},
+	//		{
+	//			Name:   "renterd_host_interactions_failedinteractions",
+	//			Labels: netAddressLabel,
+	//			Value:  float64(host.Interactions.FailedInteractions),
+	//		}}
 }
 
 func (c ContractMetadata) PrometheusMetric() (metrics []prometheus.Metric) {

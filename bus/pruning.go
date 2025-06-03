@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -12,61 +11,7 @@ import (
 	"go.sia.tech/renterd/v2/api"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/gouging"
-	rhp2 "go.sia.tech/renterd/v2/internal/rhp/v2"
 )
-
-func (b *Bus) pruneContractV1(ctx context.Context, rk types.PrivateKey, cm api.ContractMetadata, hostIP string, gc gouging.Checker, pendingUploads map[types.Hash256]struct{}) (api.ContractPruneResponse, error) {
-	// prune contract
-	rev, spending, pruned, remaining, err := b.rhp2Client.PruneContract(ctx, rk, gc, hostIP, cm.HostKey, cm.ID, cm.RevisionNumber, func(fcid types.FileContractID, roots []types.Hash256) ([]uint64, error) {
-		indices, err := b.store.PrunableContractRoots(ctx, fcid, roots)
-		if err != nil {
-			return nil, err
-		} else if len(indices) > len(roots) {
-			return nil, fmt.Errorf("selected %d prunable roots but only %d were provided", len(indices), len(roots))
-		}
-
-		filtered := indices[:0]
-		for _, index := range indices {
-			_, ok := pendingUploads[roots[index]]
-			if !ok {
-				filtered = append(filtered, index)
-			}
-		}
-		indices = filtered
-		return indices, nil
-	})
-
-	var pruneErr string
-	if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) && !errors.Is(err, context.Canceled) {
-		return api.ContractPruneResponse{}, err
-	} else if err != nil && !errors.Is(err, rhp2.ErrNoSectorsToPrune) {
-		pruneErr = err.Error()
-	}
-
-	// record spending
-	if !spending.Total().IsZero() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		b.store.RecordContractSpending(ctx, []api.ContractSpendingRecord{
-			{
-				ContractSpending: spending,
-				ContractID:       cm.ID,
-				RevisionNumber:   rev.RevisionNumber,
-				Size:             rev.Filesize,
-
-				MissedHostPayout:  rev.MissedHostPayout(),
-				ValidRenterPayout: rev.ValidRenterPayout(),
-			},
-		})
-	}
-
-	return api.ContractPruneResponse{
-		ContractSize: rev.Filesize,
-		Pruned:       pruned,
-		Remaining:    remaining,
-		Error:        pruneErr,
-	}, nil
-}
 
 func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.ContractMetadata, hostIP string, gc gouging.Checker, pendingUploads map[types.Hash256]struct{}) (api.ContractPruneResponse, error) {
 	signer := ibus.NewFormContractSigner(b.w, rk)

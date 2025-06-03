@@ -15,8 +15,6 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -31,8 +29,6 @@ import (
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/rhp"
-	rhp2 "go.sia.tech/renterd/v2/internal/rhp/v2"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.sia.tech/renterd/v2/object"
@@ -310,8 +306,6 @@ type Bus struct {
 	w        Wallet
 	store    Store
 
-	rhp2Client *rhp2.Client
-	rhp3Client *rhp3.Client
 	rhp4Client *rhp4.Client
 
 	contractLocker        ContractLocker
@@ -342,8 +336,6 @@ func New(cfg config.Bus, masterKey [32]byte, am AlertManager, cm ChainManager, s
 		alertMgr: am,
 		logger:   l.Sugar(),
 
-		rhp2Client: rhp2.New(dialer, l),
-		rhp3Client: rhp3.New(dialer, l),
 		rhp4Client: rhp4.New(dialer),
 	}
 
@@ -555,79 +547,44 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}
 	fee := b.w.RecommendedFee().Mul64(10e3)
 
-	// derive the renter key
-	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
-
-	// send V2 transaction if we're passed the V2 hardfork allow height
-	if b.isPassedV2AllowHeight() {
-		// fetch revision
-		rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.V2SiamuxAddr(), fcid)
-		if err != nil {
-			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
-		}
-
-		// fetch parent contract element
-		fce, err := b.store.FileContractElement(ctx, fcid)
-		if err != nil {
-			return types.TransactionID{}, fmt.Errorf("couldn't fetch file contract element; %w", err)
-		}
-
-		// create the transaction
-		txn := types.V2Transaction{
-			MinerFee: fee,
-			FileContractRevisions: []types.V2FileContractRevision{
-				{
-					Parent:   fce,
-					Revision: rev,
-				},
-			},
-		}
-
-		// fund the transaction (only the fee)
-		basis, toSign, err := b.w.FundV2Transaction(&txn, fee, true)
-		if err != nil {
-			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
-		}
-		// sign the transaction
-		b.w.SignV2Inputs(&txn, toSign)
-
-		// broadcast the transaction
-		txnSet := []types.V2Transaction{txn}
-		if err := b.w.BroadcastV2TransactionSet(basis, txnSet); err != nil {
-			b.w.ReleaseInputs(nil, txnSet)
-			return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
-		}
-		return txn.ID(), nil
-	} else {
-		// fetch revision
-		rev, err := b.rhp2Client.SignedRevision(ctx, host.NetAddress, c.HostKey, renterKey, fcid, time.Minute)
-		if err != nil {
-			return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
-		}
-
-		// create the transaction
-		txn := types.Transaction{
-			MinerFees:             []types.Currency{fee},
-			FileContractRevisions: []types.FileContractRevision{rev.Revision},
-			Signatures:            rev.Signatures[:],
-		}
-
-		// fund the transaction (only the fee)
-		toSign, err := b.w.FundTransaction(&txn, fee, true)
-		if err != nil {
-			return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
-		}
-		// sign the transaction
-		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
-
-		// broadcast the transaction
-		txnset := append(b.cm.UnconfirmedParents(txn), txn)
-		if err := b.w.BroadcastTransactionSet(txnset); err != nil {
-			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-			return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
-		}
-		return txn.ID(), nil
+	// fetch revision
+	rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.V2SiamuxAddr(), fcid)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
+
+	// fetch parent contract element
+	fce, err := b.store.FileContractElement(ctx, fcid)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fetch file contract element; %w", err)
+	}
+
+	// create the transaction
+	txn := types.V2Transaction{
+		MinerFee: fee,
+		FileContractRevisions: []types.V2FileContractRevision{
+			{
+				Parent:   fce,
+				Revision: rev,
+			},
+		},
+	}
+
+	// fund the transaction (only the fee)
+	basis, toSign, err := b.w.FundV2Transaction(&txn, fee, true)
+	if err != nil {
+		return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+	}
+	// sign the transaction
+	b.w.SignV2Inputs(&txn, toSign)
+
+	// broadcast the transaction
+	txnSet := []types.V2Transaction{txn}
+	if err := b.w.BroadcastV2TransactionSet(basis, txnSet); err != nil {
+		b.w.ReleaseInputs(nil, txnSet)
+		return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
+	}
+	return txn.ID(), nil
 }
 
 func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
@@ -667,88 +624,6 @@ func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP strin
 func (b *Bus) isPassedV2AllowHeight() bool {
 	cs := b.cm.TipState()
 	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
-}
-
-func (b *Bus) prepareRenew(cs consensus.State, revision types.FileContractRevision, hostAddress, renterAddress types.Address, renterFunds, minNewCollateral types.Currency, endHeight, expectedStorage uint64) rhp3.PrepareRenewFn {
-	return func(pt rhpv3.HostPriceTable) ([]types.Hash256, []types.Transaction, types.Currency, rhp3.DiscardTxnFn, error) {
-		// cap v1 renewals to the v2 require height since the host won't allow us to
-		// form contracts beyond that
-		v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
-		if endHeight >= v2ReqHeight-pt.WindowSize {
-			endHeight = v2ReqHeight - pt.WindowSize - 1
-		}
-
-		// create the final revision from the provided revision
-		finalRevision := revision
-		finalRevision.MissedProofOutputs = finalRevision.ValidProofOutputs
-		finalRevision.Filesize = 0
-		finalRevision.FileMerkleRoot = types.Hash256{}
-		finalRevision.RevisionNumber = math.MaxUint64
-
-		// prepare the new contract
-		fc, basePrice, err := rhpv3.PrepareContractRenewal(revision, hostAddress, renterAddress, renterFunds, minNewCollateral, pt, expectedStorage, endHeight)
-		if err != nil {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't prepare contract renewal: %w", err)
-		}
-
-		// prepare the transaction
-		txn := types.Transaction{
-			FileContracts:         []types.FileContract{fc},
-			FileContractRevisions: []types.FileContractRevision{finalRevision},
-			MinerFees:             []types.Currency{pt.TxnFeeMaxRecommended.Mul64(4096)},
-		}
-
-		// compute how much renter funds to put into the new contract
-		fundAmount := rhpv3.ContractRenewalCost(cs, pt, fc, txn.MinerFees[0], basePrice)
-
-		// fund the transaction, we are not signing it yet since it's not
-		// complete. The host still needs to complete it and the revision +
-		// contract are signed with the renter key by the worker.
-		toSign, err := b.w.FundTransaction(&txn, fundAmount, true)
-		if err != nil {
-			return nil, nil, types.ZeroCurrency, nil, fmt.Errorf("couldn't fund transaction: %w", err)
-		}
-
-		return toSign, append(b.cm.UnconfirmedParents(txn), txn), fundAmount, func(err *error) {
-			if *err == nil {
-				return
-			}
-			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		}, nil
-	}
-}
-
-func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.GougingParams, c api.ContractMetadata, hs rhpv2.HostSettings, renterFunds, minNewCollateral types.Currency, endHeight, expectedNewStorage uint64) (api.ContractMetadata, error) {
-	// derive the renter key
-	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
-
-	// fetch the revision
-	rev, err := b.rhp3Client.Revision(ctx, c.ID, c.HostKey, hs.SiamuxAddr())
-	if err != nil {
-		return api.ContractMetadata{}, err
-	}
-
-	// renew contract
-	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
-	prepareRenew := b.prepareRenew(cs, rev, hs.Address, b.w.Address(), renterFunds, minNewCollateral, endHeight, expectedNewStorage)
-	newRevision, _, contractPrice, fundAmount, err := b.rhp3Client.Renew(ctx, gc, rev, renterKey, c.HostKey, hs.SiamuxAddr(), prepareRenew, b.w.SignTransaction)
-	if err != nil {
-		return api.ContractMetadata{}, err
-	}
-
-	return api.ContractMetadata{
-		ID:                 newRevision.ID(),
-		HostKey:            newRevision.HostKey(),
-		RenewedFrom:        c.ID,
-		StartHeight:        cs.Index.Height,
-		State:              api.ContractStatePending,
-		WindowStart:        newRevision.Revision.WindowStart,
-		WindowEnd:          newRevision.Revision.WindowEnd,
-		ContractPrice:      contractPrice,
-		InitialRenterFunds: fundAmount,
-		Usability:          api.ContractUsabilityGood,
-		V2:                 false,
-	}, nil
 }
 
 func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency) (api.ContractMetadata, error) {

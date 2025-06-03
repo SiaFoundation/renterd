@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	"go.sia.tech/core/types"
 )
 
@@ -109,15 +108,6 @@ type (
 		LockID uint64 `json:"lockID"`
 	}
 
-	// ContractAddRequest is the request type for the /contract/:id endpoint.
-	ContractAddRequest struct {
-		ContractPrice      types.Currency         `json:"contractPrice"`
-		InitialRenterFunds types.Currency         `json:"initialRenterFunds"`
-		Revision           rhpv2.ContractRevision `json:"revision"`
-		StartHeight        uint64                 `json:"startHeight"`
-		State              string                 `json:"state,omitempty"`
-	}
-
 	// ContractFormRequest is the request type for the POST /contracts endpoint.
 	ContractFormRequest struct {
 		EndHeight      uint64          `json:"endHeight"`
@@ -158,10 +148,9 @@ type (
 	// ContractRenewRequest is the request type for the /contract/:id/renew
 	// endpoint.
 	ContractRenewRequest struct {
-		EndHeight          uint64         `json:"endHeight"`
-		ExpectedNewStorage uint64         `json:"expectedNewStorage"`
-		MinNewCollateral   types.Currency `json:"minNewCollateral"`
-		RenterFunds        types.Currency `json:"renterFunds"`
+		EndHeight        uint64         `json:"endHeight"`
+		MinNewCollateral types.Currency `json:"minNewCollateral"`
+		RenterFunds      types.Currency `json:"renterFunds"`
 	}
 
 	// ContractsArchiveRequest is the request type for the /contracts/archive endpoint.

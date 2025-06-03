@@ -4,7 +4,7 @@ import (
 	"errors"
 	"math/big"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 )
 
@@ -17,7 +17,7 @@ var (
 type (
 	Account struct {
 		// ID identifies an account. It's a public key.
-		ID rhpv3.Account `json:"id"`
+		ID rhpv4.Account `json:"id"`
 
 		// CleanShutdown indicates whether the account was saved during a clean
 		// shutdown

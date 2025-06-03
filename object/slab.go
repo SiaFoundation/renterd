@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/reedsolomon"
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"golang.org/x/crypto/chacha20"
 )
@@ -68,7 +68,7 @@ func (s Slab) Contracts() []types.FileContractID {
 
 // Length returns the length of the raw data stored in s.
 func (s Slab) Length() int {
-	return rhpv2.SectorSize * int(s.MinShards)
+	return rhpv4.SectorSize * int(s.MinShards)
 }
 
 // Encrypt xors shards with the keystream derived from s.Key, using a
@@ -88,13 +88,13 @@ func (s Slab) Encrypt(shards [][]byte) {
 }
 
 // Encode encodes slab data into sector-sized shards. The supplied shards should
-// have a capacity of at least rhpv2.SectorSize, or they will be reallocated.
+// have a capacity of at least rhpv4.SectorSize, or they will be reallocated.
 func (s Slab) Encode(buf []byte, shards [][]byte) {
 	for i := range shards {
-		if cap(shards[i]) < rhpv2.SectorSize {
-			shards[i] = make([]byte, 0, rhpv2.SectorSize)
+		if cap(shards[i]) < rhpv4.SectorSize {
+			shards[i] = make([]byte, 0, rhpv4.SectorSize)
 		}
-		shards[i] = shards[i][:rhpv2.SectorSize]
+		shards[i] = shards[i][:rhpv4.SectorSize]
 	}
 	stripedSplit(buf, shards[:s.MinShards])
 	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
@@ -105,17 +105,17 @@ func (s Slab) Encode(buf []byte, shards [][]byte) {
 
 // Reconstruct reconstructs the missing shards of a slab. Missing shards must
 // have a len of zero. All shards should have a capacity of at least
-// rhpv2.SectorSize, or they will be reallocated.
+// rhpv4.SectorSize, or they will be reallocated.
 func (s Slab) Reconstruct(shards [][]byte) error {
 	for i := range shards {
-		if len(shards[i]) != rhpv2.SectorSize && len(shards[i]) != 0 {
-			panic("shards must have a len of either 0 or rhpv2.SectorSize")
+		if len(shards[i]) != rhpv4.SectorSize && len(shards[i]) != 0 {
+			panic("shards must have a len of either 0 or rhpv4.SectorSize")
 		}
-		if cap(shards[i]) < rhpv2.SectorSize {
-			shards[i] = make([]byte, 0, rhpv2.SectorSize)
+		if cap(shards[i]) < rhpv4.SectorSize {
+			shards[i] = make([]byte, 0, rhpv4.SectorSize)
 		}
 		if len(shards[i]) != 0 {
-			shards[i] = shards[i][:rhpv2.SectorSize]
+			shards[i] = shards[i][:rhpv4.SectorSize]
 		}
 	}
 
@@ -139,11 +139,11 @@ type SlabSlice struct {
 // SectorRegion returns the offset and length of the sector region that must be
 // downloaded in order to recover the data referenced by the SlabSlice.
 func (ss SlabSlice) SectorRegion() (offset, length uint64) {
-	minChunkSize := rhpv2.LeafSize * uint32(ss.MinShards)
-	start := (ss.Offset / minChunkSize) * rhpv2.LeafSize
-	end := ((ss.Offset + ss.Length) / minChunkSize) * rhpv2.LeafSize
+	minChunkSize := rhpv4.LeafSize * uint32(ss.MinShards)
+	start := (ss.Offset / minChunkSize) * rhpv4.LeafSize
+	end := ((ss.Offset + ss.Length) / minChunkSize) * rhpv4.LeafSize
 	if (ss.Offset+ss.Length)%minChunkSize != 0 {
-		end += rhpv2.LeafSize
+		end += rhpv4.LeafSize
 	}
 	return uint64(start), uint64(end - start)
 }
@@ -151,7 +151,7 @@ func (ss SlabSlice) SectorRegion() (offset, length uint64) {
 // Decrypt xors shards with the keystream derived from s.Key (starting at the
 // slice offset), using a different nonce for each shard.
 func (ss SlabSlice) Decrypt(shards [][]byte) {
-	offset := ss.Offset / (rhpv2.LeafSize * uint32(ss.MinShards))
+	offset := ss.Offset / (rhpv4.LeafSize * uint32(ss.MinShards))
 	var wg sync.WaitGroup
 	for i := range shards {
 		wg.Add(1)
@@ -179,7 +179,7 @@ func (ss SlabSlice) Recover(w io.Writer, shards [][]byte) error {
 	if err := rsc.ReconstructData(shards); err != nil {
 		return err
 	}
-	skip := ss.Offset % (rhpv2.LeafSize * uint32(ss.MinShards))
+	skip := ss.Offset % (rhpv4.LeafSize * uint32(ss.MinShards))
 	return stripedJoin(w, shards[:ss.MinShards], int(skip), int(ss.Length))
 }
 
@@ -207,9 +207,9 @@ func (ss SlabSlices) Contracts() []types.FileContractID {
 // capacity.
 func stripedSplit(data []byte, dataShards [][]byte) {
 	buf := bytes.NewBuffer(data)
-	for off := 0; buf.Len() > 0; off += rhpv2.LeafSize {
+	for off := 0; buf.Len() > 0; off += rhpv4.LeafSize {
 		for _, shard := range dataShards {
-			copy(shard[off:], buf.Next(rhpv2.LeafSize))
+			copy(shard[off:], buf.Next(rhpv4.LeafSize))
 		}
 	}
 }
@@ -218,12 +218,12 @@ func stripedSplit(data []byte, dataShards [][]byte) {
 // bytes of the recovered data are skipped, and 'writeLen' bytes are written in
 // total.
 func stripedJoin(dst io.Writer, dataShards [][]byte, skip, writeLen int) error {
-	for off := 0; writeLen > 0; off += rhpv2.LeafSize {
+	for off := 0; writeLen > 0; off += rhpv4.LeafSize {
 		for _, shard := range dataShards {
-			if len(shard[off:]) < rhpv2.LeafSize {
+			if len(shard[off:]) < rhpv4.LeafSize {
 				return reedsolomon.ErrShortData
 			}
-			shard = shard[off:][:rhpv2.LeafSize]
+			shard = shard[off:][:rhpv4.LeafSize]
 			if skip >= len(shard) {
 				skip -= len(shard)
 				continue

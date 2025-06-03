@@ -5,11 +5,9 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/gouging"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/test"
 )
@@ -60,83 +58,6 @@ func TestClampScore(t *testing.T) {
 		if out := clampScore(test.in); out != test.out {
 			t.Errorf("expected %v, got %v", test.out, out)
 		}
-	}
-}
-
-func TestHostScore(t *testing.T) {
-	day := 24 * time.Hour
-
-	newHost := func(s rhpv2.HostSettings) api.Host {
-		return test.NewHost(test.RandomHostKey(), test.NewHostPriceTable(), s)
-	}
-	h1 := newHost(test.NewHostSettings())
-	h2 := newHost(test.NewHostSettings())
-	gs := api.GougingSettings{
-		MaxUploadPrice:   types.NewCurrency64(1000000000000),
-		MaxStoragePrice:  types.NewCurrency64(3000000000),
-		MaxDownloadPrice: types.NewCurrency64(100000000000000),
-	}
-
-	// assert both hosts score equal
-	redundancy := 3.0
-	if hostScore(cfg, gs, h1, redundancy) != hostScore(cfg, gs, h2, redundancy) {
-		t.Fatal("unexpected")
-	}
-
-	//	// assert age affects the score
-	h1.KnownSince = time.Now().Add(-100 * day)
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
-	}
-
-	// assert collateral affects the score
-	h1 = newHost(test.NewHostSettings()) // reset
-	h1.PriceTable.CollateralCost = h1.PriceTable.CollateralCost.Div64(1000)
-	if hostScore(cfg, gs, h1, redundancy).Score() >= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
-	}
-
-	// assert interactions affect the score
-	h1 = newHost(test.NewHostSettings()) // reset
-	h1.Interactions.SuccessfulInteractions++
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
-	}
-
-	// assert uptime affects the score
-	h2 = newHost(test.NewHostSettings()) // reset
-	h2.Interactions.SecondToLastScanSuccess = false
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() || ageScore(h1) != ageScore(h2) {
-		t.Fatal("unexpected")
-	}
-
-	// assert version affects the score
-	h2Settings := test.NewHostSettings()
-	h2Settings.Version = "1.5.6" // lower
-	h2 = newHost(h2Settings)     // reset
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
-	}
-
-	// assert remaining storage affects the score.
-	h1 = newHost(test.NewHostSettings()) // reset
-	h2.Settings.RemainingStorage = 100
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
-	}
-
-	// assert MaxCollateral affects the score.
-	h2 = newHost(test.NewHostSettings()) // reset
-	h2.PriceTable.MaxCollateral = types.ZeroCurrency
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
-	}
-
-	// assert price affects the score.
-	h2 = newHost(test.NewHostSettings()) // reset
-	h2.PriceTable.WriteBaseCost = types.Siacoins(1)
-	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
-		t.Fatal("unexpected")
 	}
 }
 
@@ -220,14 +141,13 @@ func TestHostScoreV2(t *testing.T) {
 func TestPriceAdjustmentScore(t *testing.T) {
 	score := func(mdp, mup, msp uint64) float64 {
 		t.Helper()
-		pt := rhpv3.HostPriceTable{
-			WriteStoreCost:        types.NewCurrency64(50),
-			DownloadBandwidthCost: types.NewCurrency64(50),
-			UploadBandwidthCost:   types.NewCurrency64(50),
+		prices := rhpv4.HostPrices{
+			EgressPrice:  types.NewCurrency64(50),
+			IngressPrice: types.NewCurrency64(50),
 		}
-		dppb, _ := gouging.DownloadPricePerByte(pt)
-		uppb, _ := gouging.UploadPricePerByte(pt)
-		sppb := pt.WriteStoreCost
+		dppb := prices.RPCReadSectorCost(1).RenterCost()
+		uppb := prices.RPCWriteSectorCost(1).RenterCost()
+		sppb := prices.StoragePrice
 		return priceAdjustmentScore(dppb, uppb, sppb, api.GougingSettings{
 			MaxDownloadPrice: types.NewCurrency64(mdp),
 			MaxUploadPrice:   types.NewCurrency64(mup),
@@ -310,13 +230,12 @@ func TestCollateralScore(t *testing.T) {
 	storageCost := uint64(100)
 	score := func(collateral, maxCollateral uint64) float64 {
 		t.Helper()
-		pt := rhpv3.HostPriceTable{
-			CollateralCost: types.NewCurrency64(collateral),
-			MaxCollateral:  types.NewCurrency64(maxCollateral),
-			WriteStoreCost: types.NewCurrency64(storageCost),
+		pt := rhpv4.HostPrices{
+			Collateral:   types.NewCurrency64(collateral),
+			StoragePrice: types.NewCurrency64(storageCost),
 		}
-		appendSectorCost := pt.AppendSectorCost(period).Storage
-		return collateralScore(appendSectorCost, pt.MaxCollateral, pt.CollateralCost, rhpv2.SectorSize, period)
+		appendSectorCost := pt.RPCAppendSectorsCost(1, period).Storage
+		return collateralScore(appendSectorCost, types.NewCurrency64(maxCollateral), pt.Collateral, rhpv4.SectorSize, period)
 	}
 
 	round := func(f float64) float64 {
@@ -325,7 +244,7 @@ func TestCollateralScore(t *testing.T) {
 	}
 
 	// NOTE: with the above settings, the cutoff is at 7500H.
-	cutoff := uint64(storageCost * rhpv2.SectorSize * period * 3 / 2)
+	cutoff := uint64(storageCost * rhpv4.SectorSize * period * 3 / 2)
 	cutoffCollateral := storageCost * 3 / 2
 
 	// Collateral is exactly at cutoff.

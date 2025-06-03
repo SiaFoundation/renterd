@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"lukechampine.com/frand"
 )
 
@@ -21,7 +21,7 @@ func checkRecover(s Slab, shards [][]byte, data []byte) bool {
 func TestReedSolomon(t *testing.T) {
 	// 3-of-10 code
 	s := Slab{MinShards: 3, Shards: make([]Sector, 10)}
-	data := frand.Bytes(rhpv2.SectorSize * 3)
+	data := frand.Bytes(rhpv4.SectorSize * 3)
 	shards := make([][]byte, 10)
 	s.Encode(data, shards)
 
@@ -54,16 +54,16 @@ func TestReedSolomon(t *testing.T) {
 	}
 
 	// pick a random segment from 3 shards
-	segIndex := frand.Intn(len(shards[0]) / rhpv2.LeafSize)
+	segIndex := frand.Intn(len(shards[0]) / rhpv4.LeafSize)
 	for i := range partialShards {
-		partialShards[i] = make([]byte, 0, rhpv2.LeafSize)
+		partialShards[i] = make([]byte, 0, rhpv4.LeafSize)
 	}
 	for _, i := range frand.Perm(len(partialShards))[:3] {
-		partialShards[i] = shards[i][segIndex*rhpv2.LeafSize:][:rhpv2.LeafSize]
+		partialShards[i] = shards[i][segIndex*rhpv4.LeafSize:][:rhpv4.LeafSize]
 	}
 
 	// recover
-	chunkSize := rhpv2.LeafSize * int(s.MinShards)
+	chunkSize := rhpv4.LeafSize * int(s.MinShards)
 	dataSeg := data[segIndex*chunkSize:][:chunkSize]
 	if !checkRecover(s, partialShards, dataSeg) {
 		t.Error("failed to recover shards")
@@ -73,7 +73,7 @@ func TestReedSolomon(t *testing.T) {
 func BenchmarkReedSolomon(b *testing.B) {
 	makeSlab := func(m, n uint8) (Slab, []byte, [][]byte) {
 		return Slab{EncryptionKey: GenerateEncryptionKey(EncryptionKeyTypeSalted), MinShards: m, Shards: make([]Sector, n)},
-			frand.Bytes(rhpv2.SectorSize * int(m)),
+			frand.Bytes(rhpv4.SectorSize * int(m)),
 			make([][]byte, n)
 	}
 

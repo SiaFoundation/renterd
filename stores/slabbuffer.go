@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
@@ -453,7 +453,7 @@ func bufferFilename(minShards, totalShards uint8) string {
 }
 
 func bufferedSlabSize(minShards uint8) int {
-	return int(rhpv2.SectorSize) * int(minShards)
+	return int(rhpv4.SectorSize) * int(minShards)
 }
 
 func createSlabBuffer(ctx context.Context, tx sql.DatabaseTx, dir string, minShards, totalShards uint8) (*SlabBuffer, error) {

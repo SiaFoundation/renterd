@@ -8,12 +8,10 @@ import (
 	"sync"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
@@ -86,7 +84,7 @@ type (
 		wg             sync.WaitGroup
 
 		mu                  sync.Mutex
-		byID                map[rhpv3.Account]*Account
+		byID                map[rhpv4.Account]*Account
 		inProgressRefills   map[types.PublicKey]struct{}
 		lastLoggedRefillErr map[types.PublicKey]time.Time
 	}
@@ -132,7 +130,7 @@ func NewManager(key utils.AccountsKey, owner string, alerter alerts.Alerter, fun
 		shutdownCtx:         shutdownCtx,
 		shutdownCancel:      shutdownCancel,
 
-		byID: make(map[rhpv3.Account]*Account),
+		byID: make(map[rhpv4.Account]*Account),
 	}
 	a.wg.Add(1)
 	go func() {
@@ -160,7 +158,7 @@ func (a *Manager) Accounts() []api.Account {
 }
 
 // ResetDrift resets the drift on an account.
-func (a *Manager) ResetDrift(id rhpv3.Account) error {
+func (a *Manager) ResetDrift(id rhpv4.Account) error {
 	a.mu.Lock()
 	account, exists := a.byID[id]
 	if !exists {
@@ -203,7 +201,7 @@ func (a *Manager) account(hk types.PublicKey) *Account {
 
 	// Derive account key.
 	accKey := a.key.DeriveAccountKey(hk)
-	accID := rhpv3.Account(accKey.PublicKey())
+	accID := rhpv4.Account(accKey.PublicKey())
 
 	// Create account if it doesn't exist.
 	acc, exists := a.byID[accID]
@@ -263,10 +261,10 @@ func (a *Manager) run() {
 
 	// add accounts
 	a.mu.Lock()
-	accounts := make(map[rhpv3.Account]*Account, len(saved))
+	accounts := make(map[rhpv4.Account]*Account, len(saved))
 	for _, acc := range saved {
 		accKey := a.key.DeriveAccountKey(acc.HostKey)
-		if rhpv3.Account(accKey.PublicKey()) != acc.ID {
+		if rhpv4.Account(accKey.PublicKey()) != acc.ID {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
 		}
@@ -468,7 +466,7 @@ func (a *Account) WithSync(balanceFn func() (types.Currency, error)) error {
 	return nil
 }
 
-func (a *Account) ID() rhpv3.Account {
+func (a *Account) ID() rhpv4.Account {
 	return a.acc.ID
 }
 
@@ -505,13 +503,13 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	a.mu.Lock()
 	if a.acc.RequiresSync {
 		a.mu.Unlock()
-		return fmt.Errorf("%w; account requires resync", rhp3.ErrBalanceInsufficient)
+		return fmt.Errorf("%w; account requires resync", rhpv4.ErrNotEnoughFunds)
 	}
 
 	// return early if our account is not funded
 	if a.acc.Balance.Cmp(big.NewInt(0)) <= 0 {
 		a.mu.Unlock()
-		return rhp3.ErrBalanceInsufficient
+		return rhpv4.ErrNotEnoughFunds
 	}
 	a.mu.Unlock()
 
@@ -519,7 +517,7 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	amt, err := amtFn()
 
 	// in case of an insufficient balance, we schedule a sync
-	if utils.IsBalanceInsufficient(err) {
+	if rhpv4.ErrorCode(err) == rhpv4.ErrorCodePayment {
 		a.ScheduleSync()
 	}
 
@@ -634,7 +632,7 @@ func (a *Account) setBalance(balance *big.Int) {
 		zap.Stringer("drift", drift))
 }
 
-func newAccountRefillAlert(id rhpv3.Account, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {
+func newAccountRefillAlert(id rhpv4.Account, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {
 	data := map[string]interface{}{
 		"error":      err.Error(),
 		"accountID":  id.String(),

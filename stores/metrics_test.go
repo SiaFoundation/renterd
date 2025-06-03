@@ -157,14 +157,13 @@ func TestContractPruneMetrics(t *testing.T) {
 	times := []time.Time{time.UnixMilli(3), time.UnixMilli(1), time.UnixMilli(2)}
 	var i byte
 	fcid2Metric := make(map[types.FileContractID]api.ContractPruneMetric)
-	for hi, host := range hosts {
+	for _, host := range hosts {
 		for _, recordedTime := range times {
 			metric := api.ContractPruneMetric{
 				Timestamp: api.TimeRFC3339(recordedTime),
 
-				ContractID:  types.FileContractID{i},
-				HostKey:     host,
-				HostVersion: hostVersions[hi],
+				ContractID: types.FileContractID{i},
+				HostKey:    host,
 
 				Pruned:    math.MaxUint64,
 				Remaining: math.MaxUint64,

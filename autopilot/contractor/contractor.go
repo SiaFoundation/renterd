@@ -13,8 +13,6 @@ import (
 
 	"github.com/montanaflynn/stats"
 	"go.sia.tech/core/consensus"
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -66,7 +64,7 @@ type ContractManager interface {
 	BroadcastContract(ctx context.Context, fcid types.FileContractID) (types.TransactionID, error)
 	ContractRevision(ctx context.Context, fcid types.FileContractID) (api.Revision, error)
 	FormContract(ctx context.Context, renterAddress types.Address, renterFunds types.Currency, hostKey types.PublicKey, hostCollateral types.Currency, endHeight uint64) (api.ContractMetadata, error)
-	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency, expectedNewStorage uint64) (api.ContractMetadata, error)
+	RenewContract(ctx context.Context, fcid types.FileContractID, endHeight uint64, renterFunds, minNewCollateral types.Currency) (api.ContractMetadata, error)
 }
 
 type Database interface {
@@ -150,8 +148,8 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 
-func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, initialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
-	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
 	defer cancel()
 
@@ -174,7 +172,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, init
 
 	contractPrice := scan.V2Settings.Prices.ContractPrice
 	maxCollateral := scan.V2Settings.MaxCollateral
-	renterFunds := initialContractFunds
+	renterFunds := InitialContractFunding
 
 	// calculate the host collateral
 	hostCollateral := rhpv4.MaxHostCollateral(scan.V2Settings.Prices, renterFunds)
@@ -219,10 +217,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	if contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
 	}
-	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
-
-	// convenience variables
-	pt := host.PriceTable.HostPriceTable
+	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
@@ -233,21 +228,14 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	// calculate the renter funds
 	renterFunds := c.refreshFundingEstimate(contract, logger)
 
-	var expectedNewStorage uint64
-	var contractPrice types.Currency
-	if host.IsV2() {
-		contractPrice = host.V2Settings.Prices.ContractPrice
-		expectedNewStorage = renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
-	} else {
-		contractPrice = host.PriceTable.ContractPrice
-		expectedNewStorage = renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
-	}
+	contractPrice := host.V2Settings.Prices.ContractPrice
+	expectedNewStorage := renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
 
 	// a refresh should always result in a contract that has enough collateral
 	minNewCollateral := MinCollateral.Mul64(2).Add(contractPrice)
 
 	// renew the contract
-	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral, expectedNewStorage)
+	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral)
 	if err != nil {
 		logger.Errorw(
 			"refresh failed",
@@ -276,10 +264,9 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	if contract.Revision == nil {
 		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
 	}
-	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
+	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
 	// convenience variables
-	pt := host.PriceTable.HostPriceTable
 	fcid := contract.ID
 
 	// fetch consensus state
@@ -300,28 +287,19 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, contract.EndHeight())
 	}
 
-	// calculate the expected new storage
-	var expectedNewStorage uint64
-	if host.IsV2() {
-		expectedNewStorage = renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
-	} else {
-		expectedNewStorage = renterFundsToExpectedStorage(renterFunds, contract.EndHeight()-cs.BlockHeight, pt)
-	}
-
 	// unlike a refresh, a renewal doesn't require a minimum amount of
 	// collateral after the renewal since our primary goal is to extend the
 	// lifetime of our data.
 	minNewCollateral := types.ZeroCurrency
 
 	// renew the contract
-	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, minNewCollateral, expectedNewStorage)
+	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, minNewCollateral)
 	if err != nil {
 		logger.Errorw(
 			"renewal failed",
 			zap.Error(err),
 			"endHeight", endHeight,
 			"renterFunds", renterFunds,
-			"expectedNewStorage", expectedNewStorage,
 		)
 		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !utils.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
@@ -619,22 +597,6 @@ func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds 
 		renterFunds = minRenterFunds
 	}
 	return renterFunds
-}
-
-// renterFundsToExpectedStorage returns how much storage a renter is expected to
-// be able to afford given the provided 'renterFunds'.
-func renterFundsToExpectedStorage(renterFunds types.Currency, duration uint64, pt rhpv3.HostPriceTable) uint64 {
-	costPerSector := sectorUploadCost(pt, duration)
-	// handle free storage
-	if costPerSector.IsZero() {
-		costPerSector = types.NewCurrency64(1)
-	}
-	// catch overflow
-	expectedStorage := renterFunds.Div(costPerSector).Mul64(rhpv2.SectorSize)
-	if expectedStorage.Cmp(types.NewCurrency64(math.MaxUint64)) > 0 {
-		expectedStorage = types.NewCurrency64(math.MaxUint64)
-	}
-	return expectedStorage.Big().Uint64()
 }
 
 // renterFundsToExpectedStorageV2 returns how much storage a renter is expected to
@@ -1019,7 +981,6 @@ func performHostChecks(ctx *mCtx, bus Database, cs ConsensusStore, logger *zap.S
 	}
 	for _, h := range scoredHosts {
 		// ignore HostBlockHeight
-		h.host.PriceTable.HostBlockHeight = state.BlockHeight
 		h.host.V2Settings.Prices.TipHeight = state.BlockHeight
 		hc := checkHost(ctx.GougingChecker(state), h, minScore, ctx.Period())
 		if err := bus.UpdateHostCheck(ctx, h.host.PublicKey, *hc); err != nil {
@@ -1069,8 +1030,8 @@ func performPostMaintenanceTasks(ctx *mCtx, bus Database, alerter alerts.Alerter
 	for _, h := range allHosts {
 		if _, used := usedHosts[h.PublicKey]; !used {
 			continue
-		} else if registerLostSectorsAlert(h.Interactions.LostSectors*rhpv2.SectorSize, h.StoredData) {
-			alerter.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.Settings.Version, h.Settings.Release, h.Interactions.LostSectors))
+		} else if registerLostSectorsAlert(h.Interactions.LostSectors*rhpv4.LeafSize, h.StoredData) {
+			alerter.RegisterAlert(ctx, newLostSectorsAlert(h.PublicKey, h.V2Settings.ProtocolVersion, h.V2Settings.Release, h.Interactions.LostSectors))
 		} else {
 			toDismiss = append(toDismiss, alerts.IDForHost(alertLostSectorsID, h.PublicKey))
 		}

@@ -66,7 +66,6 @@ CREATE TABLE `contracts` (
   `fcid` varbinary(32) NOT NULL,
   `host_id` bigint unsigned DEFAULT NULL,
   `host_key` varbinary(32),
-  `v2` boolean NOT NULL,
 
   `archival_reason` varchar(191) DEFAULT NULL,
   `proof_height` bigint unsigned DEFAULT '0',

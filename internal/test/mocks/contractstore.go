@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 )
@@ -111,7 +111,7 @@ type Contract struct {
 	metadata api.ContractMetadata
 
 	mu      sync.Mutex
-	sectors map[types.Hash256]*[rhpv2.SectorSize]byte
+	sectors map[types.Hash256]*[rhpv4.SectorSize]byte
 }
 
 func NewContract(hk types.PublicKey, fcid types.FileContractID) *Contract {
@@ -123,11 +123,11 @@ func NewContract(hk types.PublicKey, fcid types.FileContractID) *Contract {
 			WindowEnd:   10,
 		},
 		rev:     types.FileContractRevision{ParentID: fcid},
-		sectors: make(map[types.Hash256]*[rhpv2.SectorSize]byte),
+		sectors: make(map[types.Hash256]*[rhpv4.SectorSize]byte),
 	}
 }
 
-func (c *Contract) AddSector(root types.Hash256, sector *[rhpv2.SectorSize]byte) {
+func (c *Contract) AddSector(root types.Hash256, sector *[rhpv4.SectorSize]byte) {
 	c.mu.Lock()
 	c.sectors[root] = sector
 	c.mu.Unlock()
@@ -151,7 +151,7 @@ func (c *Contract) Revision() types.FileContractRevision {
 	return c.rev
 }
 
-func (c *Contract) Sector(root types.Hash256) (sector *[rhpv2.SectorSize]byte, found bool) {
+func (c *Contract) Sector(root types.Hash256) (sector *[rhpv4.SectorSize]byte, found bool) {
 	c.mu.Lock()
 	sector, found = c.sectors[root]
 	c.mu.Unlock()

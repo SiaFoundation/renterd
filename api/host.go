@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 )
@@ -48,11 +46,6 @@ var (
 )
 
 type (
-	// HostsPriceTablesRequest is the request type for the /hosts/pricetables endpoint.
-	HostsPriceTablesRequest struct {
-		PriceTableUpdates []HostPriceTableUpdate `json:"priceTableUpdates"`
-	}
-
 	// HostsRemoveRequest is the request type for the delete /hosts endpoint.
 	HostsRemoveRequest struct {
 		MaxDowntimeHours           DurationH `json:"maxDowntimeHours"`
@@ -102,24 +95,20 @@ type (
 
 type (
 	Host struct {
-		KnownSince        time.Time          `json:"knownSince"`
-		LastAnnouncement  time.Time          `json:"lastAnnouncement"`
-		PublicKey         types.PublicKey    `json:"publicKey"`
-		NetAddress        string             `json:"netAddress"`
-		PriceTable        HostPriceTable     `json:"priceTable"`
-		Settings          rhpv2.HostSettings `json:"settings,omitempty"`
-		V2Settings        rhp4.HostSettings  `json:"v2Settings,omitempty"`
-		Interactions      HostInteractions   `json:"interactions"`
-		Scanned           bool               `json:"scanned"`
-		Blocked           bool               `json:"blocked"`
-		Checks            HostChecks         `json:"checks,omitempty"`
-		StoredData        uint64             `json:"storedData"`
-		V2SiamuxAddresses []string           `json:"v2SiamuxAddresses"`
+		KnownSince        time.Time         `json:"knownSince"`
+		LastAnnouncement  time.Time         `json:"lastAnnouncement"`
+		PublicKey         types.PublicKey   `json:"publicKey"`
+		V2Settings        rhp4.HostSettings `json:"v2Settings,omitempty"`
+		Interactions      HostInteractions  `json:"interactions"`
+		Scanned           bool              `json:"scanned"`
+		Blocked           bool              `json:"blocked"`
+		Checks            HostChecks        `json:"checks,omitempty"`
+		StoredData        uint64            `json:"storedData"`
+		V2SiamuxAddresses []string          `json:"v2SiamuxAddresses"`
 	}
 
 	HostInfo struct {
 		PublicKey         types.PublicKey `json:"publicKey"`
-		SiamuxAddr        string          `json:"siamuxAddr"`
 		V2SiamuxAddresses []string        `json:"v2SiamuxAddresses"`
 	}
 
@@ -137,24 +126,10 @@ type (
 	}
 
 	HostScan struct {
-		HostKey    types.PublicKey      `json:"hostKey"`
-		PriceTable rhpv3.HostPriceTable `json:"priceTable,omitempty"`
-		Settings   rhpv2.HostSettings   `json:"settings,omitempty"`
-		V2Settings rhp4.HostSettings    `json:"v2Settings,omitempty"`
-		Success    bool                 `json:"success"`
-		Timestamp  time.Time            `json:"timestamp"`
-	}
-
-	HostPriceTable struct {
-		rhpv3.HostPriceTable
-		Expiry time.Time `json:"expiry"`
-	}
-
-	HostPriceTableUpdate struct {
-		HostKey    types.PublicKey `json:"hostKey"`
-		Success    bool            `json:"success"`
-		Timestamp  time.Time       `json:"timestamp"`
-		PriceTable HostPriceTable  `json:"priceTable"`
+		HostKey    types.PublicKey   `json:"hostKey"`
+		V2Settings rhp4.HostSettings `json:"v2Settings,omitempty"`
+		Success    bool              `json:"success"`
+		Timestamp  time.Time         `json:"timestamp"`
 	}
 
 	HostChecks struct {
@@ -209,7 +184,6 @@ func (hc HostChecks) MarshalJSON() ([]byte, error) {
 func (h Host) Info() HostInfo {
 	return HostInfo{
 		PublicKey:         h.PublicKey,
-		SiamuxAddr:        h.Settings.SiamuxAddr(),
 		V2SiamuxAddresses: h.V2SiamuxAddresses,
 	}
 }

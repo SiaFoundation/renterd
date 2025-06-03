@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -125,13 +126,12 @@ func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContrac
 	if h == nil {
 		return nil, fmt.Errorf("no host found for contract %v", c)
 	}
-	var roots []types.Hash256
 	state, unlock, err := h.contractsV2.LockV2Contract(fcid)
-	if err == nil {
-		roots = append(roots, state.Roots...)
-		defer unlock()
+	if err != nil {
+		return nil, err
 	}
-	return append(roots, h.contracts.SectorRoots(fcid)...), nil
+	defer unlock()
+	return slices.Clone(state.Roots), nil
 }
 
 func (tc *TestCluster) IsPassedV2AllowHeight() bool {
@@ -616,28 +616,12 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 	return b, shutdownFn, cm, sqlStore, nil
 }
 
-// addStorageFolderToHosts adds a single storage folder to each host.
-func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
-	for _, host := range hosts {
-		sectors := uint64(10)
-		volumeDir := filepath.Join(host.dir, "volumes")
-		if err := os.MkdirAll(volumeDir, 0777); err != nil {
-			return err
-		}
-		if err := host.AddVolume(ctx, filepath.Join(volumeDir, "volume.dat"), sectors); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // announceHosts configures hosts with default settings and announces them to
 // the group
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
-		if err := host.settings.Announce(); err != nil {
-			return err
-		}
+		// TODO: announce
+		_ = host
 	}
 	return nil
 }
@@ -807,9 +791,6 @@ func (c *TestCluster) AddHost(h *Host) {
 	})
 
 	// Announce hosts.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	c.tt.OK(addStorageFolderToHost(ctx, []*Host{h}))
 	c.tt.OK(announceHosts([]*Host{h}))
 
 	// Mine a block and wait until the host shows up.

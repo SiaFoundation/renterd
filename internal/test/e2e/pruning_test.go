@@ -276,11 +276,10 @@ func TestSectorPruning(t *testing.T) {
 
 	// update the host settings so it's gouging
 	host := hosts[0]
-	settings := host.settings.Settings()
-	settings.IngressPrice = types.Siacoins(1)
-	settings.EgressPrice = types.Siacoins(1)
-	settings.BaseRPCPrice = types.Siacoins(1)
-	tt.OK(host.UpdateSettings(settings))
+	settings := host.settings.RHP4Settings()
+	settings.Prices.IngressPrice = types.Siacoins(1)
+	settings.Prices.EgressPrice = types.Siacoins(1)
+	host.UpdateSettings(settings)
 
 	// find the corresponding contract
 	var c api.ContractMetadata

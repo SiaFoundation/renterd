@@ -15,7 +15,6 @@ func TestHostSet(t *testing.T) {
 	// Host with no subnets
 	host1 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "",
 		V2SiamuxAddresses: []string{},
 	}
 	ctx := context.Background()
@@ -26,8 +25,7 @@ func TestHostSet(t *testing.T) {
 	// Host with more than 2 subnets
 	host2 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "1.1.1.1:1111",
-		V2SiamuxAddresses: []string{"2.2.2.2:2222", "3.3.3.3:3333"},
+		V2SiamuxAddresses: []string{"1.1.1.1:1111", "2.2.2.2:2222", "3.3.3.3:3333"},
 	}
 	if !hs.HasRedundantIP(ctx, host2) {
 		t.Fatalf("Expected host with more than 2 subnets to be considered redundant")
@@ -36,7 +34,6 @@ func TestHostSet(t *testing.T) {
 	// New host with unique subnet
 	host3 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "",
 		V2SiamuxAddresses: []string{"4.4.4.4:4444"},
 	}
 	if hs.HasRedundantIP(ctx, host3) {
@@ -47,7 +44,6 @@ func TestHostSet(t *testing.T) {
 	// New host with same subnet but different public key
 	host4 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "",
 		V2SiamuxAddresses: []string{"4.4.4.4:4444"},
 	}
 	if !hs.HasRedundantIP(ctx, host4) {
@@ -62,7 +58,6 @@ func TestHostSet(t *testing.T) {
 	// Host with two valid subnets
 	host5 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "",
 		V2SiamuxAddresses: []string{"5.5.5.5:5555", "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:5555"},
 	}
 	if hs.HasRedundantIP(ctx, host5) {
@@ -73,7 +68,6 @@ func TestHostSet(t *testing.T) {
 	// New host with one overlapping subnet
 	host6 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "",
 		V2SiamuxAddresses: []string{"6.6.6.6:6666", "7.7.7.7:7777"},
 	}
 	if !hs.HasRedundantIP(ctx, host6) {
@@ -81,8 +75,7 @@ func TestHostSet(t *testing.T) {
 	}
 	host7 := api.Host{
 		PublicKey:         types.GeneratePrivateKey().PublicKey(),
-		NetAddress:        "6.6.6.6:6666",
-		V2SiamuxAddresses: []string{"8.8.8.8:8888"},
+		V2SiamuxAddresses: []string{"6.6.6.6:6666", "8.8.8.8:8888"},
 	}
 	if !hs.HasRedundantIP(ctx, host7) {
 		t.Fatal("Expected host with one overlapping subnet to be considered redundant")

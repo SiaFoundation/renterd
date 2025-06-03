@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"sync"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
@@ -48,17 +46,8 @@ func (hs *HostStore) UsableHosts(ctx context.Context) (hosts []api.HostInfo, _ e
 	defer hs.mu.Unlock()
 
 	for _, h := range hs.hosts {
-		host, _, err := net.SplitHostPort(h.hi.NetAddress)
-		if err != nil || host == "" {
-			continue
-		}
-
-		hosts = append(hosts, api.HostInfo{
-			PublicKey:  h.hk,
-			SiamuxAddr: net.JoinHostPort(host, h.hi.Settings.SiaMuxPort),
-		})
+		hosts = append(hosts, h.hi.Info())
 	}
-
 	return
 }
 
@@ -98,12 +87,8 @@ func (h *Host) DownloadSector(ctx context.Context, w io.Writer, root types.Hash2
 	return errors.New("implement when needed")
 }
 
-func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv2.SectorSize]byte) error {
+func (h *Host) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv4.SectorSize]byte) error {
 	return errors.New("implement when needed")
-}
-
-func (h *Host) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
-	return h.HostPriceTable(), types.NewCurrency64(1), nil
 }
 
 func (h *Host) Prices(ctx context.Context) (rhpv4.HostPrices, error) {

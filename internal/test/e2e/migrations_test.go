@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
@@ -56,7 +56,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// add an object
-	data := make([]byte, rhpv2.SectorSize)
+	data := make([]byte, rhpv4.SectorSize)
 	frand.Read(data)
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, t.Name(), api.UploadObjectOptions{}))
 

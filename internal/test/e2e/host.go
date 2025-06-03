@@ -1,17 +1,14 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
-	crhpv2 "go.sia.tech/core/rhp/v2"
-	crhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
@@ -19,15 +16,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/hostd/v2/host/accounts"
-	"go.sia.tech/hostd/v2/host/contracts"
-	"go.sia.tech/hostd/v2/host/registry"
 	"go.sia.tech/hostd/v2/host/settings"
-	"go.sia.tech/hostd/v2/host/storage"
-	"go.sia.tech/hostd/v2/index"
-	"go.sia.tech/hostd/v2/persist/sqlite"
-	rhpv2 "go.sia.tech/hostd/v2/rhp/v2"
-	rhpv3 "go.sia.tech/hostd/v2/rhp/v3"
 	"go.uber.org/zap"
 )
 
@@ -43,18 +32,10 @@ type Host struct {
 
 	s *syncer.Syncer
 
-	store       *sqlite.Store
 	wallet      *wallet.SingleAddressWallet
-	settings    *settings.ConfigManager
-	storage     *storage.VolumeManager
-	index       *index.Manager
-	registry    *registry.Manager
-	accounts    *accounts.AccountManager
-	contracts   *contracts.Manager
+	settings    *testutil.EphemeralSettingsReporter
 	contractsV2 *testutil.EphemeralContractor
 
-	rhpv2        *rhpv2.SessionHandler
-	rhpv3        *rhpv3.SessionHandler
 	rhp4Listener net.Listener
 }
 
@@ -83,29 +64,11 @@ var defaultHostSettings = settings.Settings{
 
 // Close shutsdown the host
 func (h *Host) Close() error {
-	h.rhpv2.Close()
-	h.rhpv3.Close()
 	h.rhp4Listener.Close()
-	h.settings.Close()
-	h.index.Close()
 	h.wallet.Close()
-	h.contracts.Close()
 	h.contractsV2.Close()
-	h.registry.Close()
-	h.storage.Close()
-	h.store.Close()
 	h.s.Close()
 	return nil
-}
-
-// RHPv2Addr returns the address of the RHPv2 listener
-func (h *Host) RHPv2Addr() string {
-	return h.rhpv2.LocalAddr()
-}
-
-// RHPv3Addr returns the address of the RHPv3 listener
-func (h *Host) RHPv3Addr() string {
-	return h.rhpv3.LocalAddr()
 }
 
 // RHPv4Addr returns the address of the RHPv4 listener
@@ -113,39 +76,14 @@ func (h *Host) RHPv4Addr() string {
 	return h.rhp4Listener.Addr().String()
 }
 
-// AddVolume adds a new volume to the host
-func (h *Host) AddVolume(ctx context.Context, path string, size uint64) error {
-	result := make(chan error, 1)
-	_, err := h.storage.AddVolume(ctx, path, size, result)
-	if err != nil {
-		return err
-	}
-	return <-result
-}
-
 // UpdateSettings updates the host's configuration
-func (h *Host) UpdateSettings(settings settings.Settings) error {
-	return h.settings.UpdateSettings(settings)
-}
-
-// RHPv2Settings returns the host's current RHPv2 settings
-func (h *Host) RHPv2Settings() (crhpv2.HostSettings, error) {
-	return h.settings.RHP2Settings()
-}
-
-// RHPv3PriceTable returns the host's current RHPv3 price table
-func (h *Host) RHPv3PriceTable() (crhpv3.HostPriceTable, error) {
-	return h.settings.RHP3PriceTable()
+func (h *Host) UpdateSettings(settings rhpv4.HostSettings) {
+	h.settings.Update(settings)
 }
 
 // WalletAddress returns the host's wallet address
 func (h *Host) WalletAddress() types.Address {
 	return h.wallet.Address()
-}
-
-// Contracts returns the host's contract manager
-func (h *Host) Contracts() *contracts.Manager {
-	return h.contracts
 }
 
 // PublicKey returns the public key of the host
@@ -178,34 +116,11 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	go s.Run()
 
 	log := zap.NewNop()
-	db, err := sqlite.OpenDatabase(filepath.Join(dir, "hostd.db"), log.Named("sqlite"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create sql store: %w", err)
-	}
 
-	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, db, s)
+	ws := testutil.NewEphemeralWalletStore()
+	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, ws, s)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
-	}
-
-	storage, err := storage.NewVolumeManager(db)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage manager: %w", err)
-	}
-
-	contracts, err := contracts.NewManager(db, storage, cm, wallet, contracts.WithRejectAfter(10), contracts.WithRevisionSubmissionBuffer(5))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create contract manager: %w", err)
-	}
-
-	rhp2Listener, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rhp2 listener: %w", err)
-	}
-
-	rhp3Listener, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
 	rhp4Listener, err := net.Listen("tcp", "localhost:0")
@@ -213,36 +128,10 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	defaultSettings := defaultHostSettings
-	defaultSettings.NetAddress = rhp4Listener.Addr().(*net.TCPAddr).IP.String()
-
-	settings, err := settings.NewConfigManager(privKey, db, cm, storage, wallet,
-		settings.WithValidateNetAddress(false),
-		settings.WithRHP2Port(uint16(rhp2Listener.Addr().(*net.TCPAddr).Port)),
-		settings.WithRHP3Port(uint16(rhp3Listener.Addr().(*net.TCPAddr).Port)),
-		settings.WithRHP4Port(uint16(rhp4Listener.Addr().(*net.TCPAddr).Port)),
-		settings.WithInitialSettings(defaultSettings),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create settings manager: %w", err)
-	}
-
-	idx, err := index.NewManager(db, cm, contracts, wallet, settings, storage, index.WithLog(log.Named("index")), index.WithBatchSize(1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create index manager: %w", err)
-	}
-
-	registry := registry.NewManager(privKey, db, zap.NewNop())
-	accounts := accounts.NewManager(db, settings)
-
-	rhpv2 := rhpv2.NewSessionHandler(rhp2Listener, privKey, cm, s, wallet, contracts, settings, storage, log.Named("rhpv2"))
-	go rhpv2.Serve()
-
-	rhpv3 := rhpv3.NewSessionHandler(rhp3Listener, privKey, cm, s, wallet, accounts, contracts, registry, storage, settings, log.Named("rhpv3"))
-	go rhpv3.Serve()
-
+	settings := testutil.NewEphemeralSettingsReporter()
 	contractsV2 := testutil.NewEphemeralContractor(cm)
-	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, wallet, settings, storage, rhp4.WithPriceTableValidity(30*time.Minute))
+	sectors := testutil.NewEphemeralSectorStore()
+	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, wallet, settings, sectors, rhp4.WithPriceTableValidity(30*time.Minute))
 	go siamux.Serve(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
@@ -251,18 +140,9 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 		s: s,
 
-		store:       db,
 		wallet:      wallet,
 		settings:    settings,
-		index:       idx,
-		storage:     storage,
-		registry:    registry,
-		accounts:    accounts,
-		contracts:   contracts,
 		contractsV2: contractsV2,
-
-		rhpv2: rhpv2,
-		rhpv3: rhpv3,
 
 		rhp4Listener: rhp4Listener,
 	}, nil

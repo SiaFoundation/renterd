@@ -85,7 +85,6 @@ func ContractPruneMetrics(ctx context.Context, tx sql.Tx, start time.Time, n uin
 			&timestamp,
 			(*FileContractID)(&m.ContractID),
 			(*PublicKey)(&m.HostKey),
-			&m.HostVersion,
 			(*Unsigned64)(&m.Pruned),
 			(*Unsigned64)(&m.Remaining),
 			(*DurationMS)(&m.Duration),
@@ -180,7 +179,7 @@ func RecordContractMetric(ctx context.Context, tx sql.Tx, metrics ...api.Contrac
 }
 
 func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.ContractPruneMetric) error {
-	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_prunes (created_at, timestamp, fcid, host, host_version, pruned, remaining, duration) VALUES (?, ?,?, ?, ?, ?, ?, ?)")
+	insertStmt, err := tx.Prepare(ctx, "INSERT INTO contract_prunes (created_at, timestamp, fcid, host, pruned, remaining, duration) VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement to insert contract prune metric: %w", err)
 	}
@@ -192,7 +191,6 @@ func RecordContractPruneMetric(ctx context.Context, tx sql.Tx, metrics ...api.Co
 			UnixTimeMS(metric.Timestamp),
 			FileContractID(metric.ContractID),
 			PublicKey(metric.HostKey),
-			metric.HostVersion,
 			Unsigned64(metric.Pruned),
 			Unsigned64(metric.Remaining),
 			(DurationMS)(metric.Duration),

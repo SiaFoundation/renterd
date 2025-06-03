@@ -5,11 +5,9 @@ import (
 	"math/big"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/utils"
 )
 
@@ -63,39 +61,16 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	allocationPerHost := idealDataPerHost * 2
 
 	// extract inputs from the host depending on whether the host supports v1 or v2
-	var uploadSectorCost types.Currency
-	var collateral, maxCollateral types.Currency
-	var egressPrice, ingressPrice, storagePrice types.Currency
-	var remainingStorage uint64
-	var version float64
-	if h.IsV2() {
-		appendCost := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost()
-		uploadCost := h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize).RenterCost()
-		uploadSectorCost = appendCost.Add(uploadCost)
-		maxCollateral = h.V2Settings.MaxCollateral
-		collateral = h.V2Settings.Prices.Collateral
-		egressPrice = h.V2Settings.Prices.RPCReadSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
-		ingressPrice = h.V2Settings.Prices.RPCWriteSectorCost(rhpv2.SectorSize).RenterCost().Div64(rhpv2.SectorSize)
-		storagePrice = h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost().Div64(rhpv2.SectorSize)
-		remainingStorage = h.V2Settings.RemainingStorage * rhpv2.SectorSize
-		version = 1.0 // v2 only has one version
-	} else {
-		var overflow bool
-		uploadSectorCost = h.PriceTable.AppendSectorCost(cfg.Contracts.Period).Storage
-		maxCollateral = h.PriceTable.MaxCollateral
-		collateral = h.PriceTable.CollateralCost
-		egressPrice, overflow = gouging.DownloadPricePerByte(h.PriceTable.HostPriceTable)
-		if overflow {
-			egressPrice = types.MaxCurrency
-		}
-		ingressPrice, overflow = gouging.UploadPricePerByte(h.PriceTable.HostPriceTable)
-		if overflow {
-			ingressPrice = types.MaxCurrency
-		}
-		storagePrice = h.PriceTable.WriteStoreCost
-		remainingStorage = h.Settings.RemainingStorage
-		version = clampScore(versionScore(h.Settings.Version, cfg.Hosts.MinProtocolVersion))
-	}
+	appendCost := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost()
+	uploadCost := h.V2Settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost()
+	uploadSectorCost := appendCost.Add(uploadCost)
+	maxCollateral := h.V2Settings.MaxCollateral
+	collateral := h.V2Settings.Prices.Collateral
+	egressPrice := h.V2Settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Div64(rhpv4.SectorSize)
+	ingressPrice := h.V2Settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Div64(rhpv4.SectorSize)
+	storagePrice := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost().Div64(rhpv4.SectorSize)
+	remainingStorage := h.V2Settings.RemainingStorage * rhpv4.SectorSize
+	version := 1.0 // v2 only has one version
 
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h), // not clamped since values are hardcoded
@@ -351,15 +326,9 @@ func versionScore(version, minVersion string) float64 {
 }
 
 func bytesToSectors(bytes uint64) uint64 {
-	numSectors := bytes / rhpv2.SectorSize
-	if bytes%rhpv2.SectorSize != 0 {
+	numSectors := bytes / rhpv4.SectorSize
+	if bytes%rhpv4.SectorSize != 0 {
 		numSectors++
 	}
 	return numSectors
-}
-
-func sectorUploadCost(pt rhpv3.HostPriceTable, duration uint64) types.Currency {
-	asc := pt.BaseCost().Add(pt.AppendSectorCost(duration))
-	uploadSectorCostRHPv3, _ := asc.Total()
-	return uploadSectorCostRHPv3
 }

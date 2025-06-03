@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/v2/api"
@@ -43,7 +43,7 @@ func (c *Client) Accounts(ctx context.Context) (accounts []api.Account, err erro
 }
 
 // ResetDrift resets the drift of an account to zero.
-func (c *Client) ResetDrift(ctx context.Context, id rhpv3.Account) (err error) {
+func (c *Client) ResetDrift(ctx context.Context, id rhpv4.Account) (err error) {
 	err = c.c.POST(ctx, fmt.Sprintf("/account/%s/resetdrift", id), nil, nil)
 	return
 }

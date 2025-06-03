@@ -6,7 +6,7 @@ import (
 
 func TestHost(t *testing.T) {
 	hk := RandomHostKey()
-	h := NewHost(hk, NewHostPriceTable(), NewHostSettings())
+	h := NewV2Host(hk, NewV2HostSettings())
 
 	// assert host is online
 	if !h.IsOnline() {

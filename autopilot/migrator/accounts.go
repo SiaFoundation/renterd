@@ -8,9 +8,6 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/gouging"
-	"go.sia.tech/renterd/v2/internal/locking"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 )
 
 const (
@@ -33,9 +30,6 @@ func (m *Migrator) FundAccount(ctx context.Context, fcid types.FileContractID, h
 		var err error
 		deposit, err = m.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
 		if err != nil {
-			if rhp3.IsBalanceMaxExceeded(err) {
-				acc.ScheduleSync()
-			}
 			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
 		}
 
@@ -49,46 +43,8 @@ func (m *Migrator) FundAccount(ctx context.Context, fcid types.FileContractID, h
 }
 
 func (m *Migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
-	// handle v2 host
-	if host.IsV2() {
-		account := m.accounts.ForHost(host.PublicKey)
-		return account.WithSync(func() (types.Currency, error) {
-			return m.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
-		})
-	}
-
-	// attach gouging checker
-	gp, err := m.bus.GougingParams(ctx)
-	if err != nil {
-		return fmt.Errorf("couldn't get gouging parameters; %w", err)
-	}
-	ctx = gouging.WithChecker(ctx, m.bus, gp)
-
-	// acquire lock
-	contractLock, err := locking.NewContractLock(ctx, fcid, lockingPrioritySyncing, m.bus, m.logger)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(m.shutdownCtx, 10*time.Second)
-		_ = contractLock.Release(releaseCtx)
-		cancel()
-	}()
-
-	h := m.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
-
-	// fetch revision
-	ctx, cancel := context.WithTimeout(ctx, defaultRevisionFetchTimeout)
-	defer cancel()
-	rev, err := h.FetchRevision(ctx, fcid)
-	if err != nil {
-		return err
-	}
-
-	// sync the account
-	err = h.SyncAccount(ctx, &rev)
-	if err != nil {
-		return fmt.Errorf("failed to sync account; %w", err)
-	}
-	return nil
+	account := m.accounts.ForHost(host.PublicKey)
+	return account.WithSync(func() (types.Currency, error) {
+		return m.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
+	})
 }

@@ -158,8 +158,8 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 	if h, err := ss.Host(context.Background(), hks[0]); err != nil {
 		t.Fatal("unexpected error", err)
-	} else if h.NetAddress != "foo" {
-		t.Fatal("unexpected net address", h.NetAddress)
+	} else if h.V2SiamuxAddr() != "foo" {
+		t.Fatal("unexpected siamux address", h.V2SiamuxAddr())
 	} else if !h.LastAnnouncement.Truncate(time.Second).Equal(ts) {
 		t.Fatalf("unexpected last announcement %v != %v", h.LastAnnouncement, ts)
 	}
@@ -188,8 +188,8 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	} else if h.Interactions.Uptime < time.Minute || h.Interactions.Uptime > time.Minute+time.Second {
 		t.Fatalf("unexpected uptime %v", h.Interactions.Uptime)
-	} else if h.NetAddress != "fooNew" {
-		t.Fatal("unexpected net address", h.NetAddress)
+	} else if h.V2SiamuxAddr() != "fooNew" {
+		t.Fatal("unexpected net address", h.V2SiamuxAddr())
 	} else if !h.LastAnnouncement.Equal(ts) {
 		t.Fatalf("unexpected last announcement %v != %v", h.LastAnnouncement, ts)
 	}

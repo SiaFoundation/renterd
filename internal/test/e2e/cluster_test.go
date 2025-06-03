@@ -19,15 +19,12 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/hostd/v2/host/accounts"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/autopilot/contractor"
@@ -299,8 +296,6 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		} else if !hi.IsV2() && hi.Settings.Release == "" {
-			t.Fatal("release should be set")
 		} else if hi.IsV2() && hi.V2Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
@@ -743,8 +738,8 @@ func TestUploadDownloadBasic(t *testing.T) {
 		hosts, err := cluster.Bus.Hosts(context.Background(), api.HostOptions{})
 		tt.OK(err)
 		for _, host := range hosts {
-			if host.StoredData != rhpv2.SectorSize {
-				return fmt.Errorf("stored data should be %v, got %v", rhpv2.SectorSize, host.StoredData)
+			if host.StoredData != rhpv4.SectorSize {
+				return fmt.Errorf("stored data should be %v, got %v", rhpv4.SectorSize, host.StoredData)
 			}
 		}
 		return nil
@@ -824,8 +819,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	// upload two files under /foo
 	// the first 4kib are not random to avoid NDFs and to ensure the mime type
 	// ends up being octet-stream
-	file1 := make([]byte, rhpv2.SectorSize/12)
-	file2 := make([]byte, rhpv2.SectorSize/12)
+	file1 := make([]byte, rhpv4.SectorSize/12)
+	file2 := make([]byte, rhpv4.SectorSize/12)
 	frand.Read(file1[4096:])
 	frand.Read(file2[4096:])
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file1), testBucket, "fileś/file1", api.UploadObjectOptions{}))
@@ -868,8 +863,8 @@ func TestUploadDownloadExtended(t *testing.T) {
 	}
 
 	// prepare two files, a small one and a large one
-	small := make([]byte, rhpv2.SectorSize/12)
-	large := make([]byte, rhpv2.SectorSize*3)
+	small := make([]byte, rhpv4.SectorSize/12)
+	large := make([]byte, rhpv4.SectorSize*3)
 
 	// upload the data
 	for _, data := range [][]byte{small, large} {
@@ -890,7 +885,7 @@ func TestUploadDownloadExtended(t *testing.T) {
 			if info.TotalObjectsSize != objectsSize {
 				return fmt.Errorf("wrong size %v %v", info.TotalObjectsSize, objectsSize)
 			}
-			sectorsSize := 15 * rhpv2.SectorSize
+			sectorsSize := 15 * rhpv4.SectorSize
 			if info.TotalSectorsSize != uint64(sectorsSize) {
 				return fmt.Errorf("wrong size %v %v", info.TotalSectorsSize, sectorsSize)
 			}
@@ -965,8 +960,8 @@ func TestUploadDownloadSpending(t *testing.T) {
 	})
 
 	// prepare two files, a small one and a large one
-	small := make([]byte, rhpv2.SectorSize/12)
-	large := make([]byte, rhpv2.SectorSize*3)
+	small := make([]byte, rhpv4.SectorSize/12)
+	large := make([]byte, rhpv4.SectorSize*3)
 	files := [][]byte{small, large}
 
 	uploadDownload := func() {
@@ -1102,7 +1097,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 		cluster.MineBlocks(1)
 
 		// force a new revision by funding an account
-		_, err = b.FundAccount(context.Background(), rhpv3.Account{}, contract.ID, types.NewCurrency64(100))
+		_, err = b.FundAccount(context.Background(), rhpv4.Account{}, contract.ID, types.NewCurrency64(100))
 		tt.OK(err)
 
 		// broadcast the revision for each contract
@@ -1138,7 +1133,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	host := cluster.hosts[0]
 	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
 		t.Fatalf("wrong balance %v", acc.Balance)
-	} else if acc.ID == (rhpv3.Account{}) {
+	} else if acc.ID == (rhpv4.Account{}) {
 		t.Fatal("account id not set")
 	} else if acc.HostKey != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
@@ -1210,7 +1205,7 @@ func TestParallelUpload(t *testing.T) {
 	upload := func() {
 		t.Helper()
 		// prepare some data - make sure it's more than one sector
-		data := make([]byte, rhpv2.SectorSize)
+		data := make([]byte, rhpv4.SectorSize)
 		tt.OKAll(frand.Read(data))
 
 		// upload the data
@@ -1280,7 +1275,7 @@ func TestParallelDownload(t *testing.T) {
 	tt := cluster.tt
 
 	// upload the data
-	data := frand.Bytes(rhpv2.SectorSize)
+	data := frand.Bytes(rhpv4.SectorSize)
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{}))
 
 	download := func() error {
@@ -1413,7 +1408,7 @@ func TestUploadDownloadSameHost(t *testing.T) {
 	shards := make(map[types.PublicKey][]object.Sector)
 	for i := 0; i < 3; i++ {
 		// upload object
-		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(frand.Bytes(rhpv2.SectorSize)), testBucket, fmt.Sprintf("foo_%d", i), api.UploadObjectOptions{}))
+		tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(frand.Bytes(rhpv4.SectorSize)), testBucket, fmt.Sprintf("foo_%d", i), api.UploadObjectOptions{}))
 
 		// download object from bus and keep track of its shards
 		res, err = b.Object(context.Background(), testBucket, fmt.Sprintf("foo_%d", i), api.GetObjectOptions{})
@@ -1616,7 +1611,7 @@ func TestUploadPacking(t *testing.T) {
 
 	// prepare 3 files which are all smaller than a slab but together make up
 	// for 2 full slabs.
-	slabSize := rhpv2.SectorSize * rs.MinShards
+	slabSize := rhpv4.SectorSize * rs.MinShards
 	totalDataSize := 2 * slabSize
 	data1 := make([]byte, (totalDataSize-(slabSize-256))/2)
 	data2 := make([]byte, slabSize-256) // large partial slab
@@ -1907,7 +1902,7 @@ func TestSlabBufferStats(t *testing.T) {
 
 	// prepare 3 files which are all smaller than a slab but together make up
 	// for 2 full slabs.
-	slabSize := rhpv2.SectorSize * rs.MinShards
+	slabSize := rhpv4.SectorSize * rs.MinShards
 	data1 := make([]byte, (slabSize - threshold - 1))
 	data2 := make([]byte, 1)
 	frand.Read(data1)
@@ -1985,11 +1980,11 @@ func TestSlabBufferStats(t *testing.T) {
 		if os.TotalObjectsSize != uint64(len(data1)+len(data2)) {
 			return fmt.Errorf("expected totalObjectSize of %d, got %d", len(data1)+len(data2), os.TotalObjectsSize)
 		}
-		if os.TotalSectorsSize != 3*rhpv2.SectorSize {
-			return fmt.Errorf("expected totalSectorSize of %d, got %d", 3*rhpv2.SectorSize, os.TotalSectorsSize)
+		if os.TotalSectorsSize != 3*rhpv4.SectorSize {
+			return fmt.Errorf("expected totalSectorSize of %d, got %d", 3*rhpv4.SectorSize, os.TotalSectorsSize)
 		}
-		if os.TotalUploadedSize != 3*rhpv2.SectorSize {
-			return fmt.Errorf("expected totalUploadedSize of %d, got %d", 3*rhpv2.SectorSize, os.TotalUploadedSize)
+		if os.TotalUploadedSize != 3*rhpv4.SectorSize {
+			return fmt.Errorf("expected totalUploadedSize of %d, got %d", 3*rhpv4.SectorSize, os.TotalUploadedSize)
 		}
 		if os.MinHealth != 1 {
 			t.Errorf("expected minHealth of 1, got %v", os.MinHealth)
@@ -2552,18 +2547,16 @@ func TestHostScan(t *testing.T) {
 	hk = host.PublicKey()
 
 	// update the host's net address
-	settings := host.settings.Settings()
-	settings.NetAddress = "hostwithoutport.com"
-	tt.OK(host.settings.UpdateSettings(settings))
-	tt.OK(host.settings.Announce())
+	// TODO: announce "hostwithoutport.com"
+	newAddr := "hostwithoutport.com"
 
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		cluster.MineBlocks(1)
 
 		h, err := b.Host(context.Background(), hk)
 		tt.OK(err)
-		if !strings.HasPrefix(h.NetAddress, settings.NetAddress) && !strings.HasPrefix(h.V2SiamuxAddr(), settings.NetAddress) {
-			return fmt.Errorf("expected net address to be %v, got '%v' and '%v'", settings.NetAddress, h.NetAddress, h.V2SiamuxAddr())
+		if !strings.HasPrefix(h.V2SiamuxAddr(), newAddr) && !strings.HasPrefix(h.V2SiamuxAddr(), newAddr) {
+			return fmt.Errorf("expected net address to be %v, got '%v' and '%v'", newAddr, h.V2SiamuxAddr(), h.V2SiamuxAddr())
 		}
 		return nil
 	})
@@ -2627,7 +2620,7 @@ func TestDownloadAllHosts(t *testing.T) {
 	var randomHost []string
 	for _, host := range cluster.hosts {
 		if _, used := usedHosts[host.PublicKey()]; used {
-			randomHost = []string{host.RHPv2Addr(), host.RHPv4Addr()}
+			randomHost = []string{host.RHPv4Addr()}
 			break
 		}
 	}
@@ -2663,7 +2656,7 @@ func TestDownloadAllHosts(t *testing.T) {
 	// block the new host but unblock the old one
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			toBlock := []string{host.RHPv2Addr(), host.RHPv4Addr()}
+			toBlock := []string{host.RHPv4Addr()}
 			tt.OK(b.UpdateHostBlocklist(context.Background(), toBlock, randomHost, false))
 		}
 	}
@@ -2671,9 +2664,9 @@ func TestDownloadAllHosts(t *testing.T) {
 	// gouge prices on the new host
 	for _, host := range cluster.hosts {
 		if host.PublicKey() == newHost {
-			settings := host.settings.Settings()
-			settings.StoragePrice = types.Siacoins(1e3)
-			tt.OK(host.UpdateSettings(settings))
+			settings := host.settings.RHP4Settings()
+			settings.Prices.StoragePrice = types.Siacoins(1e3)
+			host.settings.Update(settings)
 		}
 	}
 	time.Sleep(testWorkerCfg().CacheExpiry) // expire cache
@@ -2950,13 +2943,11 @@ func TestResyncAccounts(t *testing.T) {
 	for _, h := range cluster.hosts {
 		for _, acc := range workerAccs {
 			// v1 accounts
-			balance, err := h.accounts.Balance(acc.ID)
+			balance, err := h.contractsV2.AccountBalance(rhpv4.Account(acc.ID))
 			tt.OK(err)
 			if balance.Cmp(types.ZeroCurrency) > 0 {
-				budget, err := h.accounts.Budget(acc.ID, balance)
+				err := h.contractsV2.DebitAccount(rhpv4.Account(acc.ID), rhpv4.Usage{RPC: balance})
 				tt.OK(err)
-				tt.OK(budget.Spend(accounts.Usage{RPCRevenue: balance}))
-				tt.OK(budget.Commit())
 			}
 
 			// v2 accounts

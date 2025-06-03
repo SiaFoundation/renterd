@@ -16,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	s3aws "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/go-cmp/cmp"
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -678,7 +678,7 @@ func TestS3MultipartPruneSlabs(t *testing.T) {
 
 	// Upload 1 regular object. It will share the same packed slab, cause the
 	// packed slab to be complete and start a new one.
-	data = frand.Bytes(test.RedundancySettings.MinShards*rhpv2.SectorSize - 1)
+	data = frand.Bytes(test.RedundancySettings.MinShards*rhpv4.SectorSize - 1)
 	tt.OKAll(cluster.S3.PutObject(bucket, "bar", bytes.NewReader(data), putObjectOptions{}))
 
 	// Block until the buffer is uploaded.

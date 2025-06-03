@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/url"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 )
@@ -17,7 +17,7 @@ func (c *Client) Accounts(ctx context.Context, owner string) (accounts []api.Acc
 	return
 }
 
-func (c *Client) FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error) {
+func (c *Client) FundAccount(ctx context.Context, account rhpv4.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error) {
 	var resp api.AccountsFundResponse
 	err := c.c.POST(ctx, "/accounts/fund", api.AccountsFundRequest{
 		AccountID:  account,

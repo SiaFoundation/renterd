@@ -15,15 +15,11 @@ import (
 	"strings"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 
 	rhp4utils "go.sia.tech/coreutils/rhp/v4"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/prometheus"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
-	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.sia.tech/renterd/v2/stores/sql"
 
@@ -70,37 +66,36 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	}
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
-	var deposit types.Currency
-	var spending api.ContractSpendingRecord
-	if cm.V2 {
-		// latest revision
-		rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.V2SiamuxAddr(), req.ContractID)
-		if jc.Check("failed to fetch contract revision", err) != nil {
-			return
-		}
-		// cap the deposit by what's left in the contract
-		renterFunds := rev.RenterOutput.Value
-		if renterFunds.IsZero() {
-			jc.Error(errors.New("contract is out of funds"), http.StatusBadRequest)
-			return
-		} else if req.Amount.Cmp(renterFunds) > 0 {
-			req.Amount = renterFunds
-		}
-		deposit = req.Amount
-		// fund the account
-		signer := ibus.NewFormContractSigner(b.w, rk)
-		res, err := b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
-			{
-				Account: rhpv4.Account(req.AccountID),
-				Amount:  deposit,
-			},
-		})
-		if jc.Check("failed to fund v2 account", err) != nil {
-			return
-		}
+	// latest revision
+	rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.V2SiamuxAddr(), req.ContractID)
+	if jc.Check("failed to fetch contract revision", err) != nil {
+		return
+	}
+	// cap the deposit by what's left in the contract
+	renterFunds := rev.RenterOutput.Value
+	if renterFunds.IsZero() {
+		jc.Error(errors.New("contract is out of funds"), http.StatusBadRequest)
+		return
+	} else if req.Amount.Cmp(renterFunds) > 0 {
+		req.Amount = renterFunds
+	}
+	deposit := req.Amount
+	// fund the account
+	signer := ibus.NewFormContractSigner(b.w, rk)
+	res, err := b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
+		{
+			Account: rhpv4.Account(req.AccountID),
+			Amount:  deposit,
+		},
+	})
+	if jc.Check("failed to fund account", err) != nil {
+		return
+	}
 
-		rev = res.Revision
-		spending = api.ContractSpendingRecord{
+	// record spending
+	rev = res.Revision
+	err = b.store.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
+		{
 			ContractSpending: api.ContractSpending{
 				FundAccount: deposit,
 			},
@@ -110,61 +105,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 
 			MissedHostPayout:  rev.MissedHostValue,
 			ValidRenterPayout: rev.RenterOutput.Value,
-		}
-	} else {
-		// latest revision
-		rev, err := b.rhp3Client.Revision(jc.Request.Context(), req.ContractID, cm.HostKey, host.Settings.SiamuxAddr())
-		if jc.Check("failed to fetch contract revision", err) != nil {
-			return
-		}
-
-		// ensure we have at least 2H in the contract to cover the costs
-		if types.NewCurrency64(2).Cmp(rev.ValidRenterPayout()) >= 0 {
-			jc.Error(fmt.Errorf("insufficient funds to fund account: %v <= %v", rev.ValidRenterPayout(), types.NewCurrency64(2)), http.StatusBadRequest)
-			return
-		}
-
-		// price table
-		pt, err := b.rhp3Client.PriceTable(jc.Request.Context(), cm.HostKey, host.Settings.SiamuxAddr(), rhp3.PreparePriceTableContractPayment(&rev, req.AccountID, rk))
-		if jc.Check("failed to fetch price table", err) != nil {
-			return
-		}
-
-		// check only the FundAccountCost
-		if types.NewCurrency64(1).Cmp(pt.FundAccountCost) < 0 {
-			jc.Error(fmt.Errorf("%w: host is gouging on FundAccountCost", gouging.ErrPriceTableGouging), http.StatusServiceUnavailable)
-			return
-		}
-
-		// cap the deposit by what's left in the contract
-		deposit = req.Amount
-		cost := pt.FundAccountCost
-		availableFunds := rev.ValidRenterPayout().Sub(cost)
-		if deposit.Cmp(availableFunds) > 0 {
-			deposit = availableFunds
-		}
-
-		// fund the account
-		err = b.rhp3Client.FundAccount(jc.Request.Context(), &rev, cm.HostKey, host.Settings.SiamuxAddr(), deposit, req.AccountID, pt.HostPriceTable, rk)
-		if jc.Check("failed to fund account", err) != nil {
-			return
-		}
-		spending = api.ContractSpendingRecord{
-			ContractSpending: api.ContractSpending{
-				FundAccount: deposit.Add(cost),
-			},
-			ContractID:     rev.ParentID,
-			RevisionNumber: rev.RevisionNumber,
-			Size:           rev.Filesize,
-
-			MissedHostPayout:  rev.MissedHostPayout(),
-			ValidRenterPayout: rev.ValidRenterPayout(),
-		}
-	}
-
-	// record spending
-	err = b.store.RecordContractSpending(jc.Request.Context(), []api.ContractSpendingRecord{
-		spending,
+		},
 	})
 	if err != nil {
 		b.logger.Errorw("failed to record contract spending", zap.Error(err))
@@ -576,9 +517,7 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	for _, h := range hosts {
 		// ignore height
 		h.V2HS.HostSettings.Prices.TipHeight = bh
-		h.PT.HostBlockHeight = bh
-		if (len(h.V2SiamuxAddresses) > 0 && !gc.CheckV2(h.V2HS).Gouging()) ||
-			(len(h.V2SiamuxAddresses) == 0 && !gc.CheckV1(&h.HS, &h.PT).Gouging()) {
+		if len(h.V2SiamuxAddresses) > 0 && !gc.CheckV2(h.V2HS).Gouging() {
 			infos = append(infos, h.HostInfo)
 		}
 	}
@@ -700,15 +639,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	}
 
 	// scan host, prefer v2
-	var pt rhpv3.HostPriceTable
-	var settings rhpv2.HostSettings
-	var ping time.Duration
-	var v2Settings rhp4.HostSettings
-	if h.V2SiamuxAddr() != "" {
-		v2Settings, ping, err = b.scanHostV2(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.V2SiamuxAddr())
-	} else {
-		settings, pt, ping, err = b.scanHostV1(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.NetAddress)
-	}
+	v2Settings, ping, err := b.scanHostV2(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.V2SiamuxAddr())
 
 	// check if the scan failed due to a shutdown - shouldn't be necessary but
 	// just in case since recording a failed scan might have serious
@@ -730,7 +661,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	// record host scan - make sure this is interrupted by the request ctx and
 	// not the context with the timeout used to time out the scan itself.
 	// Otherwise scans that time out won't be recorded.
-	b.recordHostScan(jc.Request.Context(), err, hk, settings, pt, v2Settings)
+	b.recordHostScan(jc.Request.Context(), err, hk, v2Settings)
 
 	// send response
 	var errStr string
@@ -739,9 +670,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	}
 	jc.Encode(api.HostScanResponse{
 		Ping:       api.DurationMS(ping),
-		PriceTable: pt,
 		ScanError:  errStr,
-		Settings:   settings,
 		V2Settings: v2Settings,
 	})
 }
@@ -904,31 +833,17 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 		return
 	}
 
-	if host.IsV2() {
-		revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.V2SiamuxAddr(), fcid)
-		if jc.Check("failed to fetch revision", err) != nil {
-			return
-		}
-		jc.Encode(api.Revision{
-			ContractID:      fcid,
-			MissedHostValue: revision.MissedHostValue,
-			RenterFunds:     revision.RenterOutput.Value,
-			RevisionNumber:  revision.RevisionNumber,
-			Size:            revision.Filesize,
-		})
-	} else {
-		revision, err := b.rhp3Client.Revision(jc.Request.Context(), fcid, contract.HostKey, host.Settings.SiamuxAddr())
-		if jc.Check("failed to fetch revision", err) != nil {
-			return
-		}
-		jc.Encode(api.Revision{
-			ContractID:      fcid,
-			MissedHostValue: revision.MissedHostPayout(),
-			RenterFunds:     revision.ValidRenterPayout(),
-			RevisionNumber:  revision.RevisionNumber,
-			Size:            revision.Filesize,
-		})
+	revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.V2SiamuxAddr(), fcid)
+	if jc.Check("failed to fetch revision", err) != nil {
+		return
 	}
+	jc.Encode(api.Revision{
+		ContractID:      fcid,
+		MissedHostValue: revision.MissedHostValue,
+		RenterFunds:     revision.RenterOutput.Value,
+		RevisionNumber:  revision.RevisionNumber,
+		Size:            revision.Filesize,
+	})
 }
 
 func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
@@ -995,12 +910,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	var res api.ContractPruneResponse
-	if c.V2 {
-		res, err = b.pruneContractV2(pruneCtx, rk, c, host.V2SiamuxAddr(), gc, pending)
-	} else {
-		res, err = b.pruneContractV1(pruneCtx, rk, c, host.NetAddress, gc, pending)
-	}
+	res, err := b.pruneContractV2(pruneCtx, rk, c, host.V2SiamuxAddr(), gc, pending)
 	if jc.Check("failed to prune contract", err) != nil {
 		return
 	}
@@ -1138,9 +1048,6 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	if rrr.EndHeight == 0 {
 		http.Error(jc.ResponseWriter, "EndHeight can not be zero", http.StatusBadRequest)
 		return
-	} else if rrr.ExpectedNewStorage == 0 {
-		http.Error(jc.ResponseWriter, "ExpectedNewStorage can not be zero", http.StatusBadRequest)
-		return
 	} else if rrr.RenterFunds.IsZero() {
 		http.Error(jc.ResponseWriter, "RenterFunds can not be zero", http.StatusBadRequest)
 		return
@@ -1181,20 +1088,11 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 		}
 	}()
 
-	// use RHP4 if we're passed the V2 hardfork allow height
 	var contract api.ContractMetadata
-	if c.V2 {
-		if c.EndHeight() == rrr.EndHeight {
-			contract, err = b.refreshContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
-		} else {
-			contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
-		}
+	if c.EndHeight() == rrr.EndHeight {
+		contract, err = b.refreshContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
 	} else {
-		contract, err = b.renewContractV1(ctx, cs, gp, c, h.Settings, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight, rrr.ExpectedNewStorage)
-		if errors.Is(err, api.ErrMaxFundAmountExceeded) {
-			jc.Error(err, http.StatusBadRequest)
-			return
-		}
+		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
 	}
 	if jc.Check("couldn't renew/refresh contract", err) != nil {
 		return

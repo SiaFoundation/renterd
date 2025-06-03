@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/config"
@@ -162,8 +162,8 @@ func newTestWorkerCfg() config.Worker {
 	}
 }
 
-func newTestSector() (*[rhpv2.SectorSize]byte, types.Hash256) {
-	var sector [rhpv2.SectorSize]byte
+func newTestSector() (*[rhpv4.SectorSize]byte, types.Hash256) {
+	var sector [rhpv4.SectorSize]byte
 	frand.Read(sector[:])
-	return &sector, rhpv2.SectorRoot(&sector)
+	return &sector, rhpv4.SectorRoot(&sector)
 }

@@ -284,7 +284,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.
 	// create the host
 	var hostID int64
 	if res, err := c.tx.Exec(c.ctx, `
-	INSERT INTO hosts (created_at, public_key, settings, v2_settings, price_table, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
+	INSERT INTO hosts (created_at, public_key, v2_settings, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		last_announcement = VALUES(last_announcement),
@@ -293,9 +293,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.
 	`,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
-		ssql.HostSettings{},
 		ssql.V2HostSettings{},
-		ssql.PriceTable{},
 		0,
 		0,
 		false,

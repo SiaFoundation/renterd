@@ -51,10 +51,7 @@ func TestBlocklist(t *testing.T) {
 	h1, err := b.Host(context.Background(), hk1)
 	tt.OK(err)
 
-	netAddresses := []string{h1.NetAddress}
-	if len(h1.V2SiamuxAddresses) > 0 {
-		netAddresses = h1.V2SiamuxAddresses
-	}
+	netAddresses := h1.V2SiamuxAddresses
 	tt.OK(b.UpdateHostBlocklist(ctx, netAddresses, nil, false))
 
 	// assert h1 is no longer usable
@@ -85,7 +82,7 @@ func TestBlocklist(t *testing.T) {
 	h := cluster.NewHost()
 
 	// update blocklist to block just that host
-	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h.RHPv2Addr(), h.RHPv4Addr()}, nil, false))
+	tt.OK(b.UpdateHostBlocklist(context.Background(), []string{h.RHPv4Addr()}, nil, false))
 
 	// add the host
 	cluster.AddHost(h)

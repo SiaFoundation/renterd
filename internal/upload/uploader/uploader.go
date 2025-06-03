@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/hosts"
 	"go.sia.tech/renterd/v2/internal/locking"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 )
@@ -42,7 +42,7 @@ type (
 type (
 	SectorUploadReq struct {
 		Ctx          context.Context
-		Data         *[rhpv2.SectorSize]byte
+		Data         *[rhpv4.SectorSize]byte
 		Idx          int
 		ResponseChan chan SectorUploadResp
 		Root         types.Hash256
@@ -62,7 +62,7 @@ type (
 	}
 )
 
-func NewUploadRequest(ctx context.Context, data *[rhpv2.SectorSize]byte, idx int, respChan chan SectorUploadResp, root types.Hash256, overdrive bool) *SectorUploadReq {
+func NewUploadRequest(ctx context.Context, data *[rhpv4.SectorSize]byte, idx int, respChan chan SectorUploadResp, root types.Hash256, overdrive bool) *SectorUploadReq {
 	return &SectorUploadReq{
 		Ctx:          ctx,
 		Data:         data,
@@ -202,7 +202,9 @@ outer:
 				start := time.Now()
 				duration, err := u.execute(req)
 				elapsed := time.Since(start)
-				if errors.Is(err, rhp3.ErrMaxRevisionReached) {
+				if rhpv4.ErrorCode(err) == rhpv4.ErrorCodeBadRequest {
+					// TODO: we can actually try and fetch the latest revision
+					// here and see if its state is 'renewed'.
 					if u.tryRefresh(req.Ctx) {
 						u.Enqueue(req.SectorUploadReq)
 						return false
@@ -232,7 +234,7 @@ outer:
 
 func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Duration, overdrive bool) (success bool, failure bool, uploadEstimateMS float64, uploadSpeedBytesPerMS float64) {
 	// no-op cases
-	if utils.IsErr(uploadErr, rhp3.ErrMaxRevisionReached) {
+	if rhpv4.ErrorCode(uploadErr) == rhpv4.ErrorCodeBadRequest {
 		return false, false, 0, 0
 	} else if utils.IsErr(uploadErr, context.Canceled) {
 		return false, false, 0, 0
@@ -244,13 +246,13 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 		if ms == 0 {
 			ms = 1 // avoid division by zero
 		}
-		return true, false, float64(ms), float64(rhpv2.SectorSize / ms)
+		return true, false, float64(ms), float64(rhpv4.SectorSize / ms)
 	}
 
 	// upload failed because we weren't able to create a payment, in this case
 	// we want to punish the host but only to ensure we stop using it, meaning
 	// we don't increment consecutive failures
-	if utils.IsErr(uploadErr, rhp3.ErrFailedToCreatePayment) {
+	if rhpv4.ErrorCode(uploadErr) == rhpv4.ErrorCodePayment {
 		return false, false, float64(time.Hour.Milliseconds()), 0
 	}
 
@@ -258,9 +260,9 @@ func handleSectorUpload(uploadErr error, uploadDuration, totalDuration time.Dura
 	// this case we want to punish the host for being too slow but only when we
 	// weren't overdriving or when it took too long to dial
 	if utils.IsErr(uploadErr, ErrSectorUploadFinished) {
-		slowDial := utils.IsErr(uploadErr, rhp3.ErrDialTransport) && totalDuration > time.Second
+		slowDial := utils.IsErr(uploadErr, rhp4.ErrDialTransport) && totalDuration > time.Second
 		slowLock := utils.IsErr(uploadErr, errAcquireContractFailed) && totalDuration > time.Second
-		slowFetchRev := utils.IsErr(uploadErr, rhp3.ErrFailedToFetchRevision) && totalDuration > time.Second
+		slowFetchRev := utils.IsErr(uploadErr, rhp4.ErrFailedToFetchRevision) && totalDuration > time.Second
 		if !overdrive || slowDial || slowLock || slowFetchRev {
 			failure = overdrive
 			uploadEstimateMS = float64(totalDuration.Milliseconds() * 10)

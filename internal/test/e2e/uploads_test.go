@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -55,7 +55,7 @@ func TestUploadingSectorsCache(t *testing.T) {
 	tt := cluster.tt
 
 	// generate some random data
-	data := make([]byte, rhpv2.SectorSize*rs.MinShards)
+	data := make([]byte, rhpv4.SectorSize*rs.MinShards)
 	frand.Read(data)
 
 	// upload an object using our custom reader

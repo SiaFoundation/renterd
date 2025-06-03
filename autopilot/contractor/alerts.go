@@ -43,7 +43,7 @@ func newContractRenewalFailedAlert(contract api.ContractMetadata, ourFault bool,
 	}
 }
 
-func newLostSectorsAlert(hk types.PublicKey, version, release string, lostSectors uint64) alerts.Alert {
+func newLostSectorsAlert(hk types.PublicKey, version [3]uint8, release string, lostSectors uint64) alerts.Alert {
 	return alerts.Alert{
 		ID:       alerts.IDForHost(alertLostSectorsID, hk),
 		Severity: alerts.SeverityWarning,

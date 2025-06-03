@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -33,8 +33,8 @@ func TestGouging(t *testing.T) {
 	n := int(test.AutopilotConfig.Contracts.Amount)
 	for i := 0; i < n; i++ {
 		h := cluster.NewHost()
-		settings := h.settings.Settings()
-		settings.PriceTableValidity = time.Duration(gs.MinPriceTableValidity)
+		settings := h.settings.RHP4Settings()
+		settings.Prices.ValidUntil = time.Now().Add(time.Second).Add(time.Duration(gs.MinPriceTableValidity))
 		h.UpdateSettings(settings)
 		cluster.AddHost(h)
 	}
@@ -54,7 +54,7 @@ func TestGouging(t *testing.T) {
 	}
 
 	// generate random data
-	data := make([]byte, rhpv2.SectorSize/12)
+	data := make([]byte, rhpv4.SectorSize/12)
 	frand.Read(data)
 
 	// upload the data
@@ -69,16 +69,16 @@ func TestGouging(t *testing.T) {
 	}
 
 	// fetch current host settings
-	settings := cluster.hosts[0].settings.Settings()
+	settings := cluster.hosts[0].settings.RHP4Settings()
 
 	// update host settings
 	updated := settings
-	updated.StoragePrice = updated.StoragePrice.Mul64(2)
-	tt.OK(cluster.hosts[0].UpdateSettings(updated))
+	updated.Prices.StoragePrice = updated.Prices.StoragePrice.Mul64(2)
+	cluster.hosts[0].UpdateSettings(updated)
 
 	// update gouging settings
 	gs = test.GougingSettings
-	gs.MaxStoragePrice = settings.StoragePrice
+	gs.MaxStoragePrice = settings.Prices.StoragePrice
 	if err := b.UpdateGougingSettings(context.Background(), gs); err != nil {
 		t.Fatal(err)
 	}
@@ -99,11 +99,9 @@ func TestGouging(t *testing.T) {
 
 	// update all host settings so they're gouging
 	for _, h := range cluster.hosts {
-		settings := h.settings.Settings()
-		settings.StoragePrice = settings.StoragePrice.Mul64(2)
-		if err := h.UpdateSettings(settings); err != nil {
-			t.Fatal(err)
-		}
+		settings := h.settings.RHP4Settings()
+		settings.Prices.StoragePrice = settings.Prices.StoragePrice.Mul64(2)
+		h.UpdateSettings(settings)
 
 		// scan the host
 		tt.OKAll(cluster.Bus.ScanHost(context.Background(), h.PublicKey(), time.Second))

@@ -3,7 +3,7 @@ package test
 import (
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 )
@@ -17,9 +17,9 @@ var (
 			Period:      144,
 			RenewWindow: 72,
 
-			Download: rhpv2.SectorSize * 500,
-			Upload:   rhpv2.SectorSize * 500,
-			Storage:  rhpv2.SectorSize * 5e3,
+			Download: rhpv4.SectorSize * 500,
+			Upload:   rhpv4.SectorSize * 500,
+			Storage:  rhpv4.SectorSize * 5e3,
 
 			Prune: false,
 		},

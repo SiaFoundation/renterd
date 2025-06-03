@@ -4,9 +4,8 @@ import (
 	"context"
 	"io"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/v2/api"
 )
 
 type (
@@ -16,14 +15,13 @@ type (
 	}
 
 	Uploader interface {
-		UploadSector(context.Context, types.Hash256, *[rhpv2.SectorSize]byte) error
+		UploadSector(context.Context, types.Hash256, *[rhpv4.SectorSize]byte) error
 		PublicKey() types.PublicKey
 	}
 
 	Host interface {
 		PublicKey() types.PublicKey
 
-		PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error)
 		FetchRevision(ctx context.Context, fcid types.FileContractID) (types.FileContractRevision, error)
 
 		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error

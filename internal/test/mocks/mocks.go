@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
@@ -78,7 +77,7 @@ func NewBus(cs *ContractStore, hs *HostStore, os *ObjectStore) *busMock {
 	}
 }
 
-func (b *busMock) FundAccount(ctx context.Context, acc rhpv3.Account, fcid types.FileContractID, desired types.Currency) (types.Currency, error) {
+func (b *busMock) FundAccount(ctx context.Context, acc rhpv4.Account, fcid types.FileContractID, desired types.Currency) (types.Currency, error) {
 	return types.ZeroCurrency, nil
 }
 
@@ -93,23 +92,15 @@ func NewHost(hk types.PublicKey) *Host {
 	return &Host{
 		hk: hk,
 		hi: api.Host{
-			NetAddress: "localhost:1234",
-			PublicKey:  hk,
-			Scanned:    true,
+			PublicKey:         hk,
+			Scanned:           true,
+			V2SiamuxAddresses: []string{"localhost:1234"},
 		},
 	}
 }
 
-func (h *Host) UpdatePriceTable(pt api.HostPriceTable) {
-	h.hi.PriceTable = pt
-}
-
 func (h *Host) UpdatePrices(prices rhpv4.HostPrices) {
 	h.hi.V2Settings.Prices = prices
-}
-
-func (h *Host) HostPriceTable() api.HostPriceTable {
-	return h.hi.PriceTable
 }
 
 func (h *Host) HostPrices() rhpv4.HostPrices {
