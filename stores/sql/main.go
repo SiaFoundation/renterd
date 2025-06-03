@@ -16,8 +16,7 @@ import (
 
 	dsql "database/sql"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
@@ -39,8 +38,6 @@ var (
 type (
 	HostInfo struct {
 		api.HostInfo
-		HS   rhpv2.HostSettings
-		PT   rhpv3.HostPriceTable
 		V2HS rhp.HostSettings
 	}
 
@@ -324,7 +321,7 @@ func ContractSize(ctx context.Context, tx sql.Tx, id types.FileContractID) (api.
 		Scan(&nSectors); err != nil {
 		return api.ContractSize{}, err
 	}
-	sectorsSize := nSectors * rhpv2.SectorSize
+	sectorsSize := nSectors * rhpv4.SectorSize
 
 	var prunable uint64
 	if size > sectorsSize {
@@ -359,7 +356,7 @@ func ContractSizes(ctx context.Context, tx sql.Tx) (map[types.FileContractID]api
 			WHERE archival_reason IS NULL
 			GROUP BY c.fcid
 		) i
-	`, rhpv2.SectorSize)
+	`, rhpv4.SectorSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract sizes: %w", err)
 	}
@@ -784,11 +781,7 @@ SELECT
 	h.created_at,
 	h.last_announcement,
 	h.public_key,
-	h.net_address,
 
-	h.price_table,
-	h.price_table_expiry,
-	h.settings,
 	h.v2_settings,
 
 	h.total_scans,
@@ -841,10 +834,8 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 	for rows.Next() {
 		var h api.Host
 		var hostID int64
-		var pte dsql.NullTime
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
-			&h.NetAddress, (*PriceTable)(&h.PriceTable.HostPriceTable), &pte,
-			(*HostSettings)(&h.Settings), (*V2HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*V2HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
@@ -856,7 +847,6 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		h.PriceTable.Expiry = pte.Time
 		h.StoredData = storedDataMap[h.PublicKey]
 		hosts = append(hosts, h)
 		hostIDs = append(hostIDs, hostID)
@@ -1514,7 +1504,7 @@ func ObjectsStats(ctx context.Context, tx sql.Tx, opts api.ObjectsStatsOpts) (ap
 		NumUnfinishedObjects:       unfinishedObjects,
 		TotalUnfinishedObjectsSize: totalUnfinishedObjectsSize,
 		TotalObjectsSize:           totalObjectsSize,
-		TotalSectorsSize:           totalSectors * rhpv2.SectorSize,
+		TotalSectorsSize:           totalSectors * rhpv4.SectorSize,
 		TotalUploadedSize:          totalUploaded,
 	}, nil
 }
@@ -1627,10 +1617,7 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 		downtime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN downtime + ? - last_scan ELSE downtime END,
 		uptime = CASE WHEN ? AND last_scan > 0 AND last_scan < ? THEN uptime + ? - last_scan ELSE uptime END,
 		last_scan = ?,
-		settings = CASE WHEN ? THEN ? ELSE settings END,
 		v2_settings = CASE WHEN ? THEN ? ELSE v2_settings END,
-		price_table = CASE WHEN ? THEN ? ELSE price_table END,
-		price_table_expiry = CASE WHEN ? THEN ? ELSE price_table_expiry END,
 		successful_interactions = CASE WHEN ? THEN successful_interactions + 1 ELSE successful_interactions END,
 		failed_interactions = CASE WHEN ? THEN failed_interactions + 1 ELSE failed_interactions END
 		WHERE public_key = ?
@@ -1640,7 +1627,6 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 	}
 	defer stmt.Close()
 
-	now := time.Now()
 	for _, scan := range scans {
 		scanTime := scan.Timestamp.UnixMilli()
 		_, err = stmt.Exec(ctx,
@@ -1650,11 +1636,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success,                      // recent_scan_failures
 			!scan.Success, scanTime, scanTime, // downtime
 			scan.Success, scanTime, scanTime, // uptime
-			scanTime,                                  // last_scan
-			scan.Success, HostSettings(scan.Settings), // settings
+			scanTime,                                      // last_scan
 			scan.Success, V2HostSettings(scan.V2Settings), // settings
-			scan.Success, PriceTable(scan.PriceTable), // price_table
-			scan.Success, now, // price_table_expiry
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
 			PublicKey(scan.HostKey),
@@ -2204,8 +2187,6 @@ EXISTS (
 	h.public_key,
 	COALESCE(h.net_address, ""),
 	COALESCE(h.settings->>'$.siamuxport', "") AS siamux_port,
-	h.price_table,
-	h.settings,
 	h.v2_settings
 	FROM hosts h
 	INNER JOIN contracts c on c.host_id = h.id and c.archival_reason IS NULL AND c.usability = ?
@@ -2223,28 +2204,16 @@ EXISTS (
 		var hostID int64
 		var hk PublicKey
 		var addr, port string
-		var pt PriceTable
-		var hs HostSettings
 		var v2Hs V2HostSettings
-		err := rows.Scan(&hostID, &hk, &addr, &port, &pt, &hs, &v2Hs)
+		err := rows.Scan(&hostID, &hk, &addr, &port, &v2Hs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)
 		}
 
-		// exclude hosts with invalid address
-		var siamuxAddr string
-		host, _, err := net.SplitHostPort(addr)
-		if err == nil {
-			siamuxAddr = net.JoinHostPort(host, port)
-		}
-
 		hosts = append(hosts, HostInfo{
 			api.HostInfo{
-				PublicKey:  types.PublicKey(hk),
-				SiamuxAddr: siamuxAddr,
+				PublicKey: types.PublicKey(hk),
 			},
-			rhpv2.HostSettings(hs),
-			rhpv3.HostPriceTable(pt),
 			rhp.HostSettings(v2Hs),
 		})
 		hostIDs = append(hostIDs, hostID)

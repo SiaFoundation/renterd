@@ -155,7 +155,7 @@ func (p *Pruner) performContractPruning(ctx context.Context) {
 		}
 
 		// prune contract
-		n, err := p.pruneContract(ctx, contract.ID, h.PublicKey, h.Settings.Version, h.Settings.Release, log)
+		n, err := p.pruneContract(ctx, contract.ID, h.PublicKey, log)
 		if err != nil {
 			log.Errorw("failed to prune contract", zap.Error(err), "contract", contract.ID)
 			continue
@@ -171,13 +171,11 @@ func (p *Pruner) performContractPruning(ctx context.Context) {
 	}
 }
 
-func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, hostVersion, hostRelease string, logger *zap.SugaredLogger) (uint64, error) {
+func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, logger *zap.SugaredLogger) (uint64, error) {
 	// define logger
 	log := logger.With(
 		zap.Stringer("contract", fcid),
-		zap.Stringer("host", hk),
-		zap.String("version", hostVersion),
-		zap.String("release", hostRelease))
+		zap.Stringer("host", hk))
 
 	// prune the contract
 	start := time.Now()
@@ -204,9 +202,8 @@ func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, h
 		if err := p.bus.RecordContractPruneMetric(ctx, api.ContractPruneMetric{
 			Timestamp: api.TimeRFC3339(start),
 
-			ContractID:  fcid,
-			HostKey:     hk,
-			HostVersion: hostVersion,
+			ContractID: fcid,
+			HostKey:    hk,
 
 			Pruned:    res.Pruned,
 			Remaining: res.Remaining,

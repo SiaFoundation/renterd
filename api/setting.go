@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 )
 
@@ -235,12 +235,12 @@ func (rs RedundancySettings) Redundancy() float64 {
 
 // SlabSize returns the size of a slab.
 func (rs RedundancySettings) SlabSize() uint64 {
-	return uint64(rs.TotalShards) * rhpv2.SectorSize
+	return uint64(rs.TotalShards) * rhpv4.SectorSize
 }
 
 // SlabSizeNoRedundancy returns the size of a slab without redundancy.
 func (rs RedundancySettings) SlabSizeNoRedundancy() uint64 {
-	return uint64(rs.MinShards) * rhpv2.SectorSize
+	return uint64(rs.MinShards) * rhpv4.SectorSize
 }
 
 // Validate returns an error if the redundancy settings are not considered

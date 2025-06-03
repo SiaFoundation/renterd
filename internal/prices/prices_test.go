@@ -8,23 +8,16 @@ import (
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/test/mocks"
 	"lukechampine.com/frand"
 )
 
 type pricesFetcher struct {
-	hk    types.PublicKey
-	hptFn func() api.HostPriceTable
-	pFn   func() rhpv4.HostPrices
+	hk  types.PublicKey
+	pFn func() rhpv4.HostPrices
 }
 
 func (pf *pricesFetcher) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
 	return pf.pFn(), nil
-}
-
-func (pf *pricesFetcher) PriceTable(ctx context.Context, rev *types.FileContractRevision) (api.HostPriceTable, types.Currency, error) {
-	return pf.hptFn(), types.ZeroCurrency, nil
 }
 
 func (pf *pricesFetcher) PublicKey() types.PublicKey {
@@ -44,22 +37,12 @@ func newTestHostPrices() rhpv4.HostPrices {
 
 func TestPricesCache(t *testing.T) {
 	cache := NewPricesCache()
-	hostMock := mocks.NewHost(types.PublicKey{1})
-
-	// expire its prices
-	expiredPT := newTestHostPriceTable()
-	expiredPT.Expiry = time.Now()
-	hostMock.UpdatePriceTable(expiredPT)
 
 	// manage the host, make sure fetching the prices blocks
 	fetchPTBlockChan := make(chan struct{})
 	validPrices := newTestHostPrices()
 	h := &pricesFetcher{
 		hk: types.PublicKey{1},
-		hptFn: func() api.HostPriceTable {
-			t.Fatal("shouldn't be called")
-			return api.HostPriceTable{}
-		},
 		pFn: func() rhpv4.HostPrices {
 			<-fetchPTBlockChan
 			return validPrices

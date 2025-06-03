@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/test"
 	"lukechampine.com/frand"
@@ -35,7 +35,7 @@ func TestMetrics(t *testing.T) {
 	tt := cluster.tt
 
 	// upload, download, delete
-	data := frand.Bytes(rhpv2.SectorSize)
+	data := frand.Bytes(rhpv4.SectorSize)
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(data), testBucket, "foo", api.UploadObjectOptions{}))
 	tt.OK(w.DownloadObject(context.Background(), io.Discard, testBucket, "foo", api.DownloadObjectOptions{}))
 	tt.OK(w.DeleteObject(context.Background(), testBucket, "foo"))

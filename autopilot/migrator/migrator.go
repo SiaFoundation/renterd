@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
@@ -48,7 +48,7 @@ type (
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) error
 		FetchPartialSlab(ctx context.Context, key object.EncryptionKey, offset, length uint32) ([]byte, error)
 		FinishUpload(ctx context.Context, uID api.UploadID) error
-		FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
+		FundAccount(ctx context.Context, account rhpv4.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
 		GougingParams(ctx context.Context) (api.GougingParams, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (api.Host, error)
 		KeepaliveContract(ctx context.Context, fcid types.FileContractID, lockID uint64, d time.Duration) (err error)

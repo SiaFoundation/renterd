@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
@@ -146,7 +146,7 @@ type (
 
 		mu       sync.Mutex
 		uploaded uploadedSector
-		data     *[rhpv2.SectorSize]byte
+		data     *[rhpv4.SectorSize]byte
 	}
 )
 
@@ -608,9 +608,9 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 			// Once we upload to temp storage we don't need AddUploadingSector
 			// anymore and can move it back to the RPC.
 			sectors[idx] = &sectorUpload{
-				data:   (*[rhpv2.SectorSize]byte)(shards[idx]),
+				data:   (*[rhpv4.SectorSize]byte)(shards[idx]),
 				index:  idx,
-				root:   rhpv2.SectorRoot((*[rhpv2.SectorSize]byte)(shards[idx])),
+				root:   rhpv4.SectorRoot((*[rhpv4.SectorSize]byte)(shards[idx])),
 				ctx:    sCtx,
 				cancel: sCancel,
 			}
@@ -788,7 +788,7 @@ loop:
 	}
 
 	// calculate the upload speed
-	bytes := slab.numUploaded * rhpv2.SectorSize
+	bytes := slab.numUploaded * rhpv4.SectorSize
 	ms := time.Since(start).Milliseconds()
 	if ms == 0 {
 		ms = 1
@@ -934,7 +934,7 @@ func (s *slabUpload) receive(resp uploader.SectorUploadResp) (bool, bool) {
 	s.numUploaded++
 
 	// release memory
-	s.mem.ReleaseSome(rhpv2.SectorSize)
+	s.mem.ReleaseSome(rhpv4.SectorSize)
 
 	return true, s.numUploaded == s.numSectors
 }

@@ -11,14 +11,13 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/download/downloader"
 	"go.sia.tech/renterd/v2/internal/hosts"
 	"go.sia.tech/renterd/v2/internal/memory"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.sia.tech/renterd/v2/object"
 	"go.uber.org/zap"
@@ -384,7 +383,7 @@ func (mgr *Manager) DownloadSlab(ctx context.Context, slab object.Slab, hosts []
 	slice := object.SlabSlice{
 		Slab:   slab,
 		Offset: 0,
-		Length: uint32(slab.MinShards) * rhpv2.SectorSize,
+		Length: uint32(slab.MinShards) * rhpv4.SectorSize,
 	}
 	shards, err := mgr.downloadSlab(ctx, slice)
 	if err != nil {
@@ -715,8 +714,7 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, error) {
 				}
 
 				// handle lost sectors
-				if rhp3.IsSectorNotFound(resp.Err) ||
-					utils.IsErr(resp.Err, rhpv4.ErrSectorNotFound) {
+				if rhp4.IsSectorNotFound(resp.Err) {
 					if err := s.mgr.os.DeleteHostSector(ctx, resp.Req.Host.PublicKey(), resp.Req.Root); err != nil {
 						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.Req.Host.PublicKey(), "root", resp.Req.Root, zap.Error(err))
 					}
@@ -746,7 +744,7 @@ func (s *slabDownload) overdrivePct() float64 {
 func (s *slabDownload) downloadSpeed() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	bytes := s.numCompleted * rhpv2.SectorSize
+	bytes := s.numCompleted * rhpv4.SectorSize
 	ms := time.Since(s.created).Milliseconds()
 	if ms == 0 {
 		ms = 1 // avoid division by zero

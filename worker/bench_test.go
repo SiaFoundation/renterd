@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/renterd/v2/api"
 	"lukechampine.com/frand"
 )
@@ -65,8 +65,8 @@ func BenchmarkUploaderSingleObject(b *testing.B) {
 	up.Packing = false
 	w.AddHosts(up.RS.TotalShards)
 
-	data := io.LimitReader(&zeroReader{}, int64(b.N*rhpv2.SectorSize*up.RS.MinShards))
-	b.SetBytes(int64(rhpv2.SectorSize * up.RS.MinShards))
+	data := io.LimitReader(&zeroReader{}, int64(b.N*rhpv4.SectorSize*up.RS.MinShards))
+	b.SetBytes(int64(rhpv4.SectorSize * up.RS.MinShards))
 	b.ResetTimer()
 
 	_, _, err := w.uploadManager.Upload(context.Background(), data, w.UploadHosts(), up)
@@ -88,11 +88,11 @@ func BenchmarkUploaderMultiObject(b *testing.B) {
 	up.Packing = false
 	w.AddHosts(up.RS.TotalShards)
 
-	b.SetBytes(int64(rhpv2.SectorSize * up.RS.MinShards))
+	b.SetBytes(int64(rhpv4.SectorSize * up.RS.MinShards))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		data := io.LimitReader(&zeroReader{}, int64(rhpv2.SectorSize*up.RS.MinShards))
+		data := io.LimitReader(&zeroReader{}, int64(rhpv4.SectorSize*up.RS.MinShards))
 		_, _, err := w.uploadManager.Upload(context.Background(), data, w.UploadHosts(), up)
 		if err != nil {
 			b.Fatal(err)

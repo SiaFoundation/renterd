@@ -154,8 +154,8 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64, period uint6
 	h := sh.host
 
 	// prepare host breakdown fields
-	var gb api.HostGougingBreakdown
 	var ub api.HostUsabilityBreakdown
+	var gb api.HostGougingBreakdown
 
 	// blocked status does not influence what host info is calculated
 	if h.Blocked {
@@ -173,29 +173,16 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64, period uint6
 			ub.Offline = true
 		}
 
-		if h.IsV2() {
-			// accepting contracts check
-			if !h.V2Settings.AcceptingContracts {
-				ub.NotAcceptingContracts = true
-			}
-
-			// max duration check
-			ub.LowMaxDuration = period > h.V2Settings.MaxContractDuration
-
-			// gouging breakdown
-			gb = gc.CheckV2(h.V2Settings)
-		} else {
-			// accepting contracts check
-			if !h.Settings.AcceptingContracts {
-				ub.NotAcceptingContracts = true
-			}
-
-			// max duration check
-			ub.LowMaxDuration = period > h.Settings.MaxDuration || period > h.PriceTable.MaxDuration
-
-			// gouging breakdown
-			gb = gc.CheckV1(&h.Settings, &h.PriceTable.HostPriceTable)
+		// accepting contracts check
+		if !h.V2Settings.AcceptingContracts {
+			ub.NotAcceptingContracts = true
 		}
+
+		// max duration check
+		ub.LowMaxDuration = period > h.V2Settings.MaxContractDuration
+
+		// gouging breakdown
+		gb = gc.CheckV2(h.V2Settings)
 
 		// perform gouging and score checks
 		if gb.Gouging() {

@@ -9,13 +9,12 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/gouging"
+	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/test"
 	sql "go.sia.tech/renterd/v2/stores/sql"
 )
@@ -66,8 +65,8 @@ func TestSQLHostDB(t *testing.T) {
 	h, err := ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	} else if h.NetAddress != "address" {
-		t.Fatalf("unexpected address: %v", h.NetAddress)
+	} else if h.V2SiamuxAddr() != "address" {
+		t.Fatalf("unexpected address: %v", h.V2SiamuxAddr())
 	} else if h.LastAnnouncement.IsZero() {
 		t.Fatal("last announcement not set")
 	}
@@ -99,7 +98,7 @@ func TestSQLHostDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h2.NetAddress != h.NetAddress {
+	if h2.V2SiamuxAddr() != h.V2SiamuxAddr() {
 		t.Fatal("wrong net address")
 	}
 	if h2.KnownSince.IsZero() {
@@ -115,7 +114,7 @@ func TestSQLHostDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h3.NetAddress != "na" {
+	if h3.V2SiamuxAddr() != "na" {
 		t.Fatal("wrong net address")
 	}
 	if h3.KnownSince.IsZero() {
@@ -418,9 +417,8 @@ func TestUsableHosts(t *testing.T) {
 		hks = append(hks, hk)
 
 		// add host scan
-		hs := test.NewHostSettings()
-		pt := test.NewHostPriceTable()
-		s1 := newTestScan(hk, time.Now(), hs, pt, true)
+		hs := test.NewV2HostSettings()
+		s1 := newTestScan(hk, time.Now(), hs, true)
 		if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 			t.Fatal(err)
 		}
@@ -459,7 +457,7 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != hks[0] {
 		t.Fatal("unexpected", hosts)
-	} else if hosts[0].SiamuxAddr != "foo.com:9983" {
+	} else if hosts[0].V2SiamuxAddr() != "foo.com:9983" {
 		t.Fatal("unexpected", hosts)
 	}
 
@@ -470,15 +468,14 @@ func TestUsableHosts(t *testing.T) {
 
 	// assert h1 is not gouging
 	h1 := hosts[0]
-	if gc.CheckV1(&h1.HS, &h1.PT).Gouging() {
+	if gc.CheckV2(h1.V2HS).Gouging() {
 		t.Fatal("unexpected")
 	}
 
 	// record a scan for h1 to make it gouging
-	hs := test.NewHostSettings()
-	pt := test.NewHostPriceTable()
-	pt.UploadBandwidthCost = gs.MaxUploadPrice
-	s1 := newTestScan(h1.PublicKey, time.Now(), hs, pt, true)
+	hs := test.NewV2HostSettings()
+	hs.Prices.IngressPrice = gs.MaxUploadPrice
+	s1 := newTestScan(h1.PublicKey, time.Now(), hs, true)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 		t.Fatal(err)
 	}
@@ -493,8 +490,8 @@ func TestUsableHosts(t *testing.T) {
 
 	// assert h1 is now gouging
 	h1 = hosts[0]
-	if !gc.CheckV1(&h1.HS, &h1.PT).Gouging() {
-		t.Fatal("unexpected", h1.PT.UploadBandwidthCost, gs.MaxUploadPrice)
+	if !gc.CheckV2(h1.V2HS).Gouging() {
+		t.Fatal("unexpected", h1.V2HS.Prices.IngressPrice, gs.MaxUploadPrice)
 	}
 
 	// create helper to assert number of usable hosts
@@ -559,7 +556,7 @@ func TestRecordScan(t *testing.T) {
 	if host.Interactions != (api.HostInteractions{}) {
 		t.Fatal("mismatch", cmp.Diff(host.Interactions, api.HostInteractions{}))
 	}
-	if host.Settings != (rhpv2.HostSettings{}) {
+	if host.V2Settings != (rhp4.HostSettings{}) {
 		t.Fatal("mismatch")
 	}
 
@@ -573,20 +570,18 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
-	settings := rhpv2.HostSettings{NetAddress: "host.com"}
-	pt := rhpv3.HostPriceTable{
-		HostBlockHeight: 123,
-	}
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, pt, true)}); err != nil {
+	settings := test.NewV2HostSettings()
+	settings.Prices.TipHeight = 123
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	} else if time.Now().Before(host.PriceTable.Expiry) {
+	} else if time.Now().Before(host.V2Settings.Prices.ValidUntil) {
 		t.Fatal("invalid expiry")
-	} else if host.PriceTable.HostBlockHeight != pt.HostBlockHeight {
-		t.Fatalf("mismatch %v %v", host.PriceTable.HostBlockHeight, pt.HostBlockHeight)
+	} else if host.V2Settings.Prices.TipHeight != settings.Prices.TipHeight {
+		t.Fatalf("mismatch %v %v", host.V2Settings.Prices.TipHeight, settings.Prices.TipHeight)
 	}
 
 	// We expect no uptime or downtime from only a single scan.
@@ -608,15 +603,15 @@ func TestRecordScan(t *testing.T) {
 	}); host.Interactions != expected {
 		t.Fatal("mismatch", cmp.Diff(host.Interactions, expected))
 	}
-	if !reflect.DeepEqual(host.Settings, settings) {
+	if !reflect.DeepEqual(host.V2Settings, settings) {
 		t.Fatal("mismatch")
 	}
 
 	// Record another scan 1 hour after the previous one. We don't pass any
 	// subnets this time.
 	secondScanTime := firstScanTime.Add(time.Hour)
-	pt.HostBlockHeight = 456
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, pt, true)}); err != nil {
+	settings.Prices.TipHeight = 456
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, secondScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -642,7 +637,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record another scan 2 hours after the second one. This time it fails.
 	thirdScanTime := secondScanTime.Add(2 * time.Hour)
-	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, pt, false)}); err != nil {
+	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, thirdScanTime, settings, false)}); err != nil {
 		t.Fatal(err)
 	}
 	host, err = ss.Host(ctx, hk)
@@ -697,11 +692,10 @@ func TestRemoveHosts(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	pt := rhpv3.HostPriceTable{}
 	t1 := now.Add(-time.Minute * 120) // 2 hours ago
 	t2 := now.Add(-time.Minute * 90)  // 1.5 hours ago (30min downtime)
-	hi1 := newTestScan(hk, t1, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
-	hi2 := newTestScan(hk, t2, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
+	hi1 := newTestScan(hk, t1, rhp4.HostSettings{}, false)
+	hi2 := newTestScan(hk, t2, rhp4.HostSettings{}, false)
 
 	// record interactions
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi1, hi2}); err != nil {
@@ -731,7 +725,7 @@ func TestRemoveHosts(t *testing.T) {
 
 	// record interactions
 	t3 := now.Add(-time.Minute * 60) // 1 hour ago (60min downtime)
-	hi3 := newTestScan(hk, t3, rhpv2.HostSettings{NetAddress: "host.com"}, pt, false)
+	hi3 := newTestScan(hk, t3, rhp4.HostSettings{}, false)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{hi3}); err != nil {
 		t.Fatal(err)
 	}
@@ -1246,13 +1240,11 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 }
 
 // newTestScan returns a host interaction with given parameters.
-func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhpv2.HostSettings, pt rhpv3.HostPriceTable, success bool) api.HostScan {
+func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhp4.HostSettings, success bool) api.HostScan {
 	return api.HostScan{
-		HostKey:    hk,
-		PriceTable: pt,
-		Settings:   settings,
-		Success:    success,
-		Timestamp:  scanTime,
+		HostKey:   hk,
+		Success:   success,
+		Timestamp: scanTime,
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/download"
@@ -80,19 +80,13 @@ func TestUpload(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, used := used[h.PublicKey]; !used {
-			filtered = append(filtered, api.HostInfo{
-				PublicKey:  h.PublicKey,
-				SiamuxAddr: host.Settings.SiamuxAddr(),
-			})
+			filtered = append(filtered, host.Info())
 			continue
 		}
 
 		// add min shards used contracts
 		if n < int(params.RS.MinShards) {
-			filtered = append(filtered, api.HostInfo{
-				PublicKey:  h.PublicKey,
-				SiamuxAddr: host.Settings.SiamuxAddr(),
-			})
+			filtered = append(filtered, host.Info())
 			n++
 		}
 	}
@@ -356,7 +350,7 @@ func TestMigrateLostSector(t *testing.T) {
 	}
 
 	// migrate the shard away from the bad host
-	mem := mm.AcquireMemory(context.Background(), rhpv2.SectorSize)
+	mem := mm.AcquireMemory(context.Background(), rhpv4.SectorSize)
 	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, shards, hosts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
@@ -470,7 +464,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// migrate those shards away from bad hosts
-	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv2.SectorSize)
+	mem := mm.AcquireMemory(context.Background(), uint64(len(badIndices))*rhpv4.SectorSize)
 	err = ul.UploadShards(context.Background(), o.Object.Slabs[0].Slab, shards, hosts, 0, mem)
 	if err != nil {
 		t.Fatal(err)
@@ -515,10 +509,7 @@ func TestUploadShards(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			infos = append(infos, api.HostInfo{
-				PublicKey:  h.PublicKey,
-				SiamuxAddr: host.Settings.SiamuxAddr(),
-			})
+			infos = append(infos, host.Info())
 		}
 	}
 
@@ -550,7 +541,7 @@ func TestUploadSingleSectorSlowHosts(t *testing.T) {
 	}
 
 	// create test data
-	data := frand.Bytes(rhpv2.SectorSize * minShards)
+	data := frand.Bytes(rhpv4.SectorSize * minShards)
 
 	// create upload params
 	params := testParameters(t.Name())

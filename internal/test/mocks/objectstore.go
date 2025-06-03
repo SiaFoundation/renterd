@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/object"
@@ -105,7 +105,7 @@ func (os *ObjectStore) AddPartialSlab(ctx context.Context, data []byte, minShard
 	defer os.mu.Unlock()
 
 	// check if given data is too big
-	slabSize := int(minShards) * int(rhpv2.SectorSize)
+	slabSize := int(minShards) * int(rhpv4.SectorSize)
 	if len(data) > slabSize {
 		return nil, false, fmt.Errorf("data size %v exceeds size of a slab %v", len(data), slabSize)
 	}

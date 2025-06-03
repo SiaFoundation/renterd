@@ -8,11 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/internal/host"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 	"go.sia.tech/renterd/v2/internal/utils"
 )
 
@@ -264,7 +262,7 @@ func (d *Downloader) processBatch(batch []*SectorDownloadReq) chan struct{} {
 			mu.Lock()
 			if err == nil {
 				downloadedB += int64(req.Length) + downloadOverheadB
-				if downloadedB >= maxConcurrentSectorsPerHost*rhpv2.SectorSize || concurrent == maxConcurrentSectorsPerHost {
+				if downloadedB >= maxConcurrentSectorsPerHost*rhpv4.SectorSize || concurrent == maxConcurrentSectorsPerHost {
 					trackStatsFn()
 				}
 			}
@@ -347,13 +345,8 @@ func (d *Downloader) trackFailure(err error) {
 		return
 	}
 
-	if utils.IsBalanceInsufficient(err) ||
-		rhp3.IsPriceTableExpired(err) ||
-		rhp3.IsPriceTableNotFound(err) ||
-		rhp3.IsSectorNotFound(err) ||
-		rhpv4.ErrorCode(err) == rhpv4.ErrorCodeBadRequest ||
-		rhpv4.ErrorCode(err) == rhpv4.ErrorCodePayment ||
-		utils.IsErr(err, rhpv4.ErrSectorNotFound) {
+	if utils.IsErr(err, rhpv4.ErrSectorNotFound) ||
+		rhpv4.ErrorCode(err) == rhpv4.ErrorCodeBadRequest {
 		return // host is not to blame for these errors
 	}
 

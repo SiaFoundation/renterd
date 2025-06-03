@@ -11,11 +11,14 @@ import (
 	rhp4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 var (
 	// errDialTransport is returned when the worker could not dial the host.
 	ErrDialTransport = errors.New("could not dial transport")
+
+	ErrFailedToFetchRevision = errors.New("failed to fetch revision")
 )
 
 type (
@@ -37,6 +40,10 @@ func New(dialer Dialer) *Client {
 	return &Client{
 		tpool: newTransportPool(dialer),
 	}
+}
+
+func IsSectorNotFound(err error) bool {
+	return utils.IsErr(err, rhp4.ErrSectorNotFound)
 }
 
 func (c *Client) Settings(ctx context.Context, hk types.PublicKey, addr string) (hs HostSettings, _ error) {

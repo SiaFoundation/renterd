@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/config"
@@ -2448,7 +2448,7 @@ func TestObjectsStats(t *testing.T) {
 		obj := newTestObject(1)
 		objectsSize += uint64(obj.TotalSize())
 		for _, slab := range obj.Slabs {
-			sectorsSize += uint64(len(slab.Shards) * rhpv2.SectorSize)
+			sectorsSize += uint64(len(slab.Shards) * rhpv4.SectorSize)
 
 			for _, s := range slab.Shards {
 				for hpk, fcids := range s.Contracts {
@@ -2605,7 +2605,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab1Data)) || slabs[0].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
-	} else if bufferSize != rhpv2.SectorSize {
+	} else if bufferSize != rhpv4.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
@@ -2656,7 +2656,7 @@ func TestPartialSlab(t *testing.T) {
 						},
 					},
 					Offset: 0,
-					Length: rhpv2.SectorSize,
+					Length: rhpv4.SectorSize,
 				},
 			},
 		}
@@ -2682,7 +2682,7 @@ func TestPartialSlab(t *testing.T) {
 	}
 	if slabs[0].Length != uint32(len(slab2Data)) || slabs[0].Offset != uint32(len(slab1Data)) {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
-	} else if bufferSize != rhpv2.SectorSize {
+	} else if bufferSize != rhpv4.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	data, err = ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length)
@@ -2717,7 +2717,7 @@ func TestPartialSlab(t *testing.T) {
 	if slabs[1].Length != uint32(len(slab3Data)-1) || slabs[1].Offset != 0 {
 		t.Fatal("wrong offset/length", slabs[0].Offset, slabs[0].Length)
 	}
-	if bufferSize != 2*rhpv2.SectorSize {
+	if bufferSize != 2*rhpv4.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 	if data1, err := ss.FetchPartialSlab(ctx, slabs[0].EncryptionKey, slabs[0].Offset, slabs[0].Length); err != nil {
@@ -2727,7 +2727,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if !bytes.Equal(slab3Data, append(data1, data2...)) {
 		t.Fatal("wrong data")
 	}
-	assertBuffer(buffer1Name, rhpv2.SectorSize, true, false)
+	assertBuffer(buffer1Name, rhpv4.SectorSize, true, false)
 
 	buffer = fetchBuffer(slabs[1].EncryptionKey)
 	buffer2Name := buffer.Filename
@@ -2751,7 +2751,7 @@ func TestPartialSlab(t *testing.T) {
 	if len(packedSlabs) != 1 {
 		t.Fatal("expected 1 slab to be returned", len(packedSlabs))
 	}
-	assertBuffer(buffer1Name, rhpv2.SectorSize, true, true)
+	assertBuffer(buffer1Name, rhpv4.SectorSize, true, true)
 	assertBuffer(buffer2Name, 1, false, false)
 
 	buffer = fetchBuffer(packedSlabs[0].EncryptionKey)
@@ -2799,11 +2799,11 @@ func TestPartialSlab(t *testing.T) {
 	}
 
 	// Add 2 more partial slabs.
-	slices1, _, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2)
+	slices1, _, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv4.SectorSize/2), 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	slices2, bufferSize, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv2.SectorSize/2), 1, 2)
+	slices2, bufferSize, err := ss.AddPartialSlab(ctx, frand.Bytes(rhpv4.SectorSize/2), 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2829,7 +2829,7 @@ func TestPartialSlab(t *testing.T) {
 	} else if buffersBefore[1].Complete {
 		t.Fatal("expected buffer to be incomplete")
 	}
-	if bufferSize != 2*rhpv2.SectorSize {
+	if bufferSize != 2*rhpv4.SectorSize {
 		t.Fatal("unexpected buffer size", bufferSize)
 	}
 
@@ -2908,7 +2908,7 @@ func TestContractSizes(t *testing.T) {
 			{
 				ContractID:     fcids[i],
 				RevisionNumber: 1,
-				Size:           rhpv2.SectorSize,
+				Size:           rhpv4.SectorSize,
 			},
 		}); err != nil {
 			t.Fatal(err)
@@ -2935,7 +2935,7 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// assert there's one sector that can be pruned and assert it's from fcid 1
-	if n := prunableData(nil); n != rhpv2.SectorSize {
+	if n := prunableData(nil); n != rhpv4.SectorSize {
 		t.Fatalf("unexpected amount of prunable data %v", n)
 	} else if n := prunableData(&fcids[1]); n != 0 {
 		t.Fatalf("expected no prunable data %v", n)
@@ -2947,23 +2947,23 @@ func TestContractSizes(t *testing.T) {
 	}
 
 	// assert there's now two sectors that can be pruned
-	if n := prunableData(nil); n != rhpv2.SectorSize*2 {
+	if n := prunableData(nil); n != rhpv4.SectorSize*2 {
 		t.Fatalf("unexpected amount of prunable data %v", n)
-	} else if n := prunableData(&fcids[0]); n != rhpv2.SectorSize {
+	} else if n := prunableData(&fcids[0]); n != rhpv4.SectorSize {
 		t.Fatalf("unexpected amount of prunable data %v", n)
-	} else if n := prunableData(&fcids[1]); n != rhpv2.SectorSize {
+	} else if n := prunableData(&fcids[1]); n != rhpv4.SectorSize {
 		t.Fatalf("unexpected amount of prunable data %v", n)
 	}
 
 	if size, err := ss.ContractSize(context.Background(), fcids[0]); err != nil {
 		t.Fatal("unexpected err", err)
-	} else if size.Prunable != rhpv2.SectorSize {
+	} else if size.Prunable != rhpv4.SectorSize {
 		t.Fatal("unexpected prunable data", size.Prunable)
 	}
 
 	if size, err := ss.ContractSize(context.Background(), fcids[1]); err != nil {
 		t.Fatal("unexpected err", err)
-	} else if size.Prunable != rhpv2.SectorSize {
+	} else if size.Prunable != rhpv4.SectorSize {
 		t.Fatal("unexpected prunable data", size.Prunable)
 	}
 
@@ -4327,7 +4327,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		obj.Slabs = append(obj.Slabs, object.SlabSlice{
 			Offset: 0,
-			Length: uint32(minShards) * rhpv2.SectorSize,
+			Length: uint32(minShards) * rhpv4.SectorSize,
 			Slab: object.Slab{
 				EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 				MinShards:     uint8(minShards),
@@ -4456,7 +4456,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 			t.Fatal("unexpected id", slice.ID)
 		} else if slice.ObjectIndex != int64(i+1) {
 			t.Fatal("unexpected object index", slice.ObjectIndex)
-		} else if slice.Offset != 0 || slice.Length != int64(minShards)*rhpv2.SectorSize {
+		} else if slice.Offset != 0 || slice.Length != int64(minShards)*rhpv4.SectorSize {
 			t.Fatal("invalid offset/length", slice.Offset, slice.Length)
 		}
 
@@ -4502,7 +4502,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 	// add 1 slab with 30 shards
 	obj2.Slabs = append(obj2.Slabs, object.SlabSlice{
 		Offset: 0,
-		Length: uint32(minShards) * rhpv2.SectorSize,
+		Length: uint32(minShards) * rhpv4.SectorSize,
 		Slab: object.Slab{
 			EncryptionKey: object.GenerateEncryptionKey(object.EncryptionKeyTypeSalted),
 			MinShards:     uint8(minShards),
@@ -4554,7 +4554,7 @@ func TestUpdateObjectReuseSlab(t *testing.T) {
 		t.Fatal("unexpected id", slice2.ID)
 	} else if slice2.ObjectIndex != 1 {
 		t.Fatal("unexpected object index", slice2.ObjectIndex)
-	} else if slice2.Offset != 0 || slice2.Length != int64(minShards)*rhpv2.SectorSize {
+	} else if slice2.Offset != 0 || slice2.Length != int64(minShards)*rhpv4.SectorSize {
 		t.Fatal("invalid offset/length", slice2.Offset, slice2.Length)
 	}
 

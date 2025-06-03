@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/rhp/v4"
 )
 
 func TestOptimiseGougingSetting(t *testing.T) {
@@ -16,19 +16,16 @@ func TestOptimiseGougingSetting(t *testing.T) {
 	var hosts []api.Host
 	for i := 0; i < 10; i++ {
 		hosts = append(hosts, api.Host{
-
 			KnownSince: time.Unix(0, 0),
-			PriceTable: api.HostPriceTable{
-				HostPriceTable: rhpv3.HostPriceTable{
-					CollateralCost: types.Siacoins(1),
-					MaxCollateral:  types.Siacoins(1000),
+			V2Settings: rhp.HostSettings{
+				HostSettings: rhpv4.HostSettings{
+					AcceptingContracts: true,
+					MaxCollateral:      types.Siacoins(1000),
+					Prices: rhpv4.HostPrices{
+						Collateral: types.Siacoins(1),
+					},
+					ProtocolVersion: [3]uint8{2, 0, 0},
 				},
-			},
-			Settings: rhpv2.HostSettings{
-				AcceptingContracts: true,
-				Collateral:         types.Siacoins(1),
-				MaxCollateral:      types.Siacoins(1000),
-				Version:            "1.6.0",
 			},
 			Interactions: api.HostInteractions{
 				Uptime:                  time.Hour * 1000,
@@ -76,7 +73,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 
 	// Case1: test optimising a field which gets us back to a full set of hosts
 	for i := range hosts {
-		hosts[i].Settings.StoragePrice = types.Siacoins(uint32(i + 1))
+		hosts[i].V2Settings.Prices.StoragePrice = types.Siacoins(uint32(i + 1))
 	}
 	assertUsable(1)
 	if !optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, 0, rs, hosts) {
@@ -89,7 +86,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 
 	// Case2: test optimising a field where we can't get back to a full set of
 	// hosts
-	hosts[0].Settings.StoragePrice = types.Siacoins(100000)
+	hosts[0].V2Settings.Prices.StoragePrice = types.Siacoins(100000)
 	assertUsable(9)
 	if optimiseGougingSetting(&gs, &gs.MaxStoragePrice, cfg, cs, 0, rs, hosts) {
 		t.Fatal("optimising succeeded")
@@ -100,7 +97,7 @@ func TestOptimiseGougingSetting(t *testing.T) {
 
 	// Case3: force overflow
 	for i := range hosts {
-		hosts[i].Settings.StoragePrice = types.MaxCurrency
+		hosts[i].V2Settings.Prices.StoragePrice = types.MaxCurrency
 	}
 	gs.MaxStoragePrice = types.MaxCurrency.Sub(types.Siacoins(1))
 	assertUsable(0)

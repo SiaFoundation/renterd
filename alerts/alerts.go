@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/object"
 	"lukechampine.com/frand"
@@ -80,7 +80,7 @@ type (
 	}
 )
 
-func IDForAccount(alertID [32]byte, id rhpv3.Account) types.Hash256 {
+func IDForAccount(alertID [32]byte, id rhpv4.Account) types.Hash256 {
 	return types.HashBytes(append(alertID[:], id[:]...))
 }
 

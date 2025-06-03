@@ -2,6 +2,7 @@ package prices
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -11,11 +12,22 @@ import (
 )
 
 const (
+	// priceTableValidityLeeway is a leeway we apply when deeming a price table safe
+	// for use, we essentially add 60 seconds to the current time when checking
+	// whether we are still before a pricetable's expiry time
+	priceTableValidityLeeway = 60 * time.Second
+
 	// priceRefreshInterval is the max interval at which we refresh price tables.
 	// It is set to 20 minutes since that equals 2 blocks on average which keeps
 	// prices reasonably up-to-date. If the price table has an expiry shorter
 	// than this, it will be refreshed sooner.
 	priceRefreshInterval = 20 * time.Minute
+)
+
+var (
+	// errPriceTableUpdateTimedOut is returned when we timeout waiting for
+	// another thread that's performing a price table update
+	errPriceTableUpdateTimedOut = errors.New("timeout while blocking for pricetable update")
 )
 
 type (

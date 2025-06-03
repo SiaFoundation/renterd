@@ -9,8 +9,7 @@ import (
 	"strings"
 
 	"github.com/gotd/contrib/http_range"
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/internal/memory"
 )
@@ -60,13 +59,6 @@ type (
 		Upload   memory.Status `json:"upload"`
 	}
 
-	// RHPFormResponse is the response type for the /rhp/form endpoint.
-	RHPFormResponse struct {
-		ContractID     types.FileContractID   `json:"contractID"`
-		Contract       rhpv2.ContractRevision `json:"contract"`
-		TransactionSet []types.Transaction    `json:"transactionSet"`
-	}
-
 	// RHPFundRequest is the request type for the /rhp/fund endpoint.
 	RHPFundRequest struct {
 		ContractID types.FileContractID `json:"contractID"`
@@ -85,7 +77,7 @@ type (
 	// RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 	// endpoint.
 	RHPPreparePaymentRequest struct {
-		Account    rhpv3.Account    `json:"account"`
+		Account    rhpv4.Account    `json:"account"`
 		Amount     types.Currency   `json:"amount"`
 		Expiry     uint64           `json:"expiry"`
 		AccountKey types.PrivateKey `json:"accountKey"`

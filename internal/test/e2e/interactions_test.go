@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 )
 
@@ -38,8 +37,8 @@ func TestInteractions(t *testing.T) {
 	}
 
 	// assert that either prices or price table were set
-	ptUID := h.PriceTable.UID
-	if ptUID == (rhpv3.SettingsID{}) && h.V2Settings.Prices == (rhpv4.HostPrices{}) {
+	prices := h.V2Settings.Prices
+	if prices == (rhpv4.HostPrices{}) {
 		t.Fatal("expected prices to be set")
 	}
 

@@ -36,7 +36,6 @@ func EvaluateConfig(cfg api.AutopilotConfig, cs api.ConsensusState, rs api.Redun
 	resp.Hosts = uint64(len(hosts))
 	for i := range hosts {
 		// ignore block height
-		hosts[i].PriceTable.HostBlockHeight = cs.BlockHeight
 		hosts[i].V2Settings.Prices.TipHeight = cs.BlockHeight
 		hc := checkHost(gc, scoreHost(hosts[i], cfg, gs, rs.Redundancy()), minValidScore, cfg.Contracts.Period)
 		if hc.UsabilityBreakdown.IsUsable() {

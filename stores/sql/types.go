@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
@@ -40,8 +38,6 @@ type (
 	Hash256        types.Hash256
 	MerkleProof    struct{ Hashes []types.Hash256 }
 	NullableString string
-	HostSettings   rhpv2.HostSettings
-	PriceTable     rhpv3.HostPriceTable
 	PublicKey      types.PublicKey
 	EncryptionKey  object.EncryptionKey
 	Uint64Str      uint64
@@ -77,8 +73,6 @@ var (
 	_ scannerValuer = (*Hash256)(nil)
 	_ scannerValuer = (*MerkleProof)(nil)
 	_ scannerValuer = (*NullableString)(nil)
-	_ scannerValuer = (*HostSettings)(nil)
-	_ scannerValuer = (*PriceTable)(nil)
 	_ scannerValuer = (*PublicKey)(nil)
 	_ scannerValuer = (*EncryptionKey)(nil)
 	_ scannerValuer = (*UnixTimeMS)(nil)
@@ -195,50 +189,6 @@ func (h *Hash256) Scan(value interface{}) error {
 // Value returns an addr value, implements driver.Valuer interface.
 func (h Hash256) Value() (driver.Value, error) {
 	return h[:], nil
-}
-
-// Scan scan value into HostSettings, implements sql.Scanner interface.
-func (hs *HostSettings) Scan(value interface{}) error {
-	var bytes []byte
-	switch value := value.(type) {
-	case string:
-		bytes = []byte(value)
-	case []byte:
-		bytes = value
-	default:
-		return errors.New(fmt.Sprint("failed to unmarshal Settings value:", value))
-	}
-	return json.Unmarshal(bytes, hs)
-}
-
-// Value returns a HostSettings value, implements driver.Valuer interface.
-func (hs HostSettings) Value() (driver.Value, error) {
-	if hs == (HostSettings{}) {
-		return []byte("{}"), nil
-	}
-	return json.Marshal(hs)
-}
-
-// Scan scan value into PriceTable, implements sql.Scanner interface.
-func (pt *PriceTable) Scan(value interface{}) error {
-	var bytes []byte
-	switch value := value.(type) {
-	case string:
-		bytes = []byte(value)
-	case []byte:
-		bytes = value
-	default:
-		return errors.New(fmt.Sprint("failed to unmarshal PriceTable value:", value))
-	}
-	return json.Unmarshal(bytes, pt)
-}
-
-// Value returns a PriceTable value, implements driver.Valuer interface.
-func (pt PriceTable) Value() (driver.Value, error) {
-	if pt == (PriceTable{}) {
-		return []byte("{}"), nil
-	}
-	return json.Marshal(pt)
 }
 
 // Scan scan value into publicKey, implements sql.Scanner interface.

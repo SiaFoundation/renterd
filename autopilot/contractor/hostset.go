@@ -45,12 +45,7 @@ func (hs *hostSet) resolveHostIP(ctx context.Context, host api.Host) ([]net.IPAd
 		return resolvedAddresses, nil
 	}
 	// resolve host IPs
-	var hostAddrs []string
-	if host.NetAddress != "" {
-		hostAddrs = append(hostAddrs, host.NetAddress)
-	}
-	hostAddrs = append(hostAddrs, host.V2SiamuxAddresses...)
-	resolvedAddresses, err := utils.ResolveHostIPs(ctx, hostAddrs)
+	resolvedAddresses, err := utils.ResolveHostIPs(ctx, host.V2SiamuxAddresses)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +58,6 @@ func (hs *hostSet) resolveHostIP(ctx context.Context, host api.Host) ([]net.IPAd
 func (hs *hostSet) HasRedundantIP(ctx context.Context, host api.Host) bool {
 	logger := hs.logger.Named("hasRedundantIP").
 		With("hostKey", host.PublicKey).
-		With("netAddress", host.NetAddress).
 		With("v2SiamuxAddresses", host.V2SiamuxAddresses)
 
 	// resolve addresses - if a host's addresses can't be resolved, we consider

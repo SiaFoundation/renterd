@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	rhpv2 "go.sia.tech/core/rhp/v2"
-
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
@@ -161,7 +160,7 @@ SHARDS:
 	}
 
 	// acquire memory for the migration
-	mem := m.uploadManager.AcquireMemory(ctx, uint64(len(shardIndices))*rhpv2.SectorSize)
+	mem := m.uploadManager.AcquireMemory(ctx, uint64(len(shardIndices))*rhpv4.SectorSize)
 	if mem == nil {
 		return fmt.Errorf("failed to acquire memory for migration")
 	}

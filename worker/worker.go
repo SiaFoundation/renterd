@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/gotd/contrib/http_range"
-	rhpv3 "go.sia.tech/core/rhp/v3"
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
@@ -31,8 +30,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/hosts"
 	"go.sia.tech/renterd/v2/internal/memory"
 	"go.sia.tech/renterd/v2/internal/rhp"
-	rhp2 "go.sia.tech/renterd/v2/internal/rhp/v2"
-	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/upload"
 	"go.sia.tech/renterd/v2/internal/utils"
@@ -82,7 +79,7 @@ type (
 	}
 
 	AccountFunder interface {
-		FundAccount(ctx context.Context, account rhpv3.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
+		FundAccount(ctx context.Context, account rhpv4.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error)
 	}
 
 	ContractStore interface {
@@ -141,8 +138,6 @@ type (
 type Worker struct {
 	alerts alerts.Alerter
 
-	rhp2Client *rhp2.Client
-	rhp3Client *rhp3.Client
 	rhp4Client *rhp4.Client
 
 	id        string
@@ -175,22 +170,6 @@ func (w *Worker) isStopped() bool {
 	default:
 	}
 	return false
-}
-
-func (w *Worker) withRevision(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, siamuxAddr string, fetchTimeout time.Duration, lockPriority int, fn func(rev types.FileContractRevision) error) error {
-	return w.withContractLock(ctx, fcid, lockPriority, func() error {
-		if fetchTimeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, fetchTimeout)
-			defer cancel()
-		}
-
-		rev, err := w.hostManager.Host(hk, fcid, siamuxAddr).FetchRevision(ctx, fcid)
-		if err != nil {
-			return err
-		}
-		return fn(rev)
-	})
 }
 
 func (w *Worker) registerAlert(a alerts.Alert) {
@@ -556,7 +535,7 @@ func (w *Worker) accountsHandlerGET(jc jape.Context) {
 }
 
 func (w *Worker) accountsResetDriftHandlerPOST(jc jape.Context) {
-	var id rhpv3.Account
+	var id rhpv4.Account
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
@@ -621,8 +600,6 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 		bus:                  b,
 		masterKey:            masterKey,
 		logger:               l.Sugar(),
-		rhp2Client:           rhp2.New(dialer, l),
-		rhp3Client:           rhp3.New(dialer, l),
 		rhp4Client:           rhp4.New(dialer),
 		startTime:            time.Now(),
 		uploadingPackedSlabs: make(map[string]struct{}),
@@ -735,10 +712,7 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 		// fund the account
 		deposit, err := w.bus.FundAccount(ctx, acc.ID(), fcid, desired.Sub(balance))
 		if err != nil {
-			if rhp3.IsBalanceMaxExceeded(err) {
-				acc.ScheduleSync()
-			}
-			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", desired.Sub(balance), err)
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
 		}
 
 		// log the account balance after funding
@@ -821,30 +795,10 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 }
 
 func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
-	// handle v2 host
-	if host.IsV2() {
-		account := w.accounts.ForHost(host.PublicKey)
-		return account.WithSync(func() (types.Currency, error) {
-			return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
-		})
-	}
-
-	// attach gouging checker
-	gp, err := w.bus.GougingParams(ctx)
-	if err != nil {
-		return fmt.Errorf("couldn't get gouging parameters; %w", err)
-	}
-	ctx = gouging.WithChecker(ctx, w.bus, gp)
-
-	// sync the account
-	h := w.hostManager.Host(host.PublicKey, fcid, host.SiamuxAddr)
-	err = w.withRevision(ctx, fcid, host.PublicKey, host.SiamuxAddr, defaultRevisionFetchTimeout, lockingPrioritySyncing, func(rev types.FileContractRevision) error {
-		return h.SyncAccount(ctx, &rev)
+	account := w.accounts.ForHost(host.PublicKey)
+	return account.WithSync(func() (types.Currency, error) {
+		return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
 	})
-	if err != nil {
-		return fmt.Errorf("failed to sync account; %w", err)
-	}
-	return nil
 }
 
 func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key string, opts api.UploadObjectOptions) (*api.UploadObjectResponse, error) {
