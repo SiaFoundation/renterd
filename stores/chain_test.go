@@ -293,7 +293,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert wallet state elements
-	sces, _, err := ss.UnspentSiacoinElements()
+	_, sces, err := ss.UnspentSiacoinElements()
 	if err != nil {
 		t.Fatal("unexpected error", err)
 	} else if len(sces) != 1 {
@@ -323,7 +323,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert wallet state elements
-	sces, _, err = ss.UnspentSiacoinElements()
+	_, sces, err = ss.UnspentSiacoinElements()
 	if err != nil {
 		t.Fatal("unexpected error", err)
 	} else if len(sces) != 1 {
