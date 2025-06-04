@@ -549,6 +549,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00035_fix_ns_ms", log)
 				},
 			},
+			{
+				ID: "00036_wallet_locked_outputs",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00036_wallet_locked_outputs", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {

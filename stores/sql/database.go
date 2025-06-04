@@ -304,7 +304,7 @@ type (
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
 		// UnspentSiacoinElements returns all wallet outputs in the database.
-		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, error)
+		UnspentSiacoinElements(ctx context.Context) ([]types.SiacoinElement, types.ChainIndex, error)
 
 		// UpdateAutopilotConfig updates the autopilot config in the database.
 		UpdateAutopilotConfig(ctx context.Context, ap api.AutopilotConfig) error
@@ -361,6 +361,20 @@ type (
 
 		// WalletEventCount returns the total number of events in the database.
 		WalletEventCount(ctx context.Context) (uint64, error)
+
+		// WalletLockOutputs locks the given output until the given unlock time.
+		// If the output is already locked, it is updated. The unlock time
+		// should be in the future.
+		WalletLockOutputs(ctx context.Context, scois []types.SiacoinOutputID, until time.Time) error
+
+		// WalletLockedOutputs returns the IDs of all locked output. A locked
+		// output is one that has an unlock timestamp greater than the given
+		// threshold.
+		WalletLockedOutputs(ctx context.Context, threshold time.Time) ([]types.SiacoinOutputID, error)
+
+		// WalletReleaseOutputs unlocks the given outputs. If the outputs is not
+		// locked, it is ignored.
+		WalletReleaseOutputs(ctx context.Context, scois []types.SiacoinOutputID) error
 	}
 
 	MetricsDatabase interface {

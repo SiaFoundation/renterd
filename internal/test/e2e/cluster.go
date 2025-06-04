@@ -691,6 +691,8 @@ func (c *TestCluster) MineBlocks(n uint64) {
 }
 
 func (c *TestCluster) sync() {
+	c.tt.Helper()
+
 	tip := c.cm.Tip()
 	c.tt.Retry(10000, time.Millisecond, func() error {
 		cs, err := c.Bus.ConsensusState(context.Background())

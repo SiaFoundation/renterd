@@ -144,7 +144,7 @@ type (
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)
-		Tip() types.ChainIndex
+		Tip() (types.ChainIndex, error)
 		UnconfirmedEvents() ([]wallet.Event, error)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)

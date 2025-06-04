@@ -24,9 +24,9 @@ func (s *SQLStore) Tip() (ci types.ChainIndex, err error) {
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
-func (s *SQLStore) UnspentSiacoinElements() (elements []types.SiacoinElement, err error) {
-	err = s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
-		elements, err = tx.UnspentSiacoinElements(context.Background())
+func (s *SQLStore) UnspentSiacoinElements() (tip types.ChainIndex, elements []types.SiacoinElement, err error) {
+	err = s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) (err error) {
+		elements, tip, err = tx.UnspentSiacoinElements(context.Background())
 		return
 	})
 	return
@@ -51,14 +51,27 @@ func (s *SQLStore) WalletEventCount() (count uint64, err error) {
 	return
 }
 
+// LockUTXOs locks the specified UTXOs until the specified time.
 func (s *SQLStore) LockUTXOs(scois []types.SiacoinOutputID, until time.Time) error {
-	return nil
+	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		return tx.WalletLockOutputs(s.shutdownCtx, scois, until)
+	})
 }
 
-func (s *SQLStore) LockedUTXOs(t time.Time) ([]types.SiacoinOutputID, error) {
-	return nil, nil
+// LockedUTXOs returns a list of UTXOs that are currently locked until the
+// specified time.
+func (s *SQLStore) LockedUTXOs(t time.Time) (utxos []types.SiacoinOutputID, err error) {
+	err = s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) (err error) {
+		utxos, err = tx.WalletLockedOutputs(s.shutdownCtx, t)
+		return
+	})
+	return
 }
 
+// ReleaseUTXOs releases the specified UTXOs, making them available for use
+// again. If the UTXOs are not locked, this is a no-op.
 func (s *SQLStore) ReleaseUTXOs(scois []types.SiacoinOutputID) error {
-	return nil
+	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		return tx.WalletReleaseOutputs(s.shutdownCtx, scois)
+	})
 }
