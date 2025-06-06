@@ -1,3 +1,9 @@
+## 2.2.2 (2025-06-06)
+
+### Fixes
+
+- Update coreutils dependency.
+
 ## 2.2.1 (2025-05-29)
 
 ### Fixes
