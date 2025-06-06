@@ -69,7 +69,7 @@ func (b *Bus) pruneContractV1(ctx context.Context, rk types.PrivateKey, cm api.C
 }
 
 func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.ContractMetadata, hostIP string, gc gouging.Checker, pendingUploads map[types.Hash256]struct{}) (api.ContractPruneResponse, error) {
-	signer := ibus.NewFormContractSigner(b.w, rk)
+	signer := ibus.NewFormContractSigner(b.w, b.w, rk)
 
 	// get latest revision
 	rev, err := b.rhp4Client.LatestRevision(ctx, cm.HostKey, hostIP, cm.ID)

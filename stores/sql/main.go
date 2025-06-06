@@ -2137,19 +2137,23 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 	return tx.UpsertContractSectors(ctx, upsert)
 }
 
-func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, err error) {
+func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (ci types.ChainIndex, elements []types.SiacoinElement, err error) {
 	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof, address, value, maturity_height FROM wallet_outputs")
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch wallet events: %w", err)
+		return types.ChainIndex{}, nil, fmt.Errorf("failed to fetch wallet events: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		element, err := scanSiacoinElement(rows)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan wallet event: %w", err)
+			return types.ChainIndex{}, nil, fmt.Errorf("failed to scan wallet event: %w", err)
 		}
 		elements = append(elements, element)
+	}
+	ci, err = Tip(ctx, tx)
+	if err != nil {
+		return types.ChainIndex{}, nil, fmt.Errorf("failed to fetch chain tip: %w", err)
 	}
 	return
 }
