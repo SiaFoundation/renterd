@@ -48,7 +48,6 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
-		RecommendedFee() types.Currency
 		Tip() types.ChainIndex
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
 	}
@@ -58,12 +57,10 @@ type (
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 	}
 
-	Syncer interface {
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
-	}
-
 	Wallet interface {
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
+		RecommendedFee() types.Currency
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
@@ -72,7 +69,6 @@ type (
 	chainSubscriber struct {
 		cm     ChainManager
 		cs     ChainStore
-		s      Syncer
 		logger *zap.SugaredLogger
 
 		announcementMaxAge time.Duration
@@ -90,13 +86,12 @@ type (
 // NewChainSubscriber creates a new chain subscriber that will sync with the
 // given chain manager and chain store. The returned subscriber is already
 // running and can be stopped by calling Shutdown.
-func NewChainSubscriber(cm ChainManager, cs ChainStore, s Syncer, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
+func NewChainSubscriber(cm ChainManager, cs ChainStore, w Wallet, announcementMaxAge time.Duration, logger *zap.Logger) *chainSubscriber {
 	logger = logger.Named("chainsubscriber")
 	ctx, cancel := context.WithCancelCause(context.Background())
 	subscriber := &chainSubscriber{
 		cm:     cm,
 		cs:     cs,
-		s:      s,
 		logger: logger.Sugar(),
 
 		announcementMaxAge: announcementMaxAge,
@@ -396,7 +391,7 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 	for _, fce := range expiredFCEs {
 		go func(fce types.V2FileContractElement) {
 			txn := types.V2Transaction{
-				MinerFee: s.cm.RecommendedFee().Mul64(ContractResolutionTxnWeight),
+				MinerFee: s.wallet.RecommendedFee().Mul64(ContractResolutionTxnWeight),
 				FileContractResolutions: []types.V2FileContractResolution{
 					{
 						Parent:     fce,
@@ -421,6 +416,7 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 
 			// verify txn and broadcast it
 			_, err = s.cm.AddV2PoolTransactions(basis, set)
+			err = s.wallet.BroadcastV2TransactionSet(basis, set)
 			if err != nil &&
 				(strings.Contains(err.Error(), "has already been resolved") ||
 					strings.Contains(err.Error(), "not present in the accumulator")) {
@@ -431,10 +427,6 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 				s.logger.With(zap.Error(err)).Error("failed to add contract expiration txn to pool")
 				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 				return
-			}
-			if err := s.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn}); err != nil {
-				s.logger.With(zap.Error(err)).Error("failed to broadcast contract expiration txn")
-				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 			}
 		}(fce)
 	}

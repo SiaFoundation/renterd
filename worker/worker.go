@@ -132,7 +132,6 @@ type (
 	}
 
 	Syncer interface {
-		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 		SyncerPeers(ctx context.Context) (resp []string, err error)
 	}
 )
