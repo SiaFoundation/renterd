@@ -690,7 +690,7 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
 	cs := b.cm.TipState()
 	key := b.masterKey.DeriveContractKey(hk)
-	signer := ibus.NewFormContractSigner(b.w, b.w, key)
+	signer := ibus.NewFormContractSigner(b.w, key)
 
 	// form the contract
 	res, err := b.rhp4Client.FormContract(ctx, hk, hostIP, b.cm, signer, cs, prices, hostAddr, rhpv4.RPCFormContractParams{
@@ -815,7 +815,7 @@ func (b *Bus) renewContractV1(ctx context.Context, cs consensus.State, gp api.Go
 func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
-	signer := ibus.NewFormContractSigner(b.w, b.w, renterKey)
+	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
 	// fetch the revision
 	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
@@ -887,7 +887,7 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds types.Currency, endHeight uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
-	signer := ibus.NewFormContractSigner(b.w, b.w, renterKey)
+	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
 	// fetch the revision
 	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
