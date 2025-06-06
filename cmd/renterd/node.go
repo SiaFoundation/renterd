@@ -370,12 +370,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	}
 	cm := chain.NewManager(store, state)
 
-	// create wallet
-	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, cwallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
-	if err != nil {
-		return nil, nil, err
-	}
-
 	// bootstrap the syncer
 	if cfg.Bus.Bootstrap {
 		var peers []string
@@ -426,6 +420,12 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		errChan <- s.Run()
 		close(errChan)
 	}()
+
+	// create wallet
+	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, s, cwallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// create a helper function to wait for syncer to wind down on shutdown
 	syncerShutdown := func(ctx context.Context) error {

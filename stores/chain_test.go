@@ -293,7 +293,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert wallet state elements
-	sces, err := ss.UnspentSiacoinElements()
+	ci, sces, err := ss.UnspentSiacoinElements()
 	if err != nil {
 		t.Fatal("unexpected error", err)
 	} else if len(sces) != 1 {
@@ -308,6 +308,8 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal("unexpected state element merkle proof[0]", se.StateElement.MerkleProof[0])
 	} else if se.StateElement.MerkleProof[1] != (types.Hash256{2}) {
 		t.Fatal("unexpected state element merkle proof[1]", se.StateElement.MerkleProof[1])
+	} else if ci.Height != 1 {
+		t.Fatal("unexpected chain index", ci)
 	}
 
 	// update state elements
@@ -323,7 +325,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	}
 
 	// assert wallet state elements
-	sces, err = ss.UnspentSiacoinElements()
+	ci, sces, err = ss.UnspentSiacoinElements()
 	if err != nil {
 		t.Fatal("unexpected error", err)
 	} else if len(sces) != 1 {
@@ -336,6 +338,8 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal("unexpected state element merkle proof[0]", se.StateElement.MerkleProof[0])
 	} else if se.StateElement.MerkleProof[1] != (types.Hash256{4}) {
 		t.Fatal("unexpected state element merkle proof[1]", se.StateElement.MerkleProof[1])
+	} else if ci.Height != 1 {
+		t.Fatalf("unexpected chain index %v", ci)
 	}
 
 	// assert events

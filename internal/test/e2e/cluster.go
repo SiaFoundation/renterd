@@ -584,13 +584,13 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 		return nil, nil, nil, nil, err
 	}
 
-	// create wallet
-	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	s, err := newTestSyncer(cm, sqlStore, genesisBlock.ID(), cfg.GatewayAddr, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	s, err := newTestSyncer(cm, sqlStore, genesisBlock.ID(), cfg.GatewayAddr, logger)
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, s, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

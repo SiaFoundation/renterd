@@ -249,7 +249,7 @@ func (b *Bus) postSystemSQLite3BackupHandler(jc jape.Context) {
 }
 
 func (b *Bus) txpoolFeeHandler(jc jape.Context) {
-	api.WriteResponse(jc, api.TxPoolFeeResp{Currency: b.cm.RecommendedFee()})
+	api.WriteResponse(jc, api.TxPoolFeeResp{Currency: b.w.RecommendedFee()})
 }
 
 func (b *Bus) txpoolTransactionsHandler(jc jape.Context) {
@@ -262,12 +262,7 @@ func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 		return
 	}
 
-	_, err := b.cm.AddPoolTransactions(txnSet)
-	if jc.Check("couldn't broadcast transaction set", err) != nil {
-		return
-	}
-
-	err = b.s.BroadcastTransactionSet(txnSet)
+	err := b.w.BroadcastTransactionSet(txnSet)
 	if jc.Check("couldn't broadcast transaction set", err) != nil {
 		return
 	}
@@ -363,10 +358,15 @@ func (b *Bus) walletHandler(jc jape.Context) {
 		return
 	}
 
+	tip, err := b.w.Tip()
+	if jc.Check("failed to fetch wallet tip", err) != nil {
+		return
+	}
+
 	api.WriteResponse(jc, api.WalletResponse{
 		Balance:    balance,
 		Address:    address,
-		ScanHeight: b.w.Tip().Height,
+		ScanHeight: tip.Height,
 	})
 }
 
@@ -413,7 +413,7 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 	}
 
 	// estimate miner fee
-	feePerByte := b.cm.RecommendedFee()
+	feePerByte := b.w.RecommendedFee()
 	minerFee := feePerByte.Mul64(stdTxnSize)
 	if req.SubtractMinerFee {
 		var underflow bool
@@ -444,12 +444,8 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 			return
 		}
 		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddV2PoolTransactions(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+		if err := b.w.BroadcastV2TransactionSet(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
 			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-			return
-		}
-		// broadcast the transaction
-		if jc.Check("failed to broadcast transaction set", b.s.BroadcastV2TransactionSet(basis, txnset)) != nil {
 			return
 		}
 		jc.Encode(txn.ID())
@@ -469,13 +465,8 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 		// shouldn't be necessary to get parents since the transaction is
 		// not using unconfirmed outputs, but good practice
 		txnset := append(b.cm.UnconfirmedParents(txn), txn)
-		// verify the transaction and add it to the transaction pool
-		if _, err := b.cm.AddPoolTransactions(txnset); jc.Check("failed to add transaction set", err) != nil {
-			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-			return
-		}
 		// broadcast the transaction
-		if jc.Check("failed to broadcast transaction set", b.s.BroadcastTransactionSet(txnset)) != nil {
+		if jc.Check("failed to broadcast transaction set", b.w.BroadcastTransactionSet(txnset)) != nil {
 			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 			return
 		}
@@ -513,7 +504,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	var ids []types.TransactionID
 	if state := b.cm.TipState(); state.Index.Height < state.Network.HardforkV2.AllowHeight {
 		// v1 redistribution
-		txns, toSign, err := b.w.Redistribute(wantedOutputs, wfr.Amount, b.cm.RecommendedFee())
+		txns, toSign, err := b.w.Redistribute(wantedOutputs, wfr.Amount, b.w.RecommendedFee())
 		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 			return
 		}
@@ -535,7 +526,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		}
 	} else {
 		// v2 redistribution
-		txns, toSign, err := b.w.RedistributeV2(wantedOutputs, wfr.Amount, b.cm.RecommendedFee())
+		txns, toSign, err := b.w.RedistributeV2(wantedOutputs, wfr.Amount, b.w.RecommendedFee())
 		if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 			return
 		}

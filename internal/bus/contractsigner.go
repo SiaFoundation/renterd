@@ -7,12 +7,19 @@ import (
 
 var _ rhp.FormContractSigner = (*formContractSigner)(nil)
 
-type formContractSigner struct {
-	renterKey types.PrivateKey
-	w         rhp.Wallet
+type formContractSignerWallet interface {
+	FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
+	RecommendedFee() types.Currency
+	ReleaseInputs(_ []types.Transaction, txns []types.V2Transaction) error
+	SignV2Inputs(txn *types.V2Transaction, toSign []int)
 }
 
-func NewFormContractSigner(w rhp.Wallet, renterKey types.PrivateKey) rhp.FormContractSigner {
+type formContractSigner struct {
+	renterKey types.PrivateKey
+	w         formContractSignerWallet
+}
+
+func NewFormContractSigner(w formContractSignerWallet, renterKey types.PrivateKey) rhp.FormContractSigner {
 	return &formContractSigner{
 		renterKey: renterKey,
 		w:         w,
@@ -21,6 +28,10 @@ func NewFormContractSigner(w rhp.Wallet, renterKey types.PrivateKey) rhp.FormCon
 
 func (s *formContractSigner) FundV2Transaction(txn *types.V2Transaction, amount types.Currency) (types.ChainIndex, []int, error) {
 	return s.w.FundV2Transaction(txn, amount, true)
+}
+
+func (s *formContractSigner) RecommendedFee() types.Currency {
+	return s.w.RecommendedFee()
 }
 
 func (s *formContractSigner) ReleaseInputs(txns []types.V2Transaction) {

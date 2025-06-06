@@ -82,7 +82,6 @@ type (
 		PoolTransaction(txid types.TransactionID) (types.Transaction, bool)
 		PoolTransactions() []types.Transaction
 		V2PoolTransactions() []types.V2Transaction
-		RecommendedFee() types.Currency
 		Tip() types.ChainIndex
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
@@ -105,7 +104,6 @@ type (
 	TransactionPool interface {
 		AcceptTransactionSet(txns []types.Transaction) error
 		Close() error
-		RecommendedFee() types.Currency
 		Transactions() []types.Transaction
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
@@ -126,8 +124,6 @@ type (
 		Addr() string
 		BroadcastHeader(h types.BlockHeader) error
 		BroadcastV2BlockOutline(bo gateway.V2BlockOutline) error
-		BroadcastTransactionSet([]types.Transaction) error
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 		Peers() []*syncer.Peer
 	}
@@ -135,16 +131,19 @@ type (
 	Wallet interface {
 		Address() types.Address
 		Balance() (wallet.Balance, error)
+		BroadcastTransactionSet([]types.Transaction) error
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
+		RecommendedFee() types.Currency
 		Redistribute(outputs int, amount, feePerByte types.Currency) (txns []types.Transaction, toSign [][]types.Hash256, err error)
 		RedistributeV2(outputs int, amount, feePerByte types.Currency) (txns []types.V2Transaction, toSign [][]int, err error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)
-		Tip() types.ChainIndex
+		Tip() (types.ChainIndex, error)
 		UnconfirmedEvents() ([]wallet.Event, error)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 		Events(offset, limit int) ([]wallet.Event, error)
@@ -366,7 +365,7 @@ func New(cfg config.Bus, masterKey [32]byte, am AlertManager, cm ChainManager, s
 
 	// create chain subscriber
 	announcementMaxAge := time.Duration(cfg.AnnouncementMaxAgeHours) * time.Hour
-	b.cs = ibus.NewChainSubscriber(cm, store, b.s, w, announcementMaxAge, l)
+	b.cs = ibus.NewChainSubscriber(cm, store, w, announcementMaxAge, l)
 
 	// create wallet metrics recorder
 	b.walletMetricsRecorder = ibus.NewWalletMetricRecorder(store, w, defaultWalletRecordMetricInterval, l)
@@ -553,7 +552,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch host; %w", err)
 	}
-	fee := b.cm.RecommendedFee().Mul64(10e3)
+	fee := b.w.RecommendedFee().Mul64(10e3)
 
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
@@ -591,16 +590,10 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		// sign the transaction
 		b.w.SignV2Inputs(&txn, toSign)
 
-		// verify the transaction and add it to the transaction pool
-		txnSet := []types.V2Transaction{txn}
-		_, err = b.cm.AddV2PoolTransactions(basis, txnSet)
-		if err != nil {
-			b.w.ReleaseInputs(nil, txnSet)
-			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
-		}
-
 		// broadcast the transaction
-		if err := b.s.BroadcastV2TransactionSet(basis, txnSet); err != nil {
+		txnSet := []types.V2Transaction{txn}
+		if err := b.w.BroadcastV2TransactionSet(basis, txnSet); err != nil {
+			b.w.ReleaseInputs(nil, txnSet)
 			return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
 		}
 		return txn.ID(), nil
@@ -626,16 +619,10 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 		// sign the transaction
 		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
 
-		// verify the transaction and add it to the transaction pool
-		txnset := append(b.cm.UnconfirmedParents(txn), txn)
-		_, err = b.cm.AddPoolTransactions(txnset)
-		if err != nil {
-			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-			return types.TransactionID{}, fmt.Errorf("couldn't add transaction set to the pool; %w", err)
-		}
-
 		// broadcast the transaction
-		if err := b.s.BroadcastTransactionSet(txnset); err != nil {
+		txnset := append(b.cm.UnconfirmedParents(txn), txn)
+		if err := b.w.BroadcastTransactionSet(txnset); err != nil {
+			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
 			return types.TransactionID{}, fmt.Errorf("couldn't broadcast transaction set; %w", err)
 		}
 		return txn.ID(), nil
@@ -659,7 +646,7 @@ func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings,
 	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
 
 	// calculate the miner fee
-	fee := b.cm.RecommendedFee().Mul64(cs.TransactionWeight(txn))
+	fee := b.w.RecommendedFee().Mul64(cs.TransactionWeight(txn))
 	txn.MinerFees = []types.Currency{fee}
 
 	// fund the transaction

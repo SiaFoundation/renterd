@@ -183,7 +183,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create sql store: %w", err)
 	}
 
-	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, db)
+	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, db, s)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
@@ -193,7 +193,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create storage manager: %w", err)
 	}
 
-	contracts, err := contracts.NewManager(db, storage, cm, s, wallet, contracts.WithRejectAfter(10), contracts.WithRevisionSubmissionBuffer(5))
+	contracts, err := contracts.NewManager(db, storage, cm, wallet, contracts.WithRejectAfter(10), contracts.WithRevisionSubmissionBuffer(5))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract manager: %w", err)
 	}
@@ -213,7 +213,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
-	settings, err := settings.NewConfigManager(privKey, db, cm, s, storage, wallet,
+	settings, err := settings.NewConfigManager(privKey, db, cm, storage, wallet,
 		settings.WithValidateNetAddress(false),
 		settings.WithRHP2Port(uint16(rhp2Listener.Addr().(*net.TCPAddr).Port)),
 		settings.WithRHP3Port(uint16(rhp3Listener.Addr().(*net.TCPAddr).Port)),
