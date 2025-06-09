@@ -213,12 +213,15 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
 	}
 
+	defaultSettings := defaultHostSettings
+	defaultSettings.NetAddress = rhp4Listener.Addr().(*net.TCPAddr).IP.String()
+
 	settings, err := settings.NewConfigManager(privKey, db, cm, storage, wallet,
 		settings.WithValidateNetAddress(false),
 		settings.WithRHP2Port(uint16(rhp2Listener.Addr().(*net.TCPAddr).Port)),
 		settings.WithRHP3Port(uint16(rhp3Listener.Addr().(*net.TCPAddr).Port)),
 		settings.WithRHP4Port(uint16(rhp4Listener.Addr().(*net.TCPAddr).Port)),
-		settings.WithInitialSettings(defaultHostSettings),
+		settings.WithInitialSettings(defaultSettings),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create settings manager: %w", err)
