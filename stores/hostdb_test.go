@@ -12,6 +12,8 @@ import (
 	rhpv2 "go.sia.tech/core/rhp/v2"
 	rhpv3 "go.sia.tech/core/rhp/v3"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -130,10 +132,21 @@ func TestHosts(t *testing.T) {
 	// add 3 hosts
 	var hks []types.PublicKey
 	for i := 1; i <= 3; i++ {
-		if err := ss.addCustomTestHost(types.PublicKey{byte(i)}, fmt.Sprintf("foo.com:100%d", i)); err != nil {
-			t.Fatal(err)
+		hk := types.PublicKey{byte(i)}
+		na := fmt.Sprintf("foo.com:100%d", i)
+		switch i {
+		case 1, 2:
+			if err := ss.announceHost(hk, na); err != nil {
+				t.Fatal(err)
+			}
+		case 3:
+			if err := ss.announceV2Host(hk, na); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatal("unexpected")
 		}
-		hks = append(hks, types.PublicKey{byte(i)})
+		hks = append(hks, hk)
 	}
 	hk1, hk2, hk3 := hks[0], hks[1], hks[2]
 
@@ -194,15 +207,17 @@ func TestHosts(t *testing.T) {
 	}
 
 	// assert address and key filters are taken into account
-	if hosts, err := ss.Hosts(ctx, api.HostOptions{
-		FilterMode:      api.HostFilterModeAll,
-		UsabilityMode:   api.UsabilityFilterModeAll,
-		AddressContains: "com:1001",
-		KeyIn:           nil,
-		Offset:          0,
-		Limit:           -1,
-	}); err != nil || len(hosts) != 1 {
-		t.Fatal("unexpected", len(hosts), err)
+	for i := 1; i <= 3; i++ {
+		if hosts, err := ss.Hosts(ctx, api.HostOptions{
+			FilterMode:      api.HostFilterModeAll,
+			UsabilityMode:   api.UsabilityFilterModeAll,
+			AddressContains: fmt.Sprintf("com:100%d", i),
+			KeyIn:           nil,
+			Offset:          0,
+			Limit:           -1,
+		}); err != nil || len(hosts) != 1 {
+			t.Fatal("unexpected", len(hosts), err)
+		}
 	}
 	if hosts, err := ss.Hosts(ctx, api.HostOptions{
 		FilterMode:      api.HostFilterModeAll,
@@ -1304,6 +1319,20 @@ func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
 	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 			return tx.UpdateHost(hk, na, nil, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))
+		})
+	})
+}
+
+// announceHost adds a v2 host announcement to the database.
+func (s *testSQLStore) announceV2Host(hk types.PublicKey, na string) error {
+	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
+		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+			return tx.UpdateHost(hk, "", chain.V2HostAnnouncement{
+				{
+					Address:  na,
+					Protocol: siamux.Protocol,
+				},
+			}, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))
 		})
 	})
 }
