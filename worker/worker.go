@@ -738,7 +738,7 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 			if rhp3.IsBalanceMaxExceeded(err) {
 				acc.ScheduleSync()
 			}
-			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", desired.Sub(balance), err)
 		}
 
 		// log the account balance after funding

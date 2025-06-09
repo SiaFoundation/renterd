@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/internal/host"
 	rhp3 "go.sia.tech/renterd/v2/internal/rhp/v3"
@@ -349,7 +350,10 @@ func (d *Downloader) trackFailure(err error) {
 	if utils.IsBalanceInsufficient(err) ||
 		rhp3.IsPriceTableExpired(err) ||
 		rhp3.IsPriceTableNotFound(err) ||
-		rhp3.IsSectorNotFound(err) {
+		rhp3.IsSectorNotFound(err) ||
+		rhpv4.ErrorCode(err) == rhpv4.ErrorCodeBadRequest ||
+		rhpv4.ErrorCode(err) == rhpv4.ErrorCodePayment ||
+		utils.IsErr(err, rhpv4.ErrSectorNotFound) {
 		return // host is not to blame for these errors
 	}
 
