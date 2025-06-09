@@ -703,8 +703,8 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 
 	// filter address
 	if opts.AddressContains != "" {
-		whereExprs = append(whereExprs, "h.net_address LIKE ?")
-		args = append(args, "%"+opts.AddressContains+"%")
+		whereExprs = append(whereExprs, "(h.net_address LIKE ? OR (SELECT EXISTS (SELECT 1 FROM host_addresses ha WHERE ha.db_host_id = h.id AND ha.net_address LIKE ?)))")
+		args = append(args, "%"+opts.AddressContains+"%", "%"+opts.AddressContains+"%")
 	}
 
 	// filter public key
