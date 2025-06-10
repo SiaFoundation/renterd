@@ -1,3 +1,18 @@
+## 2.3.0 (2025-06-10)
+
+### Features
+
+- Extend store with utxo lock/unlock methods to implement the SingleAddressStore interface
+
+### Fixes
+
+- Check for rhp4 errors returned by hosts in download code.
+- Don't attempt to renew v1 contracts with RHP4.
+- Fix address filter not working on v2 hosts.
+- Update coreutils dependency.
+- Use RHP3 to fund accounts from v1 contracts.
+- Use RHP3 to prune v1 contracts.
+
 ## 2.2.1 (2025-05-29)
 
 ### Fixes
