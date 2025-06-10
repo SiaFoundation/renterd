@@ -132,7 +132,6 @@ type (
 	}
 
 	Syncer interface {
-		BroadcastTransaction(ctx context.Context, txns []types.Transaction) error
 		SyncerPeers(ctx context.Context) (resp []string, err error)
 	}
 )
@@ -739,7 +738,7 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 			if rhp3.IsBalanceMaxExceeded(err) {
 				acc.ScheduleSync()
 			}
-			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", deposit, err)
+			return types.ZeroCurrency, fmt.Errorf("failed to fund account with %v; %w", desired.Sub(balance), err)
 		}
 
 		// log the account balance after funding

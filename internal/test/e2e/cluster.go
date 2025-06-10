@@ -584,13 +584,13 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 		return nil, nil, nil, nil, err
 	}
 
-	// create wallet
-	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
+	s, err := newTestSyncer(cm, sqlStore, genesisBlock.ID(), cfg.GatewayAddr, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	s, err := newTestSyncer(cm, sqlStore, genesisBlock.ID(), cfg.GatewayAddr, logger)
+	// create wallet
+	w, err := wallet.NewSingleAddressWallet(pk, cm, sqlStore, s, wallet.WithReservationDuration(cfg.UsedUTXOExpiry))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -635,11 +635,6 @@ func addStorageFolderToHost(ctx context.Context, hosts []*Host) error {
 // the group
 func announceHosts(hosts []*Host) error {
 	for _, host := range hosts {
-		settings := host.settings.Settings()
-		settings.NetAddress = host.rhp4Listener.Addr().(*net.TCPAddr).IP.String()
-		if err := host.UpdateSettings(settings); err != nil {
-			return err
-		}
 		if err := host.settings.Announce(); err != nil {
 			return err
 		}
@@ -975,8 +970,8 @@ func testNetwork() (*consensus.Network, types.Block) {
 	n.HardforkOak.Height = 1
 	n.HardforkASIC.Height = 1
 	n.HardforkFoundation.Height = 1
-	n.HardforkV2.AllowHeight = HardforkV2AllowHeight
-	n.HardforkV2.RequireHeight = HardforkV2RequireHeight
+	n.HardforkV2.AllowHeight = 2
+	n.HardforkV2.RequireHeight = 3
 	n.MaturityDelay = 1
 	n.BlockInterval = 10 * time.Millisecond
 

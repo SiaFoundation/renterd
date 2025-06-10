@@ -703,8 +703,8 @@ func Hosts(ctx context.Context, tx sql.Tx, opts api.HostOptions) ([]api.Host, er
 
 	// filter address
 	if opts.AddressContains != "" {
-		whereExprs = append(whereExprs, "h.net_address LIKE ?")
-		args = append(args, "%"+opts.AddressContains+"%")
+		whereExprs = append(whereExprs, "(h.net_address LIKE ? OR (SELECT EXISTS (SELECT 1 FROM host_addresses ha WHERE ha.db_host_id = h.id AND ha.net_address LIKE ?)))")
+		args = append(args, "%"+opts.AddressContains+"%", "%"+opts.AddressContains+"%")
 	}
 
 	// filter public key
@@ -2137,24 +2137,23 @@ func UpdateSlab(ctx context.Context, tx Tx, key object.EncryptionKey, updated []
 	return tx.UpsertContractSectors(ctx, upsert)
 }
 
-func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (elements []types.SiacoinElement, tip types.ChainIndex, err error) {
-	tip, err = Tip(ctx, tx)
-	if err != nil {
-		return nil, types.ChainIndex{}, fmt.Errorf("failed to fetch chain tip: %w", err)
-	}
-
+func UnspentSiacoinElements(ctx context.Context, tx sql.Tx) (ci types.ChainIndex, elements []types.SiacoinElement, err error) {
 	rows, err := tx.Query(ctx, "SELECT output_id, leaf_index, merkle_proof, address, value, maturity_height FROM wallet_outputs")
 	if err != nil {
-		return nil, types.ChainIndex{}, fmt.Errorf("failed to fetch wallet events: %w", err)
+		return types.ChainIndex{}, nil, fmt.Errorf("failed to fetch wallet events: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		element, err := scanSiacoinElement(rows)
 		if err != nil {
-			return nil, types.ChainIndex{}, fmt.Errorf("failed to scan wallet event: %w", err)
+			return types.ChainIndex{}, nil, fmt.Errorf("failed to scan wallet event: %w", err)
 		}
 		elements = append(elements, element)
+	}
+	ci, err = Tip(ctx, tx)
+	if err != nil {
+		return types.ChainIndex{}, nil, fmt.Errorf("failed to fetch chain tip: %w", err)
 	}
 	return
 }

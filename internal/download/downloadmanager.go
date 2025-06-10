@@ -12,6 +12,7 @@ import (
 	"time"
 
 	rhpv2 "go.sia.tech/core/rhp/v2"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/download/downloader"
@@ -714,7 +715,8 @@ func (s *slabDownload) download(ctx context.Context) ([][]byte, error) {
 				}
 
 				// handle lost sectors
-				if rhp3.IsSectorNotFound(resp.Err) {
+				if rhp3.IsSectorNotFound(resp.Err) ||
+					utils.IsErr(resp.Err, rhpv4.ErrSectorNotFound) {
 					if err := s.mgr.os.DeleteHostSector(ctx, resp.Req.Host.PublicKey(), resp.Req.Root); err != nil {
 						s.mgr.logger.Errorw("failed to mark sector as lost", "hk", resp.Req.Host.PublicKey(), "root", resp.Req.Root, zap.Error(err))
 					}
