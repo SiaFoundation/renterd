@@ -822,10 +822,12 @@ func TestUploadDownloadExtended(t *testing.T) {
 	tt := cluster.tt
 
 	// upload two files under /foo
+	// the first 4kib are not random to avoid NDFs and to ensure the mime type
+	// ends up being octet-stream
 	file1 := make([]byte, rhpv2.SectorSize/12)
 	file2 := make([]byte, rhpv2.SectorSize/12)
-	frand.Read(file1)
-	frand.Read(file2)
+	frand.Read(file1[4096:])
+	frand.Read(file2[4096:])
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file1), testBucket, "fileś/file1", api.UploadObjectOptions{}))
 	tt.OKAll(w.UploadObject(context.Background(), bytes.NewReader(file2), testBucket, "fileś/file2", api.UploadObjectOptions{}))
 
