@@ -108,7 +108,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 			Revision: rev,
 		}, offset, length)
 		if err != nil {
-			return api.ContractPruneResponse{}, err
+			return api.ContractPruneResponse{}, fmt.Errorf("failed to fetch contract sectors: %w", err)
 		}
 
 		// update revision since it was revised
@@ -125,7 +125,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 	// fetch indices to prune
 	indices, err := b.store.PrunableContractRoots(ctx, cm.ID, sectorRoots)
 	if err != nil {
-		return api.ContractPruneResponse{}, err
+		return api.ContractPruneResponse{}, fmt.Errorf("failed to fetch prunable roots: %w", err)
 	}
 
 	// avoid pruning pending uploads
@@ -151,7 +151,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 		Revision: rev,
 	}, toPrune)
 	if err != nil {
-		return api.ContractPruneResponse{}, err
+		return api.ContractPruneResponse{}, fmt.Errorf("failed to free sectors: %w", err)
 	}
 	deleteUsage := res.Usage
 	rev = res.Revision // update rev
