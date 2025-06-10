@@ -72,7 +72,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 
 	var deposit types.Currency
 	var spending api.ContractSpendingRecord
-	if b.isPassedV2AllowHeight() {
+	if cm.V2 {
 		// latest revision
 		rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.V2SiamuxAddr(), req.ContractID)
 		if jc.Check("failed to fetch contract revision", err) != nil {
@@ -996,7 +996,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
 	var res api.ContractPruneResponse
-	if b.isPassedV2AllowHeight() {
+	if c.V2 {
 		res, err = b.pruneContractV2(pruneCtx, rk, c, host.V2SiamuxAddr(), gc, pending)
 	} else {
 		res, err = b.pruneContractV1(pruneCtx, rk, c, host.NetAddress, gc, pending)
