@@ -324,7 +324,7 @@ func (a *Manager) markRefillDone(hk types.PublicKey) {
 	delete(a.inProgressRefills, hk)
 }
 
-// refillWorkerAccounts refills all accounts on a worker that require a refill.
+// refillAccounts refills all accounts on a worker that require a refill.
 // To avoid slow hosts preventing refills for fast hosts, a separate goroutine
 // is used for every host. If a slow host's account is still being refilled by a
 // goroutine from a previous call, refillWorkerAccounts will skip that account
@@ -574,7 +574,7 @@ func (a *Account) resetDrift() {
 	a.mu.Unlock()
 }
 
-// scheduleSync sets the requiresSync flag of an account.
+// ScheduleSync sets the requiresSync flag of an account.
 func (a *Account) ScheduleSync() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
