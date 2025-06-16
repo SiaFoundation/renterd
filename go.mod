@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/aws/aws-sdk-go v1.55.7
 	github.com/gabriel-vasile/mimetype v1.4.9
-	github.com/go-sql-driver/mysql v1.9.2
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
 	github.com/klauspost/reedsolomon v1.12.4
@@ -17,10 +17,10 @@ require (
 	go.sia.tech/core v0.13.2
 	go.sia.tech/coreutils v0.16.2-0.20250614154532-fc51637947af
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/hostd/v2 v2.3.0
+	go.sia.tech/hostd/v2 v2.3.1
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/mux v1.4.0
-	go.sia.tech/web/renterd v0.79.0
+	go.sia.tech/web/renterd v0.80.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.39.0
 	golang.org/x/sys v0.33.0
