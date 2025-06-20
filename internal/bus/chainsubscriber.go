@@ -331,7 +331,7 @@ func (s *chainSubscriber) sync() error {
 			s.logger.Warn("missing block, resetting chain state")
 			if err := s.cs.ResetChainState(s.shutdownCtx); err != nil {
 				s.logger.Debugw("failed to reset chain state after missing block", zap.Error(err))
-				return err
+				return fmt.Errorf("failed to reset chain state after missing block: %w", err)
 			}
 			if index, err = s.cs.ChainIndex(s.shutdownCtx); err != nil {
 				s.logger.Debugw("failed to get chain index after reset", zap.Error(err))
