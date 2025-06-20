@@ -328,6 +328,8 @@ func (s *chainSubscriber) sync() error {
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
+		} else if len(crus)+len(caus) == 0 {
+			return nil
 		}
 		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds(), "batch_size", updatesBatchSize)
 
@@ -372,7 +374,11 @@ func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 		}
 
 		// update chain index
-		index = caus[len(caus)-1].State.Index
+		if len(caus) > 0 {
+			index = caus[len(caus)-1].State.Index
+		} else {
+			index = crus[len(crus)-1].State.Index
+		}
 		if err := tx.UpdateChainIndex(index); err != nil {
 			return fmt.Errorf("failed to update chain index: %w", err)
 		}
