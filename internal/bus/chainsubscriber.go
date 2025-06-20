@@ -55,6 +55,7 @@ type (
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
+		ResetChainState(ctx context.Context) error
 	}
 
 	Wallet interface {
@@ -326,7 +327,18 @@ func (s *chainSubscriber) sync() error {
 		// fetch updates
 		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
-		if err != nil {
+		if errors.Is(err, chain.ErrMissingBlock) {
+			s.logger.Warnf("missing block, resetting chain state", "height", index.Height, "block_id", index.ID)
+			if err := s.cs.ResetChainState(s.shutdownCtx); err != nil {
+				s.logger.Debugw("failed to reset chain state after missing block", zap.Error(err))
+				return fmt.Errorf("failed to reset chain state after missing block: %w", err)
+			}
+			if index, err = s.cs.ChainIndex(s.shutdownCtx); err != nil {
+				s.logger.Debugw("failed to get chain index after reset", zap.Error(err))
+				return fmt.Errorf("failed to get chain index after reset: %w", err)
+			}
+			continue
+		} else if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
 		}
 		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds(), "batch_size", updatesBatchSize)

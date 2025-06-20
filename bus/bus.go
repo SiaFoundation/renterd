@@ -186,6 +186,7 @@ type (
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
 		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
+		ResetChainState(ctx context.Context) error
 	}
 
 	// A HostStore stores information about hosts.
