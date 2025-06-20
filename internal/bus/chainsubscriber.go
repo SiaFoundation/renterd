@@ -372,7 +372,11 @@ func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.Rever
 		}
 
 		// update chain index
-		index = caus[len(caus)-1].State.Index
+		if len(caus) > 0 {
+			index = caus[len(caus)-1].State.Index
+		} else {
+			index = crus[len(crus)-1].State.Index
+		}
 		if err := tx.UpdateChainIndex(index); err != nil {
 			return fmt.Errorf("failed to update chain index: %w", err)
 		}
