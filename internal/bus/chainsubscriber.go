@@ -328,6 +328,8 @@ func (s *chainSubscriber) sync() error {
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch updates: %w", err)
+		} else if len(crus)+len(caus) == 0 {
+			return nil
 		}
 		s.logger.Debugw("fetched updates since", "caus", len(caus), "crus", len(crus), "since_height", index.Height, "since_block_id", index.ID, "ms", time.Since(istart).Milliseconds(), "batch_size", updatesBatchSize)
 
