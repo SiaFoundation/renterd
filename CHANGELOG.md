@@ -1,3 +1,10 @@
+## 2.3.2 (2025-06-23)
+
+### Fixes
+
+- Fix index out of range panic when processing chain updates without any blocks that are being applied
+- Reset chain state when block is missing instead of on startup.
+
 ## 2.3.1 (2025-06-17)
 
 ### Fixes
