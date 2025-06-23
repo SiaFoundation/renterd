@@ -328,7 +328,7 @@ func (s *chainSubscriber) sync() error {
 		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
 		if errors.Is(err, chain.ErrMissingBlock) {
-			s.logger.Warnf("missing block, resetting chain state", "height", index.Height, "block_id", index.ID)
+			s.logger.Warnw("missing block, resetting chain state", "height", index.Height, "block_id", index.ID)
 			if err := s.cs.ResetChainState(s.shutdownCtx); err != nil {
 				s.logger.Debugw("failed to reset chain state after missing block", zap.Error(err))
 				return fmt.Errorf("failed to reset chain state after missing block: %w", err)
