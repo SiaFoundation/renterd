@@ -344,15 +344,8 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// migrate consensus database if necessary
 	migrateConsensusDatabase(sqlStore, consensusDir, logger)
 
-	// reset chain state if blockchain.db does not exist to make sure deleting
-	// it forces a resync
+	// migrate on commitment mismatch if necessary
 	chainPath := filepath.Join(consensusDir, "blockchain.db")
-	if _, err := os.Stat(chainPath); os.IsNotExist(err) {
-		if err := sqlStore.ResetChainState(context.Background()); err != nil {
-			return nil, nil, err
-		}
-	}
-
 	if err := migrateConsensusDB(chainPath, network, genesis, logger.Named("migrate")); err != nil {
 		return nil, nil, fmt.Errorf("failed to migrate consensus database: %w", err)
 	}
