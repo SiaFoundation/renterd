@@ -1917,9 +1917,12 @@ func Tip(ctx context.Context, tx sql.Tx) (types.ChainIndex, error) {
 		Scan(&height, &id); errors.Is(err, dsql.ErrNoRows) {
 		// init
 		_, err = tx.Exec(ctx, "INSERT INTO consensus_infos (created_at, id, height, block_id) VALUES (?, ?, ?, ?)", time.Now(), sql.ConsensusInfoID, 0, Hash256{})
-		return types.ChainIndex{}, err
+		if err != nil {
+			return types.ChainIndex{}, fmt.Errorf("failed to init consensus_infos: %w", err)
+		}
+		return types.ChainIndex{}, nil
 	} else if err != nil {
-		return types.ChainIndex{}, err
+		return types.ChainIndex{}, fmt.Errorf("failed to fetch chain index: %w", err)
 	}
 	return types.ChainIndex{
 		ID:     types.BlockID(id),
