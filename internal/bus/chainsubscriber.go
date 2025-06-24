@@ -103,6 +103,9 @@ func NewChainSubscriber(cm ChainManager, cs ChainStore, w Wallet, announcementMa
 		syncSig:           make(chan struct{}, 1),
 	}
 
+	// trigger a sync on startup
+	subscriber.syncSig <- struct{}{}
+
 	// start the subscriber
 	subscriber.run()
 
