@@ -110,6 +110,11 @@ func NewSQLStore(cfg Config) (*SQLStore, error) {
 		shutdownCtxCancel: shutdownCtxCancel,
 	}
 
+	_, err = ss.ChainIndex(context.Background()) // init consensus_infos
+	if err != nil {
+		return nil, err
+	}
+
 	ss.slabBufferMgr, err = newSlabBufferManager(shutdownCtx, cfg.Alerts, dbMain, l, cfg.SlabBufferCompletionThreshold, cfg.PartialSlabDir)
 	if err != nil {
 		return nil, err
