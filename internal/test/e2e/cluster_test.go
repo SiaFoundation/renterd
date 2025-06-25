@@ -3319,6 +3319,7 @@ func TestContractRevert(t *testing.T) {
 	tt := cluster.tt
 	cm := cluster.cm
 
+	var fcid types.FileContractID
 	tt.Retry(10, time.Second, func() error {
 		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
 		tt.OK(err)
@@ -3328,6 +3329,7 @@ func TestContractRevert(t *testing.T) {
 			testutil.MineBlocks(t, cm, types.VoidAddress, 1) // make contract "active"
 			return fmt.Errorf("expected contract to be active, got %v", contracts[0].State)
 		}
+		fcid = contracts[0].ID
 		return nil
 	})
 
@@ -3351,4 +3353,13 @@ func TestContractRevert(t *testing.T) {
 		}
 		tt.OK(cm.AddBlocks([]types.Block{b}))
 	}
+	time.Sleep(time.Second)
+
+	// make sure contract is pending
+	contract, err := b.Contract(context.Background(), fcid)
+	tt.OK(err)
+	if contract.State != api.ContractStatePending {
+		t.Fatalf("expected contract to be pending, got %v", contract.State)
+	}
+
 }

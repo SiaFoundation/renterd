@@ -225,7 +225,7 @@ func RecordContractRenewal(ctx context.Context, tx sql.Tx, oldFCID, newFCID type
 	return nil
 }
 
-func DeleteFileContractElements(ctx context.Context, tx sql.Tx, fcid types.FileContractID) error {
+func DeleteFileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) error {
 	_, err := tx.Exec(ctx, `
 		DELETE FROM contract_elements WHERE db_contract_id IN (
 			SELECT id FROM contracts WHERE fcid = ?
