@@ -270,10 +270,12 @@ func (s *chainSubscriber) revertChainUpdate(tx sql.ChainUpdateTx, cru chain.Reve
 		} else if !known {
 			continue // only consider known contracts
 		}
-		if rev, ok := diff.V2RevisionElement(); !ok {
-			revertedContracts = append(revertedContracts, fce)
-		} else {
-			revertedContracts = append(revertedContracts, rev)
+		if !diff.Created {
+			if rev, ok := diff.V2RevisionElement(); !ok {
+				revertedContracts = append(revertedContracts, fce)
+			} else {
+				revertedContracts = append(revertedContracts, rev)
+			}
 		}
 		if err := s.revertV2ContractUpdate(tx, fce, diff.Created, diff.Resolution); err != nil {
 			return fmt.Errorf("failed to revert v2 contract update: %w", err)

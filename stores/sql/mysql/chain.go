@@ -31,7 +31,7 @@ type chainUpdateTx struct {
 }
 
 func (c chainUpdateTx) DeleteFileContractElement(fcid types.FileContractID) error {
-	return ssql.DeleteFileContractElements(c.ctx, c.tx, fcid)
+	return ssql.DeleteFileContractElement(c.ctx, c.tx, fcid)
 }
 
 func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
