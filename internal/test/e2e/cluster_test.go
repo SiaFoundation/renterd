@@ -3361,5 +3361,4 @@ func TestContractRevert(t *testing.T) {
 	if contract.State != api.ContractStatePending {
 		t.Fatalf("expected contract to be pending, got %v", contract.State)
 	}
-
 }
