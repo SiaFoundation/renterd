@@ -1,3 +1,9 @@
+## 2.3.3 (2025-06-25)
+
+### Fixes
+
+- Fix panic when reverting contract creation
+
 ## 2.3.2 (2025-06-23)
 
 ### Fixes
