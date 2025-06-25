@@ -225,6 +225,15 @@ func RecordContractRenewal(ctx context.Context, tx sql.Tx, oldFCID, newFCID type
 	return nil
 }
 
+func DeleteFileContractElements(ctx context.Context, tx sql.Tx, fcid types.FileContractID) error {
+	_, err := tx.Exec(ctx, `
+		DELETE FROM contract_elements WHERE db_contract_id IN (
+			SELECT id FROM contracts WHERE fcid = ?
+		)
+	`, FileContractID(fcid))
+	return err
+}
+
 func PruneFileContractElements(ctx context.Context, tx sql.Tx, threshold uint64) error {
 	_, err := tx.Exec(ctx, `
 DELETE FROM contract_elements

@@ -30,6 +30,10 @@ type chainUpdateTx struct {
 	known map[types.FileContractID]bool // map to prevent rare duplicate selects
 }
 
+func (c chainUpdateTx) DeleteFileContractElement(fcid types.FileContractID) error {
+	return ssql.DeleteFileContractElements(c.ctx, c.tx, fcid)
+}
+
 func (c chainUpdateTx) WalletApplyIndex(index types.ChainIndex, created, spent []types.SiacoinElement, events []wallet.Event, timestamp time.Time) error {
 	c.l.Debugw("applying index", "height", index.Height, "block_id", index.ID)
 

@@ -652,6 +652,8 @@ func (s *chainSubscriber) revertV2ContractUpdate(tx sql.ChainUpdateTx, fce types
 	if created {
 		if err := tx.UpdateContractState(fcid, api.ContractStatePending); err != nil {
 			return fmt.Errorf("failed to update contract state: %w", err)
+		} else if err := tx.DeleteFileContractElement(fcid); err != nil {
+			return fmt.Errorf("failed to delete file contract element: %w", err)
 		}
 		s.logger.Infow(fmt.Sprintf("contract state changed: %s -> pending", state),
 			"fcid", fcid,
