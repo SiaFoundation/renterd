@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/hostd/v2/host/accounts"
 	"go.sia.tech/renterd/v2/alerts"
@@ -3303,5 +3304,51 @@ func TestContractFormationAndRenewalV2EndHeightCap(t *testing.T) {
 		t.Fatal(err)
 	} else if renewed.WindowEnd != network.HardforkV2.RequireHeight-1 {
 		t.Fatalf("expected renewed contract to have end height %v, got %v", network.HardforkV2.RequireHeight-1, renewed.WindowEnd)
+	}
+}
+
+func TestContractRevert(t *testing.T) {
+	// create a test cluster
+	cluster := newTestCluster(t, testClusterOptions{
+		hosts:  1,
+		logger: newTestLogger(false),
+	})
+	defer cluster.Shutdown()
+
+	b := cluster.Bus
+	tt := cluster.tt
+	cm := cluster.cm
+
+	tt.Retry(10, time.Second, func() error {
+		contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
+		tt.OK(err)
+		if len(contracts) != 1 {
+			t.Fatalf("expected 1 contract, got %v", len(contracts))
+		} else if contracts[0].State != api.ContractStateActive {
+			testutil.MineBlocks(t, cm, types.VoidAddress, 1) // make contract "active"
+			return fmt.Errorf("expected contract to be active, got %v", contracts[0].State)
+		}
+		return nil
+	})
+
+	// reorg the chain to revert the contract
+	network, genesis := testNetwork()
+	ds, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
+	tt.OK(err)
+	ds.AddState(cluster.network.GenesisState())
+
+	otherCM := chain.NewManager(ds, state)
+	testutil.MineBlocks(t, otherCM, types.VoidAddress, int(cluster.cm.Tip().Height)+10)
+
+	for i := uint64(1); i <= otherCM.Tip().Height; i++ {
+		ci, ok := otherCM.BestIndex(i)
+		if !ok {
+			t.Fatalf("could not get block at height %v", i)
+		}
+		b, ok := otherCM.Block(ci.ID)
+		if !ok {
+			t.Fatalf("could not get block %v at height %v", ci.ID, i)
+		}
+		tt.OK(cm.AddBlocks([]types.Block{b}))
 	}
 }

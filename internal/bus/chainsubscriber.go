@@ -653,7 +653,7 @@ func (s *chainSubscriber) revertV2ContractUpdate(tx sql.ChainUpdateTx, fce types
 		if err := tx.UpdateContractState(fcid, api.ContractStatePending); err != nil {
 			return fmt.Errorf("failed to update contract state: %w", err)
 		}
-		s.logger.Infow(fmt.Sprintf("contract state changed: %s -> active", state),
+		s.logger.Infow(fmt.Sprintf("contract state changed: %s -> pending", state),
 			"fcid", fcid,
 			"reason", "contract was reverted")
 		return nil
