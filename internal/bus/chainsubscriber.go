@@ -301,8 +301,20 @@ func (s *chainSubscriber) run() {
 			case <-s.syncSig:
 			}
 
-			if err := s.sync(); errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
+			err := s.sync()
+			if errors.Is(err, errClosed) || errors.Is(err, context.Canceled) {
 				return
+			} else if errors.Is(err, chain.ErrMissingBlock) || (err != nil && strings.Contains(err.Error(), "is not present in the accumulator")) {
+				s.logger.Warnw("resetting chain state", zap.Error(err))
+				if resetErr := s.cs.ResetChainState(s.shutdownCtx); resetErr != nil {
+					s.logger.Panicf("failed to reset chain state after %v: %v", err, resetErr)
+				}
+
+				// re-trigger sync
+				select {
+				case s.syncSig <- struct{}{}:
+				default:
+				}
 			} else if err != nil {
 				s.logger.Panicf("failed to sync: %v", err)
 			}
@@ -327,18 +339,8 @@ func (s *chainSubscriber) sync() error {
 		// fetch updates
 		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
-		if errors.Is(err, chain.ErrMissingBlock) {
-			s.logger.Warnw("missing block, resetting chain state", "height", index.Height, "block_id", index.ID)
-			if err := s.cs.ResetChainState(s.shutdownCtx); err != nil {
-				s.logger.Debugw("failed to reset chain state after missing block", zap.Error(err))
-				return fmt.Errorf("failed to reset chain state after missing block: %w", err)
-			} else if index, err = s.cs.ChainIndex(s.shutdownCtx); err != nil {
-				s.logger.Debugw("failed to get chain index after reset", zap.Error(err))
-				return fmt.Errorf("failed to get chain index after reset: %w", err)
-			}
-			continue
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch updates: %w", err)
+		if err != nil {
+			return fmt.Errorf("failed to fetch updates since %v: %w", index, err)
 		} else if len(crus)+len(caus) == 0 {
 			return nil
 		}
@@ -364,6 +366,12 @@ func (s *chainSubscriber) sync() error {
 }
 
 func (s *chainSubscriber) processUpdates(ctx context.Context, crus []chain.RevertUpdate, caus []chain.ApplyUpdate) (index types.ChainIndex, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic (processUpdates): %v", r)
+		}
+	}()
+
 	err = s.cs.ProcessChainUpdate(ctx, func(tx sql.ChainUpdateTx) error {
 		// process wallet updates
 		if err := s.wallet.UpdateChainState(tx, crus, caus); err != nil {
