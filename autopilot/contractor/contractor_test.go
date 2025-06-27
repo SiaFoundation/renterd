@@ -80,6 +80,13 @@ func TestRenewFundingEstimate(t *testing.T) {
 			remainingRenterFunds: 90,
 			expected:             90,
 		},
+		{
+			name:                 "UsedUnderThreshold",
+			minRenterFunds:       0,
+			initRenterFunds:      100,
+			remainingRenterFunds: 70,
+			expected:             80,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
