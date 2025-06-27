@@ -622,6 +622,9 @@ func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds 
 		// otherwise we use the remaining funds from before because a renewal
 		// shouldn't add more funds, that's what a refresh is for
 		renterFunds = remainingRenterFunds
+		if minFunds := initRenterFunds.Mul64(8).Div64(10); renterFunds.Cmp(minFunds) < 0 {
+			renterFunds = minFunds // at least 80% of the initial funds
+		}
 	}
 
 	// but the funds should not drop below the amount we'd fund a new contract with
