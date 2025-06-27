@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -171,49 +170,20 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		return api.ContractMetadata{}, true, err
 	}
 
-	// handle edge case where the host is not v2 but has v2 settings which can
-	// happen if we encounter a host's v2 announcement during maintenance
-	if !host.IsV2() && scan.V2Settings != (rhp.HostSettings{}) {
-		host, err = c.db.Host(ctx, hk)
-		if err != nil {
-			logger.With(zap.Error(err)).Error("failed to re-fetch host")
-			return api.ContractMetadata{}, false, err
-		}
-	}
-
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
 	if err != nil {
 		return api.ContractMetadata{}, false, err
 	}
+	endHeight := ctx.EndHeight(cs.BlockHeight)
 
-	// version specific costs
-	var contractPrice, collateral, maxCollateral types.Currency
-	if host.IsV2() {
-		contractPrice = scan.V2Settings.Prices.ContractPrice
-		collateral = scan.V2Settings.Prices.Collateral
-		maxCollateral = scan.V2Settings.MaxCollateral
-	} else {
-		contractPrice = scan.Settings.ContractPrice
-		collateral = scan.Settings.Collateral
-		maxCollateral = scan.Settings.MaxCollateral
-	}
-
-	// check our budget
+	contractPrice := scan.V2Settings.Prices.ContractPrice
+	maxCollateral := scan.V2Settings.MaxCollateral
 	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
 	renterFunds := initialContractFunding(contractPrice, txnFee, minInitialContractFunds)
 
-	// calculate the expected storage
-	endHeight := ctx.EndHeight(cs.BlockHeight)
-	var expectedStorage uint64
-	if host.IsV2() {
-		expectedStorage = renterFundsToExpectedStorageV2(renterFunds, endHeight-cs.BlockHeight, scan.V2Settings.Prices)
-	} else {
-		expectedStorage = renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
-	}
-
 	// calculate the host collateral
-	hostCollateral := collateral.Mul64(expectedStorage).Mul64(ctx.Period())
+	hostCollateral := rhpv4.MaxHostCollateral(scan.V2Settings.Prices, renterFunds)
 	if hostCollateral.Cmp(maxCollateral) > 0 {
 		hostCollateral = maxCollateral
 	}
@@ -259,7 +229,6 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 
 	// convenience variables
 	pt := host.PriceTable.HostPriceTable
-	rev := contract.Revision
 
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
@@ -268,12 +237,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	}
 
 	// calculate the renter funds
-	var renterFunds types.Currency
-	if contract.IsOutOfFunds() {
-		renterFunds = c.refreshFundingEstimate(contract, logger)
-	} else {
-		renterFunds = rev.RenterFunds // don't increase funds
-	}
+	renterFunds := c.refreshFundingEstimate(contract, logger)
 
 	var expectedNewStorage uint64
 	var contractPrice types.Currency
