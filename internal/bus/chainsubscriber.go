@@ -327,23 +327,26 @@ func (s *chainSubscriber) sync() error {
 	sheight := index.Height / syncUpdateFrequency
 
 	// fetch updates until we're caught up
-	var cnt uint64
+	var cnt, resetAttempts uint64
 	for index != s.cm.Tip() && index.Height <= s.cm.Tip().Height && !s.isClosed() {
 		// fetch updates
 		istart := time.Now()
 		crus, caus, err := s.cm.UpdatesSince(index, updatesBatchSize)
-		if errors.Is(err, chain.ErrMissingBlock) {
-			s.logger.Warnw("missing block, resetting chain state", "height", index.Height, "block_id", index.ID)
+		if err != nil {
+			resetAttempts++
+			if resetAttempts > 3 {
+				return fmt.Errorf("failed to sync chain state after multiple attempts: %w", err)
+			}
+
+			s.logger.Warnw("failed to fetch updates, resetting chain state", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID), zap.Uint64("attempt", resetAttempts), zap.Error(err))
 			if err := s.cs.ResetChainState(s.shutdownCtx); err != nil {
-				s.logger.Debugw("failed to reset chain state after missing block", zap.Error(err))
-				return fmt.Errorf("failed to reset chain state after missing block: %w", err)
+				s.logger.Debugw("failed to reset chain state", zap.Error(err))
+				return fmt.Errorf("failed to reset chain state: %w", err)
 			} else if index, err = s.cs.ChainIndex(s.shutdownCtx); err != nil {
 				s.logger.Debugw("failed to get chain index after reset", zap.Error(err))
 				return fmt.Errorf("failed to get chain index after reset: %w", err)
 			}
 			continue
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch updates: %w", err)
 		} else if len(crus)+len(caus) == 0 {
 			return nil
 		}
