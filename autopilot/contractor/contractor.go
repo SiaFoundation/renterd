@@ -31,11 +31,6 @@ const (
 	// contract broadcast interval.
 	broadcastRevisionRetriesPerInterval = 5
 
-	// estimatedFileContractTransactionSetSize is the estimated blockchain size
-	// of a transaction set between a renter and a host that contains a file
-	// contract.
-	estimatedFileContractTransactionSetSize = 2048
-
 	// failedRenewalForgivenessPeriod is the amount of time we wait before
 	// punishing a contract for not being able to refresh
 	failedRefreshForgivenessPeriod = 24 * time.Hour
