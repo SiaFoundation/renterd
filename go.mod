@@ -14,10 +14,10 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.14.0
+	go.sia.tech/core v0.14.1
 	go.sia.tech/coreutils v0.16.3
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/hostd/v2 v2.3.3
+	go.sia.tech/hostd/v2 v2.3.4
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/renterd v0.81.0
