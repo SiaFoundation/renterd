@@ -2257,7 +2257,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	// check gouging
 	breakdown := gc.CheckV2(settings)
 	if breakdown.Gouging() {
-		jc.Error(fmt.Errorf("failed to form v2 contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
 		return
 	}
 	contract, err := b.formContract(

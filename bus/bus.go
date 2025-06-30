@@ -644,7 +644,7 @@ func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP strin
 		ProofHeight:     endHeight,
 	})
 	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to form v2 contract: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("failed to form contract: %w", err)
 	}
 
 	// add transaction set to the pool

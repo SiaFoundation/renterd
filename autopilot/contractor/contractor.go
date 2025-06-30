@@ -155,7 +155,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 
-func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, initialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
 	defer cancel()
@@ -179,8 +179,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 
 	contractPrice := scan.V2Settings.Prices.ContractPrice
 	maxCollateral := scan.V2Settings.MaxCollateral
-	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
-	renterFunds := initialContractFunding(contractPrice, txnFee, minInitialContractFunds)
+	renterFunds := initialContractFunds
 
 	// calculate the host collateral
 	hostCollateral := rhpv4.MaxHostCollateral(scan.V2Settings.Prices, renterFunds)
@@ -588,14 +587,6 @@ func hasAlert(ctx context.Context, alerter alerts.Alerter, id types.Hash256, log
 		}
 	}
 	return false
-}
-
-func initialContractFunding(contractPrice, txnFee, minFunding types.Currency) types.Currency {
-	funding := contractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
-	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
-		return minFunding
-	}
-	return funding
 }
 
 // renewFundingEstimate computes the funds the renter should use to renew a
