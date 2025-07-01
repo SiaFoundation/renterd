@@ -591,24 +591,6 @@ func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds 
 	return renterFunds
 }
 
-// renterFundsToExpectedStorageV2 returns how much storage a renter is expected to
-// be able to afford given the provided 'renterFunds'.
-func renterFundsToExpectedStorageV2(renterFunds types.Currency, duration uint64, hp rhpv4.HostPrices) uint64 {
-	sectorUploadCost := hp.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost()
-	sectorStorageCost := hp.RPCAppendSectorsCost(1, duration).RenterCost()
-	costPerSector := sectorUploadCost.Add(sectorStorageCost)
-	// handle free storage
-	if costPerSector.IsZero() {
-		costPerSector = types.NewCurrency64(1)
-	}
-	// catch overflow
-	expectedStorage := renterFunds.Div(costPerSector).Mul64(rhpv4.SectorSize)
-	if expectedStorage.Cmp(types.NewCurrency64(math.MaxUint64)) > 0 {
-		expectedStorage = types.NewCurrency64(math.MaxUint64)
-	}
-	return expectedStorage.Big().Uint64()
-}
-
 // performContractChecks checks existing contracts, renewing/refreshing any that
 // need it and marking contracts that should no longer be used as bad. The
 // host filter is updated to contain all hosts that we keep contracts with. If a

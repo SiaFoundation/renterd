@@ -16,13 +16,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/hostd/v2/host/settings"
 	"go.uber.org/zap"
-)
-
-const (
-	blocksPerDay   = 144
-	blocksPerMonth = blocksPerDay * 30
 )
 
 // A Host is an ephemeral host that can be used for testing.
@@ -37,29 +31,6 @@ type Host struct {
 	contractsV2 *testutil.EphemeralContractor
 
 	rhp4Listener net.Listener
-}
-
-// defaultHostSettings returns the default settings for the test host
-var defaultHostSettings = settings.Settings{
-	AcceptingContracts:  true,
-	MaxContractDuration: blocksPerMonth * 3,
-	MaxCollateral:       types.Siacoins(5000),
-
-	ContractPrice: types.Siacoins(1).Div64(4),
-
-	BaseRPCPrice:      types.NewCurrency64(100),
-	SectorAccessPrice: types.NewCurrency64(100),
-
-	CollateralMultiplier: 2,
-	StoragePrice:         types.Siacoins(100).Div64(1e12).Div64(blocksPerMonth),
-	EgressPrice:          types.Siacoins(100).Div64(1e12),
-	IngressPrice:         types.Siacoins(100).Div64(1e12),
-	WindowSize:           5,
-
-	PriceTableValidity: 5 * time.Minute,
-
-	AccountExpiry:     30 * 24 * time.Hour, // 1 month
-	MaxAccountBalance: types.Siacoins(10),
 }
 
 // Close shutsdown the host

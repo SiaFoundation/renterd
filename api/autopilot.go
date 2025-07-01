@@ -7,12 +7,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/utils"
 )
 
-const (
-	// BlocksPerDay defines the amount of blocks that are mined in a day (one
-	// block every 10 minutes roughly)
-	BlocksPerDay = 144
-)
-
 var (
 	// ErrMaxDowntimeHoursTooHigh is returned if the contracts config is updated
 	// with a value that exceeds the maximum of 99 years.

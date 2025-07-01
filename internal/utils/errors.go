@@ -11,7 +11,6 @@ import (
 
 // Common i/o related errors
 var (
-	errBalanceInsufficientV1 = errors.New("ephemeral account balance was insufficient")
 	ErrHost                  = errors.New("host responded with error")
 	ErrNoRouteToHost         = errors.New("no route to host")
 	ErrNoSuchHost            = errors.New("no such host")
