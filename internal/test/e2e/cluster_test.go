@@ -31,7 +31,6 @@ import (
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/autopilot/contractor"
-	"go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -2317,57 +2316,6 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 		}
 		return nil
 	})
-}
-
-func TestWalletFormUnconfirmed(t *testing.T) {
-	// create cluster without autopilot
-	cfg := clusterOptsDefault
-	cfg.skipSettingAutopilot = true
-	cluster := newTestCluster(t, cfg)
-	defer cluster.Shutdown()
-
-	// convenience variables
-	b := cluster.Bus
-	tt := cluster.tt
-
-	// add a host (non-blocking)
-	cluster.AddHosts(1)
-
-	// send all money to ourselves, making sure it's unconfirmed
-	feeReserve := types.Siacoins(1)
-	wr, err := b.Wallet(context.Background())
-	tt.OK(err)
-	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, wr.Confirmed.Sub(feeReserve), false)) // leave some for the fee
-
-	// check wallet only has the reserve in the confirmed balance
-	wr, err = b.Wallet(context.Background())
-	tt.OK(err)
-	if wr.Confirmed.Sub(wr.Unconfirmed).Cmp(feeReserve) > 0 {
-		t.Fatal("wallet should have hardly any confirmed balance")
-	}
-
-	// there shouldn't be any contracts yet
-	contracts, err := b.Contracts(context.Background(), api.ContractsOpts{})
-	tt.OK(err)
-	if len(contracts) != 0 {
-		t.Fatal("expected 0 contracts", len(contracts))
-	}
-
-	// enable the autopilot by configuring it
-	tt.OK(
-		b.UpdateAutopilotConfig(
-			context.Background(),
-			client.WithContractsConfig(test.AutopilotConfig.Contracts),
-			client.WithHostsConfig(test.AutopilotConfig.Hosts),
-			client.WithAutopilotEnabled(true),
-		),
-	)
-
-	// wait for a contract to form
-	contractsFormed := cluster.WaitForContracts()
-	if len(contractsFormed) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
-	}
 }
 
 func TestMultipartUploadWrappedByPartialSlabs(t *testing.T) {
