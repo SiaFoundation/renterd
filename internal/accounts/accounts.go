@@ -270,7 +270,6 @@ func (a *Manager) run() {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
 		}
-		acc.RequiresSync = true // force sync on reboot
 		account := &Account{
 			acc:              acc,
 			driftRate:        rate.NewLimiter(rate.Every(driftResetInterval), 1),
@@ -501,6 +500,13 @@ func (a *Account) WithDeposit(amtFn func(types.Currency) (types.Currency, error)
 func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	a.rwmu.RLock()
 	defer a.rwmu.RUnlock()
+
+	// return early if the account needs to sync
+	a.mu.Lock()
+	if a.acc.RequiresSync {
+		a.mu.Unlock()
+		return fmt.Errorf("%w; account requires resync", rhp3.ErrBalanceInsufficient)
+	}
 
 	// return early if our account is not funded
 	if a.acc.Balance.Cmp(big.NewInt(0)) <= 0 {
