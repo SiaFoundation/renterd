@@ -206,6 +206,16 @@ func newScoredHost(h api.Host, sb api.HostScoreBreakdown) scoredHost {
 	}
 }
 
-func scoreHost(h api.Host, cfg api.AutopilotConfig, gs api.GougingSettings, expectedRedundancy float64) scoredHost {
+func scoreHost(h api.Host, cfg api.AutopilotConfig, gs api.GougingSettings, expectedRedundancy float64) (sh scoredHost) {
+	// host settings that cause a panic should result in a score of 0
+	defer func() {
+		if r := recover(); r != nil {
+			sh = scoredHost{
+				host:  h,
+				sb:    api.HostScoreBreakdown{},
+				score: 0,
+			}
+		}
+	}()
 	return newScoredHost(h, hostScore(cfg, gs, h, expectedRedundancy))
 }
