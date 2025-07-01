@@ -1311,7 +1311,7 @@ func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
 	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-			return tx.UpdateHost(hk, "", chain.V2HostAnnouncement{
+			return tx.UpdateHost(hk, chain.V2HostAnnouncement{
 				{
 					Address:  na,
 					Protocol: siamux.Protocol,

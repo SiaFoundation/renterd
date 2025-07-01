@@ -279,17 +279,16 @@ func (c chainUpdateTx) UpdateFailedContracts(blockHeight uint64) error {
 	return ssql.UpdateFailedContracts(c.ctx, c.tx, blockHeight, c.l)
 }
 
-func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
-	c.l.Debugw("update host", "hk", hk, "netaddress", v1Addr)
+func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v2Ha chain.V2HostAnnouncement, bh uint64, blockID types.BlockID, ts time.Time) error { //
+	c.l.Debugw("update host", "hk", hk, "netaddress", v2Ha)
 
 	// create the host
 	var hostID int64
 	if err := c.tx.QueryRow(c.ctx, `
-	INSERT INTO hosts (created_at, public_key, v2_settings, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement, net_address)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO hosts (created_at, public_key, v2_settings, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(public_key) DO UPDATE SET
-		last_announcement = EXCLUDED.last_announcement,
-		net_address = EXCLUDED.net_address
+		last_announcement = EXCLUDED.last_announcement
 	RETURNING id`,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
@@ -307,13 +306,11 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.
 		0,
 		0,
 		ts.UTC(),
-		v1Addr,
 	).Scan(&hostID); err != nil {
 		if errors.Is(err, dsql.ErrNoRows) {
 			err = c.tx.QueryRow(c.ctx,
-				"UPDATE hosts SET last_announcement = ?, net_address = ? WHERE public_key = ? RETURNING id",
+				"UPDATE hosts SET last_announcement = ? WHERE public_key = ? RETURNING id",
 				ts.UTC(),
-				v1Addr,
 				ssql.PublicKey(hk),
 			).Scan(&hostID)
 			if err != nil {
@@ -380,7 +377,6 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.
 			values = append(values, host)
 		}
 	}
-	addAddr(v1Addr)
 	for _, ha := range v2Ha {
 		addAddr(ha.Address)
 	}
