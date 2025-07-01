@@ -457,8 +457,8 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != hks[0] {
 		t.Fatal("unexpected", hosts)
-	} else if hosts[0].SiamuxAddr() != "foo.com:9983" {
-		t.Fatal("unexpected", hosts)
+	} else if hosts[0].SiamuxAddr() != "foo.com:1001" {
+		t.Fatal("unexpected", hosts[0].SiamuxAddr())
 	}
 
 	// create gouging checker
@@ -474,7 +474,7 @@ func TestUsableHosts(t *testing.T) {
 
 	// record a scan for h1 to make it gouging
 	hs := test.NewHostSettings()
-	hs.Prices.IngressPrice = gs.MaxUploadPrice
+	hs.Prices.IngressPrice = gs.MaxUploadPrice.Add(types.NewCurrency64(1))
 	s1 := newTestScan(h1.PublicKey, time.Now(), hs, true)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 		t.Fatal(err)
