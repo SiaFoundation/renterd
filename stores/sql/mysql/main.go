@@ -734,11 +734,11 @@ func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadat
 	// update contract
 	_, err = tx.Exec(ctx, `
 INSERT INTO contracts (
-	created_at, fcid, host_id, host_key, v2,
+	created_at, fcid, host_id, host_key,
 	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, usability, window_start, window_end,
 	contract_price, initial_renter_funds,
 	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
 	created_at = VALUES(created_at), fcid = VALUES(fcid), host_id = VALUES(host_id), host_key = VALUES(host_key),
 	archival_reason = VALUES(archival_reason), proof_height = VALUES(proof_height), renewed_from = VALUES(renewed_from), renewed_to = VALUES(renewed_to), revision_height = VALUES(revision_height), revision_number = VALUES(revision_number), size = VALUES(size), start_height = VALUES(start_height), state = VALUES(state), usability = VALUES(usability), window_start = VALUES(window_start), window_end = VALUES(window_end),
@@ -1006,14 +1006,6 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 		defer insertStmt.Close()
 		joinStmt, err := tx.Prepare(ctx, `
 		INSERT IGNORE INTO host_blocklist_entry_hosts (db_blocklist_entry_id, db_host_id)
-		SELECT ?, id FROM (
-			SELECT id
-			FROM hosts
-			WHERE net_address=? OR
-			SUBSTRING_INDEX(net_address,':',1) = ? OR
-			SUBSTRING_INDEX(net_address,':',1) LIKE ?
-		) AS _
-		UNION ALL
 		SELECT ?, db_host_id FROM (
 			SELECT db_host_id
 			FROM host_addresses
@@ -1031,7 +1023,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 				return fmt.Errorf("failed to insert host blocklist entry: %w", err)
 			} else if entryID, err := res.LastInsertId(); err != nil {
 				return fmt.Errorf("failed to fetch host blocklist entry id: %w", err)
-			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry), entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
+			} else if _, err := joinStmt.Exec(ctx, entryID, entry, entry, fmt.Sprintf("%%.%s", entry)); err != nil {
 				return fmt.Errorf("failed to join host blocklist entry: %w", err)
 			}
 		}

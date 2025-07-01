@@ -51,7 +51,7 @@ CREATE TABLE `hosts` (
   KEY `idx_hosts_last_scan` (`last_scan`),
   KEY `idx_hosts_scanned` (`scanned`),
   KEY `idx_hosts_recent_downtime` (`recent_downtime`),
-  KEY `idx_hosts_recent_scan_failures` (`recent_scan_failures`),
+  KEY `idx_hosts_recent_scan_failures` (`recent_scan_failures`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- dbContract
