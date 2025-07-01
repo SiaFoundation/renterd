@@ -1,3 +1,16 @@
+## 2.4.0 (2025-07-01)
+
+### Features
+
+- No longer reset consensus on commitment mismatch
+
+### Fixes
+
+- Be slightly more generous with the host collateral put into refreshed contracts to refresh less often
+- Don't resync accounts on every reboot
+- Limit maximum number of times we reset chain state in an attempt to sync the chain state'
+- Use only confirmed outputs for funding contract transactions
+
 ## 2.3.3 (2025-06-25)
 
 ### Fixes
