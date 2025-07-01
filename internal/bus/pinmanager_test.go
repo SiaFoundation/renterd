@@ -11,7 +11,6 @@ import (
 
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
-	"go.sia.tech/hostd/v2/host/settings/pin"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
 	"go.uber.org/zap"
@@ -261,7 +260,7 @@ func TestConvertConvertCurrencyToSC(t *testing.T) {
 		{decimal.New(1, 50), decimal.NewFromFloat(0.1), types.Currency{}, errors.New("currency overflow")},
 	}
 	for i, test := range tests {
-		if result, err := pin.ConvertCurrencyToSC(test.target, test.rate); test.err != nil {
+		if result, err := convertCurrencyToSC(test.target, test.rate); test.err != nil {
 			if err == nil {
 				t.Fatalf("%d: expected error, got nil", i)
 			} else if err.Error() != test.err.Error() {
