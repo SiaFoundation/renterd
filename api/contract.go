@@ -95,12 +95,13 @@ type (
 )
 
 func (cm ContractMetadata) MarshalJSON() ([]byte, error) {
+	type md ContractMetadata
 	return json.Marshal(struct {
-		ContractMetadata
+		md
 		V2 bool `json:"v2"`
 	}{
-		ContractMetadata: cm,
-		V2:               true, // COMPATIBILITY: can be removed in v3.0.0
+		md: md(cm),
+		V2: true, // COMPATIBILITY: can be removed in v3.0.0
 	})
 }
 
