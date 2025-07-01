@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/stores/sql"
@@ -152,7 +154,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	// assert update host is successful
 	ts := time.Now().Truncate(time.Second).Add(-time.Minute).UTC()
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		return tx.UpdateHost(hks[0], "foo", nil, 1, types.BlockID{}, ts)
+		return tx.UpdateHost(hks[0], chain.V2HostAnnouncement{{Protocol: siamux.Protocol, Address: "foo"}}, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}
@@ -180,7 +182,7 @@ func TestProcessChainUpdate(t *testing.T) {
 	// reannounce the host and make sure the uptime is the same
 	ts = ts.Add(time.Minute)
 	if err := ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-		return tx.UpdateHost(hks[0], "fooNew", nil, 1, types.BlockID{}, ts)
+		return tx.UpdateHost(hks[0], chain.V2HostAnnouncement{{Protocol: siamux.Protocol, Address: "fooNew"}}, 1, types.BlockID{}, ts)
 	}); err != nil {
 		t.Fatal("unexpected error", err)
 	}

@@ -166,7 +166,7 @@ func (s *chainSubscriber) applyChainUpdate(tx sql.ChainUpdateTx, cau chain.Apply
 			}
 		})
 		for hk, ha := range hus {
-			if err := tx.UpdateHost(hk, "", ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
+			if err := tx.UpdateHost(hk, ha, cau.State.Index.Height, b.ID(), b.Timestamp); err != nil {
 				return fmt.Errorf("failed to update host: %w", err)
 			}
 		}
