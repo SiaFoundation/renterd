@@ -572,6 +572,7 @@ func TestRecordScan(t *testing.T) {
 	firstScanTime := time.Now().UTC()
 	settings := test.NewHostSettings()
 	settings.Prices.TipHeight = 123
+	settings.Prices.ValidUntil = time.Time{}
 	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)
 	}
