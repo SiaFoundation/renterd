@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/renterd/v2/internal/locking"
 )
 
 type ContractLocker interface {
@@ -15,21 +14,3 @@ type ContractLocker interface {
 }
 
 var _ ContractLocker = (Bus)(nil)
-
-func (w *Worker) acquireContractLock(ctx context.Context, fcid types.FileContractID, priority int) (_ *locking.ContractLock, err error) {
-	return locking.NewContractLock(ctx, fcid, priority, w.bus, w.logger)
-}
-
-func (w *Worker) withContractLock(ctx context.Context, fcid types.FileContractID, priority int, fn func() error) error {
-	contractLock, err := w.acquireContractLock(ctx, fcid, priority)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		releaseCtx, cancel := context.WithTimeout(w.shutdownCtx, 10*time.Second)
-		_ = contractLock.Release(releaseCtx)
-		cancel()
-	}()
-
-	return fn()
-}

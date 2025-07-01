@@ -11,10 +11,6 @@ import (
 )
 
 const (
-	// MinProtocolVersion is the minimum protocol version of a host that we
-	// accept.
-	minProtocolVersion = "1.5.9"
-
 	// minValidScore is the smallest score that a host can have before
 	// being ignored.
 	minValidScore = math.SmallestNonzeroFloat64
