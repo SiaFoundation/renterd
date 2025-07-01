@@ -125,11 +125,12 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		RemainingStorage:    100 * rhpv4.SectorSize,
 		TotalStorage:        100 * rhpv4.SectorSize,
 		Prices: rhpv4.HostPrices{
-			ContractPrice: types.Siacoins(1).Div64(5), // 0.2 SC
-			StoragePrice:  types.NewCurrency64(100),   // 100 H / byte / block
-			IngressPrice:  types.NewCurrency64(100),   // 100 H / byte
-			EgressPrice:   types.NewCurrency64(100),   // 100 H / byte
-			Collateral:    types.NewCurrency64(200),
+			ContractPrice:   types.Siacoins(1).Div64(5), // 0.2 SC
+			StoragePrice:    types.NewCurrency64(100),   // 100 H / byte / block
+			IngressPrice:    types.NewCurrency64(100),   // 100 H / byte
+			EgressPrice:     types.NewCurrency64(100),   // 100 H / byte
+			Collateral:      types.NewCurrency64(200),
+			FreeSectorPrice: types.NewCurrency64(1),
 		},
 	})
 
