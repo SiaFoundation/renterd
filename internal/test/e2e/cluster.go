@@ -630,6 +630,11 @@ func announceHosts(cs consensus.State, hosts []*Host) error {
 			},
 			MinerFee: types.Siacoins(1),
 		}
+		_, toSign, err := host.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
+		if err != nil {
+			return fmt.Errorf("failed to fund host %s: %w", host.PublicKey(), err)
+		}
+		host.wallet.SignV2Inputs(&txn, toSign)
 		if err := host.wallet.BroadcastV2TransactionSet(cs.Index, []types.V2Transaction{txn}); err != nil {
 			return fmt.Errorf("failed to announce host %s: %w", host.PublicKey(), err)
 		}

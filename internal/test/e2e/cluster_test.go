@@ -263,7 +263,7 @@ func TestNewTestCluster(t *testing.T) {
 			return fmt.Errorf("should have 1 archived contract but got %v", len(archivedContracts))
 		}
 		ac = archivedContracts[0]
-		if ac.RevisionHeight == 0 || (!ac.V2 && ac.RevisionNumber != math.MaxUint64) {
+		if ac.RevisionHeight == 0 {
 			return fmt.Errorf("revision information is wrong: %v %v %v", ac.RevisionHeight, ac.RevisionNumber, ac.ID)
 		}
 		if ac.ProofHeight == 0 {

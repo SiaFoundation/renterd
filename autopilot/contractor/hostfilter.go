@@ -17,13 +17,12 @@ const (
 )
 
 var (
-	errContractBeyondV2RequireHeight = errors.New("contract is beyond v2 require height")
-	errContractOutOfCollateral       = errors.New("contract is out of collateral")
-	errContractOutOfFunds            = errors.New("contract is out of funds")
-	errContractUpForRenewal          = errors.New("contract is up for renewal")
-	errContractRenewed               = errors.New(api.ContractArchivalReasonRenewed)
-	errContractExpired               = errors.New("contract has expired")
-	errContractNotConfirmed          = errors.New("contract hasn't been confirmed on chain in time")
+	errContractOutOfCollateral = errors.New("contract is out of collateral")
+	errContractOutOfFunds      = errors.New("contract is out of funds")
+	errContractUpForRenewal    = errors.New("contract is up for renewal")
+	errContractRenewed         = errors.New(api.ContractArchivalReasonRenewed)
+	errContractExpired         = errors.New("contract has expired")
+	errContractNotConfirmed    = errors.New("contract hasn't been confirmed on chain in time")
 )
 
 type unusableHostsBreakdown struct {
