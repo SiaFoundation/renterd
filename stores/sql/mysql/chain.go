@@ -285,7 +285,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v2Ha chain.V2HostAnnouncem
 	var hostID int64
 	if res, err := c.tx.Exec(c.ctx, `
 	INSERT INTO hosts (created_at, public_key, v2_settings, total_scans, last_scan, last_scan_success, second_to_last_scan_success, scanned, uptime, downtime, recent_downtime, recent_scan_failures, successful_interactions, failed_interactions, lost_sectors, last_announcement)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON DUPLICATE KEY UPDATE
 		last_announcement = VALUES(last_announcement),
 		id = last_insert_id(id)
