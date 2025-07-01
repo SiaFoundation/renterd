@@ -34,7 +34,7 @@ func (b *Bus) recordHostScan(ctx context.Context, err error, hostKey types.Publi
 	}
 }
 
-func (b *Bus) scanHostV2(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhp4.HostSettings, time.Duration, error) {
+func (b *Bus) scanHost(ctx context.Context, timeout time.Duration, hostKey types.PublicKey, hostIP string) (rhp4.HostSettings, time.Duration, error) {
 	logger := b.logger.
 		With("host", hostKey).
 		With("hostIP", hostIP).

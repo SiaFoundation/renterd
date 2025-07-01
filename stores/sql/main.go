@@ -835,7 +835,7 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 		var h api.Host
 		var hostID int64
 		err := rows.Scan(&hostID, &h.KnownSince, &h.LastAnnouncement, (*PublicKey)(&h.PublicKey),
-			(*V2HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
+			(*HostSettings)(&h.V2Settings), &h.Interactions.TotalScans, (*UnixTimeMS)(&h.Interactions.LastScan), &h.Interactions.LastScanSuccess,
 			&h.Interactions.SecondToLastScanSuccess, (*DurationMS)(&h.Interactions.Uptime), (*DurationMS)(&h.Interactions.Downtime),
 			&h.Interactions.SuccessfulInteractions, &h.Interactions.FailedInteractions, &h.Interactions.LostSectors,
 			&h.Scanned, &h.Blocked, &h.Checks.UsabilityBreakdown.Blocked, &h.Checks.UsabilityBreakdown.Offline, &h.Checks.UsabilityBreakdown.LowScore, &h.Checks.UsabilityBreakdown.RedundantIP,
@@ -855,14 +855,6 @@ LEFT JOIN host_checks hc ON hc.db_host_id = h.id
 	// fill in v2 addresses
 	err = fillInV2Addresses(ctx, tx, hostIDs, func(i int, addrs []string) {
 		hosts[i].V2SiamuxAddresses = addrs
-
-		// NOTE: a v2 host might have been scanned before the v2 height so strictly
-		// speaking it is scanned but since it hasn't been scanned since, the
-		// settings aren't set so we treat it as not scanned
-		if hosts[i].IsV2() && hosts[i].V2Settings == (rhp.HostSettings{}) {
-			hosts[i].Scanned = false
-		}
-
 		i++
 	})
 	if err != nil {
@@ -1636,8 +1628,8 @@ func RecordHostScans(ctx context.Context, tx sql.Tx, scans []api.HostScan) error
 			scan.Success,                      // recent_scan_failures
 			!scan.Success, scanTime, scanTime, // downtime
 			scan.Success, scanTime, scanTime, // uptime
-			scanTime,                                      // last_scan
-			scan.Success, V2HostSettings(scan.V2Settings), // settings
+			scanTime,                                    // last_scan
+			scan.Success, HostSettings(scan.V2Settings), // settings
 			scan.Success,  // successful_interactions
 			!scan.Success, // failed_interactions
 			PublicKey(scan.HostKey),
@@ -2204,7 +2196,7 @@ EXISTS (
 		var hostID int64
 		var hk PublicKey
 		var addr, port string
-		var v2Hs V2HostSettings
+		var v2Hs HostSettings
 		err := rows.Scan(&hostID, &hk, &addr, &port, &v2Hs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan host: %w", err)

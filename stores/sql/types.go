@@ -44,9 +44,9 @@ type (
 	UnixTimeMS     time.Time
 	DurationMS     time.Duration
 	Unsigned64     uint64
-	V2Contract     types.V2FileContract
+	FileContract   types.V2FileContract
 	ChainProtocol  chain.Protocol
-	V2HostSettings rhp.HostSettings
+	HostSettings   rhp.HostSettings
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
@@ -78,9 +78,9 @@ var (
 	_ scannerValuer = (*UnixTimeMS)(nil)
 	_ scannerValuer = (*DurationMS)(nil)
 	_ scannerValuer = (*Unsigned64)(nil)
-	_ scannerValuer = (*V2Contract)(nil)
+	_ scannerValuer = (*FileContract)(nil)
 	_ scannerValuer = (*ChainProtocol)(nil)
-	_ scannerValuer = (*V2HostSettings)(nil)
+	_ scannerValuer = (*HostSettings)(nil)
 )
 
 // Scan implements the sql.Scanner interface.
@@ -452,7 +452,7 @@ func (s NullableString) Value() (driver.Value, error) {
 }
 
 // Scan scan value into V2Contract, implements sql.Scanner interface.
-func (s *V2Contract) Scan(value interface{}) error {
+func (s *FileContract) Scan(value interface{}) error {
 	switch value := value.(type) {
 	case []byte:
 		dec := types.NewBufDecoder(value)
@@ -464,7 +464,7 @@ func (s *V2Contract) Scan(value interface{}) error {
 }
 
 // Value returns a V2Contract value, implements driver.Valuer interface.
-func (c V2Contract) Value() (driver.Value, error) {
+func (c FileContract) Value() (driver.Value, error) {
 	buf := new(bytes.Buffer)
 	enc := types.NewEncoder(buf)
 	types.V2FileContract(c).EncodeTo(enc)
@@ -509,7 +509,7 @@ func (p ChainProtocol) Value() (driver.Value, error) {
 }
 
 // Scan scan value into V2HostSettings, implements sql.Scanner interface.
-func (hs *V2HostSettings) Scan(value interface{}) error {
+func (hs *HostSettings) Scan(value interface{}) error {
 	var bytes []byte
 	switch value := value.(type) {
 	case string:
@@ -523,8 +523,8 @@ func (hs *V2HostSettings) Scan(value interface{}) error {
 }
 
 // Value returns a V2HostSettings value, implements driver.Valuer interface.
-func (hs V2HostSettings) Value() (driver.Value, error) {
-	if hs == (V2HostSettings{}) {
+func (hs HostSettings) Value() (driver.Value, error) {
+	if hs == (HostSettings{}) {
 		return []byte("{}"), nil
 	}
 	return json.Marshal(hs)

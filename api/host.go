@@ -203,20 +203,11 @@ func (h Host) IsOnline() bool {
 	return h.Interactions.LastScanSuccess || h.Interactions.SecondToLastScanSuccess
 }
 
-func (h Host) IsV2() bool {
-	return h.Info().IsV2()
+func (h Host) SiamuxAddr() string {
+	return h.Info().SiamuxAddr()
 }
 
-func (h Host) V2SiamuxAddr() string {
-	return h.Info().V2SiamuxAddr()
-}
-
-func (h HostInfo) IsV2() bool {
-	// consider a host to be v2 if it has announced a v2 address
-	return len(h.V2SiamuxAddresses) > 0
-}
-
-func (h HostInfo) V2SiamuxAddr() string {
+func (h HostInfo) SiamuxAddr() string {
 	// NOTE: eventually we can improve this by implementing a dialer wrapper that
 	// can be created from a slice of addresses and tries them in order. It
 	// should also be aware of whether we support v4 or v6 and pick addresses

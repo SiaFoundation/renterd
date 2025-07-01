@@ -23,7 +23,5 @@ type (
 		PublicKey() types.PublicKey
 
 		FetchRevision(ctx context.Context, fcid types.FileContractID) (types.FileContractRevision, error)
-
-		SyncAccount(ctx context.Context, rev *types.FileContractRevision) error
 	}
 )

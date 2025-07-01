@@ -239,7 +239,7 @@ func (s *Scanner) scanHosts(ctx context.Context, hs HostScanner, cutoff time.Tim
 			select {
 			case jobs <- scanJob{
 				hostKey: h.PublicKey,
-				hostIP:  h.V2SiamuxAddr(),
+				hostIP:  h.SiamuxAddr(),
 			}:
 			case <-ctx.Done():
 				continue

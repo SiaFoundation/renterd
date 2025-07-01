@@ -67,7 +67,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
 	// latest revision
-	rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.V2SiamuxAddr(), req.ContractID)
+	rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.SiamuxAddr(), req.ContractID)
 	if jc.Check("failed to fetch contract revision", err) != nil {
 		return
 	}
@@ -82,7 +82,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	deposit := req.Amount
 	// fund the account
 	signer := ibus.NewFormContractSigner(b.w, rk)
-	res, err := b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.V2SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
+	res, err := b.rhp4Client.FundAccounts(jc.Request.Context(), host.PublicKey, host.SiamuxAddr(), b.cm.TipState(), signer, rhp4utils.ContractRevision{ID: req.ContractID, Revision: rev}, []rhpv4.AccountDeposit{
 		{
 			Account: rhpv4.Account(req.AccountID),
 			Amount:  deposit,
@@ -517,7 +517,7 @@ func (b *Bus) hostsHandlerGET(jc jape.Context) {
 	for _, h := range hosts {
 		// ignore height
 		h.V2HS.HostSettings.Prices.TipHeight = bh
-		if len(h.V2SiamuxAddresses) > 0 && !gc.CheckV2(h.V2HS).Gouging() {
+		if len(h.V2SiamuxAddresses) > 0 && !gc.Check(h.V2HS).Gouging() {
 			infos = append(infos, h.HostInfo)
 		}
 	}
@@ -639,7 +639,7 @@ func (b *Bus) hostsScanHandlerPOST(jc jape.Context) {
 	}
 
 	// scan host, prefer v2
-	v2Settings, ping, err := b.scanHostV2(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.V2SiamuxAddr())
+	v2Settings, ping, err := b.scanHost(jc.Request.Context(), time.Duration(rsr.Timeout), hk, h.SiamuxAddr())
 
 	// check if the scan failed due to a shutdown - shouldn't be necessary but
 	// just in case since recording a failed scan might have serious
@@ -833,7 +833,7 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 		return
 	}
 
-	revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.V2SiamuxAddr(), fcid)
+	revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.SiamuxAddr(), fcid)
 	if jc.Check("failed to fetch revision", err) != nil {
 		return
 	}
@@ -910,7 +910,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	res, err := b.pruneContractV2(pruneCtx, rk, c, host.V2SiamuxAddr(), gc, pending)
+	res, err := b.pruneContractV2(pruneCtx, rk, c, host.SiamuxAddr(), gc, pending)
 	if jc.Check("failed to prune contract", err) != nil {
 		return
 	}
@@ -1092,7 +1092,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	if c.EndHeight() == rrr.EndHeight {
 		contract, err = b.refreshContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
 	} else {
-		contract, err = b.renewContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
+		contract, err = b.renewContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
 	}
 	if jc.Check("couldn't renew/refresh contract", err) != nil {
 		return
@@ -2147,13 +2147,13 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
 	// fetch host settings
-	settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
+	settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.SiamuxAddr())
 	if jc.Check("couldn't fetch host settings", err) != nil {
 		return
 	}
 
 	// check gouging
-	breakdown := gc.CheckV2(settings)
+	breakdown := gc.Check(settings)
 	if breakdown.Gouging() {
 		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
 		return
@@ -2161,7 +2161,7 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	contract, err := b.formContract(
 		ctx,
 		rfr.HostKey,
-		h.V2SiamuxAddr(),
+		h.SiamuxAddr(),
 		settings.WalletAddress,
 		rfr.RenterAddress,
 		settings.Prices,

@@ -40,7 +40,7 @@ type (
 	}
 
 	Checker interface {
-		CheckV2(rhp.HostSettings) api.HostGougingBreakdown
+		Check(rhp.HostSettings) api.HostGougingBreakdown
 		BlocksUntilBlockHeightGouging(hostHeight uint64) int64
 	}
 
@@ -69,7 +69,7 @@ func (gc checker) BlocksUntilBlockHeightGouging(hostHeight uint64) int64 {
 	return int64(hostHeight) - int64(minHeight)
 }
 
-func (gc checker) CheckV2(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
+func (gc checker) Check(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
 	prices := hs.Prices
 	gs := gc.settings
 

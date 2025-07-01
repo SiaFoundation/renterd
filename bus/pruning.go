@@ -32,7 +32,7 @@ func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.C
 	prices := settings.Prices
 
 	// make sure they are sane
-	if gb := gc.CheckV2(settings); gb.Gouging() {
+	if gb := gc.Check(settings); gb.Gouging() {
 		return api.ContractPruneResponse{}, fmt.Errorf("host for pruning is gouging: %v", gb.String())
 	}
 

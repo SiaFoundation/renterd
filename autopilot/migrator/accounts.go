@@ -45,6 +45,6 @@ func (m *Migrator) FundAccount(ctx context.Context, fcid types.FileContractID, h
 func (m *Migrator) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
 	account := m.accounts.ForHost(host.PublicKey)
 	return account.WithSync(func() (types.Currency, error) {
-		return m.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
+		return m.rhp4Client.AccountBalance(ctx, host.PublicKey, host.SiamuxAddr(), rhpv4.Account(account.ID()))
 	})
 }

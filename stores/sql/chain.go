@@ -164,7 +164,7 @@ func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fce
 	defer rows.Close()
 	for rows.Next() {
 		var fcid FileContractID
-		var contract V2Contract
+		var contract FileContract
 		var leafIndex uint64
 		var proof MerkleProof
 		if err := rows.Scan(&fcid, &contract, &leafIndex, &proof); err != nil {
@@ -183,7 +183,7 @@ func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fce
 }
 
 func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (types.V2FileContractElement, error) {
-	var contract V2Contract
+	var contract FileContract
 	var leafIndex uint64
 	var proof MerkleProof
 	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", FileContractID(fcid)).

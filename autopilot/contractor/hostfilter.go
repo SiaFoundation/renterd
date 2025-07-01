@@ -182,7 +182,7 @@ func checkHost(gc gouging.Checker, sh scoredHost, minScore float64, period uint6
 		ub.LowMaxDuration = period > h.V2Settings.MaxContractDuration
 
 		// gouging breakdown
-		gb = gc.CheckV2(h.V2Settings)
+		gb = gc.Check(h.V2Settings)
 
 		// perform gouging and score checks
 		if gb.Gouging() {

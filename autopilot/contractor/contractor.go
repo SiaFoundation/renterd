@@ -219,17 +219,10 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	}
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
-	// fetch consensus state
-	cs, err := c.cs.ConsensusState(ctx)
-	if err != nil {
-		return api.ContractMetadata{}, false, err
-	}
-
 	// calculate the renter funds
 	renterFunds := c.refreshFundingEstimate(contract, logger)
 
 	contractPrice := host.V2Settings.Prices.ContractPrice
-	expectedNewStorage := renterFundsToExpectedStorageV2(renterFunds, contract.EndHeight()-cs.BlockHeight, host.V2Settings.Prices)
 
 	// a refresh should always result in a contract that has enough collateral
 	minNewCollateral := MinCollateral.Mul64(2).Add(contractPrice)
@@ -242,7 +235,6 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 			zap.Error(err),
 			"endHeight", contract.EndHeight(),
 			"renterFunds", renterFunds,
-			"expectedNewStorage", expectedNewStorage,
 		)
 		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !utils.IsErrHost(err) {
 			return api.ContractMetadata{}, false, err
