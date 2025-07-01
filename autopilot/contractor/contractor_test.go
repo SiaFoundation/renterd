@@ -172,10 +172,6 @@ func TestShouldArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal("unexpected error", err)
 	}
-	err = c.shouldArchive(c1, 20, n)
-	if err != errContractBeyondV2RequireHeight {
-		t.Fatal("unexpected error", err)
-	}
 }
 
 func TestShouldForgiveFailedRenewal(t *testing.T) {

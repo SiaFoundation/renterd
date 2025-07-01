@@ -735,17 +735,17 @@ func (tx *MainDatabaseTx) PutContract(ctx context.Context, c api.ContractMetadat
 	// update contract
 	_, err = tx.Exec(ctx, `
 INSERT INTO contracts (
-	created_at, fcid, host_id, host_key, v2,
+	created_at, fcid, host_id, host_key,
 	archival_reason, proof_height, renewed_from, renewed_to, revision_height, revision_number, size, start_height, state, usability, window_start, window_end,
 	contract_price, initial_renter_funds,
 	delete_spending, fund_account_spending, sector_roots_spending, upload_spending
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(fcid) DO UPDATE SET
-	fcid = EXCLUDED.fcid, host_id = EXCLUDED.host_id, host_key = EXCLUDED.host_key, v2 = EXCLUDED.v2,
+	fcid = EXCLUDED.fcid, host_id = EXCLUDED.host_id, host_key = EXCLUDED.host_key,
 	archival_reason = EXCLUDED.archival_reason, proof_height = EXCLUDED.proof_height, renewed_from = EXCLUDED.renewed_from, renewed_to = EXCLUDED.renewed_to, revision_height = EXCLUDED.revision_height, revision_number = EXCLUDED.revision_number, size = EXCLUDED.size, start_height = EXCLUDED.start_height, state = EXCLUDED.state, usability = EXCLUDED.usability, window_start = EXCLUDED.window_start, window_end = EXCLUDED.window_end,
 	contract_price = EXCLUDED.contract_price, initial_renter_funds = EXCLUDED.initial_renter_funds,
 	delete_spending = EXCLUDED.delete_spending, fund_account_spending = EXCLUDED.fund_account_spending, sector_roots_spending = EXCLUDED.sector_roots_spending, upload_spending = EXCLUDED.upload_spending`,
-		time.Now(), ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey), c.V2,
+		time.Now(), ssql.FileContractID(c.ID), hostID, ssql.PublicKey(c.HostKey),
 		ssql.NullableString(c.ArchivalReason), c.ProofHeight, ssql.FileContractID(c.RenewedFrom), ssql.FileContractID(c.RenewedTo), c.RevisionHeight, c.RevisionNumber, c.Size, c.StartHeight, state, usability, c.WindowStart, c.WindowEnd,
 		ssql.Currency(c.ContractPrice), ssql.Currency(c.InitialRenterFunds),
 		ssql.Currency(c.Spending.Deletions), ssql.Currency(c.Spending.FundAccount), ssql.Currency(c.Spending.SectorRoots), ssql.Currency(c.Spending.Uploads),

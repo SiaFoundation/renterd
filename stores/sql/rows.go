@@ -42,7 +42,7 @@ type ContractRow struct {
 
 func (r *ContractRow) Scan(s Scanner) error {
 	return s.Scan(
-		&r.FCID, &r.HostID, &r.HostKey, &r.V2,
+		&r.FCID, &r.HostID, &r.HostKey,
 		&r.ArchivalReason, &r.ProofHeight, &r.RenewedFrom, &r.RenewedTo, &r.RevisionHeight, &r.RevisionNumber, &r.Size, &r.StartHeight, &r.State, &r.Usability, &r.WindowStart, &r.WindowEnd,
 		&r.ContractPrice, &r.InitialRenterFunds,
 		&r.DeleteSpending, &r.FundAccountSpending, &r.SectorRootsSpending, &r.UploadSpending,

@@ -89,10 +89,26 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	log := zap.NewNop()
 
 	ws := testutil.NewEphemeralWalletStore()
-	wallet, err := wallet.NewSingleAddressWallet(privKey, cm, ws, s)
+	w, err := wallet.NewSingleAddressWallet(privKey, cm, ws, s)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wallet: %w", err)
 	}
+	_ = cm.OnReorg(func(_ types.ChainIndex) {
+		tip, err := ws.Tip()
+		if err != nil {
+			panic(err)
+		}
+		reverted, applied, err := cm.UpdatesSince(tip, 1000)
+		if err != nil {
+			panic(err)
+		}
+
+		if err := ws.UpdateChainState(func(tx wallet.UpdateTx) error {
+			return w.UpdateChainState(tx, reverted, applied)
+		}); err != nil {
+			panic(err)
+		}
+	})
 
 	rhp4Listener, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
@@ -100,9 +116,26 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 	}
 
 	settings := testutil.NewEphemeralSettingsReporter()
+	settings.Update(rhpv4.HostSettings{
+		Release:             "test",
+		AcceptingContracts:  true,
+		WalletAddress:       w.Address(),
+		MaxCollateral:       types.Siacoins(10000),
+		MaxContractDuration: 1000,
+		RemainingStorage:    100 * rhpv4.SectorSize,
+		TotalStorage:        100 * rhpv4.SectorSize,
+		Prices: rhpv4.HostPrices{
+			ContractPrice: types.Siacoins(1).Div64(5), // 0.2 SC
+			StoragePrice:  types.NewCurrency64(100),   // 100 H / byte / block
+			IngressPrice:  types.NewCurrency64(100),   // 100 H / byte
+			EgressPrice:   types.NewCurrency64(100),   // 100 H / byte
+			Collateral:    types.NewCurrency64(200),
+		},
+	})
+
 	contractsV2 := testutil.NewEphemeralContractor(cm)
 	sectors := testutil.NewEphemeralSectorStore()
-	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, wallet, settings, sectors, rhp4.WithPriceTableValidity(30*time.Minute))
+	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, w, settings, sectors, rhp4.WithPriceTableValidity(30*time.Minute))
 	go siamux.Serve(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{
@@ -111,7 +144,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 		s: s,
 
-		wallet:      wallet,
+		wallet:      w,
 		settings:    settings,
 		contractsV2: contractsV2,
 
