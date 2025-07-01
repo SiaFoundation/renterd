@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -31,11 +30,6 @@ const (
 	// contract that fails to broadcst to be broadcasted again within a single
 	// contract broadcast interval.
 	broadcastRevisionRetriesPerInterval = 5
-
-	// estimatedFileContractTransactionSetSize is the estimated blockchain size
-	// of a transaction set between a renter and a host that contains a file
-	// contract.
-	estimatedFileContractTransactionSetSize = 2048
 
 	// failedRenewalForgivenessPeriod is the amount of time we wait before
 	// punishing a contract for not being able to refresh
@@ -156,7 +150,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 
-func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, initialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.Settings.Version, "hostRelease", host.Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
 	defer cancel()
@@ -171,49 +165,19 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		return api.ContractMetadata{}, true, err
 	}
 
-	// handle edge case where the host is not v2 but has v2 settings which can
-	// happen if we encounter a host's v2 announcement during maintenance
-	if !host.IsV2() && scan.V2Settings != (rhp.HostSettings{}) {
-		host, err = c.db.Host(ctx, hk)
-		if err != nil {
-			logger.With(zap.Error(err)).Error("failed to re-fetch host")
-			return api.ContractMetadata{}, false, err
-		}
-	}
-
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
 	if err != nil {
 		return api.ContractMetadata{}, false, err
 	}
-
-	// version specific costs
-	var contractPrice, collateral, maxCollateral types.Currency
-	if host.IsV2() {
-		contractPrice = scan.V2Settings.Prices.ContractPrice
-		collateral = scan.V2Settings.Prices.Collateral
-		maxCollateral = scan.V2Settings.MaxCollateral
-	} else {
-		contractPrice = scan.Settings.ContractPrice
-		collateral = scan.Settings.Collateral
-		maxCollateral = scan.Settings.MaxCollateral
-	}
-
-	// check our budget
-	txnFee := ctx.state.Fee.Mul64(estimatedFileContractTransactionSetSize)
-	renterFunds := initialContractFunding(contractPrice, txnFee, minInitialContractFunds)
-
-	// calculate the expected storage
 	endHeight := ctx.EndHeight(cs.BlockHeight)
-	var expectedStorage uint64
-	if host.IsV2() {
-		expectedStorage = renterFundsToExpectedStorageV2(renterFunds, endHeight-cs.BlockHeight, scan.V2Settings.Prices)
-	} else {
-		expectedStorage = renterFundsToExpectedStorage(renterFunds, endHeight-cs.BlockHeight, scan.PriceTable)
-	}
+
+	contractPrice := scan.V2Settings.Prices.ContractPrice
+	maxCollateral := scan.V2Settings.MaxCollateral
+	renterFunds := initialContractFunds
 
 	// calculate the host collateral
-	hostCollateral := collateral.Mul64(expectedStorage).Mul64(ctx.Period())
+	hostCollateral := rhpv4.MaxHostCollateral(scan.V2Settings.Prices, renterFunds)
 	if hostCollateral.Cmp(maxCollateral) > 0 {
 		hostCollateral = maxCollateral
 	}
@@ -259,7 +223,6 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 
 	// convenience variables
 	pt := host.PriceTable.HostPriceTable
-	rev := contract.Revision
 
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
@@ -268,12 +231,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	}
 
 	// calculate the renter funds
-	var renterFunds types.Currency
-	if contract.IsOutOfFunds() {
-		renterFunds = c.refreshFundingEstimate(contract, logger)
-	} else {
-		renterFunds = rev.RenterFunds // don't increase funds
-	}
+	renterFunds := c.refreshFundingEstimate(contract, logger)
 
 	var expectedNewStorage uint64
 	var contractPrice types.Currency
@@ -626,14 +584,6 @@ func hasAlert(ctx context.Context, alerter alerts.Alerter, id types.Hash256, log
 	return false
 }
 
-func initialContractFunding(contractPrice, txnFee, minFunding types.Currency) types.Currency {
-	funding := contractPrice.Add(txnFee).Mul64(10) // TODO arbitrary multiplier
-	if !minFunding.IsZero() && funding.Cmp(minFunding) < 0 {
-		return minFunding
-	}
-	return funding
-}
-
 // renewFundingEstimate computes the funds the renter should use to renew a
 // contract. 'minRenterFunds' is the minimum amount the renter should use to
 // renew a contract, 'initRenterFunds' is the amount the renter used to form the
@@ -658,6 +608,9 @@ func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds 
 		// otherwise we use the remaining funds from before because a renewal
 		// shouldn't add more funds, that's what a refresh is for
 		renterFunds = remainingRenterFunds
+		if minFunds := initRenterFunds.Mul64(8).Div64(10); renterFunds.Cmp(minFunds) < 0 {
+			renterFunds = minFunds // at least 80% of the initial funds
+		}
 	}
 
 	// but the funds should not drop below the amount we'd fund a new contract with

@@ -630,65 +630,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}
 }
 
-func (b *Bus) formContract(ctx context.Context, hostSettings rhpv2.HostSettings, renterAddress types.Address, renterFunds, hostCollateral types.Currency, hostKey types.PublicKey, hostIP string, endHeight uint64) (api.ContractMetadata, error) {
-	// cap v1 formations to the v2 require height since the host won't allow us to
-	// form contracts beyond that
-	v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
-	if endHeight >= v2ReqHeight-hostSettings.WindowSize {
-		endHeight = v2ReqHeight - hostSettings.WindowSize - 1
-	}
-
-	// derive the renter key
-	renterKey := b.masterKey.DeriveContractKey(hostKey)
-
-	// prepare the transaction
-	cs := b.cm.TipState()
-	fc := rhpv2.PrepareContractFormation(renterKey.PublicKey(), hostKey, renterFunds, hostCollateral, endHeight, hostSettings, renterAddress)
-	txn := types.Transaction{FileContracts: []types.FileContract{fc}}
-
-	// calculate the miner fee
-	fee := b.w.RecommendedFee().Mul64(cs.TransactionWeight(txn))
-	txn.MinerFees = []types.Currency{fee}
-
-	// fund the transaction
-	cost := rhpv2.ContractFormationCost(cs, fc, hostSettings.ContractPrice).Add(fee)
-	toSign, err := b.w.FundTransaction(&txn, cost, true)
-	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("couldn't fund transaction: %w", err)
-	}
-
-	// sign the transaction
-	b.w.SignTransaction(&txn, toSign, wallet.ExplicitCoveredFields(txn))
-
-	// form the contract
-	contract, txnSet, err := b.rhp2Client.FormContract(ctx, hostKey, hostIP, renterKey, append(b.cm.UnconfirmedParents(txn), txn))
-	if err != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return api.ContractMetadata{}, err
-	}
-
-	// add transaction set to the pool
-	_, err = b.cm.AddPoolTransactions(txnSet)
-	if err != nil {
-		b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-		return api.ContractMetadata{}, fmt.Errorf("couldn't add transaction set to the pool: %w", err)
-	}
-
-	return api.ContractMetadata{
-		ID:                 contract.ID(),
-		HostKey:            contract.HostKey(),
-		StartHeight:        cs.Index.Height,
-		State:              api.ContractStatePending,
-		WindowStart:        contract.Revision.WindowStart,
-		WindowEnd:          contract.Revision.WindowEnd,
-		ContractPrice:      contract.Revision.MissedHostPayout().Sub(hostCollateral),
-		InitialRenterFunds: renterFunds,
-		Usability:          api.ContractUsabilityGood,
-		V2:                 false,
-	}, nil
-}
-
-func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP string, hostAddr, renterAddr types.Address, prices rhpv4.HostPrices, renterFunds types.Currency, collateral types.Currency, endHeight uint64) (api.ContractMetadata, error) {
 	cs := b.cm.TipState()
 	key := b.masterKey.DeriveContractKey(hk)
 	signer := ibus.NewFormContractSigner(b.w, key)
@@ -702,7 +644,7 @@ func (b *Bus) formContractV2(ctx context.Context, hk types.PublicKey, hostIP str
 		ProofHeight:     endHeight,
 	})
 	if err != nil {
-		return api.ContractMetadata{}, fmt.Errorf("failed to form v2 contract: %w", err)
+		return api.ContractMetadata{}, fmt.Errorf("failed to form contract: %w", err)
 	}
 
 	// add transaction set to the pool

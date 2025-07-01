@@ -2248,70 +2248,31 @@ func (b *Bus) contractsFormHandler(jc jape.Context) {
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
 
-	// use RHP4 if we're passed the V2 hardfork allow height
-	var contract api.ContractMetadata
-	if b.isPassedV2AllowHeight() {
-		// fetch host settings
-		settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
-		if jc.Check("couldn't fetch host settings", err) != nil {
-			return
-		}
+	// fetch host settings
+	settings, err := b.rhp4Client.Settings(ctx, rfr.HostKey, h.V2SiamuxAddr())
+	if jc.Check("couldn't fetch host settings", err) != nil {
+		return
+	}
 
-		// check gouging
-		breakdown := gc.CheckV2(settings)
-		if breakdown.Gouging() {
-			jc.Error(fmt.Errorf("failed to form v2 contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
-			return
-		}
-		contract, err = b.formContractV2(
-			ctx,
-			rfr.HostKey,
-			h.V2SiamuxAddr(),
-			settings.WalletAddress,
-			rfr.RenterAddress,
-			settings.Prices,
-			rfr.RenterFunds,
-			rfr.HostCollateral,
-			rfr.EndHeight,
-		)
-		if jc.Check("couldn't form v2 contract", err) != nil {
-			return
-		}
-	} else {
-		// fetch host settings
-		settings, err := b.rhp2Client.Settings(ctx, rfr.HostKey, h.NetAddress)
-		if jc.Check("couldn't fetch host settings", err) != nil {
-			return
-		}
-
-		// cap v1 formations to the v2 require height since the host won't allow
-		// us to form contracts beyond that
-		v2ReqHeight := b.cm.TipState().Network.HardforkV2.RequireHeight
-		if rfr.EndHeight >= v2ReqHeight {
-			rfr.EndHeight = v2ReqHeight - 1
-		}
-
-		// check gouging
-		breakdown := gc.CheckSettings(settings)
-		if breakdown.Gouging() {
-			jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
-			return
-		}
-
-		// form contract
-		contract, err = b.formContract(
-			ctx,
-			settings,
-			rfr.RenterAddress,
-			rfr.RenterFunds,
-			rfr.HostCollateral,
-			rfr.HostKey,
-			h.NetAddress,
-			rfr.EndHeight,
-		)
-		if jc.Check("couldn't form contract", err) != nil {
-			return
-		}
+	// check gouging
+	breakdown := gc.CheckV2(settings)
+	if breakdown.Gouging() {
+		jc.Error(fmt.Errorf("failed to form contract, gouging check failed: %v", breakdown), http.StatusBadRequest)
+		return
+	}
+	contract, err := b.formContract(
+		ctx,
+		rfr.HostKey,
+		h.V2SiamuxAddr(),
+		settings.WalletAddress,
+		rfr.RenterAddress,
+		settings.Prices,
+		rfr.RenterFunds,
+		rfr.HostCollateral,
+		rfr.EndHeight,
+	)
+	if jc.Check("couldn't form contract", err) != nil {
+		return
 	}
 
 	// add the contract
