@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/alerts"
@@ -2547,8 +2548,25 @@ func TestHostScan(t *testing.T) {
 	hk = host.PublicKey()
 
 	// update the host's net address
-	// TODO: announce "hostwithoutport.com"
+	cs := cluster.cm.TipState()
 	newAddr := "hostwithoutport.com"
+	txn := types.V2Transaction{
+		Attestations: []types.Attestation{
+			chain.V2HostAnnouncement([]chain.NetAddress{{
+				Address:  newAddr,
+				Protocol: siamux.Protocol,
+			}}).ToAttestation(cs, host.privKey),
+		},
+		MinerFee: types.Siacoins(1),
+	}
+	_, toSign, err := host.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.wallet.SignV2Inputs(&txn, toSign)
+	if err := host.wallet.BroadcastV2TransactionSet(cs.Index, []types.V2Transaction{txn}); err != nil {
+		t.Fatal(err)
+	}
 
 	tt.Retry(100, 100*time.Millisecond, func() error {
 		cluster.MineBlocks(1)
