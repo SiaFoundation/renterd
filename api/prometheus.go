@@ -100,7 +100,7 @@ func (b Bucket) PrometheusMetric() (metrics []prometheus.Metric) {
 		}}
 }
 
-// TODO: fix
+// TODO: upgrade to v2 settings and prices
 func (host Host) PrometheusMetric() (metrics []prometheus.Metric) {
 	return nil
 	//	priceTableLabels := map[string]any{
