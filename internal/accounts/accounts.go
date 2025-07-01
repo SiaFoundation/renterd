@@ -270,7 +270,6 @@ func (a *Manager) run() {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
 		}
-		acc.RequiresSync = true // force sync on reboot
 		account := &Account{
 			acc:              acc,
 			driftRate:        rate.NewLimiter(rate.Every(driftResetInterval), 1),
