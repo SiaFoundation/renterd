@@ -42,8 +42,7 @@ import (
 const (
 	defaultRevisionFetchTimeout = 30 * time.Second
 
-	lockingPrioritySyncing                = 30
-	lockingPriorityActiveContractRevision = 100
+	lockingPrioritySyncing = 30
 )
 
 var (

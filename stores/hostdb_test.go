@@ -1242,9 +1242,10 @@ func TestSQLHostBlocklistBasic(t *testing.T) {
 // newTestScan returns a host interaction with given parameters.
 func newTestScan(hk types.PublicKey, scanTime time.Time, settings rhp4.HostSettings, success bool) api.HostScan {
 	return api.HostScan{
-		HostKey:   hk,
-		Success:   success,
-		Timestamp: scanTime,
+		HostKey:    hk,
+		Success:    success,
+		Timestamp:  scanTime,
+		V2Settings: settings,
 	}
 }
 

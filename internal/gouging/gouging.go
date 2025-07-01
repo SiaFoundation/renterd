@@ -12,23 +12,6 @@ import (
 	"go.sia.tech/renterd/v2/internal/rhp/v4"
 )
 
-const (
-	// maxBaseRPCPriceVsBandwidth is the max ratio for sane pricing between the
-	// MinBaseRPCPrice and the MinDownloadBandwidthPrice. This ensures that 1
-	// million base RPC charges are at most 1% of the cost to download 4TB. This
-	// ratio should be used by checking that the MinBaseRPCPrice is less than or
-	// equal to the MinDownloadBandwidthPrice multiplied by this constant
-	maxBaseRPCPriceVsBandwidth = uint64(40e3)
-
-	// maxSectorAccessPriceVsBandwidth is the max ratio for sane pricing between
-	// the MinSectorAccessPrice and the MinDownloadBandwidthPrice. This ensures
-	// that 1 million base accesses are at most 10% of the cost to download 4TB.
-	// This ratio should be used by checking that the MinSectorAccessPrice is
-	// less than or equal to the MinDownloadBandwidthPrice multiplied by this
-	// constant
-	maxSectorAccessPriceVsBandwidth = uint64(400e3)
-)
-
 var (
 	ErrHostSettingsGouging = errors.New("host settings gouging detected")
 	ErrPriceTableGouging   = errors.New("price table gouging detected")
@@ -138,41 +121,6 @@ func checkBlockHeight(cs api.ConsensusState, hostBH, leeway uint64) error {
 		}
 	}
 	return nil
-}
-
-func sectorReadCost(readLengthCost, readBaseCost, initBaseCost, ulBWCost, dlBWCost types.Currency) (types.Currency, bool) {
-	// base
-	base, overflow := readLengthCost.Mul64WithOverflow(rhpv4.SectorSize)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	base, overflow = base.AddWithOverflow(readBaseCost)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	base, overflow = base.AddWithOverflow(initBaseCost)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	// bandwidth
-	ingress, overflow := ulBWCost.Mul64WithOverflow(32)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	egress, overflow := dlBWCost.Mul64WithOverflow(rhpv4.SectorSize)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	// total
-	total, overflow := base.AddWithOverflow(ingress)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	total, overflow = total.AddWithOverflow(egress)
-	if overflow {
-		return types.ZeroCurrency, true
-	}
-	return total, false
 }
 
 func errsToStr(errs ...error) string {

@@ -8,7 +8,6 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/utils"
 )
 
 const (
@@ -297,32 +296,6 @@ func uptimeScore(h api.Host) float64 {
 	// Calculate the penalty for poor uptime. Penalties increase extremely
 	// quickly as uptime falls away from 95%.
 	return math.Pow(ratio, 200*math.Min(1-ratio, 0.30))
-}
-
-func versionScore(version, minVersion string) float64 {
-	if minVersion == "" {
-		minVersion = minProtocolVersion
-	}
-	versions := []struct {
-		version string
-		penalty float64
-	}{
-		// latest protocol version
-		{"1.6.0", 0.10},
-
-		// user-defined minimum
-		{minVersion, 0.00},
-
-		// absolute minimum
-		{minProtocolVersion, 0.00},
-	}
-	weight := 1.0
-	for _, v := range versions {
-		if utils.VersionCmp(version, v.version) < 0 {
-			weight *= v.penalty
-		}
-	}
-	return weight
 }
 
 func bytesToSectors(bytes uint64) uint64 {

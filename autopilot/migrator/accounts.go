@@ -3,17 +3,10 @@ package migrator
 import (
 	"context"
 	"fmt"
-	"time"
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
-)
-
-const (
-	defaultRevisionFetchTimeout = 30 * time.Second
-
-	lockingPrioritySyncing = 30
 )
 
 func (m *Migrator) FundAccount(ctx context.Context, fcid types.FileContractID, hk types.PublicKey, desired types.Currency) error {
