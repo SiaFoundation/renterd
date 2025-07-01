@@ -141,13 +141,9 @@ func TestHostScore(t *testing.T) {
 func TestPriceAdjustmentScore(t *testing.T) {
 	score := func(mdp, mup, msp uint64) float64 {
 		t.Helper()
-		prices := rhpv4.HostPrices{
-			EgressPrice:  types.NewCurrency64(50),
-			IngressPrice: types.NewCurrency64(50),
-		}
-		dppb := prices.RPCReadSectorCost(1).RenterCost()
-		uppb := prices.RPCWriteSectorCost(1).RenterCost()
-		sppb := prices.StoragePrice
+		dppb := types.NewCurrency64(50)
+		uppb := types.NewCurrency64(50)
+		sppb := types.NewCurrency64(50)
 		return priceAdjustmentScore(dppb, uppb, sppb, api.GougingSettings{
 			MaxDownloadPrice: types.NewCurrency64(mdp),
 			MaxUploadPrice:   types.NewCurrency64(mup),
