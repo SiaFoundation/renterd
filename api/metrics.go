@@ -51,8 +51,9 @@ type (
 	ContractPruneMetric struct {
 		Timestamp TimeRFC3339 `json:"timestamp"`
 
-		ContractID types.FileContractID `json:"contractID"`
-		HostKey    types.PublicKey      `json:"hostKey"`
+		ContractID  types.FileContractID `json:"contractID"`
+		HostKey     types.PublicKey      `json:"hostKey"`
+		HostVersion string               `json:"hostVersion"`
 
 		Pruned    uint64        `json:"pruned"`
 		Remaining uint64        `json:"remaining"`
