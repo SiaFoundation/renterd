@@ -910,7 +910,7 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 
 	// prune the contract
 	rk := b.masterKey.DeriveContractKey(c.HostKey)
-	res, err := b.pruneContractV2(pruneCtx, rk, c, host.SiamuxAddr(), gc, pending)
+	res, err := b.pruneContract(pruneCtx, rk, c, host.SiamuxAddr(), gc, pending)
 	if jc.Check("failed to prune contract", err) != nil {
 		return
 	}

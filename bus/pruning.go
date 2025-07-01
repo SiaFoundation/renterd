@@ -13,7 +13,7 @@ import (
 	"go.sia.tech/renterd/v2/internal/gouging"
 )
 
-func (b *Bus) pruneContractV2(ctx context.Context, rk types.PrivateKey, cm api.ContractMetadata, hostIP string, gc gouging.Checker, pendingUploads map[types.Hash256]struct{}) (api.ContractPruneResponse, error) {
+func (b *Bus) pruneContract(ctx context.Context, rk types.PrivateKey, cm api.ContractMetadata, hostIP string, gc gouging.Checker, pendingUploads map[types.Hash256]struct{}) (api.ContractPruneResponse, error) {
 	signer := ibus.NewFormContractSigner(b.w, rk)
 
 	// get latest revision
