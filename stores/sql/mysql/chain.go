@@ -262,7 +262,7 @@ ON DUPLICATE KEY UPDATE
 		} else if err != nil {
 			return err
 		}
-		_, err = insertStmt.Exec(c.ctx, time.Now(), contractID, ssql.V2Contract(fce.V2FileContract), fce.StateElement.LeafIndex, ssql.MerkleProof{Hashes: fce.StateElement.MerkleProof})
+		_, err = insertStmt.Exec(c.ctx, time.Now(), contractID, ssql.FileContract(fce.V2FileContract), fce.StateElement.LeafIndex, ssql.MerkleProof{Hashes: fce.StateElement.MerkleProof})
 		if err != nil {
 			return fmt.Errorf("failed to insert file contract element: %w", err)
 		}
@@ -293,7 +293,7 @@ func (c chainUpdateTx) UpdateHost(hk types.PublicKey, v1Addr string, v2Ha chain.
 	`,
 		time.Now().UTC(),
 		ssql.PublicKey(hk),
-		ssql.V2HostSettings{},
+		ssql.HostSettings{},
 		0,
 		0,
 		false,

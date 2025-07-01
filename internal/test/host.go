@@ -14,12 +14,12 @@ import (
 func NewHosts(n int) []api.Host {
 	hosts := make([]api.Host, n)
 	for i := 0; i < n; i++ {
-		hosts[i] = NewV2Host(RandomHostKey(), NewV2HostSettings())
+		hosts[i] = NewHost(RandomHostKey(), NewHostSettings())
 	}
 	return hosts
 }
 
-func NewV2Host(hk types.PublicKey, settings rhp4.HostSettings) api.Host {
+func NewHost(hk types.PublicKey, settings rhp4.HostSettings) api.Host {
 	return api.Host{
 		V2SiamuxAddresses: []string{randomIP().String()},
 		KnownSince:        time.Now(),
@@ -41,7 +41,7 @@ func NewV2Host(hk types.PublicKey, settings rhp4.HostSettings) api.Host {
 	}
 }
 
-func NewV2HostSettings() rhp4.HostSettings {
+func NewHostSettings() rhp4.HostSettings {
 	oneSC := types.Siacoins(1)
 
 	return rhp4.HostSettings{

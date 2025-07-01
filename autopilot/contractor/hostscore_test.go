@@ -61,14 +61,14 @@ func TestClampScore(t *testing.T) {
 	}
 }
 
-func TestHostScoreV2(t *testing.T) {
+func TestHostScore(t *testing.T) {
 	day := 24 * time.Hour
 
 	newHost := func(s rhp4.HostSettings) api.Host {
-		return test.NewV2Host(test.RandomHostKey(), s)
+		return test.NewHost(test.RandomHostKey(), s)
 	}
-	h1 := newHost(test.NewV2HostSettings())
-	h2 := newHost(test.NewV2HostSettings())
+	h1 := newHost(test.NewHostSettings())
+	h2 := newHost(test.NewHostSettings())
 	gs := api.GougingSettings{
 		MaxUploadPrice:   types.NewCurrency64(1000000000000),
 		MaxStoragePrice:  types.NewCurrency64(3000000000),
@@ -88,50 +88,50 @@ func TestHostScoreV2(t *testing.T) {
 	}
 
 	// assert collateral affects the score
-	h1 = newHost(test.NewV2HostSettings()) // reset
+	h1 = newHost(test.NewHostSettings()) // reset
 	h1.V2Settings.Prices.Collateral = h1.V2Settings.Prices.Collateral.Div64(1000)
 	if hostScore(cfg, gs, h1, redundancy).Score() >= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert interactions affect the score
-	h1 = newHost(test.NewV2HostSettings()) // reset
+	h1 = newHost(test.NewHostSettings()) // reset
 	h1.Interactions.SuccessfulInteractions++
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert uptime affects the score
-	h2 = newHost(test.NewV2HostSettings()) // reset
+	h2 = newHost(test.NewHostSettings()) // reset
 	h2.Interactions.SecondToLastScanSuccess = false
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() || ageScore(h1) != ageScore(h2) {
 		t.Fatal("unexpected")
 	}
 
 	// assert version doesn't affect score for v2 hosts
-	h1 = newHost(test.NewV2HostSettings()) // reset
-	h2 = newHost(test.NewV2HostSettings()) // reset
+	h1 = newHost(test.NewHostSettings()) // reset
+	h2 = newHost(test.NewHostSettings()) // reset
 	h2.V2Settings.ProtocolVersion = [3]uint8{0, 0, 0}
 	if hostScore(cfg, gs, h1, redundancy).Score() != hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert remaining storage affects the score.
-	h1 = newHost(test.NewV2HostSettings()) // reset
+	h1 = newHost(test.NewHostSettings()) // reset
 	h2.V2Settings.RemainingStorage = 100
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert MaxCollateral affects the score.
-	h2 = newHost(test.NewV2HostSettings()) // reset
+	h2 = newHost(test.NewHostSettings()) // reset
 	h2.V2Settings.MaxCollateral = types.ZeroCurrency
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")
 	}
 
 	// assert price affects the score.
-	h2 = newHost(test.NewV2HostSettings()) // reset
+	h2 = newHost(test.NewHostSettings()) // reset
 	h2.V2Settings.Prices.IngressPrice = types.Siacoins(1)
 	if hostScore(cfg, gs, h1, redundancy).Score() <= hostScore(cfg, gs, h2, redundancy).Score() {
 		t.Fatal("unexpected")

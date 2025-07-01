@@ -65,8 +65,8 @@ func TestSQLHostDB(t *testing.T) {
 	h, err := ss.Host(ctx, hk)
 	if err != nil {
 		t.Fatal(err)
-	} else if h.V2SiamuxAddr() != "address" {
-		t.Fatalf("unexpected address: %v", h.V2SiamuxAddr())
+	} else if h.SiamuxAddr() != "address" {
+		t.Fatalf("unexpected address: %v", h.SiamuxAddr())
 	} else if h.LastAnnouncement.IsZero() {
 		t.Fatal("last announcement not set")
 	}
@@ -98,7 +98,7 @@ func TestSQLHostDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h2.V2SiamuxAddr() != h.V2SiamuxAddr() {
+	if h2.SiamuxAddr() != h.SiamuxAddr() {
 		t.Fatal("wrong net address")
 	}
 	if h2.KnownSince.IsZero() {
@@ -114,7 +114,7 @@ func TestSQLHostDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h3.V2SiamuxAddr() != "na" {
+	if h3.SiamuxAddr() != "na" {
 		t.Fatal("wrong net address")
 	}
 	if h3.KnownSince.IsZero() {
@@ -417,7 +417,7 @@ func TestUsableHosts(t *testing.T) {
 		hks = append(hks, hk)
 
 		// add host scan
-		hs := test.NewV2HostSettings()
+		hs := test.NewHostSettings()
 		s1 := newTestScan(hk, time.Now(), hs, true)
 		if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
 			t.Fatal(err)
@@ -457,7 +457,7 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != hks[0] {
 		t.Fatal("unexpected", hosts)
-	} else if hosts[0].V2SiamuxAddr() != "foo.com:9983" {
+	} else if hosts[0].SiamuxAddr() != "foo.com:9983" {
 		t.Fatal("unexpected", hosts)
 	}
 
@@ -468,12 +468,12 @@ func TestUsableHosts(t *testing.T) {
 
 	// assert h1 is not gouging
 	h1 := hosts[0]
-	if gc.CheckV2(h1.V2HS).Gouging() {
+	if gc.Check(h1.V2HS).Gouging() {
 		t.Fatal("unexpected")
 	}
 
 	// record a scan for h1 to make it gouging
-	hs := test.NewV2HostSettings()
+	hs := test.NewHostSettings()
 	hs.Prices.IngressPrice = gs.MaxUploadPrice
 	s1 := newTestScan(h1.PublicKey, time.Now(), hs, true)
 	if err := ss.RecordHostScans(context.Background(), []api.HostScan{s1}); err != nil {
@@ -490,7 +490,7 @@ func TestUsableHosts(t *testing.T) {
 
 	// assert h1 is now gouging
 	h1 = hosts[0]
-	if !gc.CheckV2(h1.V2HS).Gouging() {
+	if !gc.Check(h1.V2HS).Gouging() {
 		t.Fatal("unexpected", h1.V2HS.Prices.IngressPrice, gs.MaxUploadPrice)
 	}
 
@@ -570,7 +570,7 @@ func TestRecordScan(t *testing.T) {
 
 	// Record a scan.
 	firstScanTime := time.Now().UTC()
-	settings := test.NewV2HostSettings()
+	settings := test.NewHostSettings()
 	settings.Prices.TipHeight = 123
 	if err := ss.RecordHostScans(ctx, []api.HostScan{newTestScan(hk, firstScanTime, settings, true)}); err != nil {
 		t.Fatal(err)

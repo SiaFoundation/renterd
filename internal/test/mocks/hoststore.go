@@ -102,7 +102,3 @@ func (h *Host) FetchRevision(ctx context.Context, fcid types.FileContractID) (ty
 func (h *Host) FundAccount(ctx context.Context, balance types.Currency, rev *types.FileContractRevision) error {
 	return errors.New("implement when needed")
 }
-
-func (h *Host) SyncAccount(ctx context.Context, rev *types.FileContractRevision) error {
-	return errors.New("implement when needed")
-}

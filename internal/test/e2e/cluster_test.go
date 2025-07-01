@@ -296,7 +296,7 @@ func TestNewTestCluster(t *testing.T) {
 			t.Fatal("usable hosts don't have any reasons set")
 		} else if reflect.DeepEqual(hi, api.Host{}) {
 			t.Fatal("host wasn't set")
-		} else if hi.IsV2() && hi.V2Settings.Release == "" {
+		} else if hi.V2Settings.Release == "" {
 			t.Fatal("release should be set")
 		}
 	}
@@ -2555,8 +2555,8 @@ func TestHostScan(t *testing.T) {
 
 		h, err := b.Host(context.Background(), hk)
 		tt.OK(err)
-		if !strings.HasPrefix(h.V2SiamuxAddr(), newAddr) && !strings.HasPrefix(h.V2SiamuxAddr(), newAddr) {
-			return fmt.Errorf("expected net address to be %v, got '%v' and '%v'", newAddr, h.V2SiamuxAddr(), h.V2SiamuxAddr())
+		if !strings.HasPrefix(h.SiamuxAddr(), newAddr) && !strings.HasPrefix(h.SiamuxAddr(), newAddr) {
+			return fmt.Errorf("expected net address to be %v, got '%v' and '%v'", newAddr, h.SiamuxAddr(), h.SiamuxAddr())
 		}
 		return nil
 	})

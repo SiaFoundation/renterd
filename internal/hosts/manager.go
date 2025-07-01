@@ -120,7 +120,7 @@ func (c *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, 
 			return types.ZeroCurrency, err
 		}
 
-		res, err := c.rhp4.ReadSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.acc.Token(), w, root, offset, length)
+		res, err := c.rhp4.ReadSector(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.acc.Token(), w, root, offset, length)
 		if err != nil {
 			return types.ZeroCurrency, err
 		}
@@ -129,7 +129,7 @@ func (c *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, 
 }
 
 func (c *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr())
+	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.SiamuxAddr())
 	if err != nil {
 		return rhpv4.HostPrices{}, err
 	}
@@ -137,7 +137,7 @@ func (c *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, er
 }
 
 func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv4.SectorSize]byte) error {
-	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), c.fcid)
+	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), c.fcid)
 	if err != nil {
 		return errors.Join(err, rhp4.ErrFailedToFetchRevision)
 	}
@@ -153,13 +153,13 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 			return types.ZeroCurrency, err
 		}
 
-		res, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.acc.Token(), utils.NewReaderLen(sector[:]), rhpv4.SectorSize)
+		res, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.acc.Token(), utils.NewReaderLen(sector[:]), rhpv4.SectorSize)
 		if err != nil {
 			return types.ZeroCurrency, fmt.Errorf("failed to write sector: %w", err)
 		}
 		cost := res.Usage.RenterCost()
 
-		res2, err := c.rhp4.AppendSectors(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr(), prices, c.rk, rev, []types.Hash256{res.Root})
+		res2, err := c.rhp4.AppendSectors(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.rk, rev, []types.Hash256{res.Root})
 		if err != nil {
 			return cost, fmt.Errorf("failed to write sector: %w", err)
 		}
@@ -170,7 +170,7 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 }
 
 func (c *hostV2UploadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.V2SiamuxAddr())
+	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.SiamuxAddr())
 	if err != nil {
 		return rhpv4.HostPrices{}, err
 	}

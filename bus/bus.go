@@ -548,7 +548,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	fee := b.w.RecommendedFee().Mul64(10e3)
 
 	// fetch revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.V2SiamuxAddr(), fcid)
+	rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.SiamuxAddr(), fcid)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -632,18 +632,18 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
 	// fetch the revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.SiamuxAddr(), c.ID)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
 
 	// fetch prices and check them
-	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.V2SiamuxAddr())
+	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.SiamuxAddr())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
-	if gb := gc.CheckV2(settings); gb.Gouging() {
+	if gb := gc.Check(settings); gb.Gouging() {
 		return api.ContractMetadata{}, errors.New(gb.String())
 	}
 	prices := settings.Prices
@@ -673,7 +673,7 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 	}
 
 	var res cRhp4.RPCRefreshContractResult
-	res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
+	res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
 		ContractID: c.ID,
 		Allowance:  renterFunds,
 		Collateral: collateral,
@@ -700,24 +700,24 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 	}, nil
 }
 
-func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds types.Currency, endHeight uint64) (api.ContractMetadata, error) {
+func (b *Bus) renewContract(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds types.Currency, endHeight uint64) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
 	// fetch the revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.V2SiamuxAddr(), c.ID)
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.SiamuxAddr(), c.ID)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
 
 	// fetch prices and check them
-	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.V2SiamuxAddr())
+	settings, err := b.rhp4Client.Settings(ctx, h.PublicKey, h.SiamuxAddr())
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
 	gc := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState)
-	if gb := gc.CheckV2(settings); gb.Gouging() {
+	if gb := gc.Check(settings); gb.Gouging() {
 		return api.ContractMetadata{}, errors.New(gb.String())
 	}
 	prices := settings.Prices
@@ -738,7 +738,7 @@ func (b *Bus) renewContractV2(ctx context.Context, cs consensus.State, h api.Hos
 	}
 
 	var res cRhp4.RPCRenewContractResult
-	res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.V2SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
+	res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
 		ContractID:  c.ID,
 		Allowance:   renterFunds,
 		Collateral:  collateral,

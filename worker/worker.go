@@ -797,7 +797,7 @@ func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.He
 func (w *Worker) SyncAccount(ctx context.Context, fcid types.FileContractID, host api.HostInfo) error {
 	account := w.accounts.ForHost(host.PublicKey)
 	return account.WithSync(func() (types.Currency, error) {
-		return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.V2SiamuxAddr(), rhpv4.Account(account.ID()))
+		return w.rhp4Client.AccountBalance(ctx, host.PublicKey, host.SiamuxAddr(), rhpv4.Account(account.ID()))
 	})
 }
 
