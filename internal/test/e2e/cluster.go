@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/alerts"
@@ -618,10 +619,20 @@ func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg con
 
 // announceHosts configures hosts with default settings and announces them to
 // the group
-func announceHosts(hosts []*Host) error {
+func announceHosts(cs consensus.State, hosts []*Host) error {
 	for _, host := range hosts {
-		// TODO: announce
-		_ = host
+		txn := types.V2Transaction{
+			Attestations: []types.Attestation{
+				chain.V2HostAnnouncement([]chain.NetAddress{{
+					Address:  host.RHPv4Addr(),
+					Protocol: siamux.Protocol,
+				}}).ToAttestation(cs, host.privKey),
+			},
+			MinerFee: types.Siacoins(1),
+		}
+		if err := host.wallet.BroadcastV2TransactionSet(cs.Index, []types.V2Transaction{txn}); err != nil {
+			return fmt.Errorf("failed to announce host %s: %w", host.PublicKey(), err)
+		}
 	}
 	return nil
 }
@@ -791,7 +802,7 @@ func (c *TestCluster) AddHost(h *Host) {
 	})
 
 	// Announce hosts.
-	c.tt.OK(announceHosts([]*Host{h}))
+	c.tt.OK(announceHosts(c.cm.TipState(), []*Host{h}))
 
 	// Mine a block and wait until the host shows up.
 	c.MineBlocks(1)

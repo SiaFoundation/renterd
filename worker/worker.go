@@ -39,12 +39,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	defaultRevisionFetchTimeout = 30 * time.Second
-
-	lockingPrioritySyncing = 30
-)
-
 var (
 	ErrShuttingDown = errors.New("worker is shutting down")
 )
