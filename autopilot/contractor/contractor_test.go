@@ -114,7 +114,6 @@ func TestShouldArchive(t *testing.T) {
 			WindowStart:    30,
 			WindowEnd:      35,
 			RevisionNumber: 1,
-			V2:             true,
 		},
 		Revision: &api.Revision{
 			RevisionNumber: 1,
@@ -165,13 +164,6 @@ func TestShouldArchive(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	}
 	c1.State = api.ContractStateActive
-
-	// passed v2 require height
-	c1.V2 = false
-	err = c.shouldArchive(c1, 19, n)
-	if err != nil {
-		t.Fatal("unexpected error", err)
-	}
 }
 
 func TestShouldForgiveFailedRenewal(t *testing.T) {

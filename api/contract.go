@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 
 	"go.sia.tech/core/types"
@@ -46,7 +47,6 @@ type (
 	ContractMetadata struct {
 		ID      types.FileContractID `json:"id"`
 		HostKey types.PublicKey      `json:"hostKey"`
-		V2      bool                 `json:"v2"`
 
 		ProofHeight    uint64               `json:"proofHeight"`
 		RenewedFrom    types.FileContractID `json:"renewedFrom"`
@@ -93,6 +93,16 @@ type (
 		ValidRenterPayout types.Currency `json:"validRenterPayout"`
 	}
 )
+
+func (cm ContractMetadata) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ContractMetadata
+		V2 bool `json:"v2"`
+	}{
+		ContractMetadata: cm,
+		V2:               true, // COMPATIBILITY: can be removed in v3.0.0
+	})
+}
 
 type (
 	// ContractAcquireRequest is the request type for the /contract/acquire

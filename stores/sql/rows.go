@@ -60,7 +60,6 @@ func (r *ContractRow) ContractMetadata() api.ContractMetadata {
 	return api.ContractMetadata{
 		ID:      types.FileContractID(r.FCID),
 		HostKey: types.PublicKey(r.HostKey),
-		V2:      r.V2,
 
 		ContractPrice:      types.Currency(r.ContractPrice),
 		InitialRenterFunds: types.Currency(r.InitialRenterFunds),
