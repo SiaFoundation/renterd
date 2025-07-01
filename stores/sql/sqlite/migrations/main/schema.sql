@@ -17,8 +17,7 @@ CREATE TABLE `hosts` (
 `successful_interactions` real,
 `failed_interactions` real,
 `lost_sectors` integer,
-`last_announcement` datetime,
-`net_address` text);
+`last_announcement` datetime);
 CREATE INDEX `idx_hosts_recent_scan_failures` ON `hosts`(`recent_scan_failures`);
 CREATE INDEX `idx_hosts_recent_downtime` ON `hosts`(`recent_downtime`);
 CREATE INDEX `idx_hosts_scanned` ON `hosts`(`scanned`);
