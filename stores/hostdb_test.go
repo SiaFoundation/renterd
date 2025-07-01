@@ -139,7 +139,7 @@ func TestHosts(t *testing.T) {
 				t.Fatal(err)
 			}
 		case 3:
-			if err := ss.announceV2Host(hk, na); err != nil {
+			if err := ss.announceHost(hk, na); err != nil {
 				t.Fatal(err)
 			}
 		default:
@@ -1307,17 +1307,8 @@ func (s *testSQLStore) addTestHosts(n int) (keys []types.PublicKey, err error) {
 	return
 }
 
-// announceHost adds a host announcement to the database.
-func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
-	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
-		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
-			return tx.UpdateHost(hk, na, nil, 42, types.BlockID{1, 2, 3}, time.Now().UTC().Round(time.Second))
-		})
-	})
-}
-
 // announceHost adds a v2 host announcement to the database.
-func (s *testSQLStore) announceV2Host(hk types.PublicKey, na string) error {
+func (s *testSQLStore) announceHost(hk types.PublicKey, na string) error {
 	return s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 		return tx.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
 			return tx.UpdateHost(hk, "", chain.V2HostAnnouncement{
