@@ -502,13 +502,6 @@ func (a *Account) WithWithdrawal(amtFn func() (types.Currency, error)) error {
 	a.rwmu.RLock()
 	defer a.rwmu.RUnlock()
 
-	// return early if the account needs to sync
-	a.mu.Lock()
-	if a.acc.RequiresSync {
-		a.mu.Unlock()
-		return fmt.Errorf("%w; account requires resync", rhp3.ErrBalanceInsufficient)
-	}
-
 	// return early if our account is not funded
 	if a.acc.Balance.Cmp(big.NewInt(0)) <= 0 {
 		a.mu.Unlock()
