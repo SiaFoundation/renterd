@@ -617,7 +617,6 @@ func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP strin
 		ContractPrice:      res.Usage.RenterCost(),
 		InitialRenterFunds: renterFunds,
 		Usability:          api.ContractUsabilityGood,
-		V2:                 true,
 	}, nil
 }
 
@@ -696,7 +695,6 @@ func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.H
 		ContractPrice:      settings.Prices.ContractPrice,
 		InitialRenterFunds: contract.Revision.RenterOutput.Value,
 		Usability:          api.ContractUsabilityGood,
-		V2:                 true,
 	}, nil
 }
 
@@ -762,7 +760,6 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, h api.Host,
 		ContractPrice:      settings.Prices.ContractPrice,
 		InitialRenterFunds: contract.Revision.RenterOutput.Value,
 		Usability:          api.ContractUsabilityGood,
-		V2:                 true,
 	}, nil
 }
 
