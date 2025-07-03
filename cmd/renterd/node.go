@@ -288,17 +288,16 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		return nil, nil, err
 	}
 
-	// create consensus directory
-	consensusDir := filepath.Join(cfg.Directory, "consensus")
-	if err := os.MkdirAll(consensusDir, 0700); err != nil {
-		return nil, nil, err
+	// create renterd directory
+	if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
+		return nil, nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// migrate consensus database if necessary
-	migrateConsensusDatabase(sqlStore, consensusDir, logger)
+	migrateConsensusDatabase(cfg.Directory, logger)
 
 	// create chain database
-	chainPath := filepath.Join(consensusDir, "blockchain.db")
+	chainPath := filepath.Join(cfg.Directory, "consensus.db")
 	bdb, err := coreutils.OpenBoltChainDB(chainPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
@@ -552,35 +551,30 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 	}, nil
 }
 
-func migrateConsensusDatabase(store *stores.SQLStore, consensusDir string, logger *zap.Logger) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	oldConsensus, err := os.Stat(filepath.Join(consensusDir, "consensus.db"))
+func migrateConsensusDatabase(dir string, logger *zap.Logger) error {
+	oldConsensusDir := filepath.Join(dir, "consensus")
+	oldPath := filepath.Join(oldConsensusDir, "blockchain.db")
+	_, err := os.Stat(oldPath)
 	if os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
 		return err
 	}
 
-	logger.Warn("found old consensus.db, indicating a migration is necessary")
+	logger.Warn("found old blockchain.db, migrating to new location")
 
-	// reset chain state
-	logger.Warn("Resetting chain state...")
-	if err := store.ResetChainState(ctx); err != nil {
-		return err
-	}
-	logger.Warn("Chain state was successfully reset.")
+	// delete anything at the destination
+	newPath := filepath.Join(dir, "consensus.db")
+	_ = os.Remove(newPath)
 
-	// remove consensus.db and consensus.log file
-	logger.Warn("Removing consensus database...")
-	_ = os.RemoveAll(filepath.Join(consensusDir, "consensus.log")) // ignore error
-	if err := os.Remove(filepath.Join(consensusDir, "consensus.db")); err != nil {
-		return err
+	// rename the old database to the new location
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("failed to rename old blockchain.db: %w", err)
 	}
 
-	logger.Warn(fmt.Sprintf("Old 'consensus.db' was successfully removed, reclaimed %v of disk space.", humanReadableSize(int(oldConsensus.Size()))))
-	logger.Warn("ATTENTION: consensus will now resync from scratch, this process may take several hours to complete")
+	// delete dir
+	_ = os.RemoveAll(oldConsensusDir)
+
 	return nil
 }
 
