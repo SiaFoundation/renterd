@@ -98,7 +98,7 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 	}
 
 	// calculate number of outputs
-	amount := contractor.InitialContractFunding.Mul64(10)
+	amount := contractor.InitialContractFunding
 	numOutputs := min(balance.Div(amount).Big().Uint64(), w.desiredNumOutputs)
 
 	// skip maintenance if wallet balance is too low
