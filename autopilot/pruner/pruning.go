@@ -167,7 +167,7 @@ func (p *Pruner) performContractPruning(ctx context.Context) {
 
 	// log total pruned
 	if total > 0 {
-		log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, humanReadableSize(int(total)), len(prunable)))
+		log.Info(fmt.Sprintf("pruned %d (%s) from %v contracts", total, utils.HumanReadableSize(int(total)), len(prunable)))
 	}
 }
 
@@ -224,18 +224,4 @@ func (p *Pruner) pruneContract(ctx context.Context, fcid types.FileContractID, h
 	}
 
 	return res.Pruned, nil
-}
-
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }
