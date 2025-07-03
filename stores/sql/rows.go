@@ -13,7 +13,6 @@ type ContractRow struct {
 	FCID    FileContractID
 	HostID  *int64
 	HostKey PublicKey
-	V2      bool
 
 	// state fields
 	ArchivalReason NullableString

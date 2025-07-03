@@ -135,10 +135,6 @@ func (tc *TestCluster) ContractRoots(ctx context.Context, fcid types.FileContrac
 	return slices.Clone(state.Roots), nil
 }
 
-func (tc *TestCluster) IsPassedV2AllowHeight() bool {
-	return tc.cm.Tip().Height >= tc.network.HardforkV2.AllowHeight
-}
-
 func (tc *TestCluster) ShutdownAutopilot(ctx context.Context) {
 	tc.tt.Helper()
 	for _, fn := range tc.autopilotShutdownFns {

@@ -112,7 +112,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 	rhp4Listener, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create rhp3 listener: %w", err)
+		return nil, fmt.Errorf("failed to create listener: %w", err)
 	}
 
 	settings := testutil.NewEphemeralSettingsReporter()

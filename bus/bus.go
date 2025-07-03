@@ -620,12 +620,7 @@ func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP strin
 	}, nil
 }
 
-func (b *Bus) isPassedV2AllowHeight() bool {
-	cs := b.cm.TipState()
-	return cs.Index.Height >= cs.Network.HardforkV2.AllowHeight
-}
-
-func (b *Bus) refreshContractV2(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency) (api.ContractMetadata, error) {
+func (b *Bus) refreshContract(ctx context.Context, cs consensus.State, h api.Host, gp api.GougingParams, c api.ContractMetadata, renterFunds, minNewCollateral types.Currency) (api.ContractMetadata, error) {
 	// derive the renter key
 	renterKey := b.masterKey.DeriveContractKey(c.HostKey)
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
