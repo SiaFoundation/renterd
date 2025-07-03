@@ -399,7 +399,6 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 			}
 
 			// verify txn and broadcast it
-			_, err = s.cm.AddV2PoolTransactions(basis, set)
 			err = s.wallet.BroadcastV2TransactionSet(basis, set)
 			if err != nil &&
 				(strings.Contains(err.Error(), "has already been resolved") ||
