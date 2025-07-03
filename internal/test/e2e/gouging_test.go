@@ -116,10 +116,8 @@ func TestGouging(t *testing.T) {
 	tt.OK(err)
 	if resp.Recommendation == nil {
 		t.Fatal("expected recommendation")
-	} else if cluster.IsPassedV2AllowHeight() && resp.Unusable.Gouging.Upload != 3 {
+	} else if resp.Unusable.Gouging.Upload != 3 {
 		t.Fatalf("expected 3 gouging errors, got %+v", resp.Unusable.Gouging.Upload)
-	} else if !cluster.IsPassedV2AllowHeight() && resp.Unusable.Gouging.Gouging != 3 {
-		t.Fatalf("expected 3 gouging errors, got %+v", resp.Unusable.Gouging.Gouging)
 	}
 
 	// set optimised settings

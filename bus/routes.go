@@ -365,54 +365,29 @@ func (b *Bus) walletSendSiacoinsHandler(jc jape.Context) {
 		}
 	}
 
-	// send V2 transaction if we're passed the V2 hardfork allow height
-	if b.isPassedV2AllowHeight() {
-		txn := types.V2Transaction{
-			MinerFee: minerFee,
-			SiacoinOutputs: []types.SiacoinOutput{
-				{Address: req.Address, Value: req.Amount},
-			},
-		}
-		// fund and sign transaction
-		basis, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
-		if jc.Check("failed to fund transaction", err) != nil {
-			return
-		}
-		b.w.SignV2Inputs(&txn, toSign)
-		basis, txnset, err := b.cm.V2TransactionSet(basis, txn)
-		if jc.Check("failed to get parents for funded transaction", err) != nil {
-			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-			return
-		}
-		// verify the transaction and add it to the transaction pool
-		if err := b.w.BroadcastV2TransactionSet(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
-			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-			return
-		}
-		jc.Encode(txn.ID())
-	} else {
-		// build transaction
-		txn := types.Transaction{
-			MinerFees: []types.Currency{minerFee},
-			SiacoinOutputs: []types.SiacoinOutput{
-				{Address: req.Address, Value: req.Amount},
-			},
-		}
-		toSign, err := b.w.FundTransaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
-		if jc.Check("failed to fund transaction", err) != nil {
-			return
-		}
-		b.w.SignTransaction(&txn, toSign, types.CoveredFields{WholeTransaction: true})
-		// shouldn't be necessary to get parents since the transaction is
-		// not using unconfirmed outputs, but good practice
-		txnset := append(b.cm.UnconfirmedParents(txn), txn)
-		// broadcast the transaction
-		if jc.Check("failed to broadcast transaction set", b.w.BroadcastTransactionSet(txnset)) != nil {
-			b.w.ReleaseInputs([]types.Transaction{txn}, nil)
-			return
-		}
-		jc.Encode(txn.ID())
+	txn := types.V2Transaction{
+		MinerFee: minerFee,
+		SiacoinOutputs: []types.SiacoinOutput{
+			{Address: req.Address, Value: req.Amount},
+		},
 	}
+	// fund and sign transaction
+	basis, toSign, err := b.w.FundV2Transaction(&txn, req.Amount.Add(minerFee), req.UseUnconfirmed)
+	if jc.Check("failed to fund transaction", err) != nil {
+		return
+	}
+	b.w.SignV2Inputs(&txn, toSign)
+	basis, txnset, err := b.cm.V2TransactionSet(basis, txn)
+	if jc.Check("failed to get parents for funded transaction", err) != nil {
+		b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+		return
+	}
+	// verify the transaction and add it to the transaction pool
+	if err := b.w.BroadcastV2TransactionSet(basis, txnset); jc.Check("failed to add v2 transaction set", err) != nil {
+		b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+		return
+	}
+	jc.Encode(txn.ID())
 }
 
 func (b *Bus) walletRedistributeHandler(jc jape.Context) {
@@ -1090,7 +1065,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 
 	var contract api.ContractMetadata
 	if c.EndHeight() == rrr.EndHeight {
-		contract, err = b.refreshContractV2(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
+		contract, err = b.refreshContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
 	} else {
 		contract, err = b.renewContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
 	}
