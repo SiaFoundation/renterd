@@ -905,7 +905,7 @@ func performContractFormations(ctx *mCtx, bus Database, cr contractReviser, hf h
 		_, proceed, err := cr.formContract(ctx, hs, candidate.host, minInitialContractFunds, logger)
 		if err != nil {
 			if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
-				logger.Warn("failed to form contract due to insufficient confirmed funds")
+				logger.With(zap.Error(err)).Warn("failed to form contract due to insufficient confirmed funds")
 			} else {
 				logger.With(zap.Error(err)).Error("failed to form contract")
 			}
