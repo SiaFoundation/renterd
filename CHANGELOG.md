@@ -1,3 +1,15 @@
+## 2.5.0 (2025-07-03)
+
+### Features
+
+- Remove legacy RHP2 and RHP3 code
+- Renamed blockchain.db to consensus.db and moved it out of the consensus subdirectory
+
+### Fixes
+
+- Broadcast formation set to peers
+- Only broadcast contract revisions for active contracts
+
 ## 2.4.0 (2025-07-01)
 
 ### Features
