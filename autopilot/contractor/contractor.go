@@ -189,7 +189,6 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 	// form contract
 	contract, err := c.cm.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
 	if err != nil {
-		logger.Errorw(fmt.Sprintf("contract formation failed, err: %v", err), "hk", hk)
 		return api.ContractMetadata{}, !utils.IsErr(err, wallet.ErrNotEnoughFunds), err
 	}
 
@@ -905,12 +904,17 @@ func performContractFormations(ctx *mCtx, bus Database, cr contractReviser, hf h
 
 		_, proceed, err := cr.formContract(ctx, hs, candidate.host, minInitialContractFunds, logger)
 		if err != nil {
-			logger.With(zap.Error(err)).Error("failed to form contract")
-			continue
-		}
-		if !proceed {
-			logger.Error("not proceeding with contract formation")
-			break
+			if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
+				logger.Warn("failed to form contract due to insufficient confirmed funds")
+			} else {
+				logger.With(zap.Error(err)).Error("failed to form contract")
+			}
+			if proceed {
+				continue
+			} else {
+				logger.Warn("skipping remaining contract formations")
+				break
+			}
 		}
 
 		// add new contract and host
