@@ -88,7 +88,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	// initialise directory
 	err := os.MkdirAll(cfg.Directory, 0700)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
+		return nil, fmt.Errorf("failed to create directory %q: %w", cfg.Directory, err)
 	}
 
 	// initialise logger
@@ -600,20 +600,6 @@ func defaultDataDirectory(fp string) string {
 	default:
 		return "."
 	}
-}
-
-func humanReadableSize(b int) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func listenTCP(addr string, logger *zap.Logger) (net.Listener, error) {
