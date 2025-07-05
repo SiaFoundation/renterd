@@ -603,6 +603,7 @@ func (b *Bus) formContract(ctx context.Context, hk types.PublicKey, hostIP strin
 	if err != nil {
 		return api.ContractMetadata{}, fmt.Errorf("failed to form contract: %w", err)
 	} else if err = b.w.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions); err != nil {
+		b.w.ReleaseInputs(nil, res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1:])
 		return api.ContractMetadata{}, fmt.Errorf("failed to broadcast transaction set: %w", err)
 	}
 
@@ -675,6 +676,7 @@ func (b *Bus) refreshContract(ctx context.Context, cs consensus.State, h api.Hos
 	if err != nil {
 		return api.ContractMetadata{}, err
 	} else if err = b.w.BroadcastV2TransactionSet(res.RenewalSet.Basis, res.RenewalSet.Transactions); err != nil {
+		b.w.ReleaseInputs(nil, res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1:])
 		return api.ContractMetadata{}, fmt.Errorf("failed to broadcast transaction set: %w", err)
 	}
 	contract := res.Contract
@@ -740,6 +742,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, h api.Host,
 	if err != nil {
 		return api.ContractMetadata{}, err
 	} else if err = b.w.BroadcastV2TransactionSet(res.RenewalSet.Basis, res.RenewalSet.Transactions); err != nil {
+		b.w.ReleaseInputs(nil, res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1:])
 		return api.ContractMetadata{}, fmt.Errorf("failed to broadcast transaction set: %w", err)
 	}
 	contract := res.Contract
