@@ -83,7 +83,7 @@ var cfg = config.Config{
 		AnnouncementMaxAgeHours:       24 * 7 * 52, // 1 year
 		Bootstrap:                     true,
 		GatewayAddr:                   ":9981",
-		UsedUTXOExpiry:                24 * time.Hour,
+		UsedUTXOExpiry:                3 * time.Hour,
 		SlabBufferCompletionThreshold: 1 << 12,
 	},
 	Worker: config.Worker{
