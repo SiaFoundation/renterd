@@ -362,7 +362,7 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	}()
 
 	// create wallet
-	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, s, cwallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry))
+	w, err := cwallet.NewSingleAddressWallet(pk, cm, sqlStore, s, cwallet.WithReservationDuration(cfg.Bus.UsedUTXOExpiry), cwallet.WithMaxDefragUTXOs(200))
 	if err != nil {
 		return nil, nil, err
 	}
