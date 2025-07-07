@@ -417,7 +417,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	}
 	wantedOutputs := wfr.Outputs - available
 
-	txns, toSign, err := b.w.RedistributeV2(wantedOutputs, wfr.Amount, b.w.RecommendedFee())
+	index, txns, toSign, err := b.w.Redistribute(wantedOutputs, wfr.Amount, b.w.RecommendedFee())
 	if jc.Check("couldn't redistribute money in the wallet into the desired outputs", err) != nil {
 		return
 	} else if len(txns) == 0 {
@@ -431,8 +431,7 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 		ids = append(ids, txns[i].ID())
 	}
 
-	state := b.cm.TipState()
-	err = b.w.BroadcastV2TransactionSet(state.Index, txns)
+	err = b.w.BroadcastV2TransactionSet(index, txns)
 	if jc.Check("couldn't broadcast the transaction", err) != nil {
 		b.w.ReleaseInputs(nil, txns)
 		return
