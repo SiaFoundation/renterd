@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -395,18 +394,13 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 			basis, set, err := s.cm.V2TransactionSet(basis, txn)
 			if err != nil {
 				s.logger.Errorf("failed to get transaction set: %w", err)
+				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 				return
 			}
 
 			// verify txn and broadcast it
 			err = s.wallet.BroadcastV2TransactionSet(basis, set)
-			if err != nil &&
-				(strings.Contains(err.Error(), "has already been resolved") ||
-					strings.Contains(err.Error(), "not present in the accumulator")) {
-				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
-				s.logger.With(zap.Error(err)).Debug("failed to add contract expiration txn to pool")
-				return
-			} else if err != nil {
+			if err != nil {
 				s.logger.With(zap.Error(err)).Error("failed to add contract expiration txn to pool")
 				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 				return
