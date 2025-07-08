@@ -1,3 +1,18 @@
+## 2.5.0 (2025-07-07)
+
+### Features
+
+- Remove legacy RHP2 and RHP3 code
+- Renamed blockchain.db to consensus.db and moved it out of the consensus subdirectory
+
+### Fixes
+
+- Broadcast formation set to peers
+- Broadcast maintenance transactions
+- Configure MaxDefragUTXOs on the wallet to ensure we don't defrag as often.
+- Only broadcast contract revisions for active contracts
+- Reduced locked utxo expiry from 24 hours to 3 hours.
+
 ## 2.4.0 (2025-07-01)
 
 ### Features
