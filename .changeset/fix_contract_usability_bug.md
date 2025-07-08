@@ -2,4 +2,4 @@
 default: patch
 ---
 
-# Fix bug in contractor where a contract's usability was updated to 'bad' even if the renew/refresh failed for reasons the host could do nothing about.
+# Avoid marking contract as 'bad' if renew/refresh fails for non-host-related reasons.
