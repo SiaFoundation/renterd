@@ -913,7 +913,7 @@ func (c *TestCluster) waitForHostAccounts(hosts map[types.PublicKey]struct{}) {
 // have a contract with every host in the given hosts map
 func (c *TestCluster) waitForHostContracts(hosts map[types.PublicKey]struct{}) {
 	c.tt.Helper()
-	c.tt.Retry(3000, time.Millisecond, func() error {
+	c.tt.Retry(1000, 10*time.Millisecond, func() error {
 		contracts, err := c.Bus.Contracts(context.Background(), api.ContractsOpts{FilterMode: api.ContractFilterModeGood})
 		if err != nil {
 			return err

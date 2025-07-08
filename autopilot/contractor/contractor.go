@@ -783,20 +783,18 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 		}
 
 		// update contract usability
-		if !usable {
-			if !ourFault {
-				logger.Info("contract is not usable")
-				updateUsability(ctx, host, cm, api.ContractUsabilityBad, strings.Join(reasons, ","))
-			} else {
-				logger.Debug("contract is not usable, host is not to blame")
-				updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable due to an issue on our end")
-			}
+		if usable {
+			logger.Debug("contract is usable")
+			updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is usable")
 			continue
 		}
-
-		// we keep the contract, add the host to the filter
-		logger.Debug("contract is usable")
-		updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is usable")
+		if ourFault {
+			logger.Debug("contract is not usable, host is not to blame")
+			updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable due to an issue on our end")
+			continue
+		}
+		logger.Info("contract is not usable")
+		updateUsability(ctx, host, cm, api.ContractUsabilityBad, strings.Join(reasons, ","))
 	}
 
 	// update churn and register alert
@@ -906,11 +904,13 @@ func performContractFormations(ctx *mCtx, bus Database, cr contractReviser, hf h
 			continue
 		}
 
+		// form the contract
 		_, ourFault, err := cr.formContract(ctx, hs, candidate.host, minInitialContractFunds, logger)
-		if err != nil && ourFault {
-			logger.Warn("failed to form contract, skipping remaining contract formations", zap.Error(err))
-			break
-		} else if err != nil {
+		if err != nil {
+			if ourFault {
+				logger.Warn("failed to form contract, skipping remaining contract formations", zap.Error(err))
+				break
+			}
 			logger.Debugw("failed to form contract", zap.Error(err))
 			continue
 		}
