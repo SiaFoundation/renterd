@@ -148,6 +148,10 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 
+// formContract forms a new contract with the given host. It returns the
+// contract's metadata and potentially an error if the contract formation
+// failed. If the formation failed the returned boolean indicates whether the
+// failure was the renter's fault, e.g. the wallet being out of funds.
 func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
@@ -218,9 +222,13 @@ func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetada
 	}
 }
 
+// refreshContract refreshes the contract with the given host. It returns the
+// contract metadata of the refreshed contract or potentially an error if the
+// refresh failed. If the refresh failed the returned boolean indicates whether
+// the failure was the renter's fault, e.g. the wallet being out of funds.
 func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	if contract.Revision == nil {
-		return api.ContractMetadata{}, false, errors.New("can't refresh contract without a revision")
+		return api.ContractMetadata{}, false, errors.New("contract has no revision")
 	}
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
@@ -255,9 +263,13 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	return renewal, false, nil
 }
 
+// renewContract renews the contract with the given host. It returns the
+// contract metadata of the renewal or potentially an error if the renewal
+// failed. If the renewal failed the returned boolean indicates whether the
+// failure was the renter's fault, e.g. the wallet being out of funds.
 func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	if contract.Revision == nil {
-		return api.ContractMetadata{}, false, errors.New("can't renew contract without a revision")
+		return api.ContractMetadata{}, false, errors.New("contract has no revision")
 	}
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
@@ -777,14 +789,14 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 				updateUsability(ctx, host, cm, api.ContractUsabilityBad, strings.Join(reasons, ","))
 			} else {
 				logger.Debug("contract is not usable, host is not to blame")
-				updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable, but it's our fault")
+				updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable due to an issue on our end")
 			}
 			continue
 		}
 
 		// we keep the contract, add the host to the filter
 		logger.Debug("contract is usable")
-		updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable")
+		updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is usable")
 	}
 
 	// update churn and register alert
