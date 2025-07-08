@@ -102,8 +102,9 @@ func TestContractUsability(t *testing.T) {
 	}
 
 	// prepare custom cluster options
+	copied := test.AutopilotConfig
 	opts := clusterOptsDefault
-	opts.autopilotConfig = &test.AutopilotConfig
+	opts.autopilotConfig = &copied
 	opts.autopilotConfig.Contracts.Amount = 0
 	opts.funding = &clusterOptNoFunding
 	opts.cm = chain.NewManager(store, state)

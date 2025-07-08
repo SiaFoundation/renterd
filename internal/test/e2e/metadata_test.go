@@ -15,8 +15,7 @@ import (
 func TestObjectMetadata(t *testing.T) {
 	// create cluster
 	cluster := newTestCluster(t, testClusterOptions{
-		hosts:  test.RedundancySettings.TotalShards,
-		logger: newTestLogger(true),
+		hosts: test.RedundancySettings.TotalShards,
 	})
 	defer cluster.Shutdown()
 
