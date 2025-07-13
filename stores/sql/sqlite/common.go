@@ -21,8 +21,14 @@ var deadlockMsgs = []string{
 //go:embed all:migrations/*
 var migrationsFs embed.FS
 
+// Open opens a SQLite database at the specified path
 func Open(path string) (*dsql.DB, error) {
-	return dsql.Open("sqlite3", fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_auto_vacuum=INCREMENTAL&_cache_size=65536", path))
+	db, err := dsql.Open("sqlite3", fmt.Sprintf("file:%s?_busy_timeout=30000&_foreign_keys=1&_journal_mode=WAL&_secure_delete=false&_auto_vacuum=INCREMENTAL&_cache_size=65536", path))
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1) // prevent database is locked errors
+	return db, nil
 }
 
 func OpenEphemeral(name string) (*dsql.DB, error) {
