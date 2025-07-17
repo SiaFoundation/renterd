@@ -52,9 +52,9 @@ const (
 	// minContractGrowthRate is the minimum expected growth rate
 	// for contracts used when calculating funding. Lowering
 	// this value will mean contracts will need to be refreshed
-	// more frequently. 64 GiB is a good trade off between initial
+	// more frequently. 32 GiB is a good trade off between initial
 	// cost to both parties and the frequency of refreshes.
-	minContractGrowthRate = 64 << 30 // 64 GiB
+	minContractGrowthRate = 32 << 30
 
 	// maxContractGrowthRate is the maximum additional data
 	// allowed when adding funds for refresh or renews. This
@@ -62,15 +62,25 @@ const (
 	// is uploaded. Decreasing this will mean contracts
 	// will need to be refreshed more frequently. Increasing
 	// this will mean large contracts will be more expensive.
-	// 512 GiB is a good trade off between cost and frequency of
+	// 256 GiB is a good trade off between cost and frequency of
 	// refreshes due to how long it would take to reasonably upload
 	// that amount of data with a 10 Gbps connection.
-	maxContractGrowthRate = 512 << 30 // 512 GiB
+	maxContractGrowthRate = 256 << 30
 )
 
 var (
-	minRenterAllowance = types.Siacoins(10)          // 10 SC
-	minHostCollateral  = types.Siacoins(1).Div64(10) // 100mS
+	// minRenterAllowance is the minimum allowance the
+	// renter will use when forming, refreshing, or renewing a
+	// contract. This is because account funding is done using
+	// 1 SC increments.
+	minRenterAllowance = types.Siacoins(10) // 10 SC
+	// minHostCollateral is the minimum collateral the
+	// renter will request when forming, refreshing, or renewing a
+	// contract.
+	minHostCollateral = types.Siacoins(1)
+	// minRenewCollateral is the amount of collateral
+	// before the renter will consider renewing a contract.
+	minRenewCollateral = types.Siacoins(1).Div64(10) // 100mS
 )
 
 type ConsensusStore interface {
@@ -1001,11 +1011,11 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, s Database, c
 // contractFunding is a helper that calculates the funding and collateral
 // that go into forming, refreshing or renewing a contract.
 func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowance, minCollateral types.Currency, duration uint64) (allowance, collateral types.Currency) {
-	contractGrowth := min(max(existingData, minContractGrowthRate), maxContractGrowthRate) // 100% growth clamped to [64GiB, 512GiB]
-	additionalSectors := contractGrowth / rhpv4.SectorSize
-	uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(additionalSectors)
-	downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(additionalSectors)
-	storeCost := settings.Prices.RPCAppendSectorsCost(additionalSectors, duration).RenterCost()
+	multiplier := 1 + (existingData / minContractGrowthRate)
+	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / rhpv4.SectorSize // 100% growth clamped to [32GiB, 256GiB]
+	uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(contractGrowth)
+	downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(contractGrowth)
+	storeCost := settings.Prices.RPCAppendSectorsCost(contractGrowth, duration).RenterCost()
 	allowance = uploadCost.Add(storeCost).Add(downloadCost)
 	if allowance.Cmp(minAllowance) < 0 {
 		allowance = minAllowance // ensure we have at least the minimum allowance

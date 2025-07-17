@@ -139,7 +139,7 @@ func (c contract) IsOutOfCollateral() bool {
 	// MinCollateral
 	// TODO: after the allowheight is reached, we can use the TotalCollateral
 	// field on the V2FileContract as a reference as well
-	return c.RemainingCollateral().Cmp(minHostCollateral) <= 0
+	return c.RemainingCollateral().Cmp(minRenewCollateral) <= 0
 }
 
 func isUpForRenewal(cfg api.AutopilotConfig, endHeight, blockHeight uint64) (shouldRenew, secondHalf bool) {
