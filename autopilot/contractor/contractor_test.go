@@ -60,8 +60,9 @@ func TestContractFunding(t *testing.T) {
 			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
 				const sectors = minContractGrowthRate / rhpv4.SectorSize
 				uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+				downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
 				storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
-				expectedAllowance = uploadCost.Add(storeCost)
+				expectedAllowance = storeCost.Add(uploadCost).Add(downloadCost)
 				expectedCollateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost)
 				return
 			},
@@ -71,8 +72,9 @@ func TestContractFunding(t *testing.T) {
 			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
 				const sectors = minContractGrowthRate / rhpv4.SectorSize // value should still be minimum growth rate
 				uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+				downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
 				storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
-				expectedAllowance = uploadCost.Add(storeCost)
+				expectedAllowance = storeCost.Add(uploadCost).Add(downloadCost)
 				expectedCollateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost)
 				return
 			},
@@ -81,26 +83,13 @@ func TestContractFunding(t *testing.T) {
 			initialDataSize: 500 << 30, // 500 GiB
 			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
 				const (
-					additionalData = (500 << 30) * 2 / 10 // 20% growth
+					additionalData = 500 << 30
 					sectors        = additionalData / rhpv4.SectorSize
 				)
 				uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+				downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
 				storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
-				expectedAllowance = uploadCost.Add(storeCost)
-				expectedCollateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost)
-				return
-			},
-		},
-		{
-			initialDataSize: 500 << 30, // 500 GiB
-			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				const (
-					additionalData = (500 << 30) * 2 / 10 // 20% growth
-					sectors        = additionalData / rhpv4.SectorSize
-				)
-				uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
-				storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
-				expectedAllowance = uploadCost.Add(storeCost)
+				expectedAllowance = storeCost.Add(uploadCost).Add(downloadCost)
 				expectedCollateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost)
 				return
 			},
@@ -110,8 +99,9 @@ func TestContractFunding(t *testing.T) {
 			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
 				const sectors = maxContractGrowthRate / rhpv4.SectorSize // clamped to 512 GiB
 				uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+				downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
 				storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
-				expectedAllowance = uploadCost.Add(storeCost)
+				expectedAllowance = storeCost.Add(uploadCost).Add(downloadCost)
 				expectedCollateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost)
 				return
 			},
@@ -124,8 +114,9 @@ func TestContractFunding(t *testing.T) {
 			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
 				const sectors = maxContractGrowthRate / rhpv4.SectorSize // clamped to 512 GiB
 				uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+				downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
 				storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
-				expectedAllowance = uploadCost.Add(storeCost)
+				expectedAllowance = storeCost.Add(uploadCost).Add(downloadCost)
 				expectedCollateral = types.NewCurrency64(10) // clamped to the host's max collateral)
 				return
 			},
