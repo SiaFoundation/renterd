@@ -98,11 +98,13 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 	}
 
 	// calculate number of outputs
-	amount := contractor.InitialContractFunding
-	numOutputs := min(balance.Div(amount).Big().Uint64(), w.desiredNumOutputs)
+	amount := balance.Div64(w.desiredNumOutputs)
+	numOutputs := w.desiredNumOutputs
 
-	// skip maintenance if wallet balance is too low
-	if numOutputs < w.minNumOutputs {
+	if amount.Cmp(contractor.InitialContractFunding) < 0 {
+		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.desiredNumOutputs, contractor.InitialContractFunding.Mul64(w.desiredNumOutputs))
+		return nil
+	} else if numOutputs < w.minNumOutputs {
 		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.minNumOutputs, amount.Mul64(w.minNumOutputs))
 		return nil
 	}
