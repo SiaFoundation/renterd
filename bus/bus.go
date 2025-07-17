@@ -641,9 +641,9 @@ func (b *Bus) refreshContract(ctx context.Context, cs consensus.State, h api.Hos
 	}
 
 	// When refreshing, the remaining allowance is rolled into the new contract.
-	// The renter only needs to add the difference between the new allowance and
+	// The renter only needs to add the difference between the target allowance and
 	// the remaining allowance.
-	var additionalRenterFunds types.Currency
+	additionalRenterFunds := types.Siacoins(1) // note: it is required the renter adds something.
 	if renterFunds.Cmp(rev.RenterOutput.Value) > 0 {
 		additionalRenterFunds = renterFunds.Sub(rev.RenterOutput.Value)
 	}
