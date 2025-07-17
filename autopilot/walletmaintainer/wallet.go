@@ -9,9 +9,10 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/autopilot/contractor"
 	"go.uber.org/zap"
 )
+
+var minRedistributeValue = types.Siacoins(10)
 
 type WalletMaintainerOption func(*walletMaintainer)
 
@@ -69,8 +70,8 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 
 	// register an alert if balance is low
 	balance := wallet.Confirmed
-	if balance.Cmp(contractor.InitialContractFunding.Mul64(cfg.Contracts.Amount)) < 0 {
-		if err := w.alerter.RegisterAlert(ctx, newAccountLowBalanceAlert(wallet.Address, balance, contractor.InitialContractFunding)); err != nil {
+	if balance.Cmp(minRedistributeValue.Mul64(w.desiredNumOutputs)) < 0 {
+		if err := w.alerter.RegisterAlert(ctx, newAccountLowBalanceAlert(wallet.Address, balance, minRedistributeValue)); err != nil {
 			w.logger.Warnf("failed to register low balance alert: %v", err)
 		}
 	} else {
@@ -100,8 +101,8 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 	// calculate number of outputs
 	amount := balance.Div64(w.desiredNumOutputs)
 
-	if amount.Cmp(contractor.InitialContractFunding) < 0 {
-		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.desiredNumOutputs, contractor.InitialContractFunding.Mul64(w.desiredNumOutputs))
+	if amount.Cmp(minRedistributeValue) < 0 {
+		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.desiredNumOutputs, minRedistributeValue.Mul64(w.desiredNumOutputs))
 		return nil
 	}
 
