@@ -130,7 +130,7 @@ func TestContractFunding(t *testing.T) {
 				test.modSettings(&settings)
 			}
 			expectedAllowance, expectedCollateral := test.calc(settings)
-			allowance, collateral := contractFunding(settings, test.initialDataSize, 1)
+			allowance, collateral := contractFunding(settings, test.initialDataSize, types.ZeroCurrency, types.ZeroCurrency, 1)
 			if !allowance.Equals(expectedAllowance) {
 				t.Errorf("expected allowance %v but got %v", expectedAllowance, allowance)
 			}

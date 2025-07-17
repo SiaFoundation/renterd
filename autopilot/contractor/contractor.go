@@ -69,7 +69,8 @@ const (
 )
 
 var (
-	MinCollateral = types.Siacoins(1).Div64(10) // 100mS
+	minRenterAllowance = types.Siacoins(10)          // 10 SC
+	minHostCollateral  = types.Siacoins(1).Div64(10) // 100mS
 )
 
 type ConsensusStore interface {
@@ -188,7 +189,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logg
 	endHeight := ctx.EndHeight(cs.BlockHeight)
 	duration := endHeight - cs.BlockHeight
 
-	renterFunds, hostCollateral := contractFunding(scan.V2Settings.HostSettings, 0, duration)
+	renterFunds, hostCollateral := contractFunding(scan.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
 
 	// form contract
 	contract, err := c.cm.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
@@ -227,7 +228,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 		return api.ContractMetadata{}, false, err
 	}
 	duration := contract.EndHeight() - cs.BlockHeight
-	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, contract.Size, duration)
+	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, contract.Size, minRenterAllowance, minHostCollateral, duration)
 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, hostCollateral)
@@ -278,7 +279,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
-	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, duration)
+	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, hostCollateral)
@@ -999,17 +1000,23 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, s Database, c
 
 // contractFunding is a helper that calculates the funding and collateral
 // that go into forming, refreshing or renewing a contract.
-func contractFunding(settings rhpv4.HostSettings, existingData uint64, duration uint64) (allowance, collateral types.Currency) {
+func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowance, minCollateral types.Currency, duration uint64) (allowance, collateral types.Currency) {
 	contractGrowth := min(max(existingData, minContractGrowthRate), maxContractGrowthRate) // 100% growth clamped to [64GiB, 512GiB]
 	additionalSectors := contractGrowth / rhpv4.SectorSize
 	uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(additionalSectors)
 	downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(additionalSectors)
 	storeCost := settings.Prices.RPCAppendSectorsCost(additionalSectors, duration).RenterCost()
 	allowance = uploadCost.Add(storeCost).Add(downloadCost)
+	if allowance.Cmp(minAllowance) < 0 {
+		allowance = minAllowance // ensure we have at least the minimum allowance
+	}
 
 	collateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost) // based on store cost because uploads do not require collateral
 	if collateral.Cmp(settings.MaxCollateral) > 0 {
 		collateral = settings.MaxCollateral
+	}
+	if collateral.Cmp(minCollateral) < 0 {
+		collateral = minCollateral // ensure we have at least the minimum collateral
 	}
 	return
 }
