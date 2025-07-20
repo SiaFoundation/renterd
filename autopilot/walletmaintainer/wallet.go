@@ -99,20 +99,16 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 
 	// calculate number of outputs
 	amount := balance.Div64(w.desiredNumOutputs)
-	numOutputs := w.desiredNumOutputs
 
 	if amount.Cmp(contractor.InitialContractFunding) < 0 {
 		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.desiredNumOutputs, contractor.InitialContractFunding.Mul64(w.desiredNumOutputs))
 		return nil
-	} else if numOutputs < w.minNumOutputs {
-		w.logger.Warnf("wallet maintenance skipped, the balance of %v is too low to redistribute into outputs of %v, at a minimum we want to redistribute into %d outputs, so the balance should be at least %v", balance, amount, w.minNumOutputs, amount.Mul64(w.minNumOutputs))
-		return nil
 	}
 
 	// redistribute outputs
-	ids, err := w.bus.WalletRedistribute(ctx, int(numOutputs), amount)
+	ids, err := w.bus.WalletRedistribute(ctx, int(w.desiredNumOutputs), amount)
 	if err != nil {
-		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", int(numOutputs), amount, balance, err)
+		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", w.desiredNumOutputs, amount, balance, err)
 	}
 
 	w.logger.Infof("wallet maintenance succeeded, txns %v", ids)
