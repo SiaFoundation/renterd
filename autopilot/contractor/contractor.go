@@ -78,9 +78,9 @@ var (
 	// renter will request when forming, refreshing, or renewing a
 	// contract.
 	minHostCollateral = types.Siacoins(1)
-	// minRenewCollateral is the amount of collateral
-	// before the renter will consider renewing a contract.
-	minRenewCollateral = types.Siacoins(1).Div64(10) // 100mS
+	// minRefreshCollateral is the amount of collateral
+	// before the renter will consider refreshing a contract.
+	minRefreshCollateral = types.Siacoins(1).Div64(10) // 100mS
 )
 
 type ConsensusStore interface {
@@ -289,7 +289,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
-	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
+	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, types.ZeroCurrency, duration)
 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, hostCollateral)
