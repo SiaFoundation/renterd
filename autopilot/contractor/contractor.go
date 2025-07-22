@@ -289,7 +289,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
-	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, types.ZeroCurrency, duration)
+	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, hostCollateral)
