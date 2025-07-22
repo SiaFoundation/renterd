@@ -60,7 +60,7 @@ type (
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		RecommendedFee() types.Currency
-		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		UpdateChainState(tx wallet.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}

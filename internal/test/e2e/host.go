@@ -136,7 +136,7 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 
 	contractsV2 := testutil.NewEphemeralContractor(cm)
 	sectors := testutil.NewEphemeralSectorStore()
-	rhpv4 := rhp4.NewServer(privKey, cm, s, contractsV2, w, settings, sectors, rhp4.WithPriceTableValidity(30*time.Minute))
+	rhpv4 := rhp4.NewServer(privKey, cm, contractsV2, w, settings, sectors, rhp4.WithPriceTableValidity(30*time.Minute))
 	go siamux.Serve(rhp4Listener, rhpv4, log.Named("rhp4"))
 
 	return &Host{

@@ -125,11 +125,7 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 		return
 	}
 
-	if block.V2 == nil {
-		if jc.Check("failed to broadcast header", b.s.BroadcastHeader(block.Header())) != nil {
-			return
-		}
-	} else {
+	if block.V2 != nil {
 		if jc.Check("failed to broadcast block outline", b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))) != nil {
 			return
 		}
@@ -202,11 +198,7 @@ func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 	if jc.Decode(&txnSet) != nil {
 		return
 	}
-
-	err := b.w.BroadcastTransactionSet(txnSet)
-	if jc.Check("couldn't broadcast transaction set", err) != nil {
-		return
-	}
+	jc.Error(errors.New("v1 transactions are no longer supported"), http.StatusBadRequest)
 }
 
 func (b *Bus) bucketsHandlerGET(jc jape.Context) {
