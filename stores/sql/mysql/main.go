@@ -1161,37 +1161,26 @@ func (tx *MainDatabaseTx) UsableHosts(ctx context.Context) ([]ssql.HostInfo, err
 	return ssql.UsableHosts(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) WalletAddBroadcastedSet(ctx context.Context, txnSet wallet.BroadcastedSet) error {
+	_, err := tx.Tx.Exec(ctx, "INSERT INTO wallet_broadcasted_txnsets (created_at, block_id, height, txn_set_id, raw_transactions VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+		time.Now(), ssql.Hash256(txnSet.Basis.ID), txnSet.Basis.Height, ssql.Hash256(txnSet.ID()), ssql.TransactionSet{Set: txnSet.Transactions})
+	return err
+}
+
+func (tx *MainDatabaseTx) WalletBroadcastedSets(ctx context.Context) ([]wallet.BroadcastedSet, error) {
+	return ssql.WalletBroadcastedSets(ctx, tx.Tx)
+}
+
+func (tx *MainDatabaseTx) WalletRemoveBroadcastedSet(ctx context.Context, txnSet wallet.BroadcastedSet) error {
+	return ssql.WalletRemoveBroadcastedSet(ctx, tx.Tx, txnSet.ID())
+}
+
 func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error) {
 	return ssql.WalletEvents(ctx, tx.Tx, offset, limit)
 }
 
 func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, err error) {
 	return ssql.WalletEventCount(ctx, tx.Tx)
-}
-
-func (tx *MainDatabaseTx) WalletLockOutputs(ctx context.Context, scois []types.SiacoinOutputID, until time.Time) error {
-	stmt, err := tx.Prepare(ctx, `INSERT INTO wallet_locked_outputs (created_at, output_id, unlock_timestamp) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE unlock_timestamp = VALUES(unlock_timestamp)`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement to lock outputs: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, id := range scois {
-		if _, err := stmt.Exec(ctx, time.Now(), ssql.Hash256(id), ssql.UnixTimeMS(until)); err != nil {
-			return fmt.Errorf("failed to lock output %s: %w", id, err)
-		}
-	}
-
-	_, err = tx.Exec(ctx, `DELETE FROM wallet_locked_outputs WHERE unlock_timestamp < ?`, ssql.UnixTimeMS(time.Now()))
-	return err
-}
-
-func (tx *MainDatabaseTx) WalletLockedOutputs(ctx context.Context, threshold time.Time) ([]types.SiacoinOutputID, error) {
-	return ssql.WalletLockedOutputs(ctx, tx.Tx, threshold)
-}
-
-func (tx *MainDatabaseTx) WalletReleaseOutputs(ctx context.Context, scois []types.SiacoinOutputID) error {
-	return ssql.WalletReleaseOutputs(ctx, tx.Tx, scois)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, slices object.SlabSlices) error {

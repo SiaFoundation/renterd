@@ -2220,6 +2220,35 @@ EXISTS (
 	return hosts, nil
 }
 
+func WalletBroadcastedSets(ctx context.Context, tx sql.Tx) ([]wallet.BroadcastedSet, error) {
+	rows, err := tx.Query(ctx, "SELECT created_at, block_id, height, raw_transactions FROM wallet_broadcasted_txnsets ORDER BY created_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch broadcasted sets: %w", err)
+	}
+	defer rows.Close()
+
+	var sets []wallet.BroadcastedSet
+	for rows.Next() {
+		var ci types.ChainIndex
+		var createdAt time.Time
+		var txns TransactionSet
+		if err := rows.Scan(&createdAt, (*Hash256)(&ci.ID), &ci.Height, &txns); err != nil {
+			return nil, fmt.Errorf("failed to scan broadcasted set: %w", err)
+		}
+		sets = append(sets, wallet.BroadcastedSet{
+			Basis:         ci,
+			BroadcastedAt: createdAt,
+			Transactions:  txns.Set,
+		})
+	}
+	return sets, rows.Err()
+}
+
+func WalletRemoveBroadcastedSet(ctx context.Context, tx sql.Tx, id types.Hash256) error {
+	_, err := tx.Exec(ctx, "DELETE FROM wallet_broadcasted_txnsets WHERE txn_set_id = ?", Hash256(id))
+	return err
+}
+
 func WalletEvents(ctx context.Context, tx sql.Tx, offset, limit int) (events []wallet.Event, _ error) {
 	if limit == 0 || limit == -1 {
 		limit = math.MaxInt64
@@ -2248,43 +2277,6 @@ func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) 
 		return 0, fmt.Errorf("failed to count wallet events: %w", err)
 	}
 	return uint64(n), nil
-}
-
-func WalletLockedOutputs(ctx context.Context, tx sql.Tx, threshold time.Time) ([]types.SiacoinOutputID, error) {
-	rows, err := tx.Query(ctx, `SELECT output_id FROM wallet_locked_outputs WHERE unlock_timestamp > ?`, UnixTimeMS(threshold))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query locked outputs: %w", err)
-	}
-	defer rows.Close()
-
-	var locked []types.SiacoinOutputID
-	for rows.Next() {
-		var id types.SiacoinOutputID
-		if err := rows.Scan((*Hash256)(&id)); err != nil {
-			return nil, fmt.Errorf("failed to scan locked output: %w", err)
-		}
-		locked = append(locked, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate locked outputs: %w", err)
-	}
-
-	return locked, nil
-}
-
-func WalletReleaseOutputs(ctx context.Context, tx sql.Tx, scois []types.SiacoinOutputID) error {
-	if len(scois) == 0 {
-		return nil
-	}
-
-	var args []any
-	for _, id := range scois {
-		args = append(args, Hash256(id))
-	}
-	args = append(args, UnixTimeMS(time.Now()))
-
-	_, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM wallet_locked_outputs WHERE output_id IN (%s) OR unlock_timestamp < ?`, strings.Repeat("?, ", len(scois)-1)+"?"), args...)
-	return err
 }
 
 func scanBucket(s Scanner) (api.Bucket, error) {

@@ -453,16 +453,18 @@ CREATE TABLE `wallet_outputs` (
   KEY `idx_wallet_outputs_maturity_height` (`maturity_height`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- locked outputs
-CREATE TABLE `wallet_locked_outputs` (
+-- broadcasted transactions
+CREATE TABLE wallet_broadcasted_txnsets (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `created_at` datetime(3) DEFAULT NULL,
-  `output_id` varbinary(32) NOT NULL,
-  `unlock_timestamp` bigint NOT NULL,
+  `block_id` longblob NOT NULL,
+  `height` bigint unsigned NOT NULL,
+  `txn_set_id` longblob NOT NULL,
+  `raw_transactions` longblob NOT NULL, -- binary serialized transaction set
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_wallet_locked_outputs_output_id` (`output_id`),
-  KEY `idx_wallet_locked_outputs_unlock_timestamp` (`unlock_timestamp`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  UNIQUE KEY wallet_broadcasted_txnsets_txn_set_id (`txn_set_id`),
+  KEY wallet_broadcasted_txnsets_created_at (`created_at`),
+);
 
 -- contract elements
 CREATE TABLE `contract_elements` (

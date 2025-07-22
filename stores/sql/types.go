@@ -47,6 +47,7 @@ type (
 	FileContract   types.V2FileContract
 	ChainProtocol  chain.Protocol
 	HostSettings   rhp.HostSettings
+	TransactionSet struct{ Set []types.V2Transaction }
 
 	FileContractStateElement struct {
 		ID int64 // db_contract_id
@@ -528,4 +529,30 @@ func (hs HostSettings) Value() (driver.Value, error) {
 		return []byte("{}"), nil
 	}
 	return json.Marshal(hs)
+}
+
+// Scan scans value into a MerkleProof, implements sql.Scanner interface.
+func (txnSet *TransactionSet) Scan(value interface{}) error {
+	b, ok := value.([]byte)
+	if !ok {
+		return errors.New(fmt.Sprint("failed to unmarshal TransactionSet value:", value))
+	}
+
+	var set []types.V2Transaction
+	dec := types.NewBufDecoder(b)
+	types.DecodeSlice(dec, &set)
+	if dec.Err() != nil {
+		return fmt.Errorf("failed to decode TransactionSet: %w", dec.Err())
+	}
+	*txnSet = TransactionSet{Set: set}
+	return nil
+}
+
+// Value returns a TransactionSet value, implements driver.Valuer interface.
+func (txnSet TransactionSet) Value() (driver.Value, error) {
+	buf := new(bytes.Buffer)
+	enc := types.NewEncoder(buf)
+	types.EncodeSlice(enc, txnSet.Set)
+	err := enc.Flush()
+	return buf.Bytes(), err
 }
