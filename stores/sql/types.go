@@ -531,7 +531,7 @@ func (hs HostSettings) Value() (driver.Value, error) {
 	return json.Marshal(hs)
 }
 
-// Scan scans value into a MerkleProof, implements sql.Scanner interface.
+// Scan scans value into a TransactionSet, implements sql.Scanner interface.
 func (txnSet *TransactionSet) Scan(value interface{}) error {
 	b, ok := value.([]byte)
 	if !ok {
