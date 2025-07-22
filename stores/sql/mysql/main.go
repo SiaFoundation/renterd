@@ -1162,7 +1162,7 @@ func (tx *MainDatabaseTx) UsableHosts(ctx context.Context) ([]ssql.HostInfo, err
 }
 
 func (tx *MainDatabaseTx) WalletAddBroadcastedSet(ctx context.Context, txnSet wallet.BroadcastedSet) error {
-	_, err := tx.Tx.Exec(ctx, "INSERT INTO wallet_broadcasted_txnsets (created_at, block_id, height, txn_set_id, raw_transactions VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
+	_, err := tx.Tx.Exec(ctx, "INSERT INTO wallet_broadcasted_txnsets (created_at, block_id, height, txn_set_id, raw_transactions) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
 		time.Now(), ssql.Hash256(txnSet.Basis.ID), txnSet.Basis.Height, ssql.Hash256(txnSet.ID()), ssql.TransactionSet{Set: txnSet.Transactions})
 	return err
 }
