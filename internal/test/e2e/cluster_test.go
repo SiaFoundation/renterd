@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/autopilot/contractor"
+	"go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -2273,7 +2274,7 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 
 	// send the full balance back to the weallet
 	toSend := wr.Confirmed.Sub(types.Siacoins(1)) // leave some for the fee
-	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, false, false))
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend))
 
 	// the unconfirmed balance should have changed to slightly more than toSend
 	// since we paid a fee
@@ -2285,11 +2286,11 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	}
 
 	// try again - this should fail
-	_, err = b.SendSiacoins(context.Background(), wr.Address, toSend, false, false)
+	_, err = b.SendSiacoins(context.Background(), wr.Address, toSend)
 	tt.AssertIs(err, wallet.ErrNotEnoughFunds)
 
 	// try again - this time using unconfirmed transactions
-	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, true, false))
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, client.WithUnconfirmedTxns()))
 
 	// the unconfirmed balance should be almost the same
 	wr, err = b.Wallet(context.Background())

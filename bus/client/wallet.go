@@ -9,13 +9,43 @@ import (
 	"go.sia.tech/renterd/v2/api"
 )
 
+type (
+	// SendSiacoinOption is a functional option for the SendSiacoins method.
+	SendSiacoinOption func(*sendOptions)
+
+	sendOptions struct {
+		UseUnconfirmedTxns bool
+		SubtractMinerFee   bool
+	}
+)
+
+// WithUnconfirmedTxns indicates that unconfirmed transactions can be used when
+// sending siacoins.
+func WithUnconfirmedTxns() SendSiacoinOption {
+	return func(opts *sendOptions) {
+		opts.UseUnconfirmedTxns = true
+	}
+}
+
+// WithSubtractMinerFee indicates that the miner fee should be subtracted from
+// the amount being sent.
+func WithSubtractMinerFee() SendSiacoinOption {
+	return func(opts *sendOptions) {
+		opts.SubtractMinerFee = true
+	}
+}
+
 // SendSiacoins is a helper method that sends siacoins to the given address.
-func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types.Currency, useUnconfirmedTxns, subtractMinerFee bool) (txnID types.TransactionID, err error) {
+func (c *Client) SendSiacoins(ctx context.Context, addr types.Address, amt types.Currency, opts ...SendSiacoinOption) (txnID types.TransactionID, err error) {
+	options := &sendOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	err = c.c.POST(ctx, "/wallet/send", api.WalletSendRequest{
 		Address:          addr,
 		Amount:           amt,
-		SubtractMinerFee: subtractMinerFee,
-		UseUnconfirmed:   useUnconfirmedTxns,
+		SubtractMinerFee: options.SubtractMinerFee,
+		UseUnconfirmed:   options.UseUnconfirmedTxns,
 	}, &txnID)
 	return
 }

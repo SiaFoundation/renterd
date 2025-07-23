@@ -787,8 +787,7 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 			logger.Debug("contract is usable")
 			updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is usable")
 			continue
-		}
-		if ourFault {
+		} else if ourFault {
 			logger.Debug("contract is not usable, host is not to blame")
 			updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable due to an issue on our end")
 			continue

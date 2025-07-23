@@ -158,7 +158,7 @@ func TestContractUsability(t *testing.T) {
 	// spend all the money
 	if res, err := b.Wallet(context.Background()); err != nil {
 		tt.Fatal(err)
-	} else if _, err := b.SendSiacoins(context.Background(), types.StandardAddress(types.GeneratePrivateKey().PublicKey()), res.Unconfirmed, true, true); err != nil {
+	} else if _, err := b.SendSiacoins(context.Background(), types.StandardAddress(types.GeneratePrivateKey().PublicKey()), res.Unconfirmed, client.WithUnconfirmedTxns(), client.WithSubtractMinerFee()); err != nil {
 		tt.Fatal(err)
 	} else if err := cluster.mineBlocks(types.VoidAddress, 1); err != nil {
 		tt.Fatal(err)
