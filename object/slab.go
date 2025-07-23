@@ -2,6 +2,7 @@ package object
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"sync"
 
@@ -100,6 +101,11 @@ func (s Slab) Encode(buf []byte, shards [][]byte) {
 	rsc, _ := reedsolomon.New(int(s.MinShards), len(shards)-int(s.MinShards))
 	if err := rsc.Encode(shards); err != nil {
 		panic(err)
+	}
+	if s.MinShards == 1 {
+		for i, shard := range shards {
+			fmt.Println("shard", i, shard[:6])
+		}
 	}
 }
 
