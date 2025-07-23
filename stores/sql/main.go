@@ -30,8 +30,9 @@ import (
 )
 
 var (
-	ErrNegativeOffset  = errors.New("offset can not be negative")
-	ErrSettingNotFound = errors.New("setting not found")
+	ErrBroadcastedSetNotFound = errors.New("broadcasted set not found")
+	ErrNegativeOffset         = errors.New("offset can not be negative")
+	ErrSettingNotFound        = errors.New("setting not found")
 )
 
 // helper types
@@ -2245,7 +2246,14 @@ func WalletBroadcastedSets(ctx context.Context, tx sql.Tx) ([]wallet.Broadcasted
 }
 
 func WalletRemoveBroadcastedSet(ctx context.Context, tx sql.Tx, id types.Hash256) error {
-	_, err := tx.Exec(ctx, "DELETE FROM wallet_broadcasted_txnsets WHERE txn_set_id = ?", Hash256(id))
+	res, err := tx.Exec(ctx, "DELETE FROM wallet_broadcasted_txnsets WHERE txn_set_id = ?", Hash256(id))
+	if err != nil {
+		return fmt.Errorf("failed to remove broadcasted set: %w", err)
+	} else if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	} else if n == 0 {
+		return ErrBroadcastedSetNotFound
+	}
 	return err
 }
 
