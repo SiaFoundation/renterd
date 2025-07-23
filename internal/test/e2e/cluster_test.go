@@ -1828,7 +1828,7 @@ func TestWallet(t *testing.T) {
 
 	// Send 1 SC to an address outside our wallet.
 	sendAmt := types.HastingsPerSiacoin
-	_, err = b.SendSiacoins(context.Background(), types.Address{1, 2, 3}, sendAmt, false, false)
+	_, err = b.SendSiacoins(context.Background(), types.Address{1, 2, 3}, sendAmt)
 	tt.OK(err)
 
 	txns, err := b.WalletEvents(context.Background())
