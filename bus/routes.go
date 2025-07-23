@@ -1040,7 +1040,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	if c.EndHeight() == rrr.EndHeight {
 		contract, err = b.refreshContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
 	} else {
-		contract, err = b.renewContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
+		contract, err = b.renewContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight)
 	}
 	if jc.Check("couldn't renew/refresh contract", err) != nil {
 		return

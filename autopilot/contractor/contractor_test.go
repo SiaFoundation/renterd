@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	"go.uber.org/zap"
@@ -37,62 +38,116 @@ func TestCalculateMinScore(t *testing.T) {
 	}
 }
 
-func TestRenewFundingEstimate(t *testing.T) {
-	tests := []struct {
-		name                 string
-		minRenterFunds       uint64
-		initRenterFunds      uint64
-		remainingRenterFunds uint64
-		expected             uint64
-	}{
-		{
-			name:                 "UnusedAboveMinAboveInit",
-			minRenterFunds:       40,
-			initRenterFunds:      100,
-			remainingRenterFunds: 100,
-			expected:             50,
-		},
-		{
-			name:                 "UnusedAboveMinBelowInit",
-			minRenterFunds:       80,
-			initRenterFunds:      100,
-			remainingRenterFunds: 100,
-			expected:             80,
-		},
-		{
-			name:                 "UnusedBelowMin",
-			minRenterFunds:       0,
-			initRenterFunds:      100,
-			remainingRenterFunds: 100,
-			expected:             50,
-		},
-		{
-			name:                 "UsedUnderMin",
-			minRenterFunds:       50,
-			initRenterFunds:      10,
-			remainingRenterFunds: 0,
-			expected:             50,
-		},
-		{
-			name:                 "UsedAboveMin",
-			minRenterFunds:       50,
-			initRenterFunds:      100,
-			remainingRenterFunds: 90,
-			expected:             90,
-		},
-		{
-			name:                 "UsedUnderThreshold",
-			minRenterFunds:       0,
-			initRenterFunds:      100,
-			remainingRenterFunds: 70,
-			expected:             80,
+func TestContractFunding(t *testing.T) {
+	defaultSettings := rhpv4.HostSettings{
+		MaxCollateral: types.Siacoins(1), // unattainable
+		Prices: rhpv4.HostPrices{
+			StoragePrice: types.NewCurrency64(1), // 1 H/byte/block
+			IngressPrice: types.NewCurrency64(1), // 1 H/byte/block
+			EgressPrice:  types.NewCurrency64(1), // 1 H/byte/block
+			Collateral:   types.NewCurrency64(2), // 2 H/byte/block
 		},
 	}
+
+	calcCost := func(settings rhpv4.HostSettings, sectors uint64) (types.Currency, types.Currency) {
+		uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+		downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(sectors)
+		storeCost := settings.Prices.RPCAppendSectorsCost(sectors, 1).RenterCost()
+		expectedAllowance := storeCost.Add(uploadCost).Add(downloadCost)
+		expectedCollateral := rhpv4.MaxHostCollateral(settings.Prices, storeCost)
+		return expectedAllowance, expectedCollateral
+	}
+
+	tests := []struct {
+		name            string
+		initialDataSize uint64
+		minAllowance    types.Currency
+		minCollateral   types.Currency
+		modSettings     func(settings *rhpv4.HostSettings)
+		calc            func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency)
+	}{
+		{
+			name:            "empty contract",
+			initialDataSize: 0,
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				return calcCost(settings, minContractGrowthRate/rhpv4.SectorSize) // value should be minimum growth rate
+			},
+		},
+		{
+			name:            "clamped to min values",
+			initialDataSize: 0,
+			minAllowance:    types.Siacoins(1),
+			minCollateral:   types.Siacoins(1),
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				return types.Siacoins(1), types.Siacoins(1) // clamped to min
+			},
+		},
+		{
+			name:            "clamped to min allowance",
+			initialDataSize: 0,
+			minAllowance:    types.Siacoins(10),
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				_, expectedCollateral = calcCost(settings, minContractGrowthRate/rhpv4.SectorSize) // value should be minimum growth rate
+				return types.Siacoins(10), expectedCollateral                                      // clamped to min allowance
+			},
+		},
+		{
+			name:            "clamped to min collateral",
+			initialDataSize: 0,
+			minCollateral:   types.Siacoins(10),
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				expectedAllowance, _ = calcCost(settings, minContractGrowthRate/rhpv4.SectorSize) // value should be minimum growth rate
+				return expectedAllowance, types.Siacoins(10)                                      // clamped to min collateral
+			},
+		},
+		{
+			name:            "data less than min growth rate",
+			initialDataSize: 100,
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				return calcCost(settings, minContractGrowthRate/rhpv4.SectorSize) // value should still be minimum growth rate
+			},
+		},
+		{
+			name:            "data close to min growth rate",
+			initialDataSize: 100 << 30, // 100 GiB
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				return calcCost(settings, (128<<30)/rhpv4.SectorSize) // value should be closest multiple of 32 GiB
+			},
+		},
+		{
+			name:            "data over max growth rate",
+			initialDataSize: 500 << 30, // 500 GiB
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				return calcCost(settings, maxContractGrowthRate/rhpv4.SectorSize) // clamped to max
+			},
+		},
+		{
+			name:            "data over max growth rate clamped to max collateral",
+			initialDataSize: 3 << 40, // 3 TiB
+			modSettings: func(settings *rhpv4.HostSettings) {
+				settings.MaxCollateral = types.NewCurrency64(10) // want to test that collateral is clamped to the host's max
+			},
+			calc: func(settings rhpv4.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
+				expectedAllowance, _ = calcCost(settings, maxContractGrowthRate/rhpv4.SectorSize) // clamped to max
+				expectedCollateral = types.NewCurrency64(10)                                      // clamped to the host's max collateral)
+				return
+			},
+		},
+	}
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			renterFunds := renewFundingEstimate(types.NewCurrency64(test.minRenterFunds), types.NewCurrency64(test.initRenterFunds), types.NewCurrency64(test.remainingRenterFunds), zap.NewNop().Sugar())
-			if !renterFunds.Equals(types.NewCurrency64(test.expected)) {
-				t.Errorf("expected %v but got %v", test.expected, renterFunds)
+			settings := defaultSettings
+			if test.modSettings != nil {
+				test.modSettings(&settings)
+			}
+			expectedAllowance, expectedCollateral := test.calc(settings)
+			allowance, collateral := contractFunding(settings, test.initialDataSize, test.minAllowance, test.minCollateral, 1)
+			if !allowance.Equals(expectedAllowance) {
+				t.Errorf("expected allowance %v but got %v", expectedAllowance, allowance)
+			}
+			if !collateral.Equals(expectedCollateral) {
+				t.Errorf("expected collateral %v but got %v", expectedCollateral, collateral)
 			}
 		})
 	}
