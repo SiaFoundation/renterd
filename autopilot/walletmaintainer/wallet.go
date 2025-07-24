@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/bus/client"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +28,7 @@ type (
 	Bus interface {
 		Wallet(ctx context.Context) (api.WalletResponse, error)
 		WalletPending(ctx context.Context) (resp []wallet.Event, err error)
-		WalletRedistribute(ctx context.Context, outputs int, amount types.Currency) (ids []types.TransactionID, err error)
+		WalletRedistribute(ctx context.Context, outputs int, amount types.Currency, opts ...client.WalletRedistributeOpt) (ids []types.TransactionID, err error)
 	}
 )
 
@@ -107,7 +108,7 @@ func (w *walletMaintainer) PerformWalletMaintenance(ctx context.Context, cfg api
 	}
 
 	// redistribute outputs
-	ids, err := w.bus.WalletRedistribute(ctx, int(w.desiredNumOutputs), amount)
+	ids, err := w.bus.WalletRedistribute(ctx, int(w.desiredNumOutputs), amount, client.WithMinimum(minRedistributeValue))
 	if err != nil {
 		return fmt.Errorf("failed to redistribute wallet into %d outputs of amount %v, balance %v, err %v", w.desiredNumOutputs, amount, balance, err)
 	}

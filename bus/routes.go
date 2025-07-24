@@ -406,7 +406,9 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	}
 	var available int
 	for _, so := range spendableOutputs {
-		if so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0 {
+		gta := so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0
+		gtm := !wfr.Minimum.IsZero() && so.SiacoinOutput.Value.Cmp(wfr.Minimum) >= 0
+		if gta || gtm {
 			available++
 		}
 	}
