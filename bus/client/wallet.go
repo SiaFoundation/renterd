@@ -35,6 +35,8 @@ func (c *Client) WalletPending(ctx context.Context) (resp []wallet.Event, err er
 
 type WalletRedistributeOpt func(*api.WalletRedistributeRequest)
 
+// WithMinimum sets the minimum amount of siacoins an output should after
+// redistribution. By default the minimum equals the redistribution amount.
 func WithMinimum(minimum types.Currency) WalletRedistributeOpt {
 	return func(req *api.WalletRedistributeRequest) {
 		req.Minimum = minimum
