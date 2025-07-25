@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/autopilot/contractor"
+	"go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -2415,12 +2416,6 @@ func TestWalletRedistribute(t *testing.T) {
 	nOutputs := 0
 	for _, txn := range txns {
 		switch txn := txn.Data.(type) {
-		case wallet.EventV1Transaction:
-			for _, sco := range txn.Transaction.SiacoinOutputs {
-				if sco.Value.Equals(types.Siacoins(500e3)) {
-					nOutputs++
-				}
-			}
 		case wallet.EventV2Transaction:
 			for _, sco := range txn.SiacoinOutputs {
 				if sco.Value.Equals(types.Siacoins(500e3)) {
@@ -2439,6 +2434,14 @@ func TestWalletRedistribute(t *testing.T) {
 	// assert redistributing into 3 outputs succeeds, used to fail because we
 	// were broadcasting an empty transaction set
 	txnSet, err = cluster.Bus.WalletRedistribute(context.Background(), nOutputs, outputAmt)
+	cluster.tt.OK(err)
+	if len(txnSet) != 0 {
+		t.Fatal("txnSet should be empty")
+	}
+
+	// assert redistributing into larger outputs is a no-op if the minimum is
+	// set to the previous amount
+	txnSet, err = cluster.Bus.WalletRedistribute(context.Background(), nOutputs, outputAmt.Mul64(2), client.WithMinimum(outputAmt))
 	cluster.tt.OK(err)
 	if len(txnSet) != 0 {
 		t.Fatal("txnSet should be empty")
