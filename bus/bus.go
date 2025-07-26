@@ -118,7 +118,6 @@ type (
 
 	Syncer interface {
 		Addr() string
-		BroadcastHeader(h types.BlockHeader) error
 		BroadcastV2BlockOutline(bo gateway.V2BlockOutline) error
 		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 		Peers() []*syncer.Peer
@@ -127,14 +126,13 @@ type (
 	Wallet interface {
 		Address() types.Address
 		Balance() (wallet.Balance, error)
-		BroadcastTransactionSet([]types.Transaction) error
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		Close() error
 		FundTransaction(txn *types.Transaction, amount types.Currency, useUnconfirmed bool) ([]types.Hash256, error)
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		RecommendedFee() types.Currency
 		Redistribute(outputs int, amount, feePerByte types.Currency) (types.ChainIndex, []types.V2Transaction, [][]int, error)
-		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignTransaction(txn *types.Transaction, toSign []types.Hash256, cf types.CoveredFields)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 		SpendableOutputs() ([]types.SiacoinElement, error)

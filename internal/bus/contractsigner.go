@@ -10,7 +10,7 @@ var _ rhp.FormContractSigner = (*formContractSigner)(nil)
 type formContractSignerWallet interface {
 	FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 	RecommendedFee() types.Currency
-	ReleaseInputs(_ []types.Transaction, txns []types.V2Transaction) error
+	ReleaseInputs(_ []types.Transaction, txns []types.V2Transaction)
 	SignV2Inputs(txn *types.V2Transaction, toSign []int)
 }
 

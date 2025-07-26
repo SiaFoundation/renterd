@@ -57,14 +57,14 @@ func (c *Client) ResetLostSectors(ctx context.Context, hostKey types.PublicKey) 
 }
 
 // UpdateHostAllowlist updates the host allowlist, adding and removing the given entries.
-func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey, clear bool) (err error) {
-	err = c.c.PUT(ctx, "/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove, Clear: clear})
+func (c *Client) UpdateHostAllowlist(ctx context.Context, add, remove []types.PublicKey, empty bool) (err error) {
+	err = c.c.PUT(ctx, "/hosts/allowlist", api.UpdateAllowlistRequest{Add: add, Remove: remove, Clear: empty})
 	return
 }
 
 // UpdateHostBlocklist updates the host blocklist, adding and removing the given entries.
-func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, clear bool) (err error) {
-	err = c.c.PUT(ctx, "/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove, Clear: clear})
+func (c *Client) UpdateHostBlocklist(ctx context.Context, add, remove []string, empty bool) (err error) {
+	err = c.c.PUT(ctx, "/hosts/blocklist", api.UpdateBlocklistRequest{Add: add, Remove: remove, Clear: empty})
 	return
 }
 
