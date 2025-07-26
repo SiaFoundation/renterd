@@ -1177,6 +1177,10 @@ func (tx *MainDatabaseTx) WalletEvents(ctx context.Context, offset, limit int) (
 	return ssql.WalletEvents(ctx, tx.Tx, offset, limit)
 }
 
+func (tx *MainDatabaseTx) WalletEvent(ctx context.Context, id types.Hash256) (wallet.Event, error) {
+	return ssql.WalletEvent(ctx, tx.Tx, id)
+}
+
 func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, err error) {
 	return ssql.WalletEventCount(ctx, tx.Tx)
 }

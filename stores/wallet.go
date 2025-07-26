@@ -66,6 +66,16 @@ func (s *SQLStore) WalletEvents(offset, limit int) (events []wallet.Event, err e
 	return
 }
 
+// WalletEvent returns a wallet event by its ID. If the event does not exist,
+// ErrorNotFound is returned.
+func (s *SQLStore) WalletEvent(id types.Hash256) (event wallet.Event, err error) {
+	err = s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
+		event, err = tx.WalletEvent(context.Background(), id)
+		return
+	})
+	return
+}
+
 // WalletEventCount returns the number of events relevant to the wallet.
 func (s *SQLStore) WalletEventCount() (count uint64, err error) {
 	err = s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {

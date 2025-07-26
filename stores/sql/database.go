@@ -360,6 +360,10 @@ type (
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
 
+		// WalletEvent returns a wallet event by its ID. If the event does not exist,
+		// ErrorNotFound is returned.
+		WalletEvent(ctx context.Context, id types.Hash256) (wallet.Event, error)
+
 		// WalletEventCount returns the total number of events in the database.
 		WalletEventCount(ctx context.Context) (uint64, error)
 
