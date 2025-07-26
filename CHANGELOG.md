@@ -1,3 +1,15 @@
+## 2.6.0 (2025-07-26)
+
+### Features
+
+- Add 'Minimum' option to wallet redistribution endpoint.
+- Rebroadcast transactions periodically
+
+### Fixes
+
+- Increase funding for contracts.
+- Increase value of redistributed UTXOs.
+
 ## 2.5.0 (2025-07-07)
 
 ### Features
