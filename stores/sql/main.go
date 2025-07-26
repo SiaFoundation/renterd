@@ -2278,6 +2278,15 @@ func WalletEvents(ctx context.Context, tx sql.Tx, offset, limit int) (events []w
 	return
 }
 
+func WalletEvent(ctx context.Context, tx sql.Tx, id types.Hash256) (event wallet.Event, err error) {
+	row := tx.QueryRow(ctx, "SELECT event_id, block_id, height, inflow, outflow, type, data, maturity_height, timestamp FROM wallet_events WHERE event_id = ?", id)
+	event, err = scanWalletEvent(row)
+	if errors.Is(err, dsql.ErrNoRows) {
+		return wallet.Event{}, wallet.ErrEventNotFound
+	}
+	return
+}
+
 func WalletEventCount(ctx context.Context, tx sql.Tx) (count uint64, err error) {
 	var n int64
 	err = tx.QueryRow(ctx, "SELECT COUNT(*) FROM wallet_events").Scan(&n)
