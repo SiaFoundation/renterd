@@ -939,8 +939,8 @@ func (tx *MainDatabaseTx) UpdateContractUsability(ctx context.Context, fcid type
 	return ssql.UpdateContractUsability(ctx, tx, fcid, usability)
 }
 
-func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) error {
-	if clear {
+func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, empty bool) error {
+	if empty {
 		if _, err := tx.Exec(ctx, "DELETE FROM host_allowlist_entries"); err != nil {
 			return fmt.Errorf("failed to clear host allowlist entries: %w", err)
 		}
@@ -975,7 +975,7 @@ func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, r
 		}
 	}
 
-	if !clear && len(remove) > 0 {
+	if !empty && len(remove) > 0 {
 		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_allowlist_entries WHERE entry = ?")
 		if err != nil {
 			return fmt.Errorf("failed to prepare delete statement: %w", err)
@@ -991,8 +991,8 @@ func (tx *MainDatabaseTx) UpdateHostAllowlistEntries(ctx context.Context, add, r
 	return nil
 }
 
-func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) error {
-	if clear {
+func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, empty bool) error {
+	if empty {
 		if _, err := tx.Exec(ctx, "DELETE FROM host_blocklist_entries"); err != nil {
 			return fmt.Errorf("failed to clear host blocklist entries: %w", err)
 		}
@@ -1029,7 +1029,7 @@ func (tx *MainDatabaseTx) UpdateHostBlocklistEntries(ctx context.Context, add, r
 		}
 	}
 
-	if !clear && len(remove) > 0 {
+	if !empty && len(remove) > 0 {
 		deleteStmt, err := tx.Prepare(ctx, "DELETE FROM host_blocklist_entries WHERE entry = ?")
 		if err != nil {
 			return fmt.Errorf("failed to prepare delete statement: %w", err)
