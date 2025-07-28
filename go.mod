@@ -12,7 +12,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.29
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.15.0
+	go.sia.tech/core v0.14.3
 	go.sia.tech/coreutils v0.16.6-0.20250725192801-b7206fb99580
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.0
