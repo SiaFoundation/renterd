@@ -153,7 +153,7 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 			return types.ZeroCurrency, err
 		}
 
-		revision, usage, err := c.rhp4.AppendSectors(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.acc.Token(), c.rk, rev, utils.NewReaderLen(sector[:]))
+		revision, usage, err := c.rhp4.AppendSector(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.acc.Token(), c.rk, rev, utils.NewReaderLen(sector[:]))
 		if err != nil {
 			return usage.RenterCost(), fmt.Errorf("failed to upload sector: %w", err)
 		}
