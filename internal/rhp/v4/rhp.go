@@ -90,8 +90,8 @@ func (c *Client) FreeSectors(ctx context.Context, hk types.PublicKey, hostIP str
 	return res, err
 }
 
-// AppendSectors appends sectors a host is storing to a contract.
-func (c *Client) AppendSectors(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, sk types.PrivateKey, contract rhp.ContractRevision, rl rhp.ReaderLen) (revision types.V2FileContract, usage rhp4.Usage, _ error) {
+// AppendSector appends sectors a host is storing to a contract.
+func (c *Client) AppendSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, sk types.PrivateKey, contract rhp.ContractRevision, rl rhp.ReaderLen) (revision types.V2FileContract, usage rhp4.Usage, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
 		writeRes, err := rhp.RPCWriteSector(ctx, t, prices, token, rl, rhp4.SectorSize)
 		if err != nil {
