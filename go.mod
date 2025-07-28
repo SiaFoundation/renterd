@@ -8,15 +8,15 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
-	github.com/klauspost/reedsolomon v1.12.4
-	github.com/mattn/go-sqlite3 v1.14.28
+	github.com/klauspost/reedsolomon v1.12.5
+	github.com/mattn/go-sqlite3 v1.14.29
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.14.3
+	go.sia.tech/core v0.15.0
 	go.sia.tech/coreutils v0.16.6-0.20250725192801-b7206fb99580
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.0
-	go.sia.tech/web/renterd v0.82.1
+	go.sia.tech/web/renterd v0.84.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.40.0
 	golang.org/x/sys v0.34.0
@@ -30,7 +30,7 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.53.0 // indirect
 	github.com/quic-go/webtransport-go v0.9.0 // indirect
