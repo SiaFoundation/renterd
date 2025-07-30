@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"maps"
 	"math"
 	"net"
 	"net/http"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -809,7 +809,7 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 
 // PinnedObject returns a PinnedObject representation of the object
 // identified by the given bucket and key. It enables users to share
-// objects with other users and and retrieve data using external SDKs.
+// objects with other users and retrieve data using external SDKs.
 func (w *Worker) PinnedObject(ctx context.Context, bucket, key string) (object.PinnedObject, error) {
 	// Get the object from the upload manager
 	resp, err := w.bus.Object(ctx, bucket, key, api.GetObjectOptions{})
@@ -833,12 +833,10 @@ func (w *Worker) PinnedObject(ctx context.Context, bucket, key string) (object.P
 			Length:        slab.Length,
 		}
 		for _, shard := range slab.Shards {
-			hostKeys := slices.Collect(maps.Keys(shard.Contracts))
+			hostKey, _ := one(maps.Keys(shard.Contracts))
 			pinnedSector := object.PinnedSector{
-				Root: shard.Root,
-			}
-			if len(hostKeys) != 0 {
-				pinnedSector.HostKey = hostKeys[0]
+				Root:    shard.Root,
+				HostKey: hostKey,
 			}
 			pinnedSlab.Sectors = append(pinnedSlab.Sectors, pinnedSector)
 		}
@@ -987,4 +985,13 @@ func (w *Worker) prepareUploadParams(ctx context.Context, bucket string, minShar
 		return api.UploadParams{}, err
 	}
 	return up, nil
+}
+
+func one[T any](s iter.Seq[T]) (value T, ok bool) {
+	s(func(v T) bool {
+		value = v
+		ok = true
+		return false
+	})
+	return
 }
