@@ -1,3 +1,17 @@
+## 2.6.0 (2025-07-30)
+
+### Features
+
+- Add 'Minimum' option to wallet redistribution endpoint.
+- Rebroadcast transactions periodically
+
+### Fixes
+
+- Avoid marking contract as 'bad' if renew/refresh fails for non-host-related reasons.
+- Increase funding for contracts.
+- Increase value of redistributed UTXOs.
+- Perform sector write and append with single siamux transport.
+
 ## 2.5.0 (2025-07-07)
 
 ### Features
