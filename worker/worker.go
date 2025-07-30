@@ -840,7 +840,7 @@ func (w *Worker) PinnedObject(ctx context.Context, bucket, key string) (object.P
 			if len(hostKeys) != 0 {
 				pinnedSector.HostKey = hostKeys[0]
 			}
-			pinnedSlab.Shards = append(pinnedSlab.Shards, pinnedSector)
+			pinnedSlab.Sectors = append(pinnedSlab.Sectors, pinnedSector)
 		}
 		pinnedObj.Slabs = append(pinnedObj.Slabs, pinnedSlab)
 	}
