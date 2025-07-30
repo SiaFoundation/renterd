@@ -22,6 +22,8 @@ type EncryptionKeyInterface interface {
 	encoding.TextMarshaler
 	encoding.TextUnmarshaler
 	fmt.Stringer
+
+	DeriveKey(key *utils.UploadKey) [32]byte
 }
 
 var NoOpKey = EncryptionKey{
@@ -59,6 +61,31 @@ func GenerateEncryptionKey(t EncryptionKeyType) EncryptionKey {
 
 func (k EncryptionKey) IsNoopKey() bool {
 	return bytes.Equal(k.entropy[:], NoOpKey.entropy[:])
+}
+
+// EncryptionKey returns the encryption key for the given upload key.
+// For basic keys, it returns the entropy directly.
+// For salted keys, it derives the key using the upload key.
+func (k EncryptionKey) EncryptionKey(uk *utils.UploadKey) [32]byte {
+	if k.IsNoopKey() {
+		return [32]byte{}
+	}
+	switch k.keyType {
+	case EncryptionKeyTypeBasic:
+		return *k.entropy
+	case EncryptionKeyTypeSalted:
+		return uk.DeriveKey(k.entropy)
+	default:
+		panic(fmt.Sprintf("unknown key type: %v", k.keyType))
+	}
+}
+
+// Entropy returns the entropy of the encryption key.
+func (k EncryptionKey) Entropy() [32]byte {
+	if k.entropy == nil {
+		return [32]byte{}
+	}
+	return *k.entropy
 }
 
 func (k EncryptionKey) String() string {
