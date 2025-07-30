@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net"
 	"net/http"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -508,6 +510,29 @@ func (w *Worker) objectsRemoveHandlerPOST(jc jape.Context) {
 	jc.Check("couldn't remove objects", w.bus.RemoveObjects(jc.Request.Context(), orr.Bucket, orr.Prefix))
 }
 
+func (w *Worker) pinnedHandlerGET(jc jape.Context) {
+	var bucket string
+	if jc.DecodeForm("bucket", &bucket) != nil {
+		return
+	} else if bucket == "" {
+		jc.Error(api.ErrBucketMissing, http.StatusBadRequest)
+		return
+	}
+
+	key := jc.PathParam("key")
+	if key == "" {
+		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
+		return
+	}
+
+	obj, err := w.PinnedObject(jc.Request.Context(), bucket, key)
+	if utils.IsErr(err, api.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	}
+	jc.Encode(obj)
+}
+
 func (w *Worker) memoryGET(jc jape.Context) {
 	api.WriteResponse(jc, api.MemoryResponse{
 		Download: w.downloadManager.MemoryStatus(),
@@ -636,6 +661,8 @@ func (w *Worker) Handler() http.Handler {
 		"DELETE /object/*key":    w.objectHandlerDELETE,
 		"POST   /objects/remove": w.objectsRemoveHandlerPOST,
 
+		"GET /pinned/*key": w.pinnedHandlerGET,
+
 		"GET    /state": w.stateHandlerGET,
 
 		"GET    /stats/downloads": w.downloadsStatsHandlerGET,
@@ -719,9 +746,7 @@ func (w *Worker) FundAccount(ctx context.Context, fcid types.FileContractID, hk 
 
 func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.DownloadObjectOptions) (*api.GetObjectResponse, error) {
 	// head object
-	hor, res, err := w.headObject(ctx, bucket, key, false, api.HeadObjectOptions{
-		Range: opts.Range,
-	})
+	hor, res, err := w.headObject(ctx, bucket, key, false, api.HeadObjectOptions(opts))
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch object: %w", err)
 	}
@@ -780,6 +805,47 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 		Content:            content,
 		HeadObjectResponse: *hor,
 	}, nil
+}
+
+// PinnedObject returns a PinnedObject representation of the object
+// identified by the given bucket and key. It enables users to share
+// objects with other users and and retrieve data using external SDKs.
+func (w *Worker) PinnedObject(ctx context.Context, bucket, key string) (object.PinnedObject, error) {
+	// Get the object from the upload manager
+	resp, err := w.bus.Object(ctx, bucket, key, api.GetObjectOptions{})
+	if err != nil {
+		return object.PinnedObject{}, fmt.Errorf("failed to get object: %w", err)
+	}
+	obj := resp.Object
+
+	uploadKey := w.masterKey.DeriveUploadKey()
+	defer clear(uploadKey[:])
+
+	// Convert the object to a PinnedObject
+	pinnedObj := object.PinnedObject{
+		EncryptionKey: obj.Key.EncryptionKey(&uploadKey), // object key derives from the upload key
+	}
+
+	for _, slab := range obj.Slabs {
+		pinnedSlab := object.PinnedSlab{
+			EncryptionKey: slab.EncryptionKey.Entropy(), // slabs use the raw entropy + xchacha20 with the index as nonce
+			Offset:        slab.Offset,
+			Length:        slab.Length,
+		}
+		for _, shard := range slab.Shards {
+			hostKeys := slices.Collect(maps.Keys(shard.Contracts))
+			pinnedSector := object.PinnedSector{
+				Root: shard.Root,
+			}
+			if len(hostKeys) != 0 {
+				pinnedSector.HostKey = hostKeys[0]
+			}
+			pinnedSlab.Shards = append(pinnedSlab.Shards, pinnedSector)
+		}
+		pinnedObj.Slabs = append(pinnedObj.Slabs, pinnedSlab)
+	}
+
+	return pinnedObj, nil
 }
 
 func (w *Worker) HeadObject(ctx context.Context, bucket, key string, opts api.HeadObjectOptions) (*api.HeadObjectResponse, error) {
