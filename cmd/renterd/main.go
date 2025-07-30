@@ -66,14 +66,10 @@ func main() {
 	var network *consensus.Network
 	var genesis types.Block
 	switch cfg.Network {
-	case "anagami":
-		network, genesis = chain.TestnetAnagami()
 	case "mainnet":
 		network, genesis = chain.Mainnet()
 	case "zen":
 		network, genesis = chain.TestnetZen()
-	case "erravimus":
-		network, genesis = chain.TestnetErravimus()
 	default:
 		checkFatalError("invalid network settings", fmt.Errorf("unknown network '%s'", cfg.Network))
 	}

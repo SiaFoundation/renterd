@@ -184,7 +184,7 @@ func (c *Client) RenewContract(ctx context.Context, hk types.PublicKey, hostIP s
 // RefreshContract refreshes a contract with a host.
 func (c *Client) RefreshContract(ctx context.Context, hk types.PublicKey, hostIP string, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, existing types.V2FileContract, params rhp4.RPCRefreshContractParams) (res rhp.RPCRefreshContractResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
-		res, err = rhp.RPCRefreshContract(ctx, c, tp, signer, cs, p, existing, params)
+		res, err = rhp.RPCRefreshContractFullRollover(ctx, c, tp, signer, cs, p, existing, params)
 		if err != nil {
 			return err
 		}
