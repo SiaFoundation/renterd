@@ -180,7 +180,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 // contract's metadata and potentially an error if the contract formation
 // failed. If the formation failed the returned boolean indicates whether the
 // failure was the renter's fault, e.g. the wallet being out of funds.
-func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
 	defer cancel()
@@ -249,7 +249,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 
 	cs, err := c.cs.ConsensusState(ctx)
 	if err != nil {
-		return api.ContractMetadata{}, false, err
+		return api.ContractMetadata{}, true, err
 	}
 	duration := contract.EndHeight() - cs.BlockHeight
 	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, contract.Size, minRenterAllowance, minHostCollateral, duration)
