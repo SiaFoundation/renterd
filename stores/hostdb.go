@@ -68,23 +68,23 @@ func (s *SQLStore) RemoveOfflineHosts(ctx context.Context, minRecentFailures uin
 	return
 }
 
-func (s *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, clear bool) (err error) {
+func (s *SQLStore) UpdateHostAllowlistEntries(ctx context.Context, add, remove []types.PublicKey, empty bool) (err error) {
 	// nothing to do
-	if len(add)+len(remove) == 0 && !clear {
+	if len(add)+len(remove) == 0 && !empty {
 		return nil
 	}
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateHostAllowlistEntries(ctx, add, remove, clear)
+		return tx.UpdateHostAllowlistEntries(ctx, add, remove, empty)
 	})
 }
 
-func (s *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, clear bool) (err error) {
+func (s *SQLStore) UpdateHostBlocklistEntries(ctx context.Context, add, remove []string, empty bool) (err error) {
 	// nothing to do
-	if len(add)+len(remove) == 0 && !clear {
+	if len(add)+len(remove) == 0 && !empty {
 		return nil
 	}
 	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-		return tx.UpdateHostBlocklistEntries(ctx, add, remove, clear)
+		return tx.UpdateHostBlocklistEntries(ctx, add, remove, empty)
 	})
 }
 

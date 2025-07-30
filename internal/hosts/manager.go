@@ -153,19 +153,13 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 			return types.ZeroCurrency, err
 		}
 
-		res, err := c.rhp4.WriteSector(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.acc.Token(), utils.NewReaderLen(sector[:]), rhpv4.SectorSize)
+		revision, usage, err := c.rhp4.AppendSector(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.acc.Token(), c.rk, rev, utils.NewReaderLen(sector[:]))
 		if err != nil {
-			return types.ZeroCurrency, fmt.Errorf("failed to write sector: %w", err)
-		}
-		cost := res.Usage.RenterCost()
-
-		res2, err := c.rhp4.AppendSectors(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), prices, c.rk, rev, []types.Hash256{res.Root})
-		if err != nil {
-			return cost, fmt.Errorf("failed to write sector: %w", err)
+			return usage.RenterCost(), fmt.Errorf("failed to upload sector: %w", err)
 		}
 
-		c.csr.RecordV2(rhp.ContractRevision{ID: rev.ID, Revision: res2.Revision}, api.ContractSpending{Uploads: res2.Usage.RenterCost()})
-		return cost, nil
+		c.csr.RecordV2(rhp.ContractRevision{ID: rev.ID, Revision: revision}, api.ContractSpending{Uploads: usage.RenterCost()})
+		return usage.RenterCost(), nil
 	})
 }
 

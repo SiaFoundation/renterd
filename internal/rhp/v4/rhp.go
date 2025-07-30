@@ -3,6 +3,7 @@ package rhp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -75,15 +76,6 @@ func (c *Client) ReadSector(ctx context.Context, hk types.PublicKey, hostIP stri
 	return res, err
 }
 
-// WriteSector writes a sector to the host.
-func (c *Client) WriteSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, rl rhp.ReaderLen, length uint64) (res rhp.RPCWriteSectorResult, _ error) {
-	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
-		res, err = rhp.RPCWriteSector(ctx, t, prices, token, rl, length)
-		return
-	})
-	return res, err
-}
-
 // VerifySector verifies that the host is properly storing a sector
 func (c *Client) VerifySector(ctx context.Context, prices rhp4.HostPrices, token rhp4.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
 	panic("not implemented")
@@ -98,9 +90,15 @@ func (c *Client) FreeSectors(ctx context.Context, hk types.PublicKey, hostIP str
 	return res, err
 }
 
-// AppendSectors appends sectors a host is storing to a contract.
-func (c *Client) AppendSectors(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, sk types.PrivateKey, contract rhp.ContractRevision, roots []types.Hash256) (res rhp.RPCAppendSectorsResult, _ error) {
+// AppendSector appends sectors a host is storing to a contract.
+func (c *Client) AppendSector(ctx context.Context, hk types.PublicKey, hostIP string, prices rhp4.HostPrices, token rhp4.AccountToken, sk types.PrivateKey, contract rhp.ContractRevision, rl rhp.ReaderLen) (revision types.V2FileContract, usage rhp4.Usage, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(t rhp.TransportClient) (err error) {
+		writeRes, err := rhp.RPCWriteSector(ctx, t, prices, token, rl, rhp4.SectorSize)
+		if err != nil {
+			return fmt.Errorf("failed to write sector: %w", err)
+		}
+		usage = writeRes.Usage
+
 		// NOTE: construct an empty state object here to pass to
 		// RPCAppendSectors since it only uses it for hashing
 		cs := consensus.State{}
@@ -108,10 +106,15 @@ func (c *Client) AppendSectors(ctx context.Context, hk types.PublicKey, hostIP s
 		// NOTE: immediately append the sector for the time being, eventually
 		// this will be a 2-step process where uploads are unblocked as soon as
 		// the sector is on the host, but not yet added to the contract
-		res, err = rhp.RPCAppendSectors(ctx, t, sk, cs, prices, contract, roots)
+		appendRes, err := rhp.RPCAppendSectors(ctx, t, sk, cs, prices, contract, []types.Hash256{writeRes.Root})
+		if err != nil {
+			return fmt.Errorf("failed to append sector: %w", err)
+		}
+		usage = usage.Add(appendRes.Usage)
+		revision = appendRes.Revision
 		return
 	})
-	return res, err
+	return revision, usage, err
 }
 
 // FundAccounts funds accounts on the host.

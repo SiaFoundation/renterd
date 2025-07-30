@@ -3811,7 +3811,11 @@ paths:
                 amount:
                   allOf:
                     - $ref: "#/components/schemas/Currency"
-                    - description: The value of each output
+                    - description: The value of each created output
+                minimum:
+                  allOf:
+                    - $ref: "#/components/schemas/Currency"
+                    - description: The minimum amount for existing outputs to be considered good enough. Defaults to the 'amount'.
       responses:
         "200":
           description: Successfully redistributed wallet funds

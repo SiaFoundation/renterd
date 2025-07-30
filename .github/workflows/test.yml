@@ -19,7 +19,7 @@ jobs:
           npm install --global swagger-spec-validator
           swagger-spec-validator openapi.yml
       - name: Lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v8
         with:
           args: --timeout=30m
       - name: Jape Analyzer

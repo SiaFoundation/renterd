@@ -1143,16 +1143,8 @@ func (s *TestSyncer) Addr() string {
 	return s.s.Addr()
 }
 
-func (s *TestSyncer) BroadcastHeader(bh types.BlockHeader) error {
-	return ignoreErrNoPeers(s.s.BroadcastHeader(bh))
-}
-
 func (s *TestSyncer) BroadcastV2BlockOutline(outline gateway.V2BlockOutline) error {
 	return ignoreErrNoPeers(s.s.BroadcastV2BlockOutline(outline))
-}
-
-func (s *TestSyncer) BroadcastTransactionSet(txns []types.Transaction) error {
-	return ignoreErrNoPeers(s.s.BroadcastTransactionSet(txns))
 }
 
 func (s *TestSyncer) BroadcastV2TransactionSet(basis types.ChainIndex, txns []types.V2Transaction) error {

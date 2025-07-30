@@ -2,7 +2,6 @@ package stores
 
 import (
 	"context"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -12,6 +11,31 @@ import (
 var (
 	_ wallet.SingleAddressStore = (*SQLStore)(nil)
 )
+
+// AddBroadcastedSet adds a set of broadcasted transactions. The wallet
+// will periodically rebroadcast the transactions in this set until all
+// transactions are gone from the transaction pool or one week has
+// passed.
+func (s *SQLStore) AddBroadcastedSet(txnSet wallet.BroadcastedSet) error {
+	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		return tx.WalletAddBroadcastedSet(s.shutdownCtx, txnSet)
+	})
+}
+
+// BroadcastedSets returns recently broadcasted sets.
+func (s *SQLStore) BroadcastedSets() (sets []wallet.BroadcastedSet, err error) {
+	err = s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		sets, err = tx.WalletBroadcastedSets(s.shutdownCtx)
+		return err
+	})
+	return
+}
+
+func (s *SQLStore) RemoveBroadcastedSet(txnSet wallet.BroadcastedSet) error {
+	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
+		return tx.WalletRemoveBroadcastedSet(s.shutdownCtx, txnSet)
+	})
+}
 
 // Tip returns the consensus change ID and block height of the last wallet
 // change.
@@ -42,6 +66,16 @@ func (s *SQLStore) WalletEvents(offset, limit int) (events []wallet.Event, err e
 	return
 }
 
+// WalletEvent returns a wallet event by its ID. If the event does not exist,
+// ErrorNotFound is returned.
+func (s *SQLStore) WalletEvent(id types.Hash256) (event wallet.Event, err error) {
+	err = s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
+		event, err = tx.WalletEvent(context.Background(), id)
+		return
+	})
+	return
+}
+
 // WalletEventCount returns the number of events relevant to the wallet.
 func (s *SQLStore) WalletEventCount() (count uint64, err error) {
 	err = s.db.Transaction(context.Background(), func(tx sql.DatabaseTx) (err error) {
@@ -49,29 +83,4 @@ func (s *SQLStore) WalletEventCount() (count uint64, err error) {
 		return
 	})
 	return
-}
-
-// LockUTXOs locks the specified UTXOs until the specified time.
-func (s *SQLStore) LockUTXOs(scois []types.SiacoinOutputID, until time.Time) error {
-	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
-		return tx.WalletLockOutputs(s.shutdownCtx, scois, until)
-	})
-}
-
-// LockedUTXOs returns a list of UTXOs that are currently locked until the
-// specified time.
-func (s *SQLStore) LockedUTXOs(t time.Time) (utxos []types.SiacoinOutputID, err error) {
-	err = s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) (err error) {
-		utxos, err = tx.WalletLockedOutputs(s.shutdownCtx, t)
-		return
-	})
-	return
-}
-
-// ReleaseUTXOs releases the specified UTXOs, making them available for use
-// again. If the UTXOs are not locked, this is a no-op.
-func (s *SQLStore) ReleaseUTXOs(scois []types.SiacoinOutputID) error {
-	return s.db.Transaction(s.shutdownCtx, func(tx sql.DatabaseTx) error {
-		return tx.WalletReleaseOutputs(s.shutdownCtx, scois)
-	})
 }

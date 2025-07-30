@@ -48,6 +48,7 @@ type (
 	// endpoint.
 	WalletRedistributeRequest struct {
 		Amount  types.Currency `json:"amount"`
+		Minimum types.Currency `json:"minimum"`
 		Outputs int            `json:"outputs"`
 	}
 

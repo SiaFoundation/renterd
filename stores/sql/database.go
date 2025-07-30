@@ -360,22 +360,21 @@ type (
 		// WalletEvents returns all wallet events in the database.
 		WalletEvents(ctx context.Context, offset, limit int) ([]wallet.Event, error)
 
+		// WalletEvent returns a wallet event by its ID. If the event does not exist,
+		// ErrorNotFound is returned.
+		WalletEvent(ctx context.Context, id types.Hash256) (wallet.Event, error)
+
 		// WalletEventCount returns the total number of events in the database.
 		WalletEventCount(ctx context.Context) (uint64, error)
 
-		// WalletLockOutputs locks the given output until the given unlock time.
-		// If the output is already locked, it is updated. The unlock time
-		// should be in the future.
-		WalletLockOutputs(ctx context.Context, scois []types.SiacoinOutputID, until time.Time) error
+		// WalletAddBroadcastedSet adds a broadcasted set to the wallet database.
+		WalletAddBroadcastedSet(ctx context.Context, txnSet wallet.BroadcastedSet) error
 
-		// WalletLockedOutputs returns the IDs of all locked output. A locked
-		// output is one that has an unlock timestamp greater than the given
-		// threshold.
-		WalletLockedOutputs(ctx context.Context, threshold time.Time) ([]types.SiacoinOutputID, error)
+		// WalletBroadcastedSets returns recently broadcasted sets from the wallet database.
+		WalletBroadcastedSets(ctx context.Context) ([]wallet.BroadcastedSet, error)
 
-		// WalletReleaseOutputs unlocks the given outputs. If the outputs is not
-		// locked, it is ignored.
-		WalletReleaseOutputs(ctx context.Context, scois []types.SiacoinOutputID) error
+		// WalletRemoveBroadcastedSet removes a broadcasted set from the wallet database.
+		WalletRemoveBroadcastedSet(ctx context.Context, txnSet wallet.BroadcastedSet) error
 	}
 
 	MetricsDatabase interface {

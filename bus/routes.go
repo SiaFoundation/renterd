@@ -125,11 +125,7 @@ func (b *Bus) consensusAcceptBlock(jc jape.Context) {
 		return
 	}
 
-	if block.V2 == nil {
-		if jc.Check("failed to broadcast header", b.s.BroadcastHeader(block.Header())) != nil {
-			return
-		}
-	} else {
+	if block.V2 != nil {
 		if jc.Check("failed to broadcast block outline", b.s.BroadcastV2BlockOutline(gateway.OutlineBlock(block, b.cm.PoolTransactions(), b.cm.V2PoolTransactions()))) != nil {
 			return
 		}
@@ -202,11 +198,7 @@ func (b *Bus) txpoolBroadcastHandler(jc jape.Context) {
 	if jc.Decode(&txnSet) != nil {
 		return
 	}
-
-	err := b.w.BroadcastTransactionSet(txnSet)
-	if jc.Check("couldn't broadcast transaction set", err) != nil {
-		return
-	}
+	jc.Error(errors.New("v1 transactions are no longer supported"), http.StatusBadRequest)
 }
 
 func (b *Bus) bucketsHandlerGET(jc jape.Context) {
@@ -406,7 +398,9 @@ func (b *Bus) walletRedistributeHandler(jc jape.Context) {
 	}
 	var available int
 	for _, so := range spendableOutputs {
-		if so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0 {
+		gta := so.SiacoinOutput.Value.Cmp(wfr.Amount) >= 0
+		gtm := !wfr.Minimum.IsZero() && so.SiacoinOutput.Value.Cmp(wfr.Minimum) >= 0
+		if gta || gtm {
 			available++
 		}
 	}
@@ -1040,7 +1034,7 @@ func (b *Bus) contractIDRenewHandlerPOST(jc jape.Context) {
 	if c.EndHeight() == rrr.EndHeight {
 		contract, err = b.refreshContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral)
 	} else {
-		contract, err = b.renewContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.EndHeight)
+		contract, err = b.renewContract(ctx, cs, h, gp, c, rrr.RenterFunds, rrr.MinNewCollateral, rrr.EndHeight)
 	}
 	if jc.Check("couldn't renew/refresh contract", err) != nil {
 		return

@@ -48,11 +48,39 @@ const (
 	// timeoutBroadcastRevision is the amount of time we wait for the broadcast
 	// of a revision to succeed.
 	timeoutBroadcastRevision = time.Minute
+
+	// minContractGrowthRate is the minimum expected growth rate
+	// for contracts used when calculating funding. Lowering
+	// this value will mean contracts will need to be refreshed
+	// more frequently. 32 GiB is a good trade off between initial
+	// cost to both parties and the frequency of refreshes.
+	minContractGrowthRate = 32 << 30
+
+	// maxContractGrowthRate is the maximum additional data
+	// allowed when adding funds for refresh or renews. This
+	// means contracts will not grow exponentially as more data
+	// is uploaded. Decreasing this will mean contracts
+	// will need to be refreshed more frequently. Increasing
+	// this will mean large contracts will be more expensive.
+	// 256 GiB is a good trade off between cost and frequency of
+	// refreshes due to how long it would take to reasonably upload
+	// that amount of data with a 10 Gbps connection.
+	maxContractGrowthRate = 256 << 30
 )
 
 var (
-	InitialContractFunding = types.Siacoins(10)
-	MinCollateral          = types.Siacoins(1).Div64(10) // 100mS
+	// minRenterAllowance is the minimum allowance the
+	// renter will use when forming, refreshing, or renewing a
+	// contract. This is because account funding is done using
+	// 1 SC increments.
+	minRenterAllowance = types.Siacoins(10) // 10 SC
+	// minHostCollateral is the minimum collateral the
+	// renter will request when forming, refreshing, or renewing a
+	// contract.
+	minHostCollateral = types.Siacoins(1)
+	// minRefreshCollateral is the amount of collateral
+	// before the renter will consider refreshing a contract.
+	minRefreshCollateral = types.Siacoins(1).Div64(10) // 100mS
 )
 
 type ConsensusStore interface {
@@ -87,7 +115,7 @@ type contractChecker interface {
 }
 
 type contractReviser interface {
-	formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
+	formContract(ctx *mCtx, hs HostScanner, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 	renewContract(ctx *mCtx, c contract, h api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 	refreshContract(ctx *mCtx, c contract, h api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, ourFault bool, err error)
 }
@@ -152,7 +180,7 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 // contract's metadata and potentially an error if the contract formation
 // failed. If the formation failed the returned boolean indicates whether the
 // failure was the renter's fault, e.g. the wallet being out of funds.
-func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minInitialContractFunds types.Currency, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
 	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
 	defer cancel()
@@ -173,22 +201,9 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, minI
 		return api.ContractMetadata{}, true, err
 	}
 	endHeight := ctx.EndHeight(cs.BlockHeight)
+	duration := endHeight - cs.BlockHeight
 
-	contractPrice := scan.V2Settings.Prices.ContractPrice
-	maxCollateral := scan.V2Settings.MaxCollateral
-	renterFunds := InitialContractFunding
-
-	// calculate the host collateral
-	hostCollateral := rhpv4.MaxHostCollateral(scan.V2Settings.Prices, renterFunds)
-	if hostCollateral.Cmp(maxCollateral) > 0 {
-		hostCollateral = maxCollateral
-	}
-
-	// shouldn't go below the minimum immediately so we add some buffer
-	minCollateral := MinCollateral.Mul64(2).Add(contractPrice)
-	if hostCollateral.Cmp(minCollateral) < 0 {
-		hostCollateral = minCollateral
-	}
+	renterFunds, hostCollateral := contractFunding(scan.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
 
 	// form contract
 	contract, err := c.cm.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
@@ -232,16 +247,15 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	}
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
-	// calculate the renter funds
-	renterFunds := c.refreshFundingEstimate(contract, logger)
-
-	contractPrice := host.V2Settings.Prices.ContractPrice
-
-	// a refresh should always result in a contract that has enough collateral
-	minNewCollateral := MinCollateral.Mul64(2).Add(contractPrice)
+	cs, err := c.cs.ConsensusState(ctx)
+	if err != nil {
+		return api.ContractMetadata{}, false, err
+	}
+	duration := contract.EndHeight() - cs.BlockHeight
+	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, contract.Size, minRenterAllowance, minHostCollateral, duration)
 
 	// renew the contract
-	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, minNewCollateral)
+	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, hostCollateral)
 	if err != nil {
 		logger.Debugw(
 			"refresh failed",
@@ -258,7 +272,7 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 		"fcid", renewal.ID,
 		"renewedFrom", renewal.RenewedFrom,
 		"renterFunds", renterFunds.String(),
-		"minNewCollateral", minNewCollateral.String(),
+		"hostCollateral", hostCollateral.String(),
 	)
 	return renewal, false, nil
 }
@@ -281,26 +295,20 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	if err != nil {
 		return api.ContractMetadata{}, true, err
 	}
-
-	// calculate the renter funds for the renewal a.k.a. the funds the renter will
-	// be able to spend
-	minRenterFunds := InitialContractFunding
-	renterFunds := renewFundingEstimate(minRenterFunds, contract.InitialRenterFunds, contract.RenterFunds(), logger)
-
-	// sanity check the endheight is not the same on renewals
 	endHeight := ctx.EndHeight(cs.BlockHeight)
+	// sanity check the endheight is not the same on renewals
 	if endHeight <= contract.ProofHeight {
 		logger.Infow("invalid renewal endheight", "oldEndheight", contract.EndHeight(), "newEndHeight", endHeight, "bh", cs.BlockHeight)
 		return api.ContractMetadata{}, true, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, contract.EndHeight())
 	}
+	duration := endHeight - cs.BlockHeight
 
-	// unlike a refresh, a renewal doesn't require a minimum amount of
-	// collateral after the renewal since our primary goal is to extend the
-	// lifetime of our data.
-	minNewCollateral := types.ZeroCurrency
+	// calculate the renter funds for the renewal a.k.a. the funds the renter will
+	// be able to spend
+	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
 
 	// renew the contract
-	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, minNewCollateral)
+	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, hostCollateral)
 	if err != nil {
 		logger.Debugw(
 			"renewal failed",
@@ -377,24 +385,6 @@ func (c *Contractor) broadcastRevisions(ctx context.Context, contracts []api.Con
 			delete(c.revisionLastBroadcast, contractID)
 		}
 	}
-}
-
-func (c *Contractor) refreshFundingEstimate(contract contract, logger *zap.SugaredLogger) types.Currency {
-	// refresh with 1.2x the funds
-	refreshAmount := contract.InitialRenterFunds.Mul64(6).Div64(5)
-
-	// check for a sane minimum that is equal to the initial contract funding
-	// but without an upper cap.
-	minimum := InitialContractFunding
-	refreshAmountCapped := refreshAmount
-	if refreshAmountCapped.Cmp(minimum) < 0 {
-		refreshAmountCapped = minimum
-	}
-	logger.Infow("refresh estimate",
-		"fcid", contract.ID,
-		"refreshAmount", refreshAmount,
-		"refreshAmountCapped", refreshAmountCapped)
-	return refreshAmountCapped
 }
 
 func (c *Contractor) shouldArchive(contract contract, bh uint64, n consensus.Network) (err error) {
@@ -563,43 +553,6 @@ func hasAlert(ctx context.Context, alerter alerts.Alerter, id types.Hash256, log
 		}
 	}
 	return false
-}
-
-// renewFundingEstimate computes the funds the renter should use to renew a
-// contract. 'minRenterFunds' is the minimum amount the renter should use to
-// renew a contract, 'initRenterFunds' is the amount the renter used to form the
-// contract we are about to renew, and 'remainingRenterFunds' is the amount the
-// contract currently has left.
-func renewFundingEstimate(minRenterFunds, initRenterFunds, remainingRenterFunds types.Currency, log *zap.SugaredLogger) types.Currency {
-	log = log.With("minRenterFunds", minRenterFunds, "initRenterFunds", initRenterFunds, "remainingRenterFunds", remainingRenterFunds)
-
-	// compute the funds used
-	usedFunds := types.ZeroCurrency
-	if initRenterFunds.Cmp(remainingRenterFunds) >= 0 {
-		usedFunds = initRenterFunds.Sub(remainingRenterFunds)
-	}
-	log = log.With("usedFunds", usedFunds)
-
-	var renterFunds types.Currency
-	if usedFunds.IsZero() {
-		// if no funds were used, we use a fraction of the previous funding
-		log.Info("no funds were used, using half the funding from before")
-		renterFunds = initRenterFunds.Div64(2) // half the funds from before
-	} else {
-		// otherwise we use the remaining funds from before because a renewal
-		// shouldn't add more funds, that's what a refresh is for
-		renterFunds = remainingRenterFunds
-		if minFunds := initRenterFunds.Mul64(8).Div64(10); renterFunds.Cmp(minFunds) < 0 {
-			renterFunds = minFunds // at least 80% of the initial funds
-		}
-	}
-
-	// but the funds should not drop below the amount we'd fund a new contract with
-	if renterFunds.Cmp(minRenterFunds) < 0 {
-		log.Info("funds would drop below the minimum, using the minimum")
-		renterFunds = minRenterFunds
-	}
-	return renterFunds
 }
 
 // performContractChecks checks existing contracts, renewing/refreshing any that
@@ -877,9 +830,6 @@ func performContractFormations(ctx *mCtx, bus Database, cr contractReviser, hf h
 		logger.Warn("insufficient candidate hosts to form the desired amount of new contracts")
 	}
 
-	// get the initial contract funds
-	minInitialContractFunds := InitialContractFunding
-
 	// form contracts until the new set has the desired size
 	var nFormed uint64
 	for _, candidate := range candidates {
@@ -904,7 +854,7 @@ func performContractFormations(ctx *mCtx, bus Database, cr contractReviser, hf h
 		}
 
 		// form the contract
-		_, ourFault, err := cr.formContract(ctx, hs, candidate.host, minInitialContractFunds, logger)
+		_, ourFault, err := cr.formContract(ctx, hs, candidate.host, logger)
 		if err != nil {
 			if ourFault {
 				logger.Warn("failed to form contract, skipping remaining contract formations", zap.Error(err))
@@ -1053,6 +1003,29 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, s Database, c
 
 	// STEP 4: perform post maintenance tasks
 	return (nUpdated + nFormed) > 0, performPostMaintenanceTasks(ctx, s, alerter, cc, rb, logger)
+}
+
+// contractFunding is a helper that calculates the funding and collateral
+// that go into forming, refreshing or renewing a contract.
+func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowance, minCollateral types.Currency, duration uint64) (allowance, collateral types.Currency) {
+	multiplier := 1 + (existingData / minContractGrowthRate)
+	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / rhpv4.SectorSize // 100% growth clamped to [32GiB, 256GiB]
+	uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(contractGrowth)
+	downloadCost := settings.Prices.RPCReadSectorCost(rhpv4.SectorSize).RenterCost().Mul64(contractGrowth)
+	storeCost := settings.Prices.RPCAppendSectorsCost(contractGrowth, duration).RenterCost()
+	allowance = uploadCost.Add(storeCost).Add(downloadCost)
+	if allowance.Cmp(minAllowance) < 0 {
+		allowance = minAllowance // ensure we have at least the minimum allowance
+	}
+
+	collateral = rhpv4.MaxHostCollateral(settings.Prices, storeCost) // based on store cost because uploads do not require collateral
+	if collateral.Cmp(settings.MaxCollateral) > 0 {
+		collateral = settings.MaxCollateral
+	}
+	if collateral.Cmp(minCollateral) < 0 {
+		collateral = minCollateral // ensure we have at least the minimum collateral
+	}
+	return
 }
 
 func isErrRenterOutOfFunds(err error) bool {
