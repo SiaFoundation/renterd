@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/jape"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/utils"
+	"go.sia.tech/renterd/v2/object"
 )
 
 // A Client provides methods for interacting with a worker.
@@ -139,6 +140,12 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 		Content:            body,
 		HeadObjectResponse: head,
 	}, nil
+}
+
+// PinnedObject returns the object metadata at the given key.
+func (c *Client) PinnedObject(ctx context.Context, bucket, key string) (po object.PinnedObject, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/pinned/%s?bucket=%s", key, bucket), &po)
+	return
 }
 
 // Memory requests the /memory endpoint.
