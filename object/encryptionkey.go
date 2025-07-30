@@ -22,8 +22,6 @@ type EncryptionKeyInterface interface {
 	encoding.TextMarshaler
 	encoding.TextUnmarshaler
 	fmt.Stringer
-
-	DeriveKey(key *utils.UploadKey) [32]byte
 }
 
 var NoOpKey = EncryptionKey{
