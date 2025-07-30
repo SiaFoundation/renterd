@@ -318,10 +318,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			peers = syncer.MainnetBootstrapPeers
 		case "zen":
 			peers = syncer.ZenBootstrapPeers
-		case "anagami":
-			peers = syncer.AnagamiBootstrapPeers
-		case "erravimus":
-			peers = syncer.ErravimusBootstrapPeers
 		default:
 			return nil, nil, fmt.Errorf("no available bootstrap peers for unknown network '%s'", network.Name)
 		}
