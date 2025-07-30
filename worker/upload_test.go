@@ -619,3 +619,58 @@ func testParameters(key string) upload.Parameters {
 		RS: testRedundancySettings,
 	}
 }
+
+func TestPinnedObject(t *testing.T) {
+	// create test worker
+	w := newTestWorker(t, newTestWorkerCfg())
+
+	// add hosts to worker
+	w.AddHosts(testRedundancySettings.TotalShards * 2)
+
+	// convenience variables
+	ul := w.uploadManager
+
+	// create test data
+	data := frand.Bytes(128)
+
+	// create upload params
+	params := testParameters(t.Name())
+
+	// upload data
+	_, _, err := ul.Upload(context.Background(), bytes.NewReader(data), w.UploadHosts(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// grab the object
+	obj, err := w.os.Object(context.Background(), testBucket, t.Name(), api.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(obj.Object.Slabs) != 1 {
+		t.Fatal("expected 1 slab")
+	}
+
+	po, err := w.PinnedObject(context.Background(), testBucket, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(po.Slabs) != len(obj.Slabs) {
+		t.Fatal("pinned object slabs do not match original object slabs")
+	}
+	for i, ps := range po.Slabs {
+		slab := obj.Object.Slabs[i]
+		if ps.Offset != slab.Offset || ps.Length != slab.Length {
+			t.Fatal("pinned slab offset or length does not match original slab")
+		} else if len(ps.Sectors) != len(slab.Shards) {
+			t.Fatal("pinned slab sectors do not match original slab shards")
+		}
+
+		for j, sector := range ps.Sectors {
+			shard := slab.Shards[j]
+			if _, ok := shard.Contracts[sector.HostKey]; !ok {
+				t.Fatal("pinned slab sector host key does not match original slab shard host key")
+			} else if shard.Root != sector.Root {
+				t.Fatal("pinned slab sector root does not match original slab shard root")
+			}
+		}
+	}
+}
