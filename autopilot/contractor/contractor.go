@@ -176,7 +176,11 @@ func (c *Contractor) PerformContractMaintenance(ctx context.Context, state *Main
 	return performContractMaintenance(newMaintenanceCtx(ctx, state), c.alerter, c.db, c.churn, c, c.cm, c, c.cs, c.hs, c, c.allowRedundantHostIPs, c.logger)
 }
 
-func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+// formContract forms a new contract with the given host. It returns the
+// contract's metadata and potentially an error if the contract formation
+// failed. If the formation failed the returned boolean indicates whether the
+// failure was the renter's fault, e.g. the wallet being out of funds.
+func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	logger = logger.With("hostKey", host.PublicKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 	ctx, cancel := ctx.WithTimeout(time.Minute)
 	defer cancel()
@@ -187,14 +191,14 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logg
 	// fetch host settings
 	scan, err := hs.ScanHost(ctx, hk, 30*time.Second)
 	if err != nil {
-		logger.Infow(err.Error(), "hk", hk)
+		logger.Debugw("scan failed", zap.Stringer("hk", hk), zap.Error(err))
 		return api.ContractMetadata{}, true, err
 	}
 
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
 	if err != nil {
-		return api.ContractMetadata{}, false, err
+		return api.ContractMetadata{}, true, err
 	}
 	endHeight := ctx.EndHeight(cs.BlockHeight)
 	duration := endHeight - cs.BlockHeight
@@ -204,7 +208,13 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logg
 	// form contract
 	contract, err := c.cm.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
 	if err != nil {
-		return api.ContractMetadata{}, !utils.IsErr(err, wallet.ErrNotEnoughFunds), err
+		logger.Debugw("formation failed",
+			zap.Uint64("endHeight", endHeight),
+			zap.Stringer("renterFunds", renterFunds),
+			zap.Error(err),
+		)
+		ourFault := isErrRenterOutOfFunds(err)
+		return api.ContractMetadata{}, ourFault, err
 	}
 
 	logger.Infow("formation succeeded",
@@ -212,7 +222,7 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logg
 		"renterFunds", renterFunds.String(),
 		"collateral", hostCollateral.String(),
 	)
-	return contract, true, nil
+	return contract, false, nil
 }
 
 func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetadata) {
@@ -227,15 +237,19 @@ func (c *Contractor) pruneContractRefreshFailures(contracts []api.ContractMetada
 	}
 }
 
-func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+// refreshContract refreshes the contract with the given host. It returns the
+// contract metadata of the refreshed contract or potentially an error if the
+// refresh failed. If the refresh failed the returned boolean indicates whether
+// the failure was the renter's fault, e.g. the wallet being out of funds.
+func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	if contract.Revision == nil {
-		return api.ContractMetadata{}, true, errors.New("can't refresh contract without a revision")
+		return api.ContractMetadata{}, false, errors.New("contract has no revision")
 	}
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
 	cs, err := c.cs.ConsensusState(ctx)
 	if err != nil {
-		return api.ContractMetadata{}, false, err
+		return api.ContractMetadata{}, true, err
 	}
 	duration := contract.EndHeight() - cs.BlockHeight
 	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, contract.Size, minRenterAllowance, minHostCollateral, duration)
@@ -243,16 +257,14 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, hostCollateral)
 	if err != nil {
-		logger.Errorw(
+		logger.Debugw(
 			"refresh failed",
+			zap.Uint64("endHeight", contract.EndHeight()),
+			zap.Stringer("renterFunds", renterFunds),
 			zap.Error(err),
-			"endHeight", contract.EndHeight(),
-			"renterFunds", renterFunds,
 		)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !utils.IsErrHost(err) {
-			return api.ContractMetadata{}, false, err
-		}
-		return api.ContractMetadata{}, true, err
+		ourFault := isErrRenterOutOfFunds(err)
+		return api.ContractMetadata{}, ourFault, err
 	}
 
 	// add to renewed set
@@ -262,12 +274,16 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 		"renterFunds", renterFunds.String(),
 		"hostCollateral", hostCollateral.String(),
 	)
-	return renewal, true, nil
+	return renewal, false, nil
 }
 
-func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (cm api.ContractMetadata, proceed bool, err error) {
+// renewContract renews the contract with the given host. It returns the
+// contract metadata of the renewal or potentially an error if the renewal
+// failed. If the renewal failed the returned boolean indicates whether the
+// failure was the renter's fault, e.g. the wallet being out of funds.
+func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, logger *zap.SugaredLogger) (api.ContractMetadata, bool, error) {
 	if contract.Revision == nil {
-		return api.ContractMetadata{}, true, errors.New("can't renew contract without a revision")
+		return api.ContractMetadata{}, false, errors.New("contract has no revision")
 	}
 	logger = logger.With("to_renew", contract.ID, "hk", contract.HostKey, "hostVersion", host.V2Settings.ProtocolVersion, "hostRelease", host.V2Settings.Release)
 
@@ -277,13 +293,13 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	// fetch consensus state
 	cs, err := c.cs.ConsensusState(ctx)
 	if err != nil {
-		return api.ContractMetadata{}, false, err
+		return api.ContractMetadata{}, true, err
 	}
 	endHeight := ctx.EndHeight(cs.BlockHeight)
 	// sanity check the endheight is not the same on renewals
 	if endHeight <= contract.ProofHeight {
 		logger.Infow("invalid renewal endheight", "oldEndheight", contract.EndHeight(), "newEndHeight", endHeight, "bh", cs.BlockHeight)
-		return api.ContractMetadata{}, false, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, contract.EndHeight())
+		return api.ContractMetadata{}, true, fmt.Errorf("renewal endheight should surpass the current contract endheight, %v <= %v", endHeight, contract.EndHeight())
 	}
 	duration := endHeight - cs.BlockHeight
 
@@ -294,16 +310,14 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, hostCollateral)
 	if err != nil {
-		logger.Errorw(
+		logger.Debugw(
 			"renewal failed",
+			zap.Uint64("endHeight", endHeight),
+			zap.Stringer("renterFunds", renterFunds),
 			zap.Error(err),
-			"endHeight", endHeight,
-			"renterFunds", renterFunds,
 		)
-		if utils.IsErr(err, wallet.ErrNotEnoughFunds) && !utils.IsErrHost(err) {
-			return api.ContractMetadata{}, false, err
-		}
-		return api.ContractMetadata{}, true, err
+		ourFault := isErrRenterOutOfFunds(err)
+		return api.ContractMetadata{}, ourFault, err
 	}
 
 	logger.Infow(
@@ -312,7 +326,7 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 		"renewedFrom", renewal.RenewedFrom,
 		"renterFunds", renterFunds.String(),
 	)
-	return renewal, true, nil
+	return renewal, false, nil
 }
 
 // broadcastRevisions broadcasts contract revisions, we only broadcast the
@@ -693,13 +707,9 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 			var renewedContract api.ContractMetadata
 			renewedContract, ourFault, err = cr.renewContract(ctx, c, host, logger)
 			if err != nil {
-				logger = logger.With(zap.Error(err)).With("ourFault", ourFault)
-				logger.Error("failed to renew contract")
-
-				// don't register an alert for hosts that are out of funds since the
-				// user can't do anything about it
-				if !(utils.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
-					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(cm, !ourFault, err))
+				logger.Debugw("failed to renew contract", zap.Bool("ourFault", ourFault), zap.Error(err))
+				if !isErrHostOutOfFunds(err) { // don't register if host ran out of funds, nothing we can do
+					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(cm, ourFault, err))
 				}
 			} else {
 				logger.Info("successfully renewed contract")
@@ -712,13 +722,9 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 			var refreshedContract api.ContractMetadata
 			refreshedContract, ourFault, err = cr.refreshContract(ctx, c, host, logger)
 			if err != nil {
-				logger = logger.With(zap.Error(err)).With("ourFault", ourFault)
-				logger.Error("failed to refresh contract")
-
-				// don't register an alert for hosts that are out of funds since the
-				// user can't do anything about it
-				if !(utils.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)) {
-					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(cm, !ourFault, err))
+				logger.Debugw("failed to refresh contract", zap.Bool("ourFault", ourFault), zap.Error(err))
+				if !isErrHostOutOfFunds(err) { // don't register if host ran out of funds, nothing we can do
+					alerter.RegisterAlert(ctx, newContractRenewalFailedAlert(cm, ourFault, err))
 				}
 			} else {
 				logger.Info("successfully refreshed contract")
@@ -729,23 +735,18 @@ func performContractChecks(ctx *mCtx, alerter alerts.Alerter, s Database, churn 
 			}
 		}
 
-		// if the renewal/refresh failing was our fault (e.g. we ran out of
-		// funds), we should not drop the contract
-		if !usable && ourFault {
-			logger.Info("contract is not usable, host is not to blame")
-			usable = true
-		}
-
-		// if the contract is not usable we ignore it
-		if !usable {
-			logger.Info("contract is not usable")
-			updateUsability(ctx, host, cm, api.ContractUsabilityBad, strings.Join(reasons, ","))
+		// update contract usability
+		if usable {
+			logger.Debug("contract is usable")
+			updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is usable")
+			continue
+		} else if ourFault {
+			logger.Debug("contract is not usable, host is not to blame")
+			updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is not usable due to an issue on our end")
 			continue
 		}
-
-		// we keep the contract, add the host to the filter
-		logger.Debug("contract is usable")
-		updateUsability(ctx, host, cm, api.ContractUsabilityGood, "contract is usable")
+		logger.Info("contract is not usable")
+		updateUsability(ctx, host, cm, api.ContractUsabilityBad, strings.Join(reasons, ","))
 	}
 
 	// update churn and register alert
@@ -852,19 +853,15 @@ func performContractFormations(ctx *mCtx, bus Database, cr contractReviser, hf h
 			continue
 		}
 
-		_, proceed, err := cr.formContract(ctx, hs, candidate.host, logger)
+		// form the contract
+		_, ourFault, err := cr.formContract(ctx, hs, candidate.host, logger)
 		if err != nil {
-			if utils.IsErr(err, wallet.ErrNotEnoughFunds) {
-				logger.With(zap.Error(err)).Warn("failed to form contract due to insufficient confirmed funds")
-			} else {
-				logger.With(zap.Error(err)).Error("failed to form contract")
-			}
-			if proceed {
-				continue
-			} else {
-				logger.Warn("skipping remaining contract formations")
+			if ourFault {
+				logger.Warn("failed to form contract, skipping remaining contract formations", zap.Error(err))
 				break
 			}
+			logger.Debugw("failed to form contract", zap.Error(err))
+			continue
 		}
 
 		// add new contract and host
@@ -1029,4 +1026,12 @@ func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowa
 		collateral = minCollateral // ensure we have at least the minimum collateral
 	}
 	return
+}
+
+func isErrRenterOutOfFunds(err error) bool {
+	return !utils.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)
+}
+
+func isErrHostOutOfFunds(err error) bool {
+	return utils.IsErrHost(err) && utils.IsErr(err, wallet.ErrNotEnoughFunds)
 }

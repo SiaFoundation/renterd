@@ -60,6 +60,7 @@ type (
 		ScanHeight uint64        `json:"scanHeight"`
 	}
 
+	// WalletSendRequest is the request type for the /wallet/send endpoint.
 	WalletSendRequest struct {
 		Address          types.Address  `json:"address"`
 		Amount           types.Currency `json:"amount"`

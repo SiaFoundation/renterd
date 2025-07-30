@@ -1828,7 +1828,7 @@ func TestWallet(t *testing.T) {
 
 	// Send 1 SC to an address outside our wallet.
 	sendAmt := types.HastingsPerSiacoin
-	_, err = b.SendSiacoins(context.Background(), types.Address{1, 2, 3}, sendAmt, false)
+	_, err = b.SendSiacoins(context.Background(), types.Address{1, 2, 3}, sendAmt)
 	tt.OK(err)
 
 	txns, err := b.WalletEvents(context.Background())
@@ -2274,7 +2274,7 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 
 	// send the full balance back to the weallet
 	toSend := wr.Confirmed.Sub(types.Siacoins(1)) // leave some for the fee
-	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, false))
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend))
 
 	// the unconfirmed balance should have changed to slightly more than toSend
 	// since we paid a fee
@@ -2286,11 +2286,11 @@ func TestWalletSendUnconfirmed(t *testing.T) {
 	}
 
 	// try again - this should fail
-	_, err = b.SendSiacoins(context.Background(), wr.Address, toSend, false)
+	_, err = b.SendSiacoins(context.Background(), wr.Address, toSend)
 	tt.AssertIs(err, wallet.ErrNotEnoughFunds)
 
 	// try again - this time using unconfirmed transactions
-	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, true))
+	tt.OKAll(b.SendSiacoins(context.Background(), wr.Address, toSend, client.WithUnconfirmedTxns()))
 
 	// the unconfirmed balance should be almost the same
 	wr, err = b.Wallet(context.Background())
