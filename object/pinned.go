@@ -17,6 +17,9 @@ type (
 	}
 
 	PinnedObject struct {
+		Key      string `json:"key"`
+		MimeType string `json:"mimeType"`
+
 		EncryptionKey [32]byte     `json:"encryptionKey"`
 		Slabs         []PinnedSlab `json:"slabs"`
 	}
