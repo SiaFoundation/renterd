@@ -10,6 +10,7 @@ type (
 
 	PinnedSlab struct {
 		EncryptionKey [32]byte       `json:"encryptionKey"`
+		MinShards     uint8          `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
 		Offset        uint32         `json:"offset"`
 		Length        uint32         `json:"length"`
