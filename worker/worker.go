@@ -823,6 +823,9 @@ func (w *Worker) PinnedObject(ctx context.Context, bucket, key string) (object.P
 
 	// Convert the object to a PinnedObject
 	pinnedObj := object.PinnedObject{
+		Key:      resp.ObjectMetadata.Key,
+		MimeType: resp.ObjectMetadata.MimeType,
+
 		EncryptionKey: obj.Key.EncryptionKey(&uploadKey), // object key derives from the upload key
 	}
 
