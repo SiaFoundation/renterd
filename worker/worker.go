@@ -831,6 +831,7 @@ func (w *Worker) PinnedObject(ctx context.Context, bucket, key string) (object.P
 			EncryptionKey: slab.EncryptionKey.Entropy(), // slabs use the raw entropy + xchacha20 with the index as nonce
 			Offset:        slab.Offset,
 			Length:        slab.Length,
+			MinShards:     slab.MinShards,
 		}
 		for _, shard := range slab.Shards {
 			hostKey, _ := one(maps.Keys(shard.Contracts))
