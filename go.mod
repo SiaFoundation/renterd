@@ -3,13 +3,13 @@ module go.sia.tech/renterd/v2 // v2.5.0
 go 1.24.3
 
 require (
-	github.com/aws/aws-sdk-go v1.55.7
+	github.com/aws/aws-sdk-go v1.55.8
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
 	github.com/klauspost/reedsolomon v1.12.5
-	github.com/mattn/go-sqlite3 v1.14.29
+	github.com/mattn/go-sqlite3 v1.14.30
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.16.0
