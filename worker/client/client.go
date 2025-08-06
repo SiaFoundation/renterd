@@ -142,7 +142,7 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 	}, nil
 }
 
-// PinnedObject returns the object metadata at the given key.
+// PinnedObject returns the object metadata for the given key.
 func (c *Client) PinnedObject(ctx context.Context, bucket, key string) (po object.PinnedObject, err error) {
 	err = c.c.GET(ctx, fmt.Sprintf("/pinned/%s?bucket=%s", key, bucket), &po)
 	return

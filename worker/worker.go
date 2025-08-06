@@ -521,7 +521,7 @@ func (w *Worker) pinnedHandlerGET(jc jape.Context) {
 
 	key := jc.PathParam("key")
 	if key == "" {
-		jc.Error(errors.New("no path provided"), http.StatusBadRequest)
+		jc.Error(errors.New("no key provided"), http.StatusBadRequest)
 		return
 	}
 
