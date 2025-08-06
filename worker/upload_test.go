@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -672,5 +673,52 @@ func TestPinnedObject(t *testing.T) {
 				t.Fatal("pinned slab sector root does not match original slab shard root")
 			}
 		}
+	}
+
+	convertKey := func(key object.RawEncryptionKey) (imported object.EncryptionKey) {
+		// unmarshals the key as a basic key rather than a salted key
+		if err := imported.UnmarshalText(fmt.Appendf(nil, "key:%x", key)); err != nil {
+			panic(fmt.Sprintf("failed to unmarshal key: %v", err))
+		}
+		return
+	}
+
+	imported := object.Object{
+		Key: convertKey(po.EncryptionKey),
+	}
+	for i, ps := range po.Slabs {
+		importedSlab := object.SlabSlice{
+			Slab: object.Slab{
+				EncryptionKey: convertKey(ps.EncryptionKey),
+				MinShards:     ps.MinShards,
+			},
+			Offset: ps.Offset,
+			Length: ps.Length,
+		}
+		for j, sector := range ps.Sectors {
+			importedSlab.Shards = append(importedSlab.Shards, object.Sector{
+				Root: sector.Root,
+				Contracts: map[types.PublicKey][]types.FileContractID{
+					sector.HostKey: obj.Slabs[i].Shards[j].Contracts[sector.HostKey], // need to grab the contract IDs from the original object
+				},
+			})
+		}
+		imported.Slabs = append(imported.Slabs, importedSlab)
+	}
+
+	if err := w.bus.AddObject(context.Background(), testBucket, "foo", imported, api.AddObjectOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := w.GetObject(context.Background(), testBucket, "foo", api.DownloadObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	buf, err := io.ReadAll(resp.Content)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(buf, data) {
+		t.Fatal("downloaded data does not match original data")
 	}
 }
