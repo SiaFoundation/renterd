@@ -533,6 +533,10 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		}
 	}
 
+	if cfg.Log.Database.SlowThreshold == 0 {
+		return stores.Config{}, errors.New("Log.Database.SlowThreshold must be greater than 0")
+	}
+
 	return stores.Config{
 		Alerts:                        alerts.WithOrigin(am, "bus"),
 		DB:                            dbMain,
