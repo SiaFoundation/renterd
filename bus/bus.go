@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
+	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/rhp"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
@@ -82,6 +83,7 @@ type (
 		TipState() consensus.State
 		UnconfirmedParents(txn types.Transaction) []types.Transaction
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
+		UpdateV2TransactionSet(txns []types.V2Transaction, from, to types.ChainIndex) ([]types.V2Transaction, error)
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
@@ -177,7 +179,7 @@ type (
 	// A ChainStore stores information about the chain.
 	ChainStore interface {
 		ChainIndex(ctx context.Context) (types.ChainIndex, error)
-		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (contracts.V2BroadcastElement, error)
 		ProcessChainUpdate(ctx context.Context, applyFn func(sql.ChainUpdateTx) error) error
 		ResetChainState(ctx context.Context) error
 	}
@@ -557,20 +559,30 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	}
 
 	// create the transaction
+	fcr := types.V2FileContractRevision{
+		Parent:   fce.V2FileContractElement,
+		Revision: rev,
+	}
 	txn := types.V2Transaction{
-		MinerFee: fee,
-		FileContractRevisions: []types.V2FileContractRevision{
-			{
-				Parent:   fce,
-				Revision: rev,
-			},
-		},
+		MinerFee:              fee,
+		FileContractRevisions: []types.V2FileContractRevision{fcr},
 	}
 
 	// fund the transaction (only the fee)
 	basis, toSign, err := b.w.FundV2Transaction(&txn, fee, true)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fund transaction; %w", err)
+	}
+	if fce.Basis != basis {
+		b.logger.Debug("updating revision basis to broadcast contract", zap.Stringer("current", fce.Basis), zap.Stringer("basis", basis))
+		updated, err := b.cm.UpdateV2TransactionSet([]types.V2Transaction{
+			{FileContractRevisions: []types.V2FileContractRevision{fcr}},
+		}, fce.Basis, basis)
+		if err != nil {
+			b.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			return types.TransactionID{}, fmt.Errorf("couldn't update transaction set basis; %w", err)
+		}
+		txn.FileContractRevisions[0] = updated[0].FileContractRevisions[0]
 	}
 	// sign the transaction
 	b.w.SignV2Inputs(&txn, toSign)

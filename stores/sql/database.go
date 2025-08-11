@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/object"
 )
 
@@ -19,8 +20,8 @@ type (
 	ChainUpdateTx interface {
 		ContractState(fcid types.FileContractID) (api.ContractState, error)
 		DeleteFileContractElement(fcid types.FileContractID) error
-		ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error)
-		FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error)
+		ExpiredFileContractElements(bh uint64) ([]contracts.V2BroadcastElement, error)
+		FileContractElement(fcid types.FileContractID) (contracts.V2BroadcastElement, error)
 		IsKnownContract(fcid types.FileContractID) (bool, error)
 		PruneFileContractElements(threshold uint64) error
 		RecordContractRenewal(old, new types.FileContractID) error
@@ -147,7 +148,7 @@ type (
 
 		// FileContractElement returns the up-to-date file contract element for
 		// a given contract id.
-		FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error)
+		FileContractElement(ctx context.Context, fcid types.FileContractID) (contracts.V2BroadcastElement, error)
 
 		// Hosts returns a list of hosts that match the provided filters
 		Hosts(ctx context.Context, opts api.HostOptions) ([]api.Host, error)

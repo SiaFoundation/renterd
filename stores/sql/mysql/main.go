@@ -20,6 +20,7 @@ import (
 	ssql "go.sia.tech/renterd/v2/stores/sql"
 	"lukechampine.com/frand"
 
+	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/internal/sql"
 
 	"go.uber.org/zap"
@@ -325,7 +326,7 @@ func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
 	return ssql.DeleteSetting(ctx, tx, key)
 }
 
-func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error) {
+func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (contracts.V2BroadcastElement, error) {
 	return ssql.FileContractElement(ctx, tx, fcid)
 }
 
