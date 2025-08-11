@@ -421,19 +421,29 @@ func TestContractElements(t *testing.T) {
 		Filesize: 2,
 	}
 
+	ci := types.ChainIndex{Height: 1, ID: types.BlockID{2}}
+	err = ss.ProcessChainUpdate(context.Background(), func(tx sql.ChainUpdateTx) error {
+		return tx.UpdateChainIndex(ci)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	assertContractElement := func(tx sql.ChainUpdateTx, leafIndex uint64, proof []types.Hash256, c types.V2FileContract) {
 		t.Helper()
 		fce, err := tx.FileContractElement(fcid)
 		if err != nil {
 			t.Fatal(err)
-		} else if fce.ID != fcid {
-			t.Fatalf("unexpected contract id %v", fce.ID)
-		} else if fce.StateElement.LeafIndex != leafIndex {
-			t.Fatalf("unexpected leaf index %v", fce.StateElement.LeafIndex)
-		} else if !reflect.DeepEqual(fce.StateElement.MerkleProof, proof) {
-			t.Fatalf("unexpected merkle proof %v", fce.StateElement.MerkleProof)
-		} else if !reflect.DeepEqual(fce.V2FileContract, c) {
-			t.Fatalf("unexpected contract %v", fce.V2FileContract)
+		} else if fce.V2FileContractElement.ID != fcid {
+			t.Fatalf("unexpected contract id %v", fce.V2FileContractElement.ID)
+		} else if fce.V2FileContractElement.StateElement.LeafIndex != leafIndex {
+			t.Fatalf("unexpected leaf index %v", fce.V2FileContractElement.StateElement.LeafIndex)
+		} else if !reflect.DeepEqual(fce.V2FileContractElement.StateElement.MerkleProof, proof) {
+			t.Fatalf("unexpected merkle proof %v", fce.V2FileContractElement.StateElement.MerkleProof)
+		} else if !reflect.DeepEqual(fce.V2FileContractElement.V2FileContract, c) {
+			t.Fatalf("unexpected contract %v", fce.V2FileContractElement.V2FileContract)
+		} else if fce.Basis != ci {
+			t.Fatalf("unexpected chain index %v", fce.Basis)
 		}
 	}
 

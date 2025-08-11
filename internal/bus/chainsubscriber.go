@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/stores/sql"
 	"go.uber.org/zap"
 )
@@ -48,6 +49,7 @@ type (
 		OnReorg(fn func(types.ChainIndex)) (cancel func())
 		Tip() types.ChainIndex
 		UpdatesSince(index types.ChainIndex, max int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
+		UpdateV2TransactionSet(txns []types.V2Transaction, from, to types.ChainIndex) ([]types.V2Transaction, error)
 	}
 
 	ChainStore interface {
@@ -372,15 +374,14 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 	}
 
 	for _, fce := range expiredFCEs {
-		go func(fce types.V2FileContractElement) {
+		go func(fce contracts.V2BroadcastElement) {
+			fcr := types.V2FileContractResolution{
+				Parent:     fce.V2FileContractElement,
+				Resolution: &types.V2FileContractExpiration{},
+			}
 			txn := types.V2Transaction{
-				MinerFee: s.wallet.RecommendedFee().Mul64(ContractResolutionTxnWeight),
-				FileContractResolutions: []types.V2FileContractResolution{
-					{
-						Parent:     fce,
-						Resolution: &types.V2FileContractExpiration{},
-					},
-				},
+				MinerFee:                s.wallet.RecommendedFee().Mul64(ContractResolutionTxnWeight),
+				FileContractResolutions: []types.V2FileContractResolution{fcr},
 			}
 
 			// fund and sign txn
@@ -389,11 +390,24 @@ func (s *chainSubscriber) broadcastExpiredFileContractResolutions(tx sql.ChainUp
 				s.logger.Errorf("failed to fund contract expiration txn: %v", err)
 				return
 			}
+
+			if fce.Basis != basis {
+				s.logger.Debug("updating revision basis", zap.Stringer("current", fce.Basis), zap.Stringer("target", basis))
+				updated, err := s.cm.UpdateV2TransactionSet([]types.V2Transaction{
+					{FileContractResolutions: []types.V2FileContractResolution{fcr}},
+				}, fce.Basis, basis)
+				if err != nil {
+					s.logger.Errorf("failed to update transaction set basis", zap.Error(err))
+					s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+					return
+				}
+				txn.FileContractResolutions[0] = updated[0].FileContractResolutions[0]
+			}
 			s.wallet.SignV2Inputs(&txn, toSign)
 
 			basis, set, err := s.cm.V2TransactionSet(basis, txn)
 			if err != nil {
-				s.logger.Errorf("failed to get transaction set: %w", err)
+				s.logger.Errorf("failed to get transaction set", zap.Error(err))
 				s.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 				return
 			}

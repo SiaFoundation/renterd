@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/contracts"
 	isql "go.sia.tech/renterd/v2/internal/sql"
 	ssql "go.sia.tech/renterd/v2/stores/sql"
 	"go.uber.org/zap"
@@ -207,11 +208,11 @@ func (c chainUpdateTx) UpdateContractState(fcid types.FileContractID, state api.
 	return ssql.UpdateContractState(c.ctx, c.tx, fcid, state, c.l)
 }
 
-func (c chainUpdateTx) ExpiredFileContractElements(bh uint64) ([]types.V2FileContractElement, error) {
+func (c chainUpdateTx) ExpiredFileContractElements(bh uint64) ([]contracts.V2BroadcastElement, error) {
 	return ssql.ExpiredFileContractElements(c.ctx, c.tx, bh)
 }
 
-func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (types.V2FileContractElement, error) {
+func (c chainUpdateTx) FileContractElement(fcid types.FileContractID) (contracts.V2BroadcastElement, error) {
 	return ssql.FileContractElement(c.ctx, c.tx, fcid)
 }
 

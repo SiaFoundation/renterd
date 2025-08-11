@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/internal/sql"
 	"go.uber.org/zap"
 )
@@ -155,7 +156,11 @@ func updateSiacoinStateElements(ctx context.Context, tx sql.Tx, elements []Siaco
 	return nil
 }
 
-func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fces []types.V2FileContractElement, _ error) {
+func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fces []contracts.V2BroadcastElement, _ error) {
+	tip, err := Tip(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tip: %w", err)
+	}
 	rows, err := tx.Query(ctx, "SELECT c.fcid, contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.window_end < ?",
 		bh)
 	if err != nil {
@@ -163,44 +168,32 @@ func ExpiredFileContractElements(ctx context.Context, tx sql.Tx, bh uint64) (fce
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var fcid FileContractID
-		var contract FileContract
-		var leafIndex uint64
-		var proof MerkleProof
-		if err := rows.Scan(&fcid, &contract, &leafIndex, &proof); err != nil {
+		fce, err := scanV2FileContractElement(rows)
+		if err != nil {
 			return nil, err
 		}
-		fces = append(fces, types.V2FileContractElement{
-			ID: types.FileContractID(fcid),
-			StateElement: types.StateElement{
-				LeafIndex:   leafIndex,
-				MerkleProof: proof.Hashes,
-			},
-			V2FileContract: types.V2FileContract(contract),
+		fces = append(fces, contracts.V2BroadcastElement{
+			Basis:                 tip,
+			V2FileContractElement: fce,
 		})
 	}
 	return fces, nil
 }
 
-func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (types.V2FileContractElement, error) {
-	var contract FileContract
-	var leafIndex uint64
-	var proof MerkleProof
-	err := tx.QueryRow(ctx, "SELECT contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", FileContractID(fcid)).
-		Scan(&contract, &leafIndex, &proof)
-	if errors.Is(err, dsql.ErrNoRows) {
-		return types.V2FileContractElement{}, api.ErrContractNotFound
-	}
+func FileContractElement(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (contracts.V2BroadcastElement, error) {
+	tip, err := Tip(ctx, tx)
 	if err != nil {
-		return types.V2FileContractElement{}, err
+		return contracts.V2BroadcastElement{}, fmt.Errorf("failed to get tip: %w", err)
 	}
-	return types.V2FileContractElement{
-		ID: fcid,
-		StateElement: types.StateElement{
-			LeafIndex:   leafIndex,
-			MerkleProof: proof.Hashes,
-		},
-		V2FileContract: types.V2FileContract(contract),
+	fce, err := scanV2FileContractElement(tx.QueryRow(ctx, "SELECT c.fcid, contract, leaf_index, merkle_proof FROM contract_elements ce INNER JOIN contracts c ON ce.db_contract_id = c.id WHERE c.fcid = ?", FileContractID(fcid)))
+	if errors.Is(err, dsql.ErrNoRows) {
+		return contracts.V2BroadcastElement{}, api.ErrContractNotFound
+	} else if err != nil {
+		return contracts.V2BroadcastElement{}, err
+	}
+	return contracts.V2BroadcastElement{
+		Basis:                 tip,
+		V2FileContractElement: fce,
 	}, nil
 }
 
@@ -295,6 +288,24 @@ func updateFileContractStateElements(ctx context.Context, tx sql.Tx, elements []
 
 func contractNotFoundErr(fcid types.FileContractID) error {
 	return fmt.Errorf("%w: %v", api.ErrContractNotFound, fcid)
+}
+
+func scanV2FileContractElement(scanner Scanner) (types.V2FileContractElement, error) {
+	var fcid FileContractID
+	var contract FileContract
+	var leafIndex uint64
+	var proof MerkleProof
+	if err := scanner.Scan(&fcid, &contract, &leafIndex, &proof); err != nil {
+		return types.V2FileContractElement{}, fmt.Errorf("failed to scan V2FileContractElement: %w", err)
+	}
+	return types.V2FileContractElement{
+		ID: types.FileContractID(fcid),
+		StateElement: types.StateElement{
+			LeafIndex:   leafIndex,
+			MerkleProof: proof.Hashes,
+		},
+		V2FileContract: types.V2FileContract(contract),
+	}, nil
 }
 
 func updateContract(ctx context.Context, tx sql.Tx, fcid types.FileContractID, currRevisionHeight, currRevisionNumber, revisionHeight, revisionNumber, size uint64) (err error) {

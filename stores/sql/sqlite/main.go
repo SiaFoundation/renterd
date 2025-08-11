@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/internal/sql"
 	"go.sia.tech/renterd/v2/object"
 	ssql "go.sia.tech/renterd/v2/stores/sql"
@@ -329,7 +330,7 @@ func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
 	return ssql.DeleteSetting(ctx, tx, key)
 }
 
-func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (types.V2FileContractElement, error) {
+func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (contracts.V2BroadcastElement, error) {
 	return ssql.FileContractElement(ctx, tx, fcid)
 }
 
