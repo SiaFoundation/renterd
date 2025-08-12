@@ -470,6 +470,10 @@ func (n *node) Shutdown() error {
 func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey, logger *zap.Logger) (stores.Config, error) {
 	partialSlabDir := filepath.Join(cfg.Directory, "partial_slabs")
 
+	if cfg.Log.Database.SlowThreshold == 0 {
+		return stores.Config{}, errors.New("Log.Database.SlowThreshold must be greater than 0")
+	}
+
 	// create database connections
 	var dbMain sql.Database
 	var dbMetrics sql.MetricsDatabase
@@ -531,10 +535,6 @@ func buildStoreConfig(am alerts.Alerter, cfg config.Config, pk types.PrivateKey,
 		if err != nil {
 			return stores.Config{}, fmt.Errorf("failed to create SQLite metrics database: %w", err)
 		}
-	}
-
-	if cfg.Log.Database.SlowThreshold == 0 {
-		return stores.Config{}, errors.New("Log.Database.SlowThreshold must be greater than 0")
 	}
 
 	return stores.Config{
