@@ -1,3 +1,20 @@
+## 2.6.0 (2025-08-13)
+
+### Features
+
+- Add 'Minimum' option to wallet redistribution endpoint.
+- Added `[GET] /pinned/*key` to retrieve the raw object metadata suitable for downloading using external tools.
+- Rebroadcast transactions periodically
+
+### Fixes
+
+- Avoid marking contract as 'bad' if renew/refresh fails for non-host-related reasons.
+- Fix race when broadcasting contract revisions and resolutions.
+- Increase funding for contracts.
+- Increase value of redistributed UTXOs.
+- Make sure that SlowThreshold can't be set to 0.
+- Perform sector write and append with single siamux transport.
+
 ## 2.5.0 (2025-07-07)
 
 ### Features
