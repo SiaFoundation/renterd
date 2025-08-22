@@ -639,7 +639,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, hm, dlmm, w.bus, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
 
 	ulmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
-	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, hm, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, hm, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, cfg.UploadSectorDelay, l)
 
 	return w, nil
 }

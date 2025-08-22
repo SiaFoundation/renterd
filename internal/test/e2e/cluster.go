@@ -542,7 +542,7 @@ func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.
 	l = l.Named("autopilot")
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
+	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, cfg.MigratorUploadSectorDelay, l)
 	if err != nil {
 		cancel(nil)
 		return nil, err
