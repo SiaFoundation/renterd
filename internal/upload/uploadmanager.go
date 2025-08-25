@@ -74,6 +74,8 @@ type (
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
 
+		sectorDelay time.Duration
+
 		statsOverdrivePct              *utils.DataPoints
 		statsSlabUploadSpeedBytesPerMS *utils.DataPoints
 
@@ -150,7 +152,7 @@ type (
 	}
 )
 
-func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
+func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, sectorDelay time.Duration, logger *zap.Logger) *Manager {
 	logger = logger.Named("uploadmanager")
 	return &Manager{
 		hm:        hm,
@@ -163,6 +165,8 @@ func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manage
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
+
+		sectorDelay: sectorDelay,
 
 		statsOverdrivePct:              utils.NewDataPoints(0),
 		statsSlabUploadSpeedBytesPerMS: utils.NewDataPoints(0),
@@ -314,7 +318,7 @@ func (mgr *Manager) Upload(ctx context.Context, r io.Reader, hosts []HostInfo, u
 			} else {
 				// regular upload
 				go func(rs api.RedundancySettings, data []byte, length, slabIndex int) {
-					uploadSpeed, overdrivePct := upload.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+					uploadSpeed, overdrivePct := upload.uploadSlab(ctx, rs, data, length, slabIndex, respChan, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout, mgr.sectorDelay)
 
 					// track stats
 					mgr.statsSlabUploadSpeedBytesPerMS.Track(float64(uploadSpeed))
@@ -416,7 +420,7 @@ func (mgr *Manager) UploadPackedSlab(ctx context.Context, rs api.RedundancySetti
 	}()
 
 	// upload the shards
-	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout, mgr.sectorDelay)
 	if err != nil {
 		return err
 	}
@@ -470,7 +474,7 @@ func (mgr *Manager) UploadShards(ctx context.Context, s object.Slab, shards [][]
 	}()
 
 	// upload the shards
-	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := upload.uploadShards(ctx, shards, mgr.candidates(upload.allowed), mem, mgr.maxOverdrive, mgr.overdriveTimeout, mgr.sectorDelay)
 
 	// build sectors
 	var sectors []api.UploadedSector
@@ -640,7 +644,7 @@ func (u *upload) newSlabUpload(ctx context.Context, shards [][]byte, uploaders [
 	}, responseChan
 }
 
-func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (int64, float64) {
+func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data []byte, length, index int, respChan chan slabUploadResponse, candidates []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration, sectorDelay time.Duration) (int64, float64) {
 	// create the response
 	resp := slabUploadResponse{
 		slab: object.SlabSlice{
@@ -657,7 +661,7 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 	resp.slab.Slab.Encrypt(shards)
 
 	// upload the shards
-	uploaded, uploadSpeed, overdrivePct, err := u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout)
+	uploaded, uploadSpeed, overdrivePct, err := u.uploadShards(ctx, shards, candidates, mem, maxOverdrive, overdriveTimeout, sectorDelay)
 
 	// build the sectors
 	var sectors []object.Sector
@@ -681,7 +685,7 @@ func (u *upload) uploadSlab(ctx context.Context, rs api.RedundancySettings, data
 // uploadShards uploads the shards to the provided candidates. It returns an
 // error if it fails to upload all shards but len(sectors) will be > 0 if some
 // shards were uploaded successfully.
-func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
+func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates []*uploader.Uploader, mem memory.Memory, maxOverdrive uint64, overdriveTimeout time.Duration, sectorDelay time.Duration) (sectors []uploadedSector, uploadSpeed int64, overdrivePct float64, err error) {
 	// ensure inflight uploads get cancelled
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -707,6 +711,13 @@ func (u *upload) uploadShards(ctx context.Context, shards [][]byte, candidates [
 	for _, upload := range requests {
 		if err := slab.launch(upload); err != nil {
 			return nil, 0, 0, err
+		}
+		// do not launch all requests at once
+		// on low bandwidth connections hosts timeout sectors otherwise
+		// the delay guarantees that each sector gets a bigger share of the available bandwidth
+		// and thus does not run into timeouts
+		if sectorDelay != 0 {
+			time.Sleep(sectorDelay)
 		}
 	}
 

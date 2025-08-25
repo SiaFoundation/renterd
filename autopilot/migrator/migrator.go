@@ -104,7 +104,7 @@ type (
 	}
 )
 
-func New(ctx context.Context, masterKey [32]byte, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, logger *zap.Logger) (*Migrator, error) {
+func New(ctx context.Context, masterKey [32]byte, alerts alerts.Alerter, ss SlabStore, b Bus, healthCutoff float64, numThreads, downloadMaxOverdrive, uploadMaxOverdrive uint64, downloadOverdriveTimeout, uploadOverdriveTimeout, accountsRefillInterval time.Duration, uploadSectorDelay time.Duration, logger *zap.Logger) (*Migrator, error) {
 	logger = logger.Named("migrator")
 	m := &Migrator{
 		alerts: alerts,
@@ -145,7 +145,7 @@ func New(ctx context.Context, masterKey [32]byte, alerts alerts.Alerter, ss Slab
 	// create upload & download manager
 	mm := memory.NewManager(math.MaxInt64, logger)
 	m.downloadManager = download.NewManager(ctx, &uk, m.hostManager, mm, b, downloadMaxOverdrive, downloadOverdriveTimeout, logger)
-	m.uploadManager = upload.NewManager(ctx, &uk, m.hostManager, mm, b, b, b, uploadMaxOverdrive, uploadOverdriveTimeout, logger)
+	m.uploadManager = upload.NewManager(ctx, &uk, m.hostManager, mm, b, b, b, uploadMaxOverdrive, uploadOverdriveTimeout, uploadSectorDelay, logger)
 
 	return m, nil
 }

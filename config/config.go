@@ -129,6 +129,7 @@ type (
 		UploadMaxOverdrive            uint64        `yaml:"uploadMaxOverdrive,omitempty"`
 		AllowUnauthenticatedDownloads bool          `yaml:"allowUnauthenticatedDownloads,omitempty"`
 		CacheExpiry                   time.Duration `yaml:"cacheExpiry,omitempty"`
+		UploadSectorDelay             time.Duration `yaml:"uploadSectorDelay,omitempty"`
 	}
 
 	// Autopilot contains the configuration for an autopilot.
@@ -143,6 +144,7 @@ type (
 		MigratorNumThreads               uint64        `yaml:"migratorNumThreads,omitempty"`
 		MigratorUploadMaxOverdrive       uint64        `yaml:"migratorUploadMaxOverdrive,omitempty"`
 		MigratorUploadOverdriveTimeout   time.Duration `yaml:"migratorUploadOverdriveTimeout,omitempty"`
+		MigratorUploadSectorDelay        time.Duration `yaml:"migratorUploadSectorDelay,omitempty"`
 		RevisionBroadcastInterval        time.Duration `yaml:"revisionBroadcastInterval,omitempty"`
 		RevisionSubmissionBuffer         uint64        `yaml:"revisionSubmissionBuffer,omitempty"`
 		ScannerInterval                  time.Duration `yaml:"scannerInterval,omitempty"`

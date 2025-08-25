@@ -22,7 +22,7 @@ func (hm *hostManager) Host(hk types.PublicKey, fcid types.FileContractID, siamu
 
 func TestRefreshUploaders(t *testing.T) {
 	hm := &hostManager{}
-	ul := NewManager(context.Background(), nil, hm, nil, nil, nil, nil, 0, 0, zap.NewNop())
+	ul := NewManager(context.Background(), nil, hm, nil, nil, nil, nil, 0, 0, 0, zap.NewNop())
 
 	// prepare host info
 	hi := HostInfo{
