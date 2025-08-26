@@ -1,0 +1,16 @@
+name: Sync OpenAPI Versions
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    uses: foundation/workflows/.github/workflows/sync-openapi-version.yml@master
+    with:
+      spec_path: openapi.yml
