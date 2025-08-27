@@ -45,7 +45,7 @@ func TestEncryptionOffset(t *testing.T) {
 			data := frand.Bytes(640)
 			if !bytes.Equal(data, decrypt(offset, encrypt(offset, data))) {
 				t.Fatal("mismatch")
-			} else if bytes.Equal(data, decrypt(offset, encrypt(128, data))) {
+			} else if bytes.Equal(data, decrypt(offset, encrypt(offset+1, data))) {
 				t.Fatal("expected mismatch")
 			}
 		})
