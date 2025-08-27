@@ -2,6 +2,7 @@ package object
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"math"
 	"testing"
@@ -39,13 +40,17 @@ func TestEncryptionOffset(t *testing.T) {
 		return pt.Bytes()
 	}
 
-	data := frand.Bytes(640)
-	offset := uint64(64)
-	if !bytes.Equal(data, decrypt(offset, encrypt(offset, data))) {
-		t.Fatal("mismatch")
-	} else if bytes.Equal(data, decrypt(offset, encrypt(128, data))) {
-		t.Fatal("expected mismatch")
+	for _, offset := range []uint64{0, 16, 31, 63, 64, 96, 2048, 4096, maxBytesPerNonce - 127, maxBytesPerNonce - 128, maxBytesPerNonce - 63, maxBytesPerNonce - 64, maxBytesPerNonce, 2 * maxBytesPerNonce} {
+		t.Run(fmt.Sprint(offset), func(t *testing.T) {
+			data := frand.Bytes(640)
+			if !bytes.Equal(data, decrypt(offset, encrypt(offset, data))) {
+				t.Fatal("mismatch")
+			} else if bytes.Equal(data, decrypt(offset, encrypt(128, data))) {
+				t.Fatal("expected mismatch")
+			}
+		})
 	}
+
 }
 
 func TestEncryptionOverflow(t *testing.T) {
