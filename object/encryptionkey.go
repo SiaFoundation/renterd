@@ -177,12 +177,12 @@ type EncryptionOptions struct {
 func (k *EncryptionKey) Encrypt(r io.Reader, opts EncryptionOptions) (cipher.StreamReader, error) {
 	switch k.keyType {
 	case EncryptionKeyTypeBasic:
-		return (*encryptionKeyBasic)(k).Encrypt(r, opts.Offset)
+		return (*encryptionKeyBasic)(k).Encrypt(r, opts.Offset), nil
 	case EncryptionKeyTypeSalted:
 		if opts.Key == nil {
 			return cipher.StreamReader{}, ErrKeyRequired
 		}
-		return (*encryptionKeySalted)(k).Encrypt(r, opts.Offset, opts.Key)
+		return (*encryptionKeySalted)(k).Encrypt(r, opts.Offset, opts.Key), nil
 	default:
 		return cipher.StreamReader{}, fmt.Errorf("%w: %v", ErrKeyType, k.keyType)
 	}
@@ -204,7 +204,7 @@ func (k *EncryptionKey) Decrypt(w io.Writer, opts EncryptionOptions) (cipher.Str
 
 type encryptionKeyBasic EncryptionKey
 
-func (k *encryptionKeyBasic) Encrypt(r io.Reader, offset uint64) (cipher.StreamReader, error) {
+func (k *encryptionKeyBasic) Encrypt(r io.Reader, offset uint64) cipher.StreamReader {
 	return encrypt(k.entropy, r, offset)
 }
 func (k *encryptionKeyBasic) Decrypt(w io.Writer, offset uint64) cipher.StreamWriter {
@@ -213,7 +213,7 @@ func (k *encryptionKeyBasic) Decrypt(w io.Writer, offset uint64) cipher.StreamWr
 
 type encryptionKeySalted EncryptionKey
 
-func (k *encryptionKeySalted) Encrypt(r io.Reader, offset uint64, key *utils.UploadKey) (cipher.StreamReader, error) {
+func (k *encryptionKeySalted) Encrypt(r io.Reader, offset uint64, key *utils.UploadKey) cipher.StreamReader {
 	derivedKey := key.DeriveKey(k.entropy)
 	return encrypt(&derivedKey, r, offset)
 }
@@ -222,32 +222,70 @@ func (k *encryptionKeySalted) Decrypt(w io.Writer, offset uint64, key *utils.Upl
 	return decrypt(&derivedKey, w, offset)
 }
 
+const (
+	// maximum amount of data we can encrypt with a single nonce because
+	// counter is a uint32 and each tick is 64 bytes
+	maxBytesPerNonce = 64 * math.MaxUint32
+)
+
 type rekeyStream struct {
-	key []byte
-	c   *chacha20.Cipher
+	key  []byte
+	c    *chacha20.Cipher
+	skip int
 
 	counter uint64
 	nonce   uint64
 }
 
 func (rs *rekeyStream) XORKeyStream(dst, src []byte) {
+	if len(src) == 0 {
+		return
+	}
+
+	if rs.skip > 0 {
+		// determine how many bytes we can process from the first block.
+		n := min(64-rs.skip, len(src))
+
+		// generate the full 64-byte keystream for the initial block.
+		var keyStream [64]byte
+		rs.c.XORKeyStream(keyStream[:], keyStream[:])
+
+		// XOR the relevant part of the keystream with the source data
+		for i := 0; i < n; i++ {
+			dst[i] = src[i] ^ keyStream[rs.skip+i]
+		}
+
+		// update state and slice pointers for the rest of the operation
+		rs.counter += uint64(n)
+		src = src[n:]
+		dst = dst[n:]
+		// only run once
+		rs.skip = 0
+	}
+	if len(src) == 0 {
+		return
+	}
+
 	rs.counter += uint64(len(src))
-	if rs.counter < 64*math.MaxUint32 {
+	if rs.counter < maxBytesPerNonce {
 		rs.c.XORKeyStream(dst, src)
 		return
 	}
+
 	// counter overflow; xor remaining bytes, then increment nonce and xor again
-	rem := 64*math.MaxUint32 - (rs.counter - uint64(len(src)))
-	rs.counter -= 64 * math.MaxUint32
+	rem := maxBytesPerNonce - (rs.counter - uint64(len(src)))
 	rs.c.XORKeyStream(dst[:rem], src[:rem])
-	// NOTE: we increment the last 8 bytes because XChaCha uses the
-	// first 16 bytes to derive a new key; leaving them alone means
-	// the key will be stable, which might be useful.
+	src = src[rem:]
+	dst = dst[rem:]
+
+	// reset counter and re-key the cipher with an incremented nonce
+	rs.counter = uint64(len(src))
 	rs.nonce++
 	nonce := make([]byte, 24)
 	binary.LittleEndian.PutUint64(nonce[16:], rs.nonce)
 	rs.c, _ = chacha20.NewUnauthenticatedCipher(rs.key, nonce)
-	rs.c.XORKeyStream(dst[rem:], src[rem:])
+
+	rs.c.XORKeyStream(dst, src)
 }
 
 type noOpStream struct{}
@@ -256,24 +294,27 @@ func (noOpStream) XORKeyStream(dst, src []byte) {
 	copy(dst, src)
 }
 
+func nonce(offset uint64) (nonce [24]byte, nonce64 uint64) {
+	nonce64 = offset / maxBytesPerNonce
+	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
+	return
+}
+
 // Encrypt returns a cipher.StreamReader that encrypts r with k starting at the
 // given offset.
-func encrypt(key *[32]byte, r io.Reader, offset uint64) (cipher.StreamReader, error) {
-	if offset%64 != 0 {
-		return cipher.StreamReader{}, fmt.Errorf("offset must be a multiple of 64, got %v", offset)
-	}
+func encrypt(key *[32]byte, r io.Reader, offset uint64) cipher.StreamReader {
 	if bytes.Equal(key[:], NoOpKey.entropy[:]) {
-		return cipher.StreamReader{S: &noOpStream{}, R: r}, nil
+		return cipher.StreamReader{S: &noOpStream{}, R: r}
 	}
-	nonce64 := offset / (64 * math.MaxUint32)
-	offset %= 64 * math.MaxUint32
 
-	nonce := make([]byte, 24)
-	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
-	c, _ := chacha20.NewUnauthenticatedCipher(key[:], nonce)
+	n, n64 := nonce(offset)
+	offset %= maxBytesPerNonce
+	skip := int(offset % 64)
+
+	c, _ := chacha20.NewUnauthenticatedCipher(key[:], n[:])
 	c.SetCounter(uint32(offset / 64))
-	rs := &rekeyStream{key: key[:], c: c}
-	return cipher.StreamReader{S: rs, R: r}, nil
+	rs := &rekeyStream{key: key[:], c: c, counter: offset, nonce: n64, skip: skip}
+	return cipher.StreamReader{S: rs, R: r}
 }
 
 // Decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
@@ -282,16 +323,12 @@ func decrypt(key *[32]byte, w io.Writer, offset uint64) cipher.StreamWriter {
 	if bytes.Equal(key[:], NoOpKey.entropy[:]) {
 		return cipher.StreamWriter{S: &noOpStream{}, W: w}
 	}
-	nonce64 := offset / (64 * math.MaxUint32)
-	offset %= 64 * math.MaxUint32
+	n, n64 := nonce(offset)
+	offset %= maxBytesPerNonce
+	skip := int(offset % 64)
 
-	nonce := make([]byte, 24)
-	binary.LittleEndian.PutUint64(nonce[16:], nonce64)
-	c, _ := chacha20.NewUnauthenticatedCipher(key[:], nonce)
+	c, _ := chacha20.NewUnauthenticatedCipher(key[:], n[:])
 	c.SetCounter(uint32(offset / 64))
-
-	var buf [64]byte
-	c.XORKeyStream(buf[:offset%64], buf[:offset%64])
-	rs := &rekeyStream{key: key[:], c: c, counter: offset, nonce: nonce64}
+	rs := &rekeyStream{key: key[:], c: c, counter: offset, nonce: n64, skip: skip}
 	return cipher.StreamWriter{S: rs, W: w}
 }
