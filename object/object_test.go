@@ -50,7 +50,6 @@ func TestEncryptionOffset(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestEncryptionOverflow(t *testing.T) {
