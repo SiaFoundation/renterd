@@ -144,7 +144,6 @@ type (
 		MigratorNumThreads               uint64        `yaml:"migratorNumThreads,omitempty"`
 		MigratorUploadMaxOverdrive       uint64        `yaml:"migratorUploadMaxOverdrive,omitempty"`
 		MigratorUploadOverdriveTimeout   time.Duration `yaml:"migratorUploadOverdriveTimeout,omitempty"`
-		MigratorUploadSectorTimeout      time.Duration `yaml:"migratorUploadSectorTimeout,omitempty"`
 		RevisionBroadcastInterval        time.Duration `yaml:"revisionBroadcastInterval,omitempty"`
 		RevisionSubmissionBuffer         uint64        `yaml:"revisionSubmissionBuffer,omitempty"`
 		ScannerInterval                  time.Duration `yaml:"scannerInterval,omitempty"`

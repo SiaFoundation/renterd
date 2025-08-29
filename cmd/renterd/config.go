@@ -51,6 +51,7 @@ var cfg = config.Config{
 		Password: os.Getenv(apiPasswordEnvVar),
 	},
 	ShutdownTimeout: 5 * time.Minute,
+
 	Database: config.Database{
 		MySQL: config.MySQL{
 			User:            "renterd",
@@ -101,7 +102,7 @@ var cfg = config.Config{
 		UploadMaxMemory:        1 << 30, // 1 GiB
 		UploadMaxOverdrive:     5,
 		UploadOverdriveTimeout: 3 * time.Second,
-		UploadSectorTimeout:    3 * time.Minute,
+		UploadSectorTimeout:    1 * time.Minute,
 	},
 	Autopilot: config.Autopilot{
 		Enabled: true,
@@ -115,7 +116,6 @@ var cfg = config.Config{
 		MigratorDownloadOverdriveTimeout: 3 * time.Second,
 		MigratorUploadMaxOverdrive:       5,
 		MigratorUploadOverdriveTimeout:   3 * time.Second,
-		MigratorUploadSectorTimeout:      3 * time.Minute,
 
 		RevisionBroadcastInterval: 7 * 24 * time.Hour,
 		RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
@@ -263,7 +263,6 @@ func parseCLIFlags() {
 	flag.DurationVar(&cfg.Autopilot.MigratorDownloadOverdriveTimeout, "autopilot.migratorDownloadOverdriveTimeout", cfg.Autopilot.MigratorDownloadOverdriveTimeout, "Timeout for overdriving migration downloads")
 	flag.Uint64Var(&cfg.Autopilot.MigratorUploadMaxOverdrive, "autopilot.migratorUploadMaxOverdrive", cfg.Autopilot.MigratorUploadMaxOverdrive, "Max overdrive workers for migration uploads")
 	flag.DurationVar(&cfg.Autopilot.MigratorUploadOverdriveTimeout, "autopilot.migratorUploadOverdriveTimeout", cfg.Autopilot.MigratorUploadOverdriveTimeout, "Timeout for overdriving migration uploads")
-	flag.DurationVar(&cfg.Autopilot.MigratorUploadSectorTimeout, "autopilot.migratorUploadSectorTimeout", cfg.Autopilot.MigratorUploadSectorTimeout, "Timeout for individual sectors of a migration upload")
 
 	// s3
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")
