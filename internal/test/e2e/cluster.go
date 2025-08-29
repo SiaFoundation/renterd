@@ -205,7 +205,7 @@ type testClusterOptions struct {
 	skipUpdatingSettings bool
 	walletKey            *types.PrivateKey
 
-	autopilotCfg    *config.Autopilot
+	autopilotCfg    *config.Config
 	autopilotConfig *api.AutopilotConfig
 	cm              *chain.Manager
 	busCfg          *config.Bus
@@ -537,28 +537,28 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	return cluster
 }
 
-func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
+func newTestAutopilot(masterKey utils.MasterKey, cfg config.Config, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
+	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.Autopilot.MigratorHealthCutoff, cfg.Autopilot.MigratorNumThreads, cfg.Autopilot.MigratorDownloadMaxOverdrive, cfg.Autopilot.MigratorUploadMaxOverdrive, cfg.Autopilot.MigratorDownloadOverdriveTimeout, cfg.Autopilot.MigratorUploadOverdriveTimeout, cfg.Worker.UploadSectorTimeout, cfg.Autopilot.MigratorAccountsRefillInterval, l)
 	if err != nil {
 		cancel(nil)
 		return nil, err
 	}
 
-	s, err := scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, l)
+	s, err := scanner.New(bus, cfg.Autopilot.ScannerBatchSize, cfg.Autopilot.ScannerNumThreads, cfg.Autopilot.ScannerInterval, l)
 	if err != nil {
 		cancel(nil)
 		return nil, err
 	}
 
-	c := contractor.New(bus, bus, bus, bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
+	c := contractor.New(bus, bus, bus, bus, bus, cfg.Autopilot.RevisionSubmissionBuffer, cfg.Autopilot.RevisionBroadcastInterval, cfg.Autopilot.AllowRedundantHostIPs, l)
 	p := pruner.New(bus, l)
 	w := walletmaintainer.New(a, bus, l, walletmaintainer.WithNumOutputs(5, 5))
 
-	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
+	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Autopilot.Heartbeat, l), nil
 }
 
 func newTestBus(cm *chain.Manager, genesisBlock types.Block, dir string, cfg config.Bus, cfgDb dbConfig, pk types.PrivateKey, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, *chain.Manager, bus.Store, error) {
@@ -1010,23 +1010,28 @@ func testWorkerCfg() config.Worker {
 	}
 }
 
-func testApCfg() config.Autopilot {
-	return config.Autopilot{
-		AllowRedundantHostIPs:    true,
-		Heartbeat:                time.Second,
-		RevisionSubmissionBuffer: 0,
+func testApCfg() config.Config {
+	return config.Config{
+		Autopilot: config.Autopilot{
+			AllowRedundantHostIPs:    true,
+			Heartbeat:                time.Second,
+			RevisionSubmissionBuffer: 0,
 
-		MigratorAccountsRefillInterval:   10 * time.Millisecond,
-		MigratorHealthCutoff:             0.99,
-		MigratorNumThreads:               1,
-		MigratorDownloadMaxOverdrive:     5,
-		MigratorDownloadOverdriveTimeout: 500 * time.Millisecond,
-		MigratorUploadOverdriveTimeout:   500 * time.Millisecond,
-		MigratorUploadMaxOverdrive:       5,
+			MigratorAccountsRefillInterval:   10 * time.Millisecond,
+			MigratorHealthCutoff:             0.99,
+			MigratorNumThreads:               1,
+			MigratorDownloadMaxOverdrive:     5,
+			MigratorDownloadOverdriveTimeout: 500 * time.Millisecond,
+			MigratorUploadOverdriveTimeout:   500 * time.Millisecond,
+			MigratorUploadMaxOverdrive:       5,
 
-		ScannerInterval:   10 * time.Millisecond,
-		ScannerBatchSize:  10,
-		ScannerNumThreads: 1,
+			ScannerInterval:   10 * time.Millisecond,
+			ScannerBatchSize:  10,
+			ScannerNumThreads: 1,
+		},
+		Worker: config.Worker{
+			UploadSectorTimeout: 1 * time.Minute,
+		},
 	}
 }
 

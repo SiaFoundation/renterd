@@ -218,7 +218,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	// initialise autopilot
 	if cfg.Autopilot.Enabled {
 		workerKey := blake2b.Sum256(append([]byte("worker"), pk...))
-		ap, err := newAutopilot(workerKey, cfg.Autopilot, bc, logger)
+		ap, err := newAutopilot(workerKey, cfg, bc, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create autopilot: %v", err)
 		}
@@ -252,28 +252,28 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	}, nil
 }
 
-func newAutopilot(masterKey [32]byte, cfg config.Autopilot, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
+func newAutopilot(masterKey [32]byte, cfg config.Config, bus *bus.Client, l *zap.Logger) (Autopilot, error) {
 	a := alerts.WithOrigin(bus, "autopilot")
 	l = l.Named("autopilot")
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
+	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.Autopilot.MigratorHealthCutoff, cfg.Autopilot.MigratorNumThreads, cfg.Autopilot.MigratorDownloadMaxOverdrive, cfg.Autopilot.MigratorUploadMaxOverdrive, cfg.Autopilot.MigratorDownloadOverdriveTimeout, cfg.Autopilot.MigratorUploadOverdriveTimeout, cfg.Worker.UploadSectorTimeout, cfg.Autopilot.MigratorAccountsRefillInterval, l)
 	if err != nil {
 		cancel(nil)
 		return nil, err
 	}
 
-	s, err := scanner.New(bus, cfg.ScannerBatchSize, cfg.ScannerNumThreads, cfg.ScannerInterval, l)
+	s, err := scanner.New(bus, cfg.Autopilot.ScannerBatchSize, cfg.Autopilot.ScannerNumThreads, cfg.Autopilot.ScannerInterval, l)
 	if err != nil {
 		cancel(nil)
 		return nil, err
 	}
 
-	c := contractor.New(bus, bus, bus, bus, bus, cfg.RevisionSubmissionBuffer, cfg.RevisionBroadcastInterval, cfg.AllowRedundantHostIPs, l)
+	c := contractor.New(bus, bus, bus, bus, bus, cfg.Autopilot.RevisionSubmissionBuffer, cfg.Autopilot.RevisionBroadcastInterval, cfg.Autopilot.AllowRedundantHostIPs, l)
 	p := pruner.New(bus, l)
 	w := walletmaintainer.New(a, bus, l)
 
-	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
+	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Autopilot.Heartbeat, l), nil
 }
 
 func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {

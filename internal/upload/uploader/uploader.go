@@ -20,7 +20,6 @@ import (
 const (
 	lockingPriorityUpload     = 10
 	revisionFetchTimeout      = 30 * time.Second
-	sectorUploadTimeout       = 60 * time.Second
 	statsRecomputeMinInterval = 3 * time.Second
 )
 
@@ -97,10 +96,12 @@ type (
 
 		statsSectorUploadEstimateInMS    *utils.DataPoints
 		statsSectorUploadSpeedBytesPerMS *utils.DataPoints
+
+		sectorTimeout time.Duration
 	}
 )
 
-func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm hosts.Manager, hi api.HostInfo, fcid types.FileContractID, endHeight uint64, l *zap.SugaredLogger) *Uploader {
+func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm hosts.Manager, hi api.HostInfo, fcid types.FileContractID, endHeight uint64, sectorTimeout time.Duration, l *zap.SugaredLogger) *Uploader {
 	return &Uploader{
 		cl:     cl,
 		cs:     cs,
@@ -122,6 +123,8 @@ func New(ctx context.Context, cl locking.ContractLocker, cs ContractStore, hm ho
 		fcid:   fcid,
 		host:   hi,
 		queue:  make([]*queuedSectorUploadReq, 0),
+
+		sectorTimeout: sectorTimeout,
 	}
 }
 
@@ -364,7 +367,7 @@ func (u *Uploader) execute(req *queuedSectorUploadReq) (_ time.Duration, err err
 	}()
 
 	// apply sane timeout
-	ctx, cancel := context.WithTimeout(req.Ctx, sectorUploadTimeout)
+	ctx, cancel := context.WithTimeout(req.Ctx, u.sectorTimeout)
 	defer cancel()
 
 	// upload the sector
