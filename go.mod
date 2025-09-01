@@ -4,7 +4,7 @@ go 1.24.3
 
 require (
 	github.com/aws/aws-sdk-go v1.55.8
-	github.com/gabriel-vasile/mimetype v1.4.9
+	github.com/gabriel-vasile/mimetype v1.4.10
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.0
@@ -12,8 +12,8 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.17.3
-	go.sia.tech/coreutils v0.18.1
+	go.sia.tech/core v0.17.4
+	go.sia.tech/coreutils v0.18.2
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/web/renterd v0.84.3
@@ -36,7 +36,7 @@ require (
 	github.com/quic-go/webtransport-go v0.9.0 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
-	go.etcd.io/bbolt v1.4.2 // indirect
+	go.etcd.io/bbolt v1.4.3 // indirect
 	go.sia.tech/mux v1.4.0 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/mock v0.5.2 // indirect
