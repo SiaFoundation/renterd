@@ -157,6 +157,7 @@ func newTestWorkerCfg() config.Worker {
 		BusFlushInterval:         time.Second,
 		DownloadOverdriveTimeout: time.Second,
 		UploadOverdriveTimeout:   time.Second,
+		UploadSectorTimeout:      time.Minute,
 		DownloadMaxMemory:        1 << 12, // 4 KiB
 		UploadMaxMemory:          1 << 12, // 4 KiB
 	}
