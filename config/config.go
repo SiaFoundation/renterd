@@ -123,6 +123,7 @@ type (
 		BusFlushInterval              time.Duration `yaml:"busFlushInterval,omitempty"`
 		DownloadOverdriveTimeout      time.Duration `yaml:"downloadOverdriveTimeout,omitempty"`
 		UploadOverdriveTimeout        time.Duration `yaml:"uploadOverdriveTimeout,omitempty"`
+		UploadSectorTimeout           time.Duration `yaml:"uploadSectorTimeout,omitempty"`
 		DownloadMaxOverdrive          uint64        `yaml:"downloadMaxOverdrive,omitempty"`
 		DownloadMaxMemory             uint64        `yaml:"downloadMaxMemory,omitempty"`
 		UploadMaxMemory               uint64        `yaml:"uploadMaxMemory,omitempty"`

@@ -173,7 +173,7 @@ func TestContractUsability(t *testing.T) {
 	} else if _, err := cluster.Autopilot.Trigger(context.Background(), false); err != nil {
 		tt.Fatal(err)
 	} else {
-		time.Sleep(2 * testApCfg().Heartbeat)
+		time.Sleep(2 * testApCfg().Autopilot.Heartbeat)
 	}
 
 	// assert the logs contain an entry for the failed contract renewal

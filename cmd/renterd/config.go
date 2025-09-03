@@ -51,6 +51,7 @@ var cfg = config.Config{
 		Password: os.Getenv(apiPasswordEnvVar),
 	},
 	ShutdownTimeout: 5 * time.Minute,
+
 	Database: config.Database{
 		MySQL: config.MySQL{
 			User:            "renterd",
@@ -101,6 +102,7 @@ var cfg = config.Config{
 		UploadMaxMemory:        1 << 30, // 1 GiB
 		UploadMaxOverdrive:     5,
 		UploadOverdriveTimeout: 3 * time.Second,
+		UploadSectorTimeout:    1 * time.Minute,
 	},
 	Autopilot: config.Autopilot{
 		Enabled: true,
@@ -241,6 +243,7 @@ func parseCLIFlags() {
 	flag.Uint64Var(&cfg.Worker.UploadMaxMemory, "worker.uploadMaxMemory", cfg.Worker.UploadMaxMemory, "Max amount of RAM the worker allocates for slabs when uploading (overrides with RENTERD_WORKER_UPLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.UploadMaxOverdrive, "worker.uploadMaxOverdrive", cfg.Worker.UploadMaxOverdrive, "Max overdrive workers for uploads")
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
+	flag.DurationVar(&cfg.Worker.UploadSectorTimeout, "worker.uploadSectorTimeout", cfg.Worker.UploadSectorTimeout, "Timeout for upload of individual sectors of a slab")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
 	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
 
