@@ -81,11 +81,12 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 
 // hostVersionScore computes a score given the host's protocol version.
 func hostVersionScore(version rhpv4.ProtocolVersion) float64 {
-	if version.Cmp(rhp.ProtocolVersion501) == 0 {
+	switch {
+	case version.Cmp(rhp.ProtocolVersion501) == 0:
 		return 1.0
-	} else if version.Cmp(rhp.ProtocolVersion500) == 0 {
+	case version.Cmp(rhp.ProtocolVersion500) == 0:
 		return 0.9
-	} else {
+	default:
 		return 0.8
 	}
 }
