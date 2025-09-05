@@ -7,6 +7,7 @@ import (
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/renterd/v2/api"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 	"go.sia.tech/renterd/v2/internal/test"
@@ -281,5 +282,36 @@ func TestCollateralScore(t *testing.T) {
 	// Going below the cutoff should result in a score of 0.
 	if s := round(score(cutoffCollateral-1, math.MaxInt64)); s != 0 {
 		t.Errorf("expected %v but got %v", 0, s)
+	}
+}
+
+func TestHostVersionScore(t *testing.T) {
+	tests := []struct {
+		version rhpv4.ProtocolVersion
+		score   float64
+	}{
+		{
+			version: rhp.ProtocolVersion501,
+			score:   1.0,
+		},
+		{
+			version: rhp.ProtocolVersion500,
+			score:   0.9,
+		},
+		{
+			version: rhp.ProtocolVersion400,
+			score:   0.8,
+		},
+		// lower than v4
+		{
+			version: rhpv4.ProtocolVersion{0, 0, 0},
+			score:   0.8,
+		},
+	}
+	for _, test := range tests {
+		v := hostVersionScore(test.version)
+		if v != test.score {
+			t.Errorf("expected %v, got %v", test.score, v)
+		}
 	}
 }
