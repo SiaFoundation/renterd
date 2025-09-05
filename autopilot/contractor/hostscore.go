@@ -7,6 +7,7 @@ import (
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/renterd/v2/api"
 )
 
@@ -65,7 +66,7 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 	ingressPrice := h.V2Settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Div64(rhpv4.SectorSize)
 	storagePrice := h.V2Settings.Prices.RPCAppendSectorsCost(1, cfg.Contracts.Period).RenterCost().Div64(rhpv4.SectorSize)
 	remainingStorage := h.V2Settings.RemainingStorage * rhpv4.SectorSize
-	version := 1.0 // v2 only has one version
+	version := hostVersionScore(h.V2Settings.ProtocolVersion)
 
 	return api.HostScoreBreakdown{
 		Age:              ageScore(h), // not clamped since values are hardcoded
@@ -75,6 +76,17 @@ func hostScore(cfg api.AutopilotConfig, gs api.GougingSettings, h api.Host, expe
 		StorageRemaining: clampScore(storageRemainingScore(remainingStorage, h.StoredData, allocationPerHost)),
 		Uptime:           clampScore(uptimeScore(h)),
 		Version:          version,
+	}
+}
+
+// hostVersionScore computes a score given the host's protocol version.
+func hostVersionScore(version rhpv4.ProtocolVersion) float64 {
+	if version.Cmp(rhp.ProtocolVersion501) == 0 {
+		return 1.0
+	} else if version.Cmp(rhp.ProtocolVersion500) == 0 {
+		return 0.9
+	} else {
+		return 0.8
 	}
 }
 
