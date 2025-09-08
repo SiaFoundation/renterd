@@ -13,15 +13,15 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.17.5
-	go.sia.tech/coreutils v0.18.2
+	go.sia.tech/coreutils v0.18.4
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.0
-	go.sia.tech/web/renterd v0.84.3
+	go.sia.tech/web/renterd v0.85.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.41.0
-	golang.org/x/sys v0.35.0
+	golang.org/x/sys v0.36.0
 	golang.org/x/term v0.34.0
-	golang.org/x/time v0.12.0
+	golang.org/x/time v0.13.0
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/frand v1.5.1
 )
