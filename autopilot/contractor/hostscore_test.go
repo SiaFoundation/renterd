@@ -291,6 +291,10 @@ func TestHostVersionScore(t *testing.T) {
 		score   float64
 	}{
 		{
+			version: rhpv4.ProtocolVersion{9, 9, 9},
+			score:   1.0,
+		},
+		{
 			version: rhp.ProtocolVersion501,
 			score:   1.0,
 		},
