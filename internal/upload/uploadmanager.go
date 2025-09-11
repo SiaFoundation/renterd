@@ -73,6 +73,7 @@ type (
 
 		maxOverdrive     uint64
 		overdriveTimeout time.Duration
+		sectorTimeout    time.Duration
 
 		statsOverdrivePct              *utils.DataPoints
 		statsSlabUploadSpeedBytesPerMS *utils.DataPoints
@@ -150,7 +151,7 @@ type (
 	}
 )
 
-func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, logger *zap.Logger) *Manager {
+func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manager, mm memory.MemoryManager, os ObjectStore, cl ContractLocker, cs uploader.ContractStore, maxOverdrive uint64, overdriveTimeout time.Duration, sectorTimeout time.Duration, logger *zap.Logger) *Manager {
 	logger = logger.Named("uploadmanager")
 	return &Manager{
 		hm:        hm,
@@ -163,6 +164,7 @@ func NewManager(ctx context.Context, uploadKey *utils.UploadKey, hm hosts.Manage
 
 		maxOverdrive:     maxOverdrive,
 		overdriveTimeout: overdriveTimeout,
+		sectorTimeout:    sectorTimeout,
 
 		statsOverdrivePct:              utils.NewDataPoints(0),
 		statsSlabUploadSpeedBytesPerMS: utils.NewDataPoints(0),
@@ -577,7 +579,7 @@ func (mgr *Manager) refreshUploaders(hosts []HostInfo, bh uint64) {
 	// add missing uploaders
 	for _, h := range hosts {
 		if _, exists := existing[h.ContractID]; !exists && bh < h.ContractEndHeight {
-			uploader := uploader.New(mgr.shutdownCtx, mgr.cl, mgr.cs, mgr.hm, h.HostInfo, h.ContractID, h.ContractEndHeight, mgr.logger)
+			uploader := uploader.New(mgr.shutdownCtx, mgr.cl, mgr.cs, mgr.hm, h.HostInfo, h.ContractID, h.ContractEndHeight, mgr.sectorTimeout, mgr.logger)
 			refreshed = append(refreshed, uploader)
 			go uploader.Start()
 		}
