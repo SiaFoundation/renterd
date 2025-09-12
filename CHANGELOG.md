@@ -1,3 +1,9 @@
+## 2.6.1 (2025-09-12)
+
+### Fixes
+
+- Remove requirement of 64 byte alignment for client side encryption.
+
 ## 2.6.0 (2025-08-25)
 
 ### Features
