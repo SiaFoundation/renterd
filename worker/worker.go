@@ -597,6 +597,9 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	if cfg.UploadOverdriveTimeout == 0 {
 		return nil, errors.New("upload overdrive timeout must be positive")
 	}
+	if cfg.UploadSectorTimeout == 0 {
+		return nil, errors.New("upload sector timeout must be positive")
+	}
 	if cfg.DownloadMaxMemory == 0 {
 		return nil, errors.New("downloadMaxMemory cannot be 0")
 	}
@@ -639,7 +642,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	w.downloadManager = download.NewManager(w.shutdownCtx, &uploadKey, hm, dlmm, w.bus, cfg.DownloadMaxOverdrive, cfg.DownloadOverdriveTimeout, l)
 
 	ulmm := memory.NewManager(cfg.UploadMaxMemory, l.Named("uploadmanager"))
-	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, hm, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, l)
+	w.uploadManager = upload.NewManager(w.shutdownCtx, &uploadKey, hm, ulmm, w.bus, w.bus, w.bus, cfg.UploadMaxOverdrive, cfg.UploadOverdriveTimeout, cfg.UploadSectorTimeout, l)
 
 	return w, nil
 }

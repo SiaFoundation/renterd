@@ -51,6 +51,7 @@ var cfg = config.Config{
 		Password: os.Getenv(apiPasswordEnvVar),
 	},
 	ShutdownTimeout: 5 * time.Minute,
+
 	Database: config.Database{
 		MySQL: config.MySQL{
 			User:            "renterd",
@@ -101,6 +102,7 @@ var cfg = config.Config{
 		UploadMaxMemory:        1 << 30, // 1 GiB
 		UploadMaxOverdrive:     5,
 		UploadOverdriveTimeout: 3 * time.Second,
+		UploadSectorTimeout:    time.Minute,
 	},
 	Autopilot: config.Autopilot{
 		Enabled: true,
@@ -114,6 +116,7 @@ var cfg = config.Config{
 		MigratorDownloadOverdriveTimeout: 3 * time.Second,
 		MigratorUploadMaxOverdrive:       5,
 		MigratorUploadOverdriveTimeout:   3 * time.Second,
+		MigratorUploadSectorTimeout:      time.Minute,
 
 		RevisionBroadcastInterval: 7 * 24 * time.Hour,
 		RevisionSubmissionBuffer:  150, // 144 + 6 blocks leeway
@@ -241,6 +244,7 @@ func parseCLIFlags() {
 	flag.Uint64Var(&cfg.Worker.UploadMaxMemory, "worker.uploadMaxMemory", cfg.Worker.UploadMaxMemory, "Max amount of RAM the worker allocates for slabs when uploading (overrides with RENTERD_WORKER_UPLOAD_MAX_MEMORY)")
 	flag.Uint64Var(&cfg.Worker.UploadMaxOverdrive, "worker.uploadMaxOverdrive", cfg.Worker.UploadMaxOverdrive, "Max overdrive workers for uploads")
 	flag.DurationVar(&cfg.Worker.UploadOverdriveTimeout, "worker.uploadOverdriveTimeout", cfg.Worker.UploadOverdriveTimeout, "Timeout for overdriving slab uploads")
+	flag.DurationVar(&cfg.Worker.UploadSectorTimeout, "worker.uploadSectorTimeout", cfg.Worker.UploadSectorTimeout, "Timeout for upload of individual sectors of a slab")
 	flag.BoolVar(&cfg.Worker.Enabled, "worker.enabled", cfg.Worker.Enabled, "Enables/disables worker (overrides with RENTERD_WORKER_ENABLED)")
 	flag.BoolVar(&cfg.Worker.AllowUnauthenticatedDownloads, "worker.unauthenticatedDownloads", cfg.Worker.AllowUnauthenticatedDownloads, "Allows unauthenticated downloads (overrides with RENTERD_WORKER_UNAUTHENTICATED_DOWNLOADS)")
 
@@ -260,6 +264,7 @@ func parseCLIFlags() {
 	flag.DurationVar(&cfg.Autopilot.MigratorDownloadOverdriveTimeout, "autopilot.migratorDownloadOverdriveTimeout", cfg.Autopilot.MigratorDownloadOverdriveTimeout, "Timeout for overdriving migration downloads")
 	flag.Uint64Var(&cfg.Autopilot.MigratorUploadMaxOverdrive, "autopilot.migratorUploadMaxOverdrive", cfg.Autopilot.MigratorUploadMaxOverdrive, "Max overdrive workers for migration uploads")
 	flag.DurationVar(&cfg.Autopilot.MigratorUploadOverdriveTimeout, "autopilot.migratorUploadOverdriveTimeout", cfg.Autopilot.MigratorUploadOverdriveTimeout, "Timeout for overdriving migration uploads")
+	flag.DurationVar(&cfg.Autopilot.MigratorUploadSectorTimeout, "autopilot.migratorUploadSectorTimeout", cfg.Autopilot.MigratorUploadSectorTimeout, "Timeout for individual sectors of a migration upload")
 
 	// s3
 	flag.StringVar(&cfg.S3.Address, "s3.address", cfg.S3.Address, "Address for serving S3 API (overrides with RENTERD_S3_ADDRESS)")

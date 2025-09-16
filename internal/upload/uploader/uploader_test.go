@@ -24,7 +24,7 @@ func TestUploaderStopped(t *testing.T) {
 	c := mocks.NewContract(types.PublicKey{1}, types.FileContractID{1})
 	md := c.Metadata()
 
-	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, md.ID, md.WindowEnd, zap.NewNop().Sugar())
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{}, md.ID, md.WindowEnd, time.Minute, zap.NewNop().Sugar())
 
 	// enqueue a request
 	respChan := make(chan SectorUploadResp, 1)
@@ -129,7 +129,7 @@ func TestRefreshUploader(t *testing.T) {
 	c := cs.AddContract(hi.PublicKey).Metadata()
 
 	// create uploader
-	ul := New(context.Background(), cl, cs, hm, hi, c.ID, c.WindowEnd, zap.NewNop().Sugar())
+	ul := New(context.Background(), cl, cs, hm, hi, c.ID, c.WindowEnd, time.Minute, zap.NewNop().Sugar())
 
 	// assert state
 	if ul.expiry != c.WindowEnd {
@@ -177,7 +177,7 @@ func TestUploaderQueue(t *testing.T) {
 	// create uploader
 	hk := types.PublicKey{1}
 	fcid := types.FileContractID{1}
-	ul := New(context.Background(), cl, cs, hm, api.HostInfo{PublicKey: hk}, fcid, 0, zap.NewNop().Sugar())
+	ul := New(context.Background(), cl, cs, hm, api.HostInfo{PublicKey: hk}, fcid, 0, time.Minute, zap.NewNop().Sugar())
 
 	respChan := make(chan SectorUploadResp, 3)
 	cancelledCtx, cancel := context.WithCancel(context.Background())
