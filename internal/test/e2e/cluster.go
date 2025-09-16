@@ -542,7 +542,7 @@ func newTestAutopilot(masterKey utils.MasterKey, cfg config.Autopilot, bus *bus.
 	l = l.Named("autopilot")
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorAccountsRefillInterval, l)
+	m, err := migrator.New(ctx, masterKey, a, bus, bus, cfg.MigratorHealthCutoff, cfg.MigratorNumThreads, cfg.MigratorDownloadMaxOverdrive, cfg.MigratorUploadMaxOverdrive, cfg.MigratorDownloadOverdriveTimeout, cfg.MigratorUploadOverdriveTimeout, cfg.MigratorUploadSectorTimeout, cfg.MigratorAccountsRefillInterval, l)
 	if err != nil {
 		cancel(nil)
 		return nil, err
@@ -1003,6 +1003,7 @@ func testWorkerCfg() config.Worker {
 		BusFlushInterval:         testBusFlushInterval,
 		DownloadOverdriveTimeout: 500 * time.Millisecond,
 		UploadOverdriveTimeout:   500 * time.Millisecond,
+		UploadSectorTimeout:      time.Minute,
 		DownloadMaxMemory:        1 << 28, // 256 MiB
 		UploadMaxMemory:          1 << 28, // 256 MiB
 		DownloadMaxOverdrive:     5,       // TODO: added b/c I think this was overlooked but not sure
@@ -1022,6 +1023,7 @@ func testApCfg() config.Autopilot {
 		MigratorDownloadMaxOverdrive:     5,
 		MigratorDownloadOverdriveTimeout: 500 * time.Millisecond,
 		MigratorUploadOverdriveTimeout:   500 * time.Millisecond,
+		MigratorUploadSectorTimeout:      time.Minute,
 		MigratorUploadMaxOverdrive:       5,
 
 		ScannerInterval:   10 * time.Millisecond,
