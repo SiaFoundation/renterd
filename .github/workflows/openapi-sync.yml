@@ -11,6 +11,6 @@ on:
 
 jobs:
   sync:
-    uses: foundation/workflows/.github/workflows/sync-openapi-version.yml@master
+    uses: SiaFoundation/workflows/.github/workflows/sync-openapi-version.yml@master
     with:
       spec_path: openapi.yml
