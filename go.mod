@@ -13,7 +13,7 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.17.5
-	go.sia.tech/coreutils v0.18.4
+	go.sia.tech/coreutils v0.18.5-0.20250922204021-a1fbf0dfe1fa
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.0
 	go.sia.tech/web/renterd v0.85.0
@@ -42,7 +42,7 @@ require (
 	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 	golang.org/x/tools v0.36.0 // indirect
