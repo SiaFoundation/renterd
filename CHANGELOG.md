@@ -1,3 +1,14 @@
+## 2.7.0 (2025-09-29)
+
+### Features
+
+- Make per-sector upload timeout configurable.
+
+### Fixes
+
+- Remove requirement of 64 byte alignment for client side encryption.
+- Score hosts according to host's protocol version.
+
 ## 2.6.0 (2025-08-25)
 
 ### Features
