@@ -7,16 +7,16 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.10
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
-	github.com/gotd/contrib v0.21.0
+	github.com/gotd/contrib v0.21.1
 	github.com/klauspost/reedsolomon v1.12.5
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.17.5
-	go.sia.tech/coreutils v0.18.4
+	go.sia.tech/coreutils v0.18.5
 	go.sia.tech/gofakes3 v0.0.5
-	go.sia.tech/jape v0.14.0
-	go.sia.tech/web/renterd v0.85.0
+	go.sia.tech/jape v0.14.1
+	go.sia.tech/web/renterd v0.85.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.42.0
 	golang.org/x/sys v0.36.0
@@ -41,10 +41,9 @@ require (
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/mod v0.27.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/mod v0.28.0 // indirect
+	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	golang.org/x/tools v0.36.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
+	golang.org/x/tools v0.37.0 // indirect
 )
