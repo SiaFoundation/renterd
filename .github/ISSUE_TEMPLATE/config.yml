@@ -1,5 +1,11 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Feature Requests
+    url: https://github.com/SiaFoundation/renterd/discussions/categories/feature-requests
+    about: Please check existing feature requests before creating a new one.
+  - name: Questions & Support
+    url: https://github.com/SiaFoundation/renterd/discussions/categories/questions-support
+    about: Please check the support category for existing answers before creating a new one.
   - name: Sia Community Discord
     url: https://discord.gg/sia
     about: Join the Sia community discord for more help with Sia or renterd.
