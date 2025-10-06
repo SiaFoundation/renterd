@@ -16,7 +16,7 @@ require (
 	go.sia.tech/coreutils v0.18.5
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
-	go.sia.tech/web/renterd v0.85.1
+	go.sia.tech/web/renterd v0.85.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.42.0
 	golang.org/x/sys v0.36.0
