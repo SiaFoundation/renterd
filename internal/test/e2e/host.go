@@ -81,8 +81,11 @@ func NewHost(privKey types.PrivateKey, cm *chain.Manager, dir string, network *c
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: l.Addr().String(),
 	},
-		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithRPCTimeout(2*time.Second),
+		syncer.WithMaxSendBlocks(100),
+		syncer.WithPeerDiscoveryInterval(time.Second),
+		syncer.WithRPCTimeout(time.Second),
+		syncer.WithSendBlocksTimeout(time.Second),
+		syncer.WithSyncInterval(time.Second),
 	)
 	go s.Run()
 

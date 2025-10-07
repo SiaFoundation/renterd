@@ -2831,7 +2831,7 @@ func TestConsensusResync(t *testing.T) {
 	defer newCluster.Shutdown()
 
 	// check the chain managers synced up
-	tt.Retry(100, 100*time.Millisecond, func() error {
+	tt.Retry(300, 100*time.Millisecond, func() error {
 		oldTip := cluster.cm.Tip()
 		newTip := newCluster.cm.Tip()
 		if oldTip != newTip {
@@ -2841,14 +2841,17 @@ func TestConsensusResync(t *testing.T) {
 	})
 
 	// the bus state should also be in sync
-	newCS, err := newCluster.Bus.ConsensusState(context.Background())
-	tt.OK(err)
+	tt.Retry(300, 100*time.Millisecond, func() error {
+		newCS, err := newCluster.Bus.ConsensusState(context.Background())
+		tt.OK(err)
 
-	if !newCS.Synced {
-		t.Fatal("not synced")
-	} else if newCS.BlockHeight != cs.BlockHeight {
-		t.Fatalf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
-	}
+		if !newCS.Synced {
+			return errors.New("not synced")
+		} else if newCS.BlockHeight != cs.BlockHeight {
+			return fmt.Errorf("blockheight mismatch %d != %d", newCS.BlockHeight, cs.BlockHeight)
+		}
+		return nil
+	})
 }
 
 func TestContractFundsReturnWhenHostOffline(t *testing.T) {

@@ -1134,8 +1134,11 @@ func newTestSyncer(cm syncer.ChainManager, store syncer.PeerStore, genesisID typ
 
 	// create the syncer
 	s := syncer.New(l, cm, store, header, syncer.WithLogger(logger.Named("syncer")),
-		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithRPCTimeout(2*time.Second),
+		syncer.WithMaxSendBlocks(100),
+		syncer.WithPeerDiscoveryInterval(time.Second),
+		syncer.WithRPCTimeout(time.Second),
+		syncer.WithSendBlocksTimeout(time.Second),
+		syncer.WithSyncInterval(time.Second),
 	)
 	go s.Run()
 	return &TestSyncer{s: s}, nil
