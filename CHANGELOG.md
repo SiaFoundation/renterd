@@ -1,3 +1,9 @@
+## 2.7.1 (2025-10-10)
+
+### Fixes
+
+- Reset chain state if consensus.db was deleted.
+
 ## 2.7.0 (2025-09-29)
 
 ### Features
