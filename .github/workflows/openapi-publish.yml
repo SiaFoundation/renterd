@@ -18,3 +18,4 @@ jobs:
       spec_path: openapi.yml
     secrets:
       SCALAR_API_KEY: ${{ secrets.SCALAR_API_KEY }}
+      SCALAR_ACCESS_TOKEN: ${{ secrets.SCALAR_ACCESS_TOKEN }}
