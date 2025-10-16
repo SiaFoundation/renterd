@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/gotd/contrib/http_range"
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/internal/memory"
 )
@@ -77,7 +76,7 @@ type (
 	// RHPPreparePaymentRequest is the request type for the /rhp/prepare/payment
 	// endpoint.
 	RHPPreparePaymentRequest struct {
-		Account    rhpv4.Account    `json:"account"`
+		Account    AccountID        `json:"account"`
 		Amount     types.Currency   `json:"amount"`
 		Expiry     uint64           `json:"expiry"`
 		AccountKey types.PrivateKey `json:"accountKey"`

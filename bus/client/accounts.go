@@ -20,7 +20,7 @@ func (c *Client) Accounts(ctx context.Context, owner string) (accounts []api.Acc
 func (c *Client) FundAccount(ctx context.Context, account rhpv4.Account, fcid types.FileContractID, amount types.Currency) (types.Currency, error) {
 	var resp api.AccountsFundResponse
 	err := c.c.POST(ctx, "/accounts/fund", api.AccountsFundRequest{
-		AccountID:  account,
+		AccountID:  api.AccountID(account),
 		Amount:     amount,
 		ContractID: fcid,
 	}, &resp)

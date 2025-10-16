@@ -1135,7 +1135,7 @@ func TestEphemeralAccounts(t *testing.T) {
 	host := cluster.hosts[0]
 	if acc.Balance.Cmp(types.Siacoins(1).Big()) < 0 {
 		t.Fatalf("wrong balance %v", acc.Balance)
-	} else if acc.ID == (rhpv4.Account{}) {
+	} else if acc.ID == (api.AccountID{}) {
 		t.Fatal("account id not set")
 	} else if acc.HostKey != types.PublicKey(host.PublicKey()) {
 		t.Fatal("wrong host")
