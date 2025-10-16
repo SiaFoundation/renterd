@@ -276,7 +276,7 @@ paths:
           required: true
           schema:
             allOf:
-              - $ref: "#/components/schemas/PublicKey"
+              - $ref: "#/components/schemas/AccountID"
               - description: The account's ID
       responses:
         "200":
@@ -779,7 +779,7 @@ paths:
               properties:
                 accountID:
                   allOf:
-                    - $ref: "#/components/schemas/PublicKey"
+                    - $ref: "#/components/schemas/AccountID"
                     - description: The ID of the account to fund.
                 amount:
                   allOf:
@@ -3882,7 +3882,7 @@ components:
       properties:
         id:
           allOf:
-            - $ref: "#/components/schemas/PublicKey"
+            - $ref: "#/components/schemas/AccountID"
             - description: The account's ID
         cleanShutdown:
           type: boolean
@@ -3906,6 +3906,11 @@ components:
         requiresSync:
           type: boolean
           description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
+
+    AccountID:
+      type: string
+      pattern: "^[0-9a-fA-F]{64}$"
+      description: A unique identifier for an account, represented as an Ed25519 public key (without the ed25519 prefix).
 
     Address:
       allOf:

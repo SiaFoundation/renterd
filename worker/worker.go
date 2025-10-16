@@ -553,11 +553,11 @@ func (w *Worker) accountsHandlerGET(jc jape.Context) {
 }
 
 func (w *Worker) accountsResetDriftHandlerPOST(jc jape.Context) {
-	var id rhpv4.Account
+	var id api.AccountID
 	if jc.DecodeParam("id", &id) != nil {
 		return
 	}
-	err := w.accounts.ResetDrift(id)
+	err := w.accounts.ResetDrift(rhpv4.Account(id))
 	if errors.Is(err, accounts.ErrAccountNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return

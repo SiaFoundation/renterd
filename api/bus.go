@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 
-	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp4 "go.sia.tech/renterd/v2/internal/rhp/v4"
 )
@@ -47,7 +46,7 @@ type (
 
 type (
 	AccountsFundRequest struct {
-		AccountID  rhpv4.Account        `json:"accountID"`
+		AccountID  AccountID            `json:"accountID"`
 		Amount     types.Currency       `json:"amount"`
 		ContractID types.FileContractID `json:"contractID"`
 	}

@@ -88,7 +88,7 @@ func TestAccounts(t *testing.T) {
 		if expected := (api.Account{
 			CleanShutdown: false,
 			RequiresSync:  true,
-			ID:            account.ID(),
+			ID:            api.AccountID(account.ID()),
 			HostKey:       hk,
 			Balance:       types.ZeroCurrency.Big(),
 			Drift:         types.ZeroCurrency.Big(),
@@ -105,7 +105,7 @@ func TestAccounts(t *testing.T) {
 	if expected := (api.Account{
 		CleanShutdown: true,
 		RequiresSync:  false,
-		ID:            account.ID(),
+		ID:            api.AccountID(account.ID()),
 		HostKey:       hk,
 		Balance:       types.ZeroCurrency.Big(),
 		Drift:         types.ZeroCurrency.Big(),
@@ -121,7 +121,7 @@ func TestAccounts(t *testing.T) {
 	if expected := (api.Account{
 		CleanShutdown: true,
 		RequiresSync:  false,
-		ID:            account.ID(),
+		ID:            api.AccountID(account.ID()),
 		HostKey:       hk,
 		Balance:       types.Siacoins(1).Big(),
 		Drift:         types.ZeroCurrency.Big(),
@@ -137,7 +137,7 @@ func TestAccounts(t *testing.T) {
 	if expected := (api.Account{
 		CleanShutdown: true,
 		RequiresSync:  true,
-		ID:            account.ID(),
+		ID:            api.AccountID(account.ID()),
 		HostKey:       hk,
 		Balance:       types.Siacoins(1).Big(),
 		Drift:         types.ZeroCurrency.Big(),
@@ -154,7 +154,7 @@ func TestAccounts(t *testing.T) {
 	if expected := (api.Account{
 		CleanShutdown: true,
 		RequiresSync:  false,
-		ID:            account.ID(),
+		ID:            api.AccountID(account.ID()),
 		HostKey:       hk,
 		Balance:       newBalance,
 		Drift:         newDrift,

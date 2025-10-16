@@ -211,7 +211,7 @@ func (a *Manager) account(hk types.PublicKey) *Account {
 			driftRate: rate.NewLimiter(rate.Every(driftResetInterval), 1),
 			logger:    a.logger.Named(accID.String()),
 			acc: api.Account{
-				ID:            accID,
+				ID:            api.AccountID(accID),
 				CleanShutdown: false,
 				HostKey:       hk,
 				Balance:       big.NewInt(0),
@@ -264,7 +264,7 @@ func (a *Manager) run() {
 	accounts := make(map[rhpv4.Account]*Account, len(saved))
 	for _, acc := range saved {
 		accKey := a.key.DeriveAccountKey(acc.HostKey)
-		if rhpv4.Account(accKey.PublicKey()) != acc.ID {
+		if api.AccountID(accKey.PublicKey()) != acc.ID {
 			a.logger.Errorf("account key derivation mismatch %v != %v", accKey.PublicKey(), acc.ID)
 			continue
 		}
@@ -275,7 +275,7 @@ func (a *Manager) run() {
 			logger:           a.logger.Named(acc.ID.String()),
 			requiresSyncTime: time.Now(),
 		}
-		accounts[account.acc.ID] = account
+		accounts[rhpv4.Account(accKey.PublicKey())] = account
 	}
 	a.mu.Unlock()
 
@@ -408,7 +408,7 @@ func (a *Manager) refillAccount(ctx context.Context, contract api.ContractMetada
 			account = acc.convert() // update account
 		} else {
 			// register alert
-			alert := newAccountRefillAlert(account.ID, contract, errMaxDriftExceeded,
+			alert := newAccountRefillAlert(api.AccountID(account.ID), contract, errMaxDriftExceeded,
 				"accountID", account.ID.String(),
 				"hostKey", contract.HostKey.String(),
 				"balance", account.Balance.String(),
@@ -418,7 +418,7 @@ func (a *Manager) refillAccount(ctx context.Context, contract api.ContractMetada
 			return false, fmt.Errorf("not refilling account since host is potentially cheating: %w", errMaxDriftExceeded)
 		}
 	} else {
-		_ = a.alerts.DismissAlerts(a.shutdownCtx, alerts.IDForAccount(alertAccountRefillID, account.ID))
+		_ = a.alerts.DismissAlerts(a.shutdownCtx, alerts.IDForAccount(alertAccountRefillID, rhpv4.Account(account.ID)))
 	}
 
 	// check if a resync is needed
@@ -466,7 +466,7 @@ func (a *Account) WithSync(balanceFn func() (types.Currency, error)) error {
 }
 
 func (a *Account) ID() rhpv4.Account {
-	return a.acc.ID
+	return rhpv4.Account(a.acc.ID)
 }
 
 func (a *Account) Key() types.PrivateKey {
@@ -631,7 +631,7 @@ func (a *Account) setBalance(balance *big.Int) {
 		zap.Stringer("drift", drift))
 }
 
-func newAccountRefillAlert(id rhpv4.Account, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {
+func newAccountRefillAlert(id api.AccountID, contract api.ContractMetadata, err error, keysAndValues ...string) alerts.Alert {
 	data := map[string]interface{}{
 		"error":      err.Error(),
 		"accountID":  id.String(),
@@ -643,7 +643,7 @@ func newAccountRefillAlert(id rhpv4.Account, contract api.ContractMetadata, err 
 	}
 
 	return alerts.Alert{
-		ID:        alerts.IDForAccount(alertAccountRefillID, id),
+		ID:        alerts.IDForAccount(alertAccountRefillID, rhpv4.Account(id)),
 		Severity:  alerts.SeverityError,
 		Message:   "Ephemeral account refill failed",
 		Data:      data,

@@ -1,8 +1,12 @@
 package api
 
 import (
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"math/big"
+	"strings"
 
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -17,7 +21,7 @@ var (
 type (
 	Account struct {
 		// ID identifies an account. It's a public key.
-		ID rhpv4.Account `json:"id"`
+		ID AccountID `json:"id"`
 
 		// CleanShutdown indicates whether the account was saved during a clean
 		// shutdown
@@ -41,7 +45,42 @@ type (
 		// host before it can be used again.
 		RequiresSync bool `json:"requiresSync"`
 	}
+
+	// AccountID aliases rhpv4.Account but has custom marshal/unmarshalers to
+	// not break backwards compatibility in the API.
+	AccountID rhpv4.Account
 )
+
+// String implements fmt.Stringer.
+func (a AccountID) String() string { return hex.EncodeToString(a[:]) }
+
+// MarshalText implements encoding.TextMarshaler.
+func (a AccountID) MarshalText() ([]byte, error) {
+	return []byte(a.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (a *AccountID) UnmarshalText(b []byte) error {
+	s := string(b)
+	switch {
+	case strings.HasPrefix(s, "ed25519:"):
+		s = strings.TrimPrefix(s, "ed25519:")
+	case strings.HasPrefix(s, "acct:"):
+		s = strings.TrimPrefix(s, "acct:")
+	}
+	if len(s) != hex.EncodedLen(len(a)) {
+		return fmt.Errorf("invalid account length: got %d, want %d hex chars",
+			len(s), hex.EncodedLen(len(a)))
+	}
+	n, err := hex.Decode(a[:], []byte(s))
+	if err != nil {
+		return fmt.Errorf("decoding account hex failed: %w", err)
+	}
+	if n != len(a) {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 
 type (
 	// AccountsAddBalanceRequest is the request type for /account/:id/add
