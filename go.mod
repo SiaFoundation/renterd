@@ -4,7 +4,7 @@ go 1.24.3
 
 require (
 	github.com/aws/aws-sdk-go v1.55.8
-	github.com/gabriel-vasile/mimetype v1.4.10
+	github.com/gabriel-vasile/mimetype v1.4.11
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.1
