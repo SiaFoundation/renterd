@@ -1,3 +1,10 @@
+## 2.7.1 (2025-11-03)
+
+### Fixes
+
+- Reset chain state if consensus.db was deleted.
+- Upgrade `core` to v0.18.0 and `coreutils` to v0.18.6
+
 ## 2.7.0 (2025-09-29)
 
 ### Features
