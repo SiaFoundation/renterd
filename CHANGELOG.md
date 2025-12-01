@@ -1,3 +1,9 @@
+## 2.7.2 (2025-12-01)
+
+### Fixes
+
+- Update core dependency to v0.18.1 and coreutils to v0.18.7.
+
 ## 2.7.1 (2025-11-03)
 
 ### Fixes
