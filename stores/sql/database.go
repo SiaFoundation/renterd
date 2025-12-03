@@ -305,6 +305,8 @@ type (
 		// Tip returns the sync height.
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
+		UpdateChainIndex(ctx context.Context, ci types.ChainIndex) error
+
 		// UnspentSiacoinElements returns all wallet outputs in the database.
 		UnspentSiacoinElements(ctx context.Context) (types.ChainIndex, []types.SiacoinElement, error)
 

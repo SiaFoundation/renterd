@@ -35,6 +35,7 @@ const (
 )
 
 var (
+	instantSync  bool
 	disableStdin bool
 	enableANSI   = runtime.GOOS != "windows"
 
@@ -59,9 +60,7 @@ var cfg = config.Config{
 			MetricsDatabase: "renterd_metrics",
 		},
 	},
-	Explorer: config.ExplorerData{
-		URL: "https://api.siascan.com",
-	},
+	Explorer: config.ExplorerData{},
 	Log: config.Log{
 		Level: "",
 		File: config.LogFile{
@@ -190,12 +189,6 @@ func sanitizeConfig() error {
 		return err
 	}
 
-	// validate explorer settings
-	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
-		err := fmt.Errorf("explorer is enabled but no URL is set")
-		checkFatalError("invalid config file", err)
-	}
-
 	return nil
 }
 
@@ -206,6 +199,7 @@ func parseCLIFlags() {
 	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
 	flag.BoolVar(&cfg.AutoOpenWebUI, "openui", cfg.AutoOpenWebUI, "automatically open the web UI on startup")
 	flag.StringVar(&cfg.Network, "network", cfg.Network, "Network to connect to (mainnet|zen|anagami). Defaults to 'mainnet' (overrides with RENTERD_NETWORK)")
+	flag.BoolVar(&instantSync, "instant", false, "instantly sync using a checkpoint skipping through history (only supported for wallets that have never been used with v1; instant sync will not work if the wallet has v1 history)")
 
 	// logger
 	flag.StringVar(&cfg.Log.Level, "log.level", cfg.Log.Level, "Global logger level (debug|info|warn|error). Defaults to 'info' (overrides with RENTERD_LOG_LEVEL)")
