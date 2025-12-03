@@ -31,6 +31,7 @@ import (
 	"go.sia.tech/renterd/v2/build"
 	"go.sia.tech/renterd/v2/bus"
 	"go.sia.tech/renterd/v2/config"
+	"go.sia.tech/renterd/v2/explorer"
 	"go.sia.tech/renterd/v2/stores"
 	"go.sia.tech/renterd/v2/stores/sql"
 	"go.sia.tech/renterd/v2/stores/sql/mysql"
@@ -77,7 +78,12 @@ type (
 	}
 )
 
-func newNode(cfg config.Config, configPath string, network *consensus.Network, genesis types.Block) (*node, error) {
+func fileExists(fp string) bool {
+	_, err := os.Stat(fp)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
+func newNode(cfg config.Config, configPath string, network *consensus.Network, genesis types.Block, instantSync bool) (*node, error) {
 	var setupFns, shutdownFns []fn
 
 	// validate config
@@ -152,7 +158,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	busAddr, busPassword := cfg.Bus.RemoteAddr, cfg.Bus.RemotePassword
 	if cfg.Bus.RemoteAddr == "" {
 		// create bus
-		b, shutdownFn, err := newBus(cfg, pk, network, genesis, logger)
+		b, shutdownFn, err := newBus(cfg, pk, network, genesis, instantSync, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -276,7 +282,7 @@ func newAutopilot(masterKey [32]byte, cfg config.Autopilot, bus *bus.Client, l *
 	return autopilot.New(ctx, cancel, bus, c, m, p, s, w, cfg.Heartbeat, l), nil
 }
 
-func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
+func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, genesis types.Block, instantSync bool, logger *zap.Logger) (*bus.Bus, func(ctx context.Context) error, error) {
 	// create store
 	alertsMgr := alerts.NewManager()
 	storeCfg, err := buildStoreConfig(alertsMgr, cfg, pk, logger)
@@ -296,23 +302,24 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// migrate consensus database if necessary
 	migrateConsensusDatabase(cfg.Directory, logger)
 
-	// create chain database
-	chainPath := filepath.Join(cfg.Directory, "consensus.db")
-	bdb, err := coreutils.OpenBoltChainDB(chainPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+	// get explorer URL
+	var explorerURL string
+	if !cfg.Explorer.Disable {
+		if cfg.Explorer.URL != "" {
+			explorerURL = cfg.Explorer.URL
+		} else {
+			switch network.Name {
+			case "mainnet":
+				explorerURL = "https://api.siascan.com"
+			case "zen":
+				explorerURL = "https://api.siascan.com/zen"
+			}
+		}
 	}
-
-	// create chain manager
-	store, state, err := chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(logger.Named("chaindb")))
-	if err != nil {
-		return nil, nil, err
-	}
-	cm := chain.NewManager(store, state)
 
 	// bootstrap the syncer
+	var peers []string
 	if cfg.Bus.Bootstrap {
-		var peers []string
 		switch network.Name {
 		case "mainnet":
 			peers = syncer.MainnetBootstrapPeers
@@ -327,6 +334,84 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			}
 		}
 	}
+
+	// create chain database
+	chainPath := filepath.Join(cfg.Directory, "consensus.db")
+	consensusExists := fileExists(chainPath)
+
+	var bdb *coreutils.BoltChainDB
+	var store *chain.DBStore
+	var state consensus.State
+	if instantSync && !consensusExists {
+		if cfg.Explorer.Disable || explorerURL == "" {
+			return nil, nil, errors.New("instant sync requires explorer access")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		walletAddress := types.StandardUnlockHash(pk.PublicKey())
+		exp := explorer.NewExplorer(explorerURL)
+
+		checkpoint, err := exp.AddressCheckpoint(ctx, walletAddress)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch address checkpoint from explorer: %w", err)
+		} else if checkpoint.Height < network.HardforkV2.RequireHeight {
+			return nil, nil, fmt.Errorf("unable to instant sync: wallet checkpoint height %d is before v2 hardfork activation height %d", checkpoint.Height, network.HardforkV2.RequireHeight)
+		}
+
+		var heightWithAnnouncements uint64
+		blocksPerYear := uint64((365 * 24 * time.Hour) / network.BlockInterval)
+		if checkpoint.Height > blocksPerYear {
+			// renterd must sync at least a year back to discover hosts. Hosts were
+			// required to reannounce at the v2 hardfork, so that can be used as a
+			// safe lower bound.
+			heightWithAnnouncements = max(checkpoint.Height-blocksPerYear, network.HardforkV2.RequireHeight)
+		}
+
+		checkpoint, err = exp.TipHeight(ctx, heightWithAnnouncements)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch height %d: %w", heightWithAnnouncements, err)
+		}
+
+		log := logger.With(zap.Stringer("checkpoint", checkpoint))
+		log.Info("instant syncing to checkpoint")
+		cs, block, err := syncer.RetrieveCheckpoint(ctx, peers, checkpoint, network, genesis.ID())
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to retrieve checkpoint: %w", err)
+		}
+		log.Debug("retrieved checkpoint")
+
+		if err := sqlStore.SetChainIndex(ctx, checkpoint); err != nil {
+			return nil, nil, fmt.Errorf("failed to set chain index to checkpoint: %w", err)
+		}
+
+		bdb, err = coreutils.OpenBoltChainDB(chainPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+		}
+
+		store, state, err = chain.NewDBStoreAtCheckpoint(bdb, cs, block, chain.NewZapMigrationLogger(log))
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create chain store at checkpoint: %w", err)
+		}
+		log.Info("synced to checkpoint")
+	} else {
+		if instantSync {
+			logger.Warn("skipping instant sync: consensus database already exists")
+		}
+		bdb, err = coreutils.OpenBoltChainDB(chainPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+		}
+
+		store, state, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(logger.Named("chaindb")))
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	cm := chain.NewManager(store, state)
 
 	// create syncer, peers will reject us if our hostname is empty or
 	// unspecified, so use loopback
@@ -377,12 +462,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// to ensure contracts formed by the bus can be renewed by the autopilot
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
 
-	// get explorer URL
-	var explorerURL string
-	if !cfg.Explorer.Disable {
-		explorerURL = cfg.Explorer.URL
-	}
-
 	// create bus
 	b, err := bus.New(cfg.Bus, masterKey, alertsMgr, cm, s, w, sqlStore, explorerURL, logger)
 	if err != nil {
@@ -395,7 +474,12 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-			bdb.Close(),
+			func() error {
+				if bdb == nil {
+					return nil
+				}
+				return bdb.Close()
+			}(),
 			syncerShutdown(ctx),
 		)
 	}, nil

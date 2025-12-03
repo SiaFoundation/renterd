@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"
+	"go.sia.tech/renterd/v2/explorer"
 	ibus "go.sia.tech/renterd/v2/internal/bus"
 	"go.sia.tech/renterd/v2/internal/contracts"
 	"go.sia.tech/renterd/v2/internal/gouging"
@@ -308,7 +309,7 @@ type Bus struct {
 	rhp4Client *rhp4.Client
 
 	contractLocker        ContractLocker
-	explorer              *ibus.Explorer
+	explorer              *explorer.Explorer
 	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 
@@ -328,7 +329,7 @@ func New(cfg config.Bus, masterKey [32]byte, am AlertManager, cm ChainManager, s
 		s:        s,
 		cm:       cm,
 		w:        w,
-		explorer: ibus.NewExplorer(explorerURL),
+		explorer: explorer.NewExplorer(explorerURL),
 		store:    store,
 
 		alerts:   alerts.WithOrigin(am, "bus"),
