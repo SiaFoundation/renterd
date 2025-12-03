@@ -1186,6 +1186,10 @@ func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, e
 	return ssql.WalletEventCount(ctx, tx.Tx)
 }
 
+func (tx *MainDatabaseTx) UpdateChainIndex(ctx context.Context, ci types.ChainIndex) error {
+	return ssql.UpdateChainIndex(ctx, tx.Tx, ci, tx.log.Named("UpdateChainIndex"))
+}
+
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, slices object.SlabSlices) error {
 	if (objID == nil) == (partID == nil) {
 		return errors.New("exactly one of objID and partID must be set")

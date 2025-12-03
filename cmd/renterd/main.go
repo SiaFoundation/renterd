@@ -97,7 +97,7 @@ func main() {
 	checkFatalError(fmt.Sprintf("failed to sanitize config %q", configPath), sanitizeConfig())
 
 	// create node
-	node, err := newNode(cfg, configPath, network, genesis)
+	node, err := newNode(cfg, configPath, network, genesis, instantSync)
 	checkFatalError("failed to create node", err)
 
 	// start node
