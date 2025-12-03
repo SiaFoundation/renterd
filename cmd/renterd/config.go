@@ -60,9 +60,7 @@ var cfg = config.Config{
 			MetricsDatabase: "renterd_metrics",
 		},
 	},
-	Explorer: config.ExplorerData{
-		URL: "https://api.siascan.com",
-	},
+	Explorer: config.ExplorerData{},
 	Log: config.Log{
 		Level: "",
 		File: config.LogFile{
