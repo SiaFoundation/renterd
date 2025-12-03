@@ -302,6 +302,21 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// migrate consensus database if necessary
 	migrateConsensusDatabase(cfg.Directory, logger)
 
+	// get explorer URL
+	var explorerURL string
+	if !cfg.Explorer.Disable {
+		if cfg.Explorer.URL != "" {
+			explorerURL = cfg.Explorer.URL
+		} else {
+			switch network.Name {
+			case "mainnet":
+				explorerURL = "https://api.siascan.com"
+			case "zen":
+				explorerURL = "https://api.siascan.com/zen"
+			}
+		}
+	}
+
 	// bootstrap the syncer
 	var peers []string
 	if cfg.Bus.Bootstrap {
@@ -439,21 +454,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// create master key - we currently derive the same key used by the workers
 	// to ensure contracts formed by the bus can be renewed by the autopilot
 	masterKey := blake2b.Sum256(append([]byte("worker"), pk...))
-
-	// get explorer URL
-	var explorerURL string
-	if !cfg.Explorer.Disable {
-		if cfg.Explorer.URL != "" {
-			explorerURL = cfg.Explorer.URL
-		} else {
-			switch network.Name {
-			case "mainnet":
-				explorerURL = "https://api.siascan.com"
-			case "zen":
-				explorerURL = "https://api.siascan.com/zen"
-			}
-		}
-	}
 
 	// create bus
 	b, err := bus.New(cfg.Bus, masterKey, alertsMgr, cm, s, w, sqlStore, explorerURL, logger)
