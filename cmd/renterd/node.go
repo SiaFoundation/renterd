@@ -453,7 +453,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	}
 
 	return b, func(ctx context.Context) error {
-
 		return errors.Join(
 			s.Close(),
 			w.Close(),
