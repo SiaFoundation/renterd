@@ -367,7 +367,7 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		}
 	}
 
-	cm := chain.NewManager(store, state)
+	cm := chain.NewManager(store, state, chain.WithPruneTarget(cfg.Bus.MaxStoredBlocks))
 
 	// create syncer, peers will reject us if our hostname is empty or
 	// unspecified, so use loopback

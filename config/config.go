@@ -66,6 +66,10 @@ type (
 		RemotePassword                string        `yaml:"remotePassword,omitempty"`
 		UsedUTXOExpiry                time.Duration `yaml:"usedUtxoExpiry,omitempty"`
 		SlabBufferCompletionThreshold int64         `yaml:"slabBufferCompleionThreshold,omitempty"`
+
+		// MaxStoredBlocks defines how many blocks of history to store
+		// on disk. 0 means unlimited.
+		MaxStoredBlocks uint64 `yaml:"maxStoredBlocks,omitempty"`
 	}
 
 	// LogFile configures the file output of the logger.

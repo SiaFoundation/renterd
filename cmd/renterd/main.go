@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
@@ -72,6 +73,11 @@ func main() {
 		network, genesis = chain.TestnetZen()
 	default:
 		checkFatalError("invalid network settings", fmt.Errorf("unknown network '%s'", cfg.Network))
+	}
+
+	minStoreBlocks := min(network.MaturityDelay, uint64((24*time.Hour*30)/network.BlockInterval))
+	if cfg.Bus.MaxStoredBlocks > 0 && cfg.Bus.MaxStoredBlocks < minStoreBlocks {
+		checkFatalError("invalid configuration", fmt.Errorf("max stored blocks %d is less than minimum required %d for network %s", cfg.Bus.MaxStoredBlocks, minStoreBlocks, network.Name))
 	}
 
 	// NOTE: update the usage header when adding new commands
