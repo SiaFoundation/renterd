@@ -39,3 +39,10 @@ func (s *SQLStore) ResetChainState(ctx context.Context) error {
 		return tx.ResetChainState(ctx)
 	})
 }
+
+// SetChainIndex sets the current chain index in the database.
+func (s *SQLStore) SetChainIndex(ctx context.Context, index types.ChainIndex) error {
+	return s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
+		return tx.UpdateChainIndex(ctx, index)
+	})
+}

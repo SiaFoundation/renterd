@@ -628,6 +628,10 @@ func (tx *MainDatabaseTx) Peers(ctx context.Context) ([]syncer.PeerInfo, error) 
 	return ssql.Peers(ctx, tx)
 }
 
+func (tx *MainDatabaseTx) UpdateChainIndex(ctx context.Context, ci types.ChainIndex) error {
+	return ssql.UpdateChainIndex(ctx, tx, ci, tx.log.Named("UpdateChainIndex"))
+}
+
 func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.ChainUpdateTx) error) error {
 	return fn(&chainUpdateTx{
 		ctx:   ctx,
