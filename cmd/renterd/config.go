@@ -189,12 +189,6 @@ func sanitizeConfig() error {
 		return err
 	}
 
-	// validate explorer settings
-	if !cfg.Explorer.Disable && cfg.Explorer.URL == "" {
-		err := fmt.Errorf("explorer is enabled but no URL is set")
-		checkFatalError("invalid config file", err)
-	}
-
 	return nil
 }
 
