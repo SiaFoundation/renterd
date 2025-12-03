@@ -347,7 +347,7 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		defer cancel()
 
 		walletAddress := types.StandardUnlockHash(pk.PublicKey())
-		exp := explorer.NewExplorer(cfg.Explorer.URL)
+		exp := explorer.NewExplorer(explorerURL)
 
 		checkpoint, err := exp.AddressCheckpoint(ctx, walletAddress)
 		if err != nil {
