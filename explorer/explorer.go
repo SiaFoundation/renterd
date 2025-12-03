@@ -67,3 +67,18 @@ func (e *Explorer) AddressCheckpoint(ctx context.Context, address types.Address)
 	_, _, err = utils.DoRequest(req, &index)
 	return
 }
+
+func (e *Explorer) TipHeight(ctx context.Context, height uint64) (index types.ChainIndex, err error) {
+	if !e.Enabled() {
+		return types.ChainIndex{}, api.ErrExplorerDisabled
+	}
+
+	// create request
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/consensus/tip/%d", e.url, height), http.NoBody)
+	if err != nil {
+		return types.ChainIndex{}, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	_, _, err = utils.DoRequest(req, &index)
+	return
+}

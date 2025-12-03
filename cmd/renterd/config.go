@@ -87,7 +87,6 @@ var cfg = config.Config{
 		GatewayAddr:                   ":9981",
 		UsedUTXOExpiry:                3 * time.Hour,
 		SlabBufferCompletionThreshold: 1 << 12,
-		MaxStoredBlocks:               4320, // default to 1 month of 10 minute blocks
 	},
 	Worker: config.Worker{
 		Enabled: true,

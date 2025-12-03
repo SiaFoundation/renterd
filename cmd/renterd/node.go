@@ -323,11 +323,8 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// create chain database
 	chainPath := filepath.Join(cfg.Directory, "consensus.db")
 	consensusExists := fileExists(chainPath)
-	bdb, err := coreutils.OpenBoltChainDB(chainPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
-	}
 
+	var bdb *coreutils.BoltChainDB
 	var store *chain.DBStore
 	var state consensus.State
 	if !cfg.Explorer.Disable && instantSync && !consensusExists {
@@ -343,6 +340,21 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		} else if checkpoint.Height < network.HardforkV2.AllowHeight {
 			return nil, nil, fmt.Errorf("unable to instant sync: wallet checkpoint height %d is before v2 hardfork activation height %d", checkpoint.Height, network.HardforkV2.AllowHeight)
 		}
+
+		var heightWithAnnouncements uint64
+		blocksPerYear := uint64((365 * 24 * time.Hour) / network.BlockInterval)
+		if checkpoint.Height > blocksPerYear {
+			// renterd must sync at least a year back to discover hosts. Hosts were
+			// required to reannounce at the v2 hardfork, so that can be used as a
+			// safe lower bound.
+			heightWithAnnouncements = max(checkpoint.Height-blocksPerYear, network.HardforkV2.AllowHeight)
+		}
+
+		checkpoint, err = exp.TipHeight(ctx, heightWithAnnouncements)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch height %d: %w", heightWithAnnouncements, err)
+		}
+
 		log := logger.With(zap.Stringer("checkpoint", checkpoint))
 		log.Info("instant syncing to checkpoint")
 		cs, block, err := syncer.RetrieveCheckpoint(ctx, peers, checkpoint, network, genesis.ID())
@@ -355,19 +367,29 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			return nil, nil, fmt.Errorf("failed to set chain index to checkpoint: %w", err)
 		}
 
+		bdb, err = coreutils.OpenBoltChainDB(chainPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+		}
+
 		store, state, err = chain.NewDBStoreAtCheckpoint(bdb, cs, block, chain.NewZapMigrationLogger(log))
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create chain store at checkpoint: %w", err)
 		}
 		log.Info("synced to checkpoint")
 	} else {
+		bdb, err = coreutils.OpenBoltChainDB(chainPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
+		}
+
 		store, state, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(logger.Named("chaindb")))
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
-	cm := chain.NewManager(store, state, chain.WithPruneTarget(cfg.Bus.MaxStoredBlocks))
+	cm := chain.NewManager(store, state)
 
 	// create syncer, peers will reject us if our hostname is empty or
 	// unspecified, so use loopback
@@ -431,12 +453,18 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	}
 
 	return b, func(ctx context.Context) error {
+
 		return errors.Join(
 			s.Close(),
 			w.Close(),
 			b.Shutdown(ctx),
 			sqlStore.Close(),
-			bdb.Close(),
+			func() error {
+				if bdb == nil {
+					return nil
+				}
+				return bdb.Close()
+			}(),
 			syncerShutdown(ctx),
 		)
 	}, nil
