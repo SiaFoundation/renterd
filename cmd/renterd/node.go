@@ -443,7 +443,16 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 	// get explorer URL
 	var explorerURL string
 	if !cfg.Explorer.Disable {
-		explorerURL = cfg.Explorer.URL
+		if cfg.Explorer.URL != "" {
+			explorerURL = cfg.Explorer.URL
+		} else {
+			switch network.Name {
+			case "mainnet":
+				explorerURL = "https://api.siascan.com"
+			case "zen":
+				explorerURL = "https://api.siascan.com/zen"
+			}
+		}
 	}
 
 	// create bus
