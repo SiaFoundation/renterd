@@ -360,7 +360,7 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			return nil, nil, fmt.Errorf("unable to instant sync: wallet checkpoint height %d is before v2 hardfork activation height %d", checkpoint.Height, network.HardforkV2.RequireHeight)
 		}
 
-		var heightWithAnnouncements uint64
+		heightWithAnnouncements := network.HardforkV2.RequireHeight
 		blocksPerYear := uint64((365 * 24 * time.Hour) / network.BlockInterval)
 		if checkpoint.Height > blocksPerYear {
 			// renterd must sync at least a year back to discover hosts. Hosts were
