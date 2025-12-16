@@ -68,6 +68,7 @@ func (e *Explorer) AddressCheckpoint(ctx context.Context, address types.Address)
 	return
 }
 
+// TipHeight returns the chain index at the given height.
 func (e *Explorer) TipHeight(ctx context.Context, height uint64) (index types.ChainIndex, err error) {
 	if !e.Enabled() {
 		return types.ChainIndex{}, api.ErrExplorerDisabled
