@@ -2,4 +2,4 @@
 default: patch
 ---
 
-# Update core dependency to v0.18.1 and coreutils to v0.18.7.
+# Update core dependency to v0.19.0 and coreutils dependency v0.20.0.
