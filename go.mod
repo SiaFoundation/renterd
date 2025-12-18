@@ -13,10 +13,10 @@ require (
 	github.com/montanaflynn/stats v0.7.1
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.1-0.20251215141429-887336e35dd9
-	go.sia.tech/coreutils v0.19.1-0.20251215130559-b29881578e0a
+	go.sia.tech/coreutils v0.20.0
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
-	go.sia.tech/web/renterd v0.86.0
+	go.sia.tech/web/renterd v0.87.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.46.0
 	golang.org/x/sys v0.39.0
