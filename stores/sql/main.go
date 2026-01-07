@@ -263,8 +263,10 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 	// fetch size of contracts to be able to anticipate number of roots
 	var contractSize uint64
 	err := tx.QueryRow(ctx, "SELECT size FROM contracts WHERE fcid = ?", FileContractID(fcid)).Scan(&contractSize)
-	if err != nil {
+	if errors.Is(err, dsql.ErrNoRows) {
 		return nil, contractNotFoundErr(fcid)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract size: %w", err)
 	}
 
 	rows, err := tx.Query(ctx, `
@@ -288,6 +290,25 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 		roots = append(roots, root)
 	}
 	return roots, nil
+}
+
+func PrunableContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
+	wantedRoots, err := ContractRoots(ctx, tx, fcid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	wantedMap := make(map[types.Hash256]struct{}, len(wantedRoots))
+	for _, root := range wantedRoots {
+		wantedMap[root] = struct{}{}
+	}
+	for i, root := range roots {
+		if _, exists := wantedMap[root]; !exists {
+			indices = append(indices, uint64(i))
+		} else {
+			delete(wantedMap, root) // prevent duplicates
+		}
+	}
+	return
 }
 
 func Contracts(ctx context.Context, tx sql.Tx, opts api.ContractsOpts) ([]api.ContractMetadata, error) {
