@@ -260,6 +260,13 @@ func Contract(ctx context.Context, tx sql.Tx, fcid types.FileContractID) (api.Co
 }
 
 func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([]types.Hash256, error) {
+	// fetch size of contracts to be able to anticipate number of roots
+	var contractSize uint64
+	err := tx.QueryRow(ctx, "SELECT size FROM contracts WHERE fcid = ?", FileContractID(fcid)).Scan(&contractSize)
+	if err != nil {
+		return nil, contractNotFoundErr(fcid)
+	}
+
 	rows, err := tx.Query(ctx, `
 		SELECT s.root
 		FROM contract_sectors cs
@@ -272,7 +279,7 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 	}
 	defer rows.Close()
 
-	var roots []types.Hash256
+	roots := make([]types.Hash256, 0, contractSize/rhpv4.SectorSize)
 	for rows.Next() {
 		var root types.Hash256
 		if err := rows.Scan((*Hash256)(&root)); err != nil {
