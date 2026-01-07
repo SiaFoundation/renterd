@@ -634,20 +634,7 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 }
 
 func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
-	wantedRoots, err := ssql.ContractRoots(ctx, tx, fcid)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
-	}
-	wantedMap := make(map[types.Hash256]struct{}, len(wantedRoots))
-	for _, root := range wantedRoots {
-		wantedMap[root] = struct{}{}
-	}
-	for i, root := range roots {
-		if _, exists := wantedMap[root]; !exists {
-			indices = append(indices, uint64(i))
-		}
-	}
-	return
+	return ssql.PrunableContractRoots(ctx, tx, fcid, roots)
 }
 
 func (tx *MainDatabaseTx) PruneHostSectors(ctx context.Context, limit int64) (int64, error) {

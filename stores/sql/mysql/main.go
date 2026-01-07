@@ -642,57 +642,7 @@ func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.C
 }
 
 func (tx *MainDatabaseTx) PrunableContractRoots(ctx context.Context, fcid types.FileContractID, roots []types.Hash256) (indices []uint64, err error) {
-	// build tmp table name
-	tmpTable := strings.ReplaceAll(fmt.Sprintf("tmp_host_roots_%s", fcid.String()[:8]), ":", "_")
-
-	// create temporary table
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-DROP TABLE IF EXISTS %s;
-CREATE TEMPORARY TABLE %s (idx INT, root varbinary(32)) ENGINE=MEMORY;
-CREATE UNIQUE INDEX %s_idx_idx ON %s (idx);
-CREATE INDEX %s_idx ON %s (root(32));`, tmpTable, tmpTable, tmpTable, tmpTable, tmpTable, tmpTable))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary table: %w", err)
-	}
-
-	// defer removal
-	defer func() {
-		if _, err := tx.Exec(ctx, fmt.Sprintf(`DROP TABLE %s;`, tmpTable)); err != nil {
-			tx.log.Warnw("failed to drop temporary table", zap.Error(err))
-		}
-	}()
-
-	// prepare insert statement
-	insertStmt, err := tx.Prepare(ctx, fmt.Sprintf(`INSERT INTO %s (idx, root) VALUES (?, ?)`, tmpTable))
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement to insert contract roots: %w", err)
-	}
-	defer insertStmt.Close()
-
-	// insert roots
-	for i, r := range roots {
-		_, err := insertStmt.Exec(ctx, uint64(i), ssql.Hash256(r))
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert into roots into temporary table: %w", err)
-		}
-	}
-
-	// execute query
-	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT idx FROM %s tmp LEFT JOIN sectors s ON s.root = tmp.root WHERE s.root IS NULL`, tmpTable))
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch contract roots: %w", err)
-	}
-	defer rows.Close()
-
-	// fetch indices
-	for rows.Next() {
-		var idx uint64
-		if err := rows.Scan(&idx); err != nil {
-			return nil, fmt.Errorf("failed to scan root index: %w", err)
-		}
-		indices = append(indices, idx)
-	}
-	return
+	return ssql.PrunableContractRoots(ctx, tx, fcid, roots)
 }
 
 func (tx *MainDatabaseTx) PruneHostSectors(ctx context.Context, limit int64) (int64, error) {
