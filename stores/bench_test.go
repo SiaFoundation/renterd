@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
 	isql "go.sia.tech/renterd/v2/internal/sql"
@@ -320,7 +321,15 @@ func insertContract(db *isql.DB, hk types.PublicKey, fcid types.FileContractID, 
 
 	// insert contract
 	res, err := db.Exec(context.Background(), `
-INSERT INTO contracts (fcid, host_key, host_id, start_height, usability) VALUES (?, ?, ?, ?, ?)`, sql.FileContractID(fcid), sql.PublicKey(hk), hostID, 0, false, usability)
+INSERT INTO contracts (fcid, host_key, host_id, start_height, usability, size) VALUES (?, ?, ?, ?, ?, ?)`,
+		sql.FileContractID(fcid),
+		sql.PublicKey(hk),
+		hostID,
+		0,
+		false,
+		usability,
+		n*rhp.SectorSize,
+	)
 	if err != nil {
 		return nil, err
 	}
