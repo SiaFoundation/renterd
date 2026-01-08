@@ -1,6 +1,10 @@
 package contractor
 
-import "lukechampine.com/frand"
+import (
+	"slices"
+
+	"lukechampine.com/frand"
+)
 
 type (
 	scoredHosts []scoredHost
@@ -13,44 +17,40 @@ func (hosts scoredHosts) randSelectByScore(n int) (selected []scoredHost) {
 		return nil
 	}
 
-	used := make(map[int]struct{})
+	// deep copy to avoid modifying original slice
+	candidates := slices.Clone(hosts)
+
+	// compute initial total score
+	var total float64
+	for _, h := range candidates {
+		total += h.score
+	}
+
+	selected = make([]scoredHost, 0, n)
+	remaining := len(candidates)
+
 	for len(selected) < n {
-		// map indices properly
-		imap := make(map[int]int)
-
-		// deep copy
-		var candidates []scoredHost
-		for i, h := range hosts {
-			if _, used := used[i]; !used {
-				candidates = append(candidates, h)
-				imap[len(candidates)-1] = i
-			}
-		}
-
-		// normalize
-		var total float64
-		for _, h := range candidates {
-			total += h.score
-		}
-		for i := range candidates {
-			candidates[i].score /= total
-		}
-
-		// select
-		sI := len(candidates) - 1
-		r := frand.Float64()
+		// select based on weighted random
+		r := frand.Float64() * total
 		var sum float64
-		for i, host := range candidates {
-			sum += host.score
+		sI := remaining - 1 // default to last if rounding issues
+		for i := 0; i < remaining; i++ {
+			sum += candidates[i].score
 			if r < sum {
 				sI = i
 				break
 			}
 		}
 
-		// update
-		used[imap[sI]] = struct{}{}
-		selected = append(selected, hosts[imap[sI]])
+		// add to selected
+		selected = append(selected, candidates[sI])
+
+		// update total score
+		total -= candidates[sI].score
+
+		// swap selected with last active element and shrink
+		remaining--
+		candidates[sI] = candidates[remaining]
 	}
 
 	return
