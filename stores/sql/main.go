@@ -282,8 +282,8 @@ func ContractRoots(ctx context.Context, tx sql.Tx, fcid types.FileContractID) ([
 	defer rows.Close()
 
 	roots := make([]types.Hash256, 0, contractSize/rhpv4.SectorSize)
+	var root types.Hash256
 	for rows.Next() {
-		var root types.Hash256
 		if err := rows.Scan((*Hash256)(&root)); err != nil {
 			return nil, fmt.Errorf("failed to scan root: %w", err)
 		}

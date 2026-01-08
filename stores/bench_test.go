@@ -252,6 +252,7 @@ func BenchmarkObjects(b *testing.B) {
 // 2.5 TB/s | M1 Max | 8363023b | SQLite
 // 0.5 TB/s | M1 Max | 8363023b | MySQL
 func BenchmarkPrunableContractRoots(b *testing.B) {
+	b.ReportAllocs()
 	// define parameters
 	batchSize := int64(25600) // 100GiB of contract data
 	contractSize := 1 << 40   // 1TiB contract
@@ -286,7 +287,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	// start benchmark
 	b.ResetTimer()
 	b.SetBytes(batchSize * int64(sectorSize))
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if err := db.Transaction(context.Background(), func(tx sql.DatabaseTx) error {
 			indices, err := tx.PrunableContractRoots(context.Background(), fcid, batch)
 			if err != nil {
@@ -326,7 +327,6 @@ INSERT INTO contracts (fcid, host_key, host_id, start_height, usability, size) V
 		sql.PublicKey(hk),
 		hostID,
 		0,
-		false,
 		usability,
 		n*rhp.SectorSize,
 	)
