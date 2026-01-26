@@ -382,7 +382,9 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 		}
 		log.Debug("retrieved checkpoint")
 
-		if err := sqlStore.SetChainIndex(ctx, checkpoint); err != nil {
+		if err := sqlStore.ResetChainState(ctx); err != nil {
+			return nil, nil, fmt.Errorf("failed to reset chain state: %w", err)
+		} else if err := sqlStore.SetChainIndex(ctx, checkpoint); err != nil {
 			return nil, nil, fmt.Errorf("failed to set chain index to checkpoint: %w", err)
 		}
 
