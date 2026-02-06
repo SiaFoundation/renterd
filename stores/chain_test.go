@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/stores/sql"
+	"lukechampine.com/frand"
 )
 
 type passthroughProofUpdater struct {
@@ -396,6 +397,42 @@ func TestProcessChainUpdate(t *testing.T) {
 		}, now)
 	}); !errors.Is(err, sql.ErrIndexMissmatch) {
 		t.Fatal("expected ErrIndexMissmatch", err)
+	}
+}
+
+func TestSetChainIndex(t *testing.T) {
+	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
+
+	expected := types.ChainIndex{
+		ID:     frand.Entropy256(),
+		Height: frand.Uint64n(math.MaxInt64),
+	}
+	err := ss.SetChainIndex(context.Background(), expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	actual, err := ss.ChainIndex(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if actual != expected {
+		t.Fatalf("unexpected chain index: got %v, want %v", actual, expected)
+	}
+
+	expected = types.ChainIndex{
+		ID:     frand.Entropy256(),
+		Height: frand.Uint64n(math.MaxInt64),
+	}
+	err = ss.SetChainIndex(context.Background(), expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	actual, err = ss.ChainIndex(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if actual != expected {
+		t.Fatalf("unexpected chain index after update: got %v, want %v", actual, expected)
 	}
 }
 

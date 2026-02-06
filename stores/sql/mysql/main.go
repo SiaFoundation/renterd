@@ -629,7 +629,7 @@ func (tx *MainDatabaseTx) Peers(ctx context.Context) ([]syncer.PeerInfo, error) 
 }
 
 func (tx *MainDatabaseTx) UpdateChainIndex(ctx context.Context, ci types.ChainIndex) error {
-	return ssql.UpdateChainIndex(ctx, tx, ci, tx.log.Named("UpdateChainIndex"))
+	return updateChainIndex(ctx, tx.Tx, ci, tx.log.Named("UpdateChainIndex"))
 }
 
 func (tx *MainDatabaseTx) ProcessChainUpdate(ctx context.Context, fn func(ssql.ChainUpdateTx) error) error {
@@ -1301,4 +1301,17 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 		sectorIDs = append(sectorIDs, sectorID)
 	}
 	return sectorIDs, nil
+}
+
+func updateChainIndex(ctx context.Context, tx sql.Tx, ci types.ChainIndex, log *zap.SugaredLogger) error {
+	log.Debug("update chain index", "chain_index", ci)
+
+	_, err := tx.Exec(ctx,
+		"INSERT INTO consensus_infos (id, created_at, height, block_id) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE height = VALUES(height), block_id = VALUES(block_id), created_at = VALUES(created_at)",
+		sql.ConsensusInfoID,
+		time.Now(),
+		ci.Height,
+		ssql.Hash256(ci.ID),
+	)
+	return err
 }

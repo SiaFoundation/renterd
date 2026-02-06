@@ -193,7 +193,7 @@ func (c chainUpdateTx) WalletRevertIndex(index types.ChainIndex, removed, unspen
 }
 
 func (c chainUpdateTx) UpdateChainIndex(index types.ChainIndex) error {
-	return ssql.UpdateChainIndex(c.ctx, c.tx, index, c.l)
+	return updateChainIndex(c.ctx, c.tx, index, c.l)
 }
 
 func (c chainUpdateTx) UpdateContractProofHeight(fcid types.FileContractID, proofHeight uint64) error {
