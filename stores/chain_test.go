@@ -403,6 +403,10 @@ func TestProcessChainUpdate(t *testing.T) {
 func TestSetChainIndex(t *testing.T) {
 	ss := newTestSQLStore(t, defaultTestSQLStoreConfig)
 
+	if err := ss.ResetChainState(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
 	expected := types.ChainIndex{
 		ID:     frand.Entropy256(),
 		Height: frand.Uint64n(math.MaxInt64),
