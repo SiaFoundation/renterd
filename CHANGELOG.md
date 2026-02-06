@@ -1,3 +1,9 @@
+## 2.8.1 (2026-02-06)
+
+### Fixes
+
+- Fixed instant sync in SQLite causing crashes.
+
 ## 2.8.0 (2026-02-03)
 
 ### Features
