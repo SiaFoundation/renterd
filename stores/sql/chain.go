@@ -33,19 +33,6 @@ func GetContractState(ctx context.Context, tx sql.Tx, fcid types.FileContractID)
 	return api.ContractState(cse.String()), nil
 }
 
-func UpdateChainIndex(ctx context.Context, tx sql.Tx, index types.ChainIndex, l *zap.SugaredLogger) error {
-	l.Debugw("update chain index", "height", index.Height, "block_id", index.ID)
-
-	if _, err := tx.Exec(ctx,
-		fmt.Sprintf("UPDATE consensus_infos SET height = ?, block_id = ? WHERE id = %d", sql.ConsensusInfoID),
-		index.Height,
-		Hash256(index.ID),
-	); err != nil {
-		return fmt.Errorf("failed to update chain index: %w", err)
-	}
-	return nil
-}
-
 func UpdateContractRevision(ctx context.Context, tx sql.Tx, fcid types.FileContractID, revisionHeight, revisionNumber, size uint64, l *zap.SugaredLogger) error {
 	// fetch current contract, in SQLite we could use a single query to
 	// perform the conditional update, however we have to compare the

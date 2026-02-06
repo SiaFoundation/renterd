@@ -1137,7 +1137,7 @@ func (tx *MainDatabaseTx) WalletEventCount(ctx context.Context) (count uint64, e
 }
 
 func (tx *MainDatabaseTx) UpdateChainIndex(ctx context.Context, ci types.ChainIndex) error {
-	return ssql.UpdateChainIndex(ctx, tx.Tx, ci, tx.log.Named("UpdateChainIndex"))
+	return updateChainIndex(ctx, tx.Tx, ci, tx.log)
 }
 
 func (tx *MainDatabaseTx) insertSlabs(ctx context.Context, objID, partID *int64, slices object.SlabSlices) error {
@@ -1294,4 +1294,17 @@ func (tx *MainDatabaseTx) upsertSectors(ctx context.Context, sectors []upsertSec
 		sectorIDs = append(sectorIDs, sectorID)
 	}
 	return sectorIDs, nil
+}
+
+func updateChainIndex(ctx context.Context, tx sql.Tx, ci types.ChainIndex, log *zap.SugaredLogger) error {
+	log.Debugw("update chain index", "chain_index", ci)
+
+	_, err := tx.Exec(ctx,
+		"INSERT INTO consensus_infos (id, created_at, height, block_id) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET height = EXCLUDED.height, block_id = EXCLUDED.block_id, created_at = EXCLUDED.created_at",
+		sql.ConsensusInfoID,
+		time.Now(),
+		ci.Height,
+		ssql.Hash256(ci.ID),
+	)
+	return err
 }
