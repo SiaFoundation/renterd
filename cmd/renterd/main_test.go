@@ -197,7 +197,7 @@ func runSmokeTest(t *testing.T, args, env []string, port int, timeout time.Durat
 			case <-ticker.C:
 			}
 
-			req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/bus/state", port), nil)
+			req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/bus/state", port), http.NoBody)
 			if err != nil {
 				t.Error(err)
 				continue
