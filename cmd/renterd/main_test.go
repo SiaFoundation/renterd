@@ -1,4 +1,4 @@
-package main_test
+package main
 
 import (
 	"bytes"
@@ -11,12 +11,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/renterd/v2/config"
+	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
 )
 
@@ -40,7 +41,7 @@ func TestMain(m *testing.M) {
 		binaryName += ".exe"
 	}
 	binaryPath = filepath.Join(dir, binaryName)
-	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	cmd := exec.Command("go", "build", "-tags=netgo,timetzdata", "-o", binaryPath, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(dir)
 		fmt.Fprintf(os.Stderr, "failed to build renterd: %s\n%v\n", out, err)
@@ -60,75 +61,39 @@ func TestSmoke(t *testing.T) {
 	t.Run("regular", func(t *testing.T) {
 		dir := t.TempDir()
 		apiPort := randomPort(t)
-		gatewayPort := randomPort(t)
-
-		runSmokeTest(t,
-			[]string{
-				"-dir", dir,
-				"-http", fmt.Sprintf("127.0.0.1:%d", apiPort),
-				"-bus.gatewayAddr", fmt.Sprintf("127.0.0.1:%d", gatewayPort),
-				"-bus.bootstrap=false",
-				"-autopilot.enabled=false",
-				"-s3.enabled=false",
-				"-network", "zen",
-				"-env",
-				"-openui=false",
-			},
-			prepareTestEnv(t, wallet.NewSeedPhrase(), "normal"),
-			apiPort,
-			30*time.Second,
-		)
+		writeTestConfig(t, dir, apiPort)
+		runSmokeTest(t, dir, []string{"-openui=false"}, apiPort, 30*time.Second)
 	})
 
 	t.Run("instant sync", func(t *testing.T) {
 		dir := t.TempDir()
 		apiPort := randomPort(t)
-		gatewayPort := randomPort(t)
-
-		runSmokeTest(t,
-			[]string{
-				"-dir", dir,
-				"-http", fmt.Sprintf("127.0.0.1:%d", apiPort),
-				"-bus.gatewayAddr", fmt.Sprintf("127.0.0.1:%d", gatewayPort),
-				"-autopilot.enabled=false",
-				"-s3.enabled=false",
-				"-network", "zen",
-				"-env",
-				"-openui=false",
-				"-instant",
-			},
-			prepareTestEnv(t, wallet.NewSeedPhrase(), "instant"),
-			apiPort,
-			3*time.Minute,
-		)
+		writeTestConfig(t, dir, apiPort)
+		runSmokeTest(t, dir, []string{"-openui=false", "-instant"}, apiPort, 3*time.Minute)
 	})
 }
 
-// prepareTestEnv prepares the environment variables for a smoke test
-func prepareTestEnv(t *testing.T, seed, suffix string) []string {
+// writeTestConfig writes a renterd.yml config file to dir.
+func writeTestConfig(t *testing.T, dir string, apiPort int) {
 	t.Helper()
 
-	// copy existing env
-	var env []string
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "RENTERD_") {
-			env = append(env, e)
-		}
-	}
+	// copy default config and override some fields
+	c := cfg
+	c.Seed = wallet.NewSeedPhrase()
+	c.Directory = "."
+	c.Network = "zen"
+	c.HTTP.Address = fmt.Sprintf("127.0.0.1:%d", apiPort)
+	c.HTTP.Password = apiPassword
+	c.Bus.GatewayAddr = fmt.Sprintf("127.0.0.1:%d", randomPort(t))
+	c.S3.Address = fmt.Sprintf("127.0.0.1:%d", randomPort(t))
 
-	// set renterd env vars
-	env = append(env,
-		"RENTERD_SEED="+seed,
-		"RENTERD_API_PASSWORD="+apiPassword,
-	)
-
-	// if we are running on MySQL, create test database
+	// prepare MySQL test database if necessary
 	if uri := os.Getenv("RENTERD_DB_URI"); uri != "" {
 		user := os.Getenv("RENTERD_DB_USER")
 		password := os.Getenv("RENTERD_DB_PASSWORD")
 		dbID := hex.EncodeToString(frand.Bytes(4))
-		dbName := "renterd_smoke_" + suffix + "_" + dbID
-		metricsName := "renterd_smoke_" + suffix + "_" + dbID + "_metrics"
+		dbName := "renterd_smoke_" + dbID
+		metricsName := "renterd_smoke_" + dbID + "_metrics"
 
 		// open connection
 		db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s)/?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, uri))
@@ -151,29 +116,36 @@ func prepareTestEnv(t *testing.T, seed, suffix string) []string {
 			db.Close()
 		})
 
-		env = append(env,
-			"RENTERD_DB_URI="+uri,
-			"RENTERD_DB_USER="+user,
-			"RENTERD_DB_PASSWORD="+password,
-			"RENTERD_DB_NAME="+dbName,
-			"RENTERD_DB_METRICS_NAME="+metricsName,
-		)
+		c.Database.MySQL = config.MySQL{
+			URI:             uri,
+			User:            user,
+			Password:        password,
+			Database:        dbName,
+			MetricsDatabase: metricsName,
+		}
 	}
 
-	return env
+	// write config file
+	buf, err := yaml.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "renterd.yml"), buf, 0644); err != nil {
+		t.Fatal(err)
+	}
 }
 
-// runSmokeTest runs the renterd binary with given args and environment. It will
-// wait for the API to become responsive and then attempt a graceful shutdown.
-func runSmokeTest(t *testing.T, args, env []string, port int, timeout time.Duration) {
+// runSmokeTest runs the renterd binary with given args. It will wait for the
+// API to become responsive and then attempt a graceful shutdown.
+func runSmokeTest(t *testing.T, dir string, args []string, port int, timeout time.Duration) {
 	t.Helper()
 
 	// capture output
 	var output bytes.Buffer
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Env = env
 	cmd.Stdout = &output
 	cmd.Stderr = &output
+	cmd.Dir = dir
 
 	// start renterd
 	if err := cmd.Start(); err != nil {
@@ -192,6 +164,7 @@ func runSmokeTest(t *testing.T, args, env []string, port int, timeout time.Durat
 	// wait for the bus to come online in background thread
 	successCh := make(chan struct{})
 	go func() {
+		client := &http.Client{Timeout: time.Second}
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -204,12 +177,11 @@ func runSmokeTest(t *testing.T, args, env []string, port int, timeout time.Durat
 
 			req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/bus/state", port), http.NoBody)
 			if err != nil {
-				t.Error(err)
 				continue
 			}
 			req.SetBasicAuth("", apiPassword)
 
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				continue // ignored
 			}
@@ -235,10 +207,14 @@ func runSmokeTest(t *testing.T, args, env []string, port int, timeout time.Durat
 
 	// send shutdown signal
 	time.Sleep(time.Second) // allow signal handler registration
-	cmd.Process.Signal(os.Interrupt)
+	if runtime.GOOS == "windows" {
+		cmd.Process.Kill()
+	} else {
+		cmd.Process.Signal(os.Interrupt)
+	}
 	select {
 	case <-doneCh:
-		if err != nil {
+		if err != nil && runtime.GOOS != "windows" {
 			t.Fatalf("process exited with error during shutdown: %v, output: %s", err, output.String())
 		}
 	case <-time.After(30 * time.Second):
@@ -246,6 +222,8 @@ func runSmokeTest(t *testing.T, args, env []string, port int, timeout time.Durat
 		<-doneCh // ensure process is done before reading output
 		t.Fatalf("graceful shutdown took longer than 30s, output: %s", output.String())
 	}
+
+	t.Log(output.String())
 }
 
 func randomPort(t *testing.T) int {
