@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	binaryPath = filepath.Join(dir, "renterd")
+	binaryName := "renterd"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath = filepath.Join(dir, binaryName)
 	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(dir)
