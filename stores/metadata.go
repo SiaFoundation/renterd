@@ -276,6 +276,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 	}
 	metrics := make([]api.ContractMetric, 0, len(squashedRecords))
 	for fcid, newSpending := range squashedRecords {
+		var metric api.ContractMetric
 		err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
 			contract, err := tx.Contract(ctx, fcid)
 			if errors.Is(err, api.ErrContractNotFound) {
@@ -287,7 +288,7 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 			if mhp := latestValues[fcid].missedHostPayout; types.Currency(contract.ContractPrice).Cmp(mhp) <= 0 {
 				remainingCollateral = mhp.Sub(types.Currency(contract.ContractPrice))
 			}
-			m := api.ContractMetric{
+			metric = api.ContractMetric{
 				Timestamp:           api.TimeNow(),
 				ContractID:          fcid,
 				HostKey:             contract.HostKey,
@@ -299,26 +300,26 @@ func (s *SQLStore) RecordContractSpending(ctx context.Context, records []api.Con
 				DeleteSpending:      contract.Spending.Deletions.Add(newSpending.Deletions),
 				SectorRootsSpending: contract.Spending.SectorRoots.Add(newSpending.SectorRoots),
 			}
-			metrics = append(metrics, m)
 
 			var updates api.ContractSpending
 			if !newSpending.Uploads.IsZero() {
-				updates.Uploads = m.UploadSpending
+				updates.Uploads = metric.UploadSpending
 			}
 			if !newSpending.FundAccount.IsZero() {
-				updates.FundAccount = m.FundAccountSpending
+				updates.FundAccount = metric.FundAccountSpending
 			}
 			if !newSpending.Deletions.IsZero() {
-				updates.Deletions = m.DeleteSpending
+				updates.Deletions = metric.DeleteSpending
 			}
 			if !newSpending.SectorRoots.IsZero() {
-				updates.SectorRoots = m.SectorRootsSpending
+				updates.SectorRoots = metric.SectorRootsSpending
 			}
 			return tx.RecordContractSpending(ctx, fcid, latestValues[fcid].revision, latestValues[fcid].size, updates)
 		})
 		if err != nil {
 			return err
 		}
+		metrics = append(metrics, metric)
 	}
 	if len(metrics) > 0 {
 		if err := s.RecordContractMetric(ctx, metrics...); err != nil {
@@ -446,18 +447,19 @@ func (s *SQLStore) RemoveObjects(ctx context.Context, bucket, prefix string) err
 	for {
 		start := time.Now()
 		var done bool
+		var deleted bool
 		var duration time.Duration
-		if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) error {
-			deleted, err := tx.DeleteObjects(ctx, bucket, prefix, objectDeleteBatchSizes[batchSizeIdx])
-			if err != nil {
-				return err
-			}
-			prune = prune || deleted
-			done = !deleted
-			return nil
+		if err := s.db.Transaction(ctx, func(tx sql.DatabaseTx) (err error) {
+			deleted, err = tx.DeleteObjects(ctx, bucket, prefix, objectDeleteBatchSizes[batchSizeIdx])
+			return
 		}); err != nil {
 			return fmt.Errorf("failed to delete objects: %w", err)
-		} else if done {
+		}
+		if deleted {
+			prune = true
+		}
+		done = !deleted
+		if done {
 			break // nothing more to delete
 		}
 		duration = time.Since(start)
