@@ -53,15 +53,15 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: Configure MySQL
-        uses: mirromutth/mysql-action@v1.1
+        uses: shogo82148/actions-setup-mysql@v1
         with:
-          host port: 3800
-          mysql version: "8"
-          mysql root password: test
+          distribution: "mysql"
+          mysql-version: "9"
+          root-password: test
       - name: Test
         uses: SiaFoundation/workflows/.github/actions/go-test@master
         env:
-          RENTERD_DB_URI: 127.0.0.1:3800
+          RENTERD_DB_URI: 127.0.0.1:3306
           RENTERD_DB_USER: root
           RENTERD_DB_PASSWORD: test
         with:
