@@ -1,3 +1,9 @@
+## 2.8.2 (2026-02-17)
+
+### Fixes
+
+- Ensure all store methods are retry-safe
+
 ## 2.8.1 (2026-02-06)
 
 ### Fixes
