@@ -1,6 +1,6 @@
 module go.sia.tech/renterd/v2 // v2.8.1
 
-go 1.24.3
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go v1.55.8
