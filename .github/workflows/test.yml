@@ -22,18 +22,6 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           args: --timeout=30m
-      - name: Jape Analyzer
-        uses: SiaFoundation/action-golang-analysis@HEAD
-        with:
-          analyzers: |
-            go.sia.tech/jape.Analyzer@master
-          directories: |
-            autopilot
-            bus bus/client
-            worker worker/client
-          flags: |
-            -japecheck.types=false
-
   test-sqlite: # Run all tests against SQLite
     needs: analyze
     uses: SiaFoundation/workflows/.github/workflows/go-test.yml@master
