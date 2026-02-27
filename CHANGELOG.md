@@ -1,3 +1,14 @@
+## 2.9.0 (2026-02-27)
+
+### Features
+
+- Update Go to 1.26.0.
+
+### Fixes
+
+- Ensure all store methods are retry-safe
+- Update coreutils from v0.21.0 to v0.21.1
+
 ## 2.8.1 (2026-02-06)
 
 ### Fixes
