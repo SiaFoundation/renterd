@@ -145,8 +145,8 @@ func TestApplyAndRevertV2ContractUpdate(t *testing.T) {
 		}
 
 		// apply revision at height 15 (no state change)
-		rev := types.V2FileContract{RevisionNumber: 1, Filesize: 100}
-		if err := s.applyV2ContractUpdate(tx, types.ChainIndex{Height: 15}, fce, false, &rev, nil); err != nil {
+		fce.V2FileContract = types.V2FileContract{RevisionNumber: 1, Filesize: 100}
+		if err := s.applyV2ContractUpdate(tx, types.ChainIndex{Height: 15}, fce, false, &fce.V2FileContract, nil); err != nil {
 			t.Fatal(err)
 		}
 		if tx.states[fcid] != api.ContractStateActive {
@@ -184,6 +184,10 @@ func TestApplyAndRevertV2ContractUpdate(t *testing.T) {
 		}
 		if tx.states[fcid] != api.ContractStatePending {
 			t.Fatalf("expected pending, got %v", tx.states[fcid])
+		} else if known, err := tx.IsKnownContract(fcid); err != nil {
+			t.Fatal(err)
+		} else if known {
+			t.Fatalf("expected contract to be unknown after revert")
 		}
 	})
 
@@ -229,6 +233,10 @@ func TestApplyAndRevertV2ContractUpdate(t *testing.T) {
 		}
 		if tx.states[fcid] != api.ContractStatePending {
 			t.Fatalf("expected pending, got %v", tx.states[fcid])
+		} else if known, err := tx.IsKnownContract(fcid); err != nil {
+			t.Fatal(err)
+		} else if known {
+			t.Fatalf("expected contract to be unknown after revert")
 		}
 	})
 
@@ -279,6 +287,10 @@ func TestApplyAndRevertV2ContractUpdate(t *testing.T) {
 		}
 		if tx.states[fcid] != api.ContractStatePending {
 			t.Fatalf("expected pending, got %v", tx.states[fcid])
+		} else if known, err := tx.IsKnownContract(fcid); err != nil {
+			t.Fatal(err)
+		} else if known {
+			t.Fatalf("expected contract to be unknown after revert")
 		}
 	})
 
@@ -326,6 +338,10 @@ func TestApplyAndRevertV2ContractUpdate(t *testing.T) {
 		}
 		if tx.states[fcid] != api.ContractStatePending {
 			t.Fatalf("expected pending, got %v", tx.states[fcid])
+		} else if known, err := tx.IsKnownContract(fcid); err != nil {
+			t.Fatal(err)
+		} else if known {
+			t.Fatalf("expected contract to be unknown after revert")
 		}
 	})
 
@@ -376,6 +392,10 @@ func TestApplyAndRevertV2ContractUpdate(t *testing.T) {
 		}
 		if tx.states[fcid] != api.ContractStatePending {
 			t.Fatalf("expected pending, got %v", tx.states[fcid])
+		} else if known, err := tx.IsKnownContract(fcid); err != nil {
+			t.Fatal(err)
+		} else if known {
+			t.Fatalf("expected contract to be unknown after revert")
 		}
 	})
 }
