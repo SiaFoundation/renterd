@@ -2,11 +2,10 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,9 +13,10 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"go.sia.tech/coreutils/wallet"
+	bus "go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"
+	"go.sia.tech/renterd/v2/stores/sql/mysql"
 	"gopkg.in/yaml.v3"
 	"lukechampine.com/frand"
 )
@@ -35,6 +35,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
+	defer os.RemoveAll(dir)
 
 	binaryName := "renterd"
 	if runtime.GOOS == "windows" {
@@ -43,14 +44,11 @@ func TestMain(m *testing.M) {
 	binaryPath = filepath.Join(dir, binaryName)
 	cmd := exec.Command("go", "build", "-tags=netgo,timetzdata", "-o", binaryPath, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
 		fmt.Fprintf(os.Stderr, "failed to build renterd: %s\n%v\n", out, err)
 		os.Exit(1)
 	}
 
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	m.Run()
 }
 
 func TestSmoke(t *testing.T) {
@@ -96,7 +94,7 @@ func writeTestConfig(t *testing.T, dir string, apiPort int) {
 		metricsName := "renterd_smoke_" + dbID + "_metrics"
 
 		// open connection
-		db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s)/?charset=utf8mb4&parseTime=True&loc=Local&multiStatements=true", user, password, uri))
+		db, err := mysql.Open(user, password, uri, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +162,7 @@ func runSmokeTest(t *testing.T, dir string, args []string, port int, timeout tim
 	// wait for the bus to come online in background thread
 	successCh := make(chan struct{})
 	go func() {
-		client := &http.Client{Timeout: time.Second}
+		client := bus.New(fmt.Sprintf("http://127.0.0.1:%d/api/bus", port), apiPassword)
 		ticker := time.NewTicker(250 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -175,19 +173,10 @@ func runSmokeTest(t *testing.T, dir string, args []string, port int, timeout tim
 			case <-ticker.C:
 			}
 
-			req, err := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%d/api/bus/state", port), http.NoBody)
-			if err != nil {
-				continue
-			}
-			req.SetBasicAuth("", apiPassword)
-
-			resp, err := client.Do(req)
-			if err != nil {
-				continue // ignored
-			}
-			resp.Body.Close()
-
-			if resp.StatusCode == http.StatusOK {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_, err := client.State(ctx)
+			cancel()
+			if err == nil {
 				close(successCh)
 				return
 			}
