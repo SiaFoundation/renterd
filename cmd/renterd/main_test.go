@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"go.sia.tech/coreutils/wallet"
 	bus "go.sia.tech/renterd/v2/bus/client"
 	"go.sia.tech/renterd/v2/config"

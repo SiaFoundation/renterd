@@ -19,7 +19,7 @@ jobs:
         run: |
           git config --global user.name github-actions[bot]
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
-      - uses: knope-dev/action@407e9ef7c272d2dd53a4e71e39a7839e29933c48
+      - uses: knope-dev/action@1ba8f6acf146130c3f5b196465018aa9f553381a
       - run: knope prepare-release --verbose
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

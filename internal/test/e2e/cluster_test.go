@@ -1099,7 +1099,7 @@ func TestContractApplyChainUpdates(t *testing.T) {
 		cluster.MineBlocks(1)
 
 		// force a new revision by funding an account
-		_, err = b.FundAccount(context.Background(), rhpv4.Account{}, contract.ID, types.NewCurrency64(100))
+		_, err = b.FundAccount(context.Background(), rhpv4.Account(frand.Entropy256()), contract.ID, types.NewCurrency64(100))
 		tt.OK(err)
 
 		// broadcast the revision for each contract
