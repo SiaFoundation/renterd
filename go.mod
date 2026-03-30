@@ -10,7 +10,7 @@ require (
 	github.com/gotd/contrib v0.21.1
 	github.com/klauspost/reedsolomon v1.13.3
 	github.com/mattn/go-sqlite3 v1.14.37
-	github.com/montanaflynn/stats v0.8.2
+	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.1-0.20251215141429-887336e35dd9
 	go.sia.tech/coreutils v0.21.2-0.20260311150752-49aa8693b89e
