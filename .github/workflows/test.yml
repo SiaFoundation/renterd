@@ -13,7 +13,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Validate OpenAPI spec
         run: |
           npm install --global swagger-spec-validator
@@ -35,7 +35,7 @@ jobs:
         go-version: ["1.25", "1.26"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
