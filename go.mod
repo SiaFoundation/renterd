@@ -9,14 +9,14 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.1
 	github.com/klauspost/reedsolomon v1.13.3
-	github.com/mattn/go-sqlite3 v1.14.37
+	github.com/mattn/go-sqlite3 v1.14.40
 	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.1-0.20251215141429-887336e35dd9
 	go.sia.tech/coreutils v0.21.2-0.20260311150752-49aa8693b89e
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
-	go.sia.tech/web/renterd v0.88.1
+	go.sia.tech/web/renterd v0.88.2
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.49.0
 	golang.org/x/sys v0.42.0
