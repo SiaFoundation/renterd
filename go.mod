@@ -9,18 +9,18 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.1
 	github.com/klauspost/reedsolomon v1.13.3
-	github.com/mattn/go-sqlite3 v1.14.40
+	github.com/mattn/go-sqlite3 v1.14.42
 	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.19.1-0.20251215141429-887336e35dd9
-	go.sia.tech/coreutils v0.21.2-0.20260311150752-49aa8693b89e
+	go.sia.tech/core v0.19.1
+	go.sia.tech/coreutils v0.21.2
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/renterd v0.88.2
 	go.uber.org/zap v1.27.1
-	golang.org/x/crypto v0.49.0
-	golang.org/x/sys v0.42.0
-	golang.org/x/term v0.41.0
+	golang.org/x/crypto v0.50.0
+	golang.org/x/sys v0.43.0
+	golang.org/x/term v0.42.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/frand v1.5.1
@@ -38,10 +38,10 @@ require (
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
-	go.sia.tech/mux v1.4.0 // indirect
+	go.sia.tech/mux v1.5.0 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
-	golang.org/x/tools v0.42.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
 )
