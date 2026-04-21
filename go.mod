@@ -12,8 +12,8 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.42
 	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.19.1
-	go.sia.tech/coreutils v0.21.2
+	go.sia.tech/core v0.19.2-0.20260421131916-3a5d3f254fd9
+	go.sia.tech/coreutils v0.21.3-0.20260421140827-cfc04c84419e
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/renterd v0.88.2
@@ -41,7 +41,7 @@ require (
 	go.sia.tech/mux v1.5.0 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
-	golang.org/x/tools v0.43.0 // indirect
+	golang.org/x/tools v0.44.0 // indirect
 )
