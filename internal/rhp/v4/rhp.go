@@ -170,9 +170,9 @@ func (c *Client) FormContract(ctx context.Context, hk types.PublicKey, hostIP st
 }
 
 // RenewContract renews a contract with a host.
-func (c *Client) RenewContract(ctx context.Context, hk types.PublicKey, hostIP string, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, existing types.V2FileContract, params rhp4.RPCRenewContractParams) (res rhp.RPCRenewContractResult, _ error) {
+func (c *Client) RenewContract(ctx context.Context, hk types.PublicKey, hostIP string, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, hostAddress types.Address, existing types.V2FileContract, params rhp4.RPCRenewContractParams) (res rhp.RPCRenewContractResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
-		res, err = rhp.RPCRenewContract(ctx, c, tp, signer, cs, p, existing, params)
+		res, err = rhp.RPCRenewContract(ctx, c, tp, signer, cs, p, hostAddress, existing, params)
 		if err != nil {
 			return err
 		}
@@ -182,9 +182,9 @@ func (c *Client) RenewContract(ctx context.Context, hk types.PublicKey, hostIP s
 }
 
 // RefreshContract refreshes a contract with a host.
-func (c *Client) RefreshContract(ctx context.Context, hk types.PublicKey, hostIP string, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, existing types.V2FileContract, params rhp4.RPCRefreshContractParams) (res rhp.RPCRefreshContractResult, _ error) {
+func (c *Client) RefreshContract(ctx context.Context, hk types.PublicKey, hostIP string, tp rhp.TxPool, signer rhp.FormContractSigner, cs consensus.State, p rhp4.HostPrices, hostAddress types.Address, existing types.V2FileContract, params rhp4.RPCRefreshContractParams) (res rhp.RPCRefreshContractResult, _ error) {
 	err := c.tpool.withTransport(ctx, hk, hostIP, func(c rhp.TransportClient) (err error) {
-		res, err = rhp.RPCRefreshContractFullRollover(ctx, c, tp, signer, cs, p, existing, params)
+		res, err = rhp.RPCRefreshContractFullRollover(ctx, c, tp, signer, cs, p, hostAddress, existing, params)
 		if err != nil {
 			return err
 		}
