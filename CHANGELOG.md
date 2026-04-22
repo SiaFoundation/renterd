@@ -1,3 +1,11 @@
+## 2.9.1 (2026-04-22)
+
+### Fixes
+
+- Add smoke tests for renterd binary to ensure basic startup is covered on the CI.
+- Fix a bug where contracts weren't renewed due to invalid signatures.
+- Fixed an edge case where pruning a contract might delete a wrong sector.
+
 ## 2.9.0 (2026-03-02)
 
 ### Features
