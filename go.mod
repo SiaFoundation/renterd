@@ -5,11 +5,11 @@ go 1.26.0
 require (
 	github.com/aws/aws-sdk-go v1.55.8
 	github.com/gabriel-vasile/mimetype v1.4.13
-	github.com/go-sql-driver/mysql v1.9.3
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.1
-	github.com/klauspost/reedsolomon v1.13.3
-	github.com/mattn/go-sqlite3 v1.14.42
+	github.com/klauspost/reedsolomon v1.14.0
+	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.20.0
@@ -17,7 +17,7 @@ require (
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/renterd v0.88.2
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.50.0
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
@@ -27,7 +27,7 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
