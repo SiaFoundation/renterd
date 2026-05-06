@@ -10,23 +10,23 @@ import (
 	rhp "go.sia.tech/coreutils/rhp/v4"
 )
 
-// blockTransportClient is a TransportClient whose Close blocks until
-// the returned channel is closed.
+// blockTransportClient is a TransportClient whose Close signals
+// closeStarted and then blocks until unblock is closed.
 type blockTransportClient struct {
-	ch chan struct{}
+	closing chan struct{}
+	unblock chan struct{}
 }
 
 func (s *blockTransportClient) DialStream(context.Context) (net.Conn, error) { return nil, nil }
 func (s *blockTransportClient) FrameSize() int                               { return 0 }
 func (s *blockTransportClient) PeerKey() types.PublicKey                     { return types.PublicKey{} }
 func (s *blockTransportClient) Close() error {
-	<-s.ch
+	close(s.closing)
+	<-s.unblock
 	return nil
 }
 
-type mockDialer struct {
-	client rhp.TransportClient
-}
+type mockDialer struct{}
 
 func (d *mockDialer) Dial(context.Context, types.PublicKey, string) (net.Conn, error) {
 	return nil, nil
@@ -35,10 +35,12 @@ func (d *mockDialer) Dial(context.Context, types.PublicKey, string) (net.Conn, e
 // TestTransportPoolClose is a regression test for a deadlock that could
 // occur when a transport's Close blocks while holding the pool's mutex
 func TestTransportPoolClose(t *testing.T) {
-	ch := make(chan struct{})
-	slow := &blockTransportClient{ch: ch}
+	slow := &blockTransportClient{
+		closing: make(chan struct{}),
+		unblock: make(chan struct{}),
+	}
 
-	tp := newTransportPool(&mockDialer{client: slow})
+	tp := newTransportPool(&mockDialer{})
 	addr := "1.2.3.4:1234"
 
 	// inject a transport with refCount 0 so that withTransport increments
@@ -56,14 +58,14 @@ func TestTransportPoolClose(t *testing.T) {
 		})
 	}()
 
-	// wait briefly, then verify the pool is not blocked by trying to
-	// use a different address
-	time.Sleep(50 * time.Millisecond)
+	// wait until Close has actually been called
+	<-slow.closing
 
+	// verify the pool is not blocked while Close is hanging
 	lockAcquired := make(chan struct{})
 	go func() {
 		tp.mu.Lock()
-		_ = len(tp.pool) // access pool to justify the lock
+		_ = len(tp.pool)
 		tp.mu.Unlock()
 		close(lockAcquired)
 	}()
@@ -75,6 +77,6 @@ func TestTransportPoolClose(t *testing.T) {
 	}
 
 	// unblock the slow close
-	close(ch)
+	close(slow.unblock)
 	<-done
 }
