@@ -57,18 +57,22 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 		return err
 	}()
 
-	// Decrement refcounter again and clean up pool.
+	// decrement refcounter again and clean up pool
+	var toClose rhp.TransportClient
 	p.mu.Lock()
 	t.refCount--
 	if t.refCount == 0 {
-		// Cleanup
-		if t.t != nil {
-			_ = t.t.Close()
-			t.t = nil
-		}
+		toClose = t.t
+		t.t = nil
 		delete(p.pool, addr)
 	}
 	p.mu.Unlock()
+
+	// close outside the lock to avoid blocking the pool if the
+	// underlying connection is slow to tear down
+	if toClose != nil {
+		_ = toClose.Close()
+	}
 	return err
 }
 
