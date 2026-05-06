@@ -660,7 +660,7 @@ func (b *Bus) refreshContract(ctx context.Context, cs consensus.State, h api.Hos
 	}
 
 	var res cRhp4.RPCRefreshContractResult
-	res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRefreshContractParams{
+	res, err = b.rhp4Client.RefreshContract(ctx, h.PublicKey, h.SiamuxAddr(), b.cm, signer, cs, settings.Prices, settings.WalletAddress, rev, rhpv4.RPCRefreshContractParams{
 		ContractID: c.ID,
 		Allowance:  additionalRenterFunds,
 		Collateral: minNewCollateral,
@@ -708,7 +708,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, h api.Host,
 	}
 
 	var res cRhp4.RPCRenewContractResult
-	res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.SiamuxAddr(), b.cm, signer, cs, settings.Prices, rev, rhpv4.RPCRenewContractParams{
+	res, err = b.rhp4Client.RenewContract(ctx, h.PublicKey, h.SiamuxAddr(), b.cm, signer, cs, settings.Prices, settings.WalletAddress, rev, rhpv4.RPCRenewContractParams{
 		ContractID:  c.ID,
 		Allowance:   renterFunds,
 		Collateral:  hostCollateral,
