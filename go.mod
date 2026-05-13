@@ -13,7 +13,7 @@ require (
 	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.21.0
-	go.sia.tech/coreutils v0.21.3
+	go.sia.tech/coreutils v0.22.1-0.20260513143633-9856f6e895bd
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/renterd v0.88.2
@@ -33,12 +33,12 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/quic-go/webtransport-go v0.10.1-0.20260312060737-05fe5253a73c // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
-	go.sia.tech/mux v1.5.0 // indirect
+	go.sia.tech/mux v1.5.1 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
