@@ -50,7 +50,7 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 			return err
 		}
 		err = fn(client)
-		if err != nil && rhpv4.ErrorCode(err) != rhpv4.ErrorCodeTransport {
+		if code := rhpv4.ErrorCode(err); err != nil && code != rhpv4.ErrorCodeTransport && code != rhpv4.ErrorCodeClientError {
 			// wrap error to indicate that the error was returned by the host
 			err = fmt.Errorf("%w: %w", utils.ErrHost, err)
 		}
