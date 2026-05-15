@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Update UI and open PR
-        uses: SiaFoundation/workflows/.github/actions/ui-update@master
+        uses: SiaFoundation/workflows/.github/actions/ui-update@22e56c0750c0febb09784caa01c60021e0b5f111 # master
         with:
           moduleName: 'renterd'
           goVersion: '1.21'
