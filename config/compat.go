@@ -242,7 +242,8 @@ func updateConfigV111(fp string, r io.Reader, cfg *Config) error {
 	cfg.Log.File = old.Log.File
 	cfg.Log.Database = old.Database.Log // moved
 
-	cfg.HTTP = old.HTTP
+	cfg.HTTP.Address = old.HTTP.Address
+	cfg.HTTP.Password = old.HTTP.Password
 
 	cfg.Autopilot.Enabled = old.Autopilot.Enabled
 	cfg.Autopilot.Heartbeat = old.Autopilot.Heartbeat

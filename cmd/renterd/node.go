@@ -127,7 +127,7 @@ func newNode(cfg config.Config, configPath string, network *consensus.Network, g
 	cfg.HTTP.Address = "http://" + l.Addr().String()
 
 	// initialise a web server
-	mux := &api.TreeMux{Sub: make(map[string]api.TreeMux)}
+	mux := &api.TreeMux{Sub: make(map[string]api.TreeMux), Pprof: cfg.HTTP.Pprof}
 	srv := &http.Server{Handler: mux}
 	shutdownFns = append(shutdownFns, fn{
 		name: "HTTP Server",
