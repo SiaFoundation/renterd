@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	_ "net/http/pprof"
 )
 
 func DoRequest(req *http.Request, resp interface{}) (http.Header, int, error) {

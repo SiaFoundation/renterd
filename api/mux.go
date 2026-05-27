@@ -2,16 +2,18 @@ package api
 
 import (
 	"net/http"
+	_ "net/http/pprof"
 	"strings"
 )
 
 type TreeMux struct {
 	Handler http.Handler
 	Sub     map[string]TreeMux
+	Pprof   bool
 }
 
 func (t TreeMux) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if strings.HasPrefix(req.URL.Path, "/debug/pprof") {
+	if t.Pprof && strings.HasPrefix(req.URL.Path, "/debug/pprof") {
 		http.DefaultServeMux.ServeHTTP(w, req)
 		return
 	}

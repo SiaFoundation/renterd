@@ -42,6 +42,7 @@ type (
 	HTTP struct {
 		Address  string `yaml:"address,omitempty"`
 		Password string `yaml:"password,omitempty"`
+		Pprof    bool   `yaml:"pprof,omitempty"`
 	}
 
 	DatabaseLog struct {
