@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/accounts"
 	"go.sia.tech/renterd/v2/internal/contracts"
+	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/host"
 	"go.sia.tech/renterd/v2/internal/prices"
 	"go.sia.tech/renterd/v2/internal/utils"
@@ -36,6 +37,10 @@ type (
 		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
 	}
 
+	GougingStore interface {
+		GougingParams(ctx context.Context) (api.GougingParams, error)
+	}
+
 	Manager interface {
 		Downloader(hi api.HostInfo) host.Downloader
 		Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader
@@ -50,6 +55,7 @@ type (
 
 		accounts    AccountStore
 		contracts   contracts.SpendingRecorder
+		gouging     GougingStore
 		pricesCache *prices.PricesCache
 		logger      *zap.SugaredLogger
 	}
@@ -57,6 +63,7 @@ type (
 	hostV2DownloadClient struct {
 		hi   api.HostInfo
 		acc  *accounts.Account
+		gs   GougingStore
 		pts  *prices.PricesCache
 		rhp4 *rhp4.Client
 	}
@@ -68,12 +75,13 @@ type (
 
 		acc  *accounts.Account
 		csr  contracts.SpendingRecorder
+		gs   GougingStore
 		pts  *prices.PricesCache
 		rhp4 *rhp4.Client
 	}
 )
 
-func NewManager(masterKey utils.MasterKey, as AccountStore, csr contracts.SpendingRecorder, dialer Dialer, logger *zap.Logger) Manager {
+func NewManager(masterKey utils.MasterKey, as AccountStore, csr contracts.SpendingRecorder, gs GougingStore, dialer Dialer, logger *zap.Logger) Manager {
 	logger = logger.Named("hostmanager")
 	return &hostManager{
 		masterKey: masterKey,
@@ -82,6 +90,7 @@ func NewManager(masterKey utils.MasterKey, as AccountStore, csr contracts.Spendi
 
 		accounts:    as,
 		contracts:   csr,
+		gouging:     gs,
 		pricesCache: prices.NewPricesCache(),
 
 		logger: logger.Sugar(),
@@ -92,6 +101,7 @@ func (m *hostManager) Downloader(hi api.HostInfo) host.Downloader {
 	return &hostV2DownloadClient{
 		hi:   hi,
 		acc:  m.accounts.ForHost(hi.PublicKey),
+		gs:   m.gouging,
 		pts:  m.pricesCache,
 		rhp4: m.rhp4Client,
 	}
@@ -105,6 +115,7 @@ func (m *hostManager) Uploader(hi api.HostInfo, fcid types.FileContractID) host.
 
 		acc:  m.accounts.ForHost(hi.PublicKey),
 		csr:  m.contracts,
+		gs:   m.gouging,
 		pts:  m.pricesCache,
 		rhp4: m.rhp4Client,
 	}
@@ -129,11 +140,7 @@ func (c *hostV2DownloadClient) DownloadSector(ctx context.Context, w io.Writer, 
 }
 
 func (c *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.SiamuxAddr())
-	if err != nil {
-		return rhpv4.HostPrices{}, err
-	}
-	return settings.Prices, nil
+	return fetchPrices(ctx, c.rhp4, c.gs, c.hi)
 }
 
 func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv4.SectorSize]byte) error {
@@ -164,9 +171,20 @@ func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.
 }
 
 func (c *hostV2UploadClient) Prices(ctx context.Context) (rhpv4.HostPrices, error) {
-	settings, err := c.rhp4.Settings(ctx, c.hi.PublicKey, c.hi.SiamuxAddr())
+	return fetchPrices(ctx, c.rhp4, c.gs, c.hi)
+}
+
+func fetchPrices(ctx context.Context, c *rhp4.Client, gs GougingStore, hi api.HostInfo) (rhpv4.HostPrices, error) {
+	settings, err := c.Settings(ctx, hi.PublicKey, hi.SiamuxAddr())
 	if err != nil {
 		return rhpv4.HostPrices{}, err
+	}
+	gp, err := gs.GougingParams(ctx)
+	if err != nil {
+		return rhpv4.HostPrices{}, fmt.Errorf("couldn't fetch gouging params: %w", err)
+	}
+	if breakdown := gouging.NewChecker(gp.GougingSettings, gp.ConsensusState).Check(settings); breakdown.Gouging() {
+		return rhpv4.HostPrices{}, fmt.Errorf("%w: %v", gouging.ErrHostSettingsGouging, breakdown)
 	}
 	return settings.Prices, nil
 }

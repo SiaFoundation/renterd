@@ -24,7 +24,6 @@ type (
 
 	Checker interface {
 		Check(rhp.HostSettings) api.HostGougingBreakdown
-		BlocksUntilBlockHeightGouging(hostHeight uint64) int64
 	}
 
 	checker struct {
@@ -40,16 +39,6 @@ func NewChecker(gs api.GougingSettings, cs api.ConsensusState) Checker {
 		consensusState: cs,
 		settings:       gs,
 	}
-}
-
-func (gc checker) BlocksUntilBlockHeightGouging(hostHeight uint64) int64 {
-	blockHeight := gc.consensusState.BlockHeight
-	leeway := gc.settings.HostBlockHeightLeeway
-	var minHeight uint64
-	if blockHeight >= uint64(leeway) {
-		minHeight = blockHeight - uint64(leeway)
-	}
-	return int64(hostHeight) - int64(minHeight)
 }
 
 func (gc checker) Check(hs rhp.HostSettings) (gb api.HostGougingBreakdown) {
