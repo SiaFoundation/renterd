@@ -45,6 +45,10 @@ type (
 		Downloader(hi api.HostInfo) host.Downloader
 		Uploader(hi api.HostInfo, fcid types.FileContractID) host.Uploader
 	}
+
+	settingsFetcher interface {
+		Settings(ctx context.Context, hk types.PublicKey, addr string) (rhp4.HostSettings, error)
+	}
 )
 
 type (
@@ -174,8 +178,8 @@ func (c *hostV2UploadClient) Prices(ctx context.Context) (rhpv4.HostPrices, erro
 	return fetchPrices(ctx, c.rhp4, c.gs, c.hi)
 }
 
-func fetchPrices(ctx context.Context, c *rhp4.Client, gs GougingStore, hi api.HostInfo) (rhpv4.HostPrices, error) {
-	settings, err := c.Settings(ctx, hi.PublicKey, hi.SiamuxAddr())
+func fetchPrices(ctx context.Context, sf settingsFetcher, gs GougingStore, hi api.HostInfo) (rhpv4.HostPrices, error) {
+	settings, err := sf.Settings(ctx, hi.PublicKey, hi.SiamuxAddr())
 	if err != nil {
 		return rhpv4.HostPrices{}, err
 	}
