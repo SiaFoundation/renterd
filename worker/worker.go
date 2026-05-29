@@ -635,7 +635,7 @@ func New(cfg config.Worker, masterKey [32]byte, b Bus, l *zap.Logger) (*Worker, 
 	uploadKey := w.masterKey.DeriveUploadKey()
 
 	w.contractSpendingRecorder = contracts.NewSpendingRecorder(w.shutdownCtx, w.bus, cfg.BusFlushInterval, l)
-	hm := hosts.NewManager(w.masterKey, w.accounts, w.contractSpendingRecorder, dialer, l)
+	hm := hosts.NewManager(w.masterKey, w.accounts, w.contractSpendingRecorder, w.bus, dialer, l)
 	w.hostManager = hm
 
 	dlmm := memory.NewManager(cfg.DownloadMaxMemory, l.Named("downloadmanager"))
@@ -762,12 +762,6 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 	opts.Range.Offset = hor.Range.Offset
 	opts.Range.Length = hor.Range.Length
 
-	// fetch gouging params
-	gp, err := w.bus.GougingParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't fetch gouging parameters from bus: %w", err)
-	}
-
 	// fetch usable hosts
 	hosts, err := w.cache.UsableHosts(ctx)
 	if err != nil {
@@ -783,7 +777,6 @@ func (w *Worker) GetObject(ctx context.Context, bucket, key string, opts api.Dow
 	} else {
 		// otherwise return a pipe reader
 		downloadFn := func(wr io.Writer, offset, length int64) error {
-			ctx = gouging.WithChecker(ctx, w.bus, gp)
 			err = w.downloadManager.DownloadObject(ctx, wr, obj, uint64(offset), uint64(length), hosts)
 			if err != nil {
 				w.logger.Error(err)
@@ -872,9 +865,6 @@ func (w *Worker) UploadObject(ctx context.Context, r io.Reader, bucket, key stri
 		return nil, err
 	}
 
-	// attach gouging checker to the context
-	ctx = gouging.WithChecker(ctx, w.bus, up.GougingParams)
-
 	// fetch host & contract info
 	contracts, err := w.hostContracts(ctx)
 	if err != nil {
@@ -912,9 +902,6 @@ func (w *Worker) UploadMultipartUploadPart(ctx context.Context, r io.Reader, buc
 	if err != nil {
 		return nil, fmt.Errorf("couldn't fetch multipart upload: %w", err)
 	}
-
-	// attach gouging checker to the context
-	ctx = gouging.WithChecker(ctx, w.bus, up.GougingParams)
 
 	// prepare opts
 	uploadOpts := []upload.Option{

@@ -144,7 +144,7 @@ func New(ctx context.Context, masterKey [32]byte, alerts alerts.Alerter, ss Slab
 	// create host manager
 	dialer := rhp.NewFallbackDialer(b, net.Dialer{}, logger)
 	csr := contracts.NewSpendingRecorder(ctx, b, 5*time.Second, logger)
-	m.hostManager = hosts.NewManager(masterKey, am, csr, dialer, logger)
+	m.hostManager = hosts.NewManager(masterKey, am, csr, b, dialer, logger)
 	m.rhp4Client = rhp4.New(dialer)
 
 	// create upload & download manager

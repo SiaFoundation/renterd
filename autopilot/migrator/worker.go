@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/alerts"
 	"go.sia.tech/renterd/v2/api"
-	"go.sia.tech/renterd/v2/internal/gouging"
 	"go.sia.tech/renterd/v2/internal/upload"
 	"go.sia.tech/renterd/v2/internal/utils"
 	"go.sia.tech/renterd/v2/object"
@@ -38,9 +37,6 @@ func (m *Migrator) migrateSlab(ctx context.Context, key object.EncryptionKey) er
 		m.logger.Errorf("migration cancelled, err: %v", api.ErrConsensusNotSynced)
 		return api.ErrConsensusNotSynced
 	}
-
-	// attach gouging checker to the context
-	ctx = gouging.WithChecker(ctx, m.bus, up.GougingParams)
 
 	// fetch hosts
 	dlHosts, err := m.bus.UsableHosts(ctx)
