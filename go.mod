@@ -9,7 +9,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.21.1
 	github.com/klauspost/reedsolomon v1.14.0
-	github.com/mattn/go-sqlite3 v1.14.44
+	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/montanaflynn/stats v0.9.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.21.0
