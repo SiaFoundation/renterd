@@ -1,3 +1,13 @@
+## 2.9.2 (2026-06-08)
+
+### Fixes
+
+- Check gouging settings in upload and download clients.
+- Disable pprof by default
+- Fixed a deadlock in the transport pool caused by closing a mux connection while holding the pool mutex.
+- Update mux to v1.5.1.
+- Update reedsolomon dependency to 1.14.0.
+
 ## 2.9.1 (2026-04-22)
 
 ### Fixes
