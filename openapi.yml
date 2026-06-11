@@ -625,7 +625,7 @@ paths:
             text/plain:
               schema:
                 type: string
-                example: bucket missing
+                example: "'bucket' parameter is required"
         "404":
           description: Object not found
           content:
