@@ -1,10 +1,15 @@
 # [![Sia](https://sia.tech/assets/banners/sia-banner-expanded-renterd.png)](http://sia.tech)
 [![GoDoc](https://godoc.org/go.sia.tech/renterd?status.svg)](https://godoc.org/go.sia.tech/renterd)
 
-
-`renterd` is an advanced Sia renter engineered by the Sia Foundation. Designed
-to cater to both casual users seeking straightforward data storage and
-developers requiring a robust API for building apps on Sia
+> [!IMPORTANT]
+> ## 🚀 Meet [`s3d`](https://github.com/SiaFoundation/s3d) — the better way to rent storage on Sia
+> `s3d` is a lightweight, S3-compatible renter for the Sia network. Connect it
+  to [Sia Storage](https://sia.storage) for renting without the hassle of
+  managing your own node, acquiring tokens, or dealing with complex
+  configurations. With `s3d`, you can start storing data on Sia in minutes, all
+  through a familiar S3 interface.
+>
+> **👉 [Get started with `s3d`](https://github.com/SiaFoundation/s3d)**
 
 ## Overview
 
