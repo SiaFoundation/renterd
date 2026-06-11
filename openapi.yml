@@ -593,6 +593,47 @@ paths:
         "500":
           description: Internal server error
 
+  /worker/pinned/{key}:
+    get:
+      tags:
+        - worker
+      summary: Get an object's pinned metadata
+      description: Returns the raw metadata of an object in a form suitable for downloading it directly from hosts using external tools, without going through renterd.
+      parameters:
+        - name: key
+          description: The key of the object to retrieve metadata for
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ObjectKey"
+        - name: bucket
+          description: The name of the bucket the object belongs to
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/BucketName"
+      responses:
+        "200":
+          description: Successfully retrieved the object's pinned metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedObject"
+        "400":
+          description: Missing bucket or key parameter
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: bucket missing
+        "404":
+          description: Object not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: object not found
+
   /worker/state:
     get:
       tags:
@@ -5556,6 +5597,63 @@ components:
           format: float64
           description: The value of the underlying currency to which the setting is pinned
 
+    PinnedObject:
+      type: object
+      description: The raw metadata of an object, suitable for downloading it directly from hosts using external tools.
+      properties:
+        key:
+          type: string
+          description: The key of the object
+        mimeType:
+          type: string
+          description: The MIME type of the object
+        encryptionKey:
+          allOf:
+            - $ref: "#/components/schemas/RawEncryptionKey"
+            - description: The key used to encrypt the object's slabs
+        slabs:
+          type: array
+          description: The slabs that make up the object
+          items:
+            $ref: "#/components/schemas/PinnedSlab"
+
+    PinnedSector:
+      type: object
+      properties:
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host storing the sector
+
+    PinnedSlab:
+      type: object
+      properties:
+        encryptionKey:
+          allOf:
+            - $ref: "#/components/schemas/RawEncryptionKey"
+            - description: The key used to encrypt the slab's sectors
+        minShards:
+          type: integer
+          format: uint8
+          description: The number of data shards needed to reconstruct the slab
+        sectors:
+          type: array
+          description: The sectors that make up the slab
+          items:
+            $ref: "#/components/schemas/PinnedSector"
+        offset:
+          type: integer
+          format: uint32
+          description: The offset of the object's data within the slab
+        length:
+          type: integer
+          format: uint32
+          description: The length of the object's data within the slab
+
     PinnedSettings:
       type: object
       properties:
@@ -5572,6 +5670,11 @@ components:
       type: integer
       format: int
       example: 80
+
+    RawEncryptionKey:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A raw 256-bit encryption key encoded as hex, without the 'key:' or 'skey:' prefix used by EncryptionKey
 
     RedundancySettings:
       type: object
