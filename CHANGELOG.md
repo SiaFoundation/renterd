@@ -1,3 +1,9 @@
+## 2.9.3 (2026-07-13)
+
+### Fixes
+
+- Add GET /pinned/*key OpenAPI spec
+
 ## 2.9.2 (2026-06-08)
 
 ### Fixes
