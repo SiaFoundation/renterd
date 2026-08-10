@@ -2818,10 +2818,10 @@ func TestConsensusResync(t *testing.T) {
 
 	// start with fresh chain store
 	network, genesis := testNetwork()
-	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
+	store, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 	tt.OK(err)
 	newCluster := newTestCluster(t, testClusterOptions{
-		cm:        chain.NewManager(store, state),
+		cm:        chain.NewManager(store),
 		dir:       cluster.dir,
 		dbName:    cluster.dbName,
 		funding:   &clusterOptNoFunding,
@@ -3079,11 +3079,11 @@ func TestContractRevert(t *testing.T) {
 
 	// reorg the chain to revert the contract
 	network, genesis := testNetwork()
-	ds, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
+	ds, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 	tt.OK(err)
-	ds.AddState(cluster.network.GenesisState())
+	ds.Scratchpad().AddState(cluster.network.GenesisState())
 
-	otherCM := chain.NewManager(ds, state)
+	otherCM := chain.NewManager(ds)
 	testutil.MineBlocks(t, otherCM, types.VoidAddress, int(cluster.cm.Tip().Height)+10)
 
 	for i := uint64(1); i <= otherCM.Tip().Height; i++ {

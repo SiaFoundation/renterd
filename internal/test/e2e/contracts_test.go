@@ -96,7 +96,7 @@ func TestContractUsability(t *testing.T) {
 	// prepare network with no maturity delay
 	network, genesis := testNetwork()
 	network.MaturityDelay = 0
-	store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
+	store, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestContractUsability(t *testing.T) {
 	opts.autopilotConfig = &copied
 	opts.autopilotConfig.Contracts.Amount = 0
 	opts.funding = &clusterOptNoFunding
-	opts.cm = chain.NewManager(store, state)
+	opts.cm = chain.NewManager(store)
 
 	// prepare custom logger
 	core, logs := observer.New(zapcore.DebugLevel)
