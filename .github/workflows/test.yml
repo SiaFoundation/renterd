@@ -24,7 +24,7 @@ jobs:
           args: --timeout=30m
   test-sqlite: # Run all tests against SQLite
     needs: analyze
-    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@dddded471aae1c7b6f0fbc388d603b8b16336f6f # master
+    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@2dc0b0ff59df8c1a5345719e34e62a398f7a165c # master
     secrets: inherit
 
   test-mysql: # Run all tests against MySQL
@@ -47,7 +47,7 @@ jobs:
           mysql-version: "9"
           root-password: test
       - name: Test
-        uses: SiaFoundation/workflows/.github/actions/go-test@dddded471aae1c7b6f0fbc388d603b8b16336f6f # master
+        uses: SiaFoundation/workflows/.github/actions/go-test@2dc0b0ff59df8c1a5345719e34e62a398f7a165c # master
         env:
           RENTERD_DB_URI: 127.0.0.1:3306
           RENTERD_DB_USER: root
