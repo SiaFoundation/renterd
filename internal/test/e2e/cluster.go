@@ -346,9 +346,9 @@ func newTestCluster(t *testing.T, opts testClusterOptions) *TestCluster {
 	if cm == nil {
 		// create chain manager
 		network, genesis := testNetwork()
-		store, state, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
+		store, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, nil)
 		tt.OK(err)
-		cm = chain.NewManager(store, state)
+		cm = chain.NewManager(store)
 	}
 	network := cm.TipState().Network
 	genesis := types.Block{Timestamp: network.HardforkOak.GenesisTimestamp}

@@ -341,7 +341,6 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 
 	var bdb *coreutils.BoltChainDB
 	var store *chain.DBStore
-	var state consensus.State
 	if instantSync && !consensusExists {
 		if cfg.Explorer.Disable || explorerURL == "" {
 			return nil, nil, errors.New("instant sync requires explorer access")
@@ -393,7 +392,7 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 		}
 
-		store, state, err = chain.NewDBStoreAtCheckpoint(bdb, cs, block, chain.NewZapMigrationLogger(log))
+		store, err = chain.NewDBStoreAtCheckpoint(bdb, cs, block, chain.NewZapMigrationLogger(log))
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create chain store at checkpoint: %w", err)
 		}
@@ -407,13 +406,13 @@ func newBus(cfg config.Config, pk types.PrivateKey, network *consensus.Network, 
 			return nil, nil, fmt.Errorf("failed to open chain database: %w", err)
 		}
 
-		store, state, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(logger.Named("chaindb")))
+		store, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(logger.Named("chaindb")))
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
-	cm := chain.NewManager(store, state)
+	cm := chain.NewManager(store)
 
 	// create syncer, peers will reject us if our hostname is empty or
 	// unspecified, so use loopback
