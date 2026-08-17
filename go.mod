@@ -10,7 +10,7 @@ require (
 	github.com/gotd/contrib v0.25.0
 	github.com/klauspost/reedsolomon v1.14.1
 	github.com/mattn/go-sqlite3 v1.14.49
-	github.com/montanaflynn/stats v0.12.2
+	github.com/montanaflynn/stats v0.12.3
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.21.7
 	go.sia.tech/coreutils v0.24.0
@@ -18,7 +18,7 @@ require (
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/renterd v0.88.2
 	go.uber.org/zap v1.28.0
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	golang.org/x/time v0.15.0
@@ -42,6 +42,6 @@ require (
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 )
