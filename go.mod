@@ -9,8 +9,8 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.25.0
 	github.com/klauspost/reedsolomon v1.14.2
-	github.com/mattn/go-sqlite3 v1.14.50
-	github.com/montanaflynn/stats v0.12.5
+	github.com/mattn/go-sqlite3 v1.14.52
+	github.com/montanaflynn/stats v0.12.6
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.21.7
 	go.sia.tech/coreutils v0.24.0
@@ -18,10 +18,10 @@ require (
 	go.sia.tech/jape v0.14.3
 	go.sia.tech/web/renterd v0.88.2
 	go.uber.org/zap v1.28.0
-	golang.org/x/crypto v0.56.0
-	golang.org/x/sys v0.47.0
-	golang.org/x/term v0.45.0
-	golang.org/x/time v0.15.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/sys v0.48.0
+	golang.org/x/term v0.46.0
+	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/frand v1.5.1
 )
@@ -48,6 +48,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 )
