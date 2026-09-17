@@ -1,9 +1,8 @@
 openapi: "3.0.0"
 info:
   title: Renterd API
-  version: 2.0.0
+  version: 2.9.4
   description: API that caters to both casual users seeking straightforward data storage and developers requiring a robust API for building apps on Sia
-
 tags:
   - name: authentication
     description: API authentication
@@ -13,7 +12,6 @@ tags:
     description: Worker operations and status
   - name: bus
     description: Bus operations and management
-
 paths:
   /api/auth:
     post:
@@ -42,7 +40,6 @@ paths:
                     description: A hex-encoded string representing the token
         "400":
           description: Bad request
-
   #############################
   #
   # Autopilot routes
@@ -142,7 +139,6 @@ paths:
             text/plain:
               schema:
                 type: string
-
   /autopilot/state:
     get:
       tags:
@@ -191,7 +187,6 @@ paths:
                     type: string
                     format: date-time
                     description: When the autopilot was started
-
   /autopilot/trigger:
     post:
       tags:
@@ -221,7 +216,6 @@ paths:
                     description: Indicates whether the request triggered a new iteration of the maintenance loop. If maintenance was already ongoing, this will be false.
         "400":
           description: Malformed request
-
   #############################
   #
   # Worker routes
@@ -242,7 +236,6 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Account"
-
   /worker/account/{hostkey}:
     get:
       tags:
@@ -263,7 +256,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Account"
-
   /worker/account/{id}/resetdrift:
     post:
       tags:
@@ -292,7 +284,6 @@ paths:
               schema:
                 type: string
                 example: "account doesn't exist"
-
   /worker/memory:
     get:
       tags:
@@ -315,7 +306,6 @@ paths:
                     allOf:
                       - $ref: "#/components/schemas/MemoryStatus"
                       - description: The memory status for uploads
-
   /worker/multipart/{key}:
     put:
       tags:
@@ -386,7 +376,6 @@ paths:
           description: Bucket or upload weren't found
         "503":
           description: Consensus isn't synced
-
   /worker/object/{key}:
     get:
       tags:
@@ -551,7 +540,6 @@ paths:
           description: Successfully deleted object
         "404":
           description: Object not found
-
   /worker/objects/remove:
     post:
       tags:
@@ -592,7 +580,6 @@ paths:
           description: Object not found
         "500":
           description: Internal server error
-
   /worker/pinned/{key}:
     get:
       tags:
@@ -633,7 +620,6 @@ paths:
               schema:
                 type: string
                 example: object not found
-
   /worker/state:
     get:
       tags:
@@ -657,7 +643,6 @@ paths:
                     type: string
                     format: date-time
                     description: When the worker was started
-
   /worker/stats/downloads:
     get:
       tags:
@@ -701,7 +686,6 @@ paths:
                           allOf:
                             - $ref: "#/components/schemas/PublicKey"
                             - description: The host's public key
-
   /worker/stats/uploads:
     get:
       tags:
@@ -745,7 +729,6 @@ paths:
                           allOf:
                             - $ref: "#/components/schemas/PublicKey"
                             - description: The host's public key
-
   #############################
   #
   # Bus routes
@@ -805,7 +788,6 @@ paths:
                   value: "account is missing a valid 'owner' field"
         "500":
           description: Internal server error
-
   /bus/accounts/fund:
     post:
       tags:
@@ -848,7 +830,6 @@ paths:
           description: Contract not found
         "500":
           description: Internal server error
-
   /bus/alerts:
     get:
       tags:
@@ -919,7 +900,6 @@ paths:
                   value: "offset must be greater than or equal to 0"
         "500":
           description: Internal server error
-
   /bus/alerts/dismiss:
     post:
       tags:
@@ -938,7 +918,6 @@ paths:
           description: Successfully dismissed alerts
         "500":
           description: Internal server error
-
   /bus/alerts/register:
     post:
       tags:
@@ -958,7 +937,6 @@ paths:
           description: Successfully registered alert
         "500":
           description: Internal server error
-
   /bus/autopilot:
     get:
       tags:
@@ -999,7 +977,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/buckets:
     get:
       tags:
@@ -1050,7 +1027,6 @@ paths:
                   value: "bucket already exists"
         "500":
           description: Internal server error
-
   /bus/bucket/{name}/policy:
     put:
       tags:
@@ -1091,7 +1067,6 @@ paths:
                   value: "bucket name is required"
         "404":
           description: Bucket not found
-
   /bus/bucket/{name}:
     get:
       tags:
@@ -1145,7 +1120,6 @@ paths:
           description: Bucket not empty
         "500":
           description: Internal server error
-
   /bus/consensus/acceptblock:
     post:
       tags:
@@ -1162,7 +1136,6 @@ paths:
           description: Successfully accepted block
         "500":
           description: Internal server error
-
   /bus/consensus/network:
     get:
       tags:
@@ -1176,7 +1149,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Network"
-
   /bus/consensus/siafundfee/{payout}:
     get:
       tags:
@@ -1199,7 +1171,6 @@ paths:
                 $ref: "#/components/schemas/Currency"
         "500":
           description: Internal server error
-
   /bus/consensus/state:
     get:
       tags:
@@ -1215,7 +1186,6 @@ paths:
                 $ref: "#/components/schemas/ConsensusState"
         "500":
           description: Internal server error
-
   /bus/contracts:
     get:
       tags:
@@ -1265,7 +1235,6 @@ paths:
           description: Successfully updated contract
         "500":
           description: Internal server error
-
   /bus/contracts/all:
     delete:
       tags:
@@ -1277,7 +1246,6 @@ paths:
           description: All contracts where archived successfully
         "500":
           description: Internal server error
-
   /bus/contracts/archive:
     post:
       tags:
@@ -1286,8 +1254,8 @@ paths:
       description: Archives the contracts with the specified reasons. Archiving a contract means that all the data that was stored in that contract has to be migrated.
       requestBody:
         description: >
-          A mapping of file contract IDs (keys) to archive reasons (values).
-          Keys must match the pattern `^fcid:[0-9a-fA-F]{64}$`.
+          A mapping of file contract IDs (keys) to archive reasons (values). Keys must match the pattern `^fcid:[0-9a-fA-F]{64}$`.
+
         content:
           application/json:
             schema:
@@ -1300,7 +1268,6 @@ paths:
           description: Contracts archived successfully
         "500":
           description: Internal server error
-
   /bus/contracts/form:
     post:
       tags:
@@ -1367,7 +1334,6 @@ paths:
           description: Host not found
         "500":
           description: Internal server error
-
   /bus/contracts/prunable:
     get:
       tags:
@@ -1396,7 +1362,6 @@ paths:
                     type: integer
                     format: uint64
                     description: The total size of all contracts in bytes
-
   /bus/contracts/renewed/{id}:
     get:
       tags:
@@ -1418,7 +1383,6 @@ paths:
                 $ref: "#/components/schemas/ContractMetadata"
         "500":
           description: Internal server error
-
   /bus/contracts/spending:
     post:
       tags:
@@ -1449,7 +1413,6 @@ paths:
                     allOf:
                       - $ref: "#/components/schemas/Currency"
                       - description: Total amount spent on storing sectors
-
                   contractID:
                     $ref: "#/components/schemas/FileContractID"
                   revisionNumber:
@@ -1471,7 +1434,6 @@ paths:
           description: Spending recorded successfully
         "500":
           description: Internal server error
-
   /bus/contract/{id}:
     get:
       tags:
@@ -1493,7 +1455,6 @@ paths:
                 $ref: "#/components/schemas/ContractMetadata"
         "500":
           description: Internal server error
-
     delete:
       tags:
         - bus
@@ -1509,7 +1470,6 @@ paths:
           description: Contract archived successfully
         "500":
           description: Internal server error
-
   /bus/contract/{id}/acquire:
     post:
       tags:
@@ -1540,7 +1500,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContractLockID"
-
   /bus/contract/{id}/ancestors:
     get:
       tags:
@@ -1569,7 +1528,6 @@ paths:
                   $ref: "#/components/schemas/ContractMetadata"
         "500":
           description: Internal server error
-
   /bus/contract/{id}/broadcast:
     post:
       tags:
@@ -1587,7 +1545,6 @@ paths:
           description: Contract's revision broadcasted successfully
         "500":
           description: Internal server error
-
   /bus/contract/{id}/keepalive:
     post:
       tags:
@@ -1617,7 +1574,6 @@ paths:
           description: Contract lock keepalive successful
         "500":
           description: Internal server error
-
   /bus/contract/{id}/revision:
     get:
       tags:
@@ -1641,7 +1597,6 @@ paths:
           description: Contract not found
         "500":
           description: Internal server error
-
   /bus/contract/{id}/prune:
     post:
       tags:
@@ -1662,7 +1617,6 @@ paths:
               properties:
                 timeout:
                   $ref: "#/components/schemas/DurationMS"
-
       responses:
         "200":
           description: Contract pruned successfully
@@ -1688,7 +1642,6 @@ paths:
                     description: An error message if the prune failed
         "500":
           description: Internal server error
-
   /bus/contract/{id}/renew:
     post:
       tags:
@@ -1725,7 +1678,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ContractMetadata"
-
   /bus/contract/{id}/release:
     post:
       tags:
@@ -1750,7 +1702,6 @@ paths:
           description: Contract lock released successfully
         "500":
           description: Internal server error
-
   /bus/contract/{id}/roots:
     get:
       tags:
@@ -1772,7 +1723,6 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Hash256"
-
   /bus/contract/{id}/size:
     get:
       tags:
@@ -1796,7 +1746,6 @@ paths:
           description: Contract not found
         "500":
           description: Internal server error
-
   /bus/contract/{id}/usability:
     put:
       tags:
@@ -1824,7 +1773,6 @@ paths:
           description: Contract not found
         "500":
           description: Internal server error
-
   /bus/hosts:
     get:
       tags:
@@ -1896,7 +1844,6 @@ paths:
                   $ref: "#/components/schemas/Host"
         "500":
           description: Internal server error
-
   /bus/hosts/allowlist:
     get:
       tags:
@@ -1942,7 +1889,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/hosts/blocklist:
     get:
       tags:
@@ -1989,7 +1935,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/hosts/remove:
     post:
       tags:
@@ -2026,7 +1971,6 @@ paths:
                   value: "maxDowntime must be non-zero"
         "500":
           description: Internal server error
-
   /bus/host/{hostkey}:
     get:
       tags:
@@ -2051,7 +1995,6 @@ paths:
           description: Host not found
         "500":
           description: Internal server error
-
   /bus/host/{hostkey}/check:
     put:
       tags:
@@ -2077,7 +2020,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/host/{hostkey}/resetlostsectors:
     post:
       tags:
@@ -2096,7 +2038,6 @@ paths:
           description: Lost sectors reset successfully
         "500":
           description: Internal server error
-
   /bus/host/{hostkey}/scan:
     post:
       tags:
@@ -2140,7 +2081,6 @@ paths:
           description: Internal server error
         "503":
           description: Not connected to peers
-
   /bus/metric/{key}:
     get:
       tags:
@@ -2301,7 +2241,6 @@ paths:
                   value: "unknown metric key, must be one of [contract, contractprune, performance, wallet]"
         "500":
           description: Internal server error
-
   /bus/multipart/create:
     post:
       tags:
@@ -2342,7 +2281,6 @@ paths:
                       - description: The ID of the multipart upload
         "500":
           description: Internal server error
-
   /bus/multipart/abort:
     post:
       tags:
@@ -2368,7 +2306,6 @@ paths:
           description: Upload not found
         "500":
           description: Internal server error
-
   /bus/multipart/complete:
     post:
       tags:
@@ -2408,7 +2345,6 @@ paths:
                     description: The ETag of the completed object
         "500":
           description: Internal server error
-
   /bus/multipart/part:
     put:
       tags:
@@ -2456,7 +2392,6 @@ paths:
                   value: "uploadID must be non-empty"
         "500":
           description: Internal server error
-
   /bus/multipart/upload/{id}:
     get:
       tags:
@@ -2497,7 +2432,6 @@ paths:
                     description: When the upload was created
         "500":
           description: Internal server error
-
   /bus/multipart/listuploads:
     post:
       tags:
@@ -2565,7 +2499,6 @@ paths:
                           type: string
                           format: date-time
                           description: When the upload was created
-
   /bus/multipart/listparts:
     post:
       tags:
@@ -2613,7 +2546,6 @@ paths:
                       $ref: "#/components/schemas/MultipartListPartItem"
         "500":
           description: Internal server error
-
   /bus/objects/{prefix}:
     get:
       tags:
@@ -2698,7 +2630,6 @@ paths:
                   value: "delimiter must be '/' or empty"
         "500":
           description: Internal server error
-
   /bus/objects/copy:
     post:
       tags:
@@ -2742,7 +2673,6 @@ paths:
                 $ref: "#/components/schemas/ObjectMetadata"
         "500":
           description: Internal server error
-
   /bus/objects/remove:
     post:
       tags:
@@ -2779,7 +2709,6 @@ paths:
                   value: "prefix cannot be empty"
         "500":
           description: Internal server error
-
   /bus/objects/rename:
     post:
       tags:
@@ -2825,7 +2754,6 @@ paths:
                   value: "mode must be 'single' or 'multi'"
         "500":
           description: Internal server error
-
   /bus/object/{key}:
     get:
       tags:
@@ -2929,7 +2857,6 @@ paths:
           description: Object not found
         "500":
           description: Internal server error
-
   /bus/params/gouging:
     get:
       tags:
@@ -2962,7 +2889,6 @@ paths:
                     $ref: "#/components/schemas/RedundancySettings"
         "500":
           description: Internal server error
-
   /bus/params/upload:
     get:
       tags:
@@ -2989,7 +2915,6 @@ paths:
                   - $ref: "#/components/schemas/GougingParams"
         "500":
           description: Internal server error
-
   /bus/sectors/{hostkey}/{root}:
     delete:
       tags:
@@ -3014,7 +2939,6 @@ paths:
           description: Successfully marked sector as lost
         "500":
           description: Internal server error
-
   /bus/settings/gouging:
     get:
       tags:
@@ -3047,7 +2971,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/settings/pinned:
     get:
       tags:
@@ -3086,7 +3009,6 @@ paths:
                   value: "explorer must be enabled for settings to be pinned"
         "500":
           description: Internal server error
-
   /bus/settings/s3:
     get:
       tags:
@@ -3119,7 +3041,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/settings/upload:
     get:
       tags:
@@ -3152,7 +3073,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/slabbuffers:
     get:
       tags:
@@ -3170,7 +3090,6 @@ paths:
                   $ref: "#/components/schemas/SlabBuffer"
         "500":
           description: Internal server error
-
   /bus/slabbuffer/done:
     post:
       tags:
@@ -3192,7 +3111,6 @@ paths:
           description: Successfully marked slabs as uploaded
         "500":
           description: Internal server error
-
   /bus/slabbuffer/fetch:
     post:
       tags:
@@ -3227,7 +3145,6 @@ paths:
                   $ref: "#/components/schemas/PackedSlab"
         "500":
           description: Internal server error
-
   /bus/slabs/migration:
     post:
       tags:
@@ -3270,7 +3187,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/slabs/partial/{key}:
     get:
       tags:
@@ -3322,7 +3238,6 @@ paths:
           description: Slab not found
         "500":
           description: Internal server error
-
   /bus/slabs/partial:
     post:
       tags:
@@ -3376,7 +3291,6 @@ paths:
                   value: "totalShards must be less than or equal to 255"
         "500":
           description: Internal server error
-
   /bus/slabs/refreshhealth:
     post:
       tags:
@@ -3388,7 +3302,6 @@ paths:
           description: Successfully refreshed slab health
         "500":
           description: Internal server error
-
   /bus/slab/{key}:
     get:
       tags:
@@ -3444,7 +3357,6 @@ paths:
           description: Slab not found
         "500":
           description: Internal server error
-
   /bus/syncer/address:
     get:
       tags:
@@ -3458,7 +3370,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SyncerAddress"
-
   /bus/syncer/connect:
     post:
       tags:
@@ -3477,7 +3388,6 @@ paths:
           description: Successfully connected to syncer
         "500":
           description: Internal server error
-
   /bus/syncer/peers:
     get:
       tags:
@@ -3493,7 +3403,6 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SyncerAddress"
-
   /bus/system/sqlite3/backup:
     post:
       tags:
@@ -3522,7 +3431,6 @@ paths:
           description: Backup not supported
         "500":
           description: Internal server error
-
   /bus/state:
     get:
       tags:
@@ -3566,7 +3474,6 @@ paths:
                   network:
                     type: string
                     description: Name of the network (mainnet/testnet)
-
   /bus/stats/objects:
     get:
       tags:
@@ -3617,7 +3524,6 @@ paths:
                     description: Uploaded size of all objects including redundant sectors
         "500":
           description: Internal server error
-
   /bus/txpool/recommendedfee:
     get:
       tags:
@@ -3633,7 +3539,6 @@ paths:
                 $ref: "#/components/schemas/Currency"
         "500":
           description: Internal server error
-
   /bus/txpool/transactions:
     get:
       tags:
@@ -3651,7 +3556,6 @@ paths:
                   $ref: "#/components/schemas/Transaction"
         "500":
           description: Internal server error
-
   /bus/txpool/broadcast:
     post:
       tags:
@@ -3668,7 +3572,6 @@ paths:
           description: Successfully broadcast transaction
         "500":
           description: Internal server error
-
   /bus/upload/{id}:
     post:
       tags:
@@ -3702,7 +3605,6 @@ paths:
           description: Successfully finished upload
         "500":
           description: Internal server error
-
   /bus/upload/{id}/sector:
     post:
       tags:
@@ -3727,7 +3629,6 @@ paths:
           description: Successfully added sectors
         "500":
           description: Internal server error
-
   /bus/wallet:
     get:
       tags:
@@ -3768,7 +3669,6 @@ paths:
                     description: The height up until which the wallet is synced
         "500":
           description: Internal server error
-
   /bus/wallet/events:
     get:
       tags:
@@ -3814,7 +3714,6 @@ paths:
                   value: "offset must be greater than or equal to 0"
         "500":
           description: Internal server error
-
   /bus/wallet/pending:
     get:
       tags:
@@ -3832,7 +3731,6 @@ paths:
                   $ref: "#/components/schemas/Event"
         "500":
           description: Internal server error
-
   /bus/wallet/redistribute:
     post:
       tags:
@@ -3870,7 +3768,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
   /bus/wallet/send:
     post:
       tags:
@@ -3910,7 +3807,6 @@ paths:
           description: Malformed request
         "500":
           description: Internal server error
-
 components:
   schemas:
     #############################
@@ -3947,17 +3843,14 @@ components:
         requiresSync:
           type: boolean
           description: Whether the account requires a sync with the host. This is usually the case when the host reports insufficient balance for an account that the worker still believes to be funded.
-
     AccountID:
       type: string
       pattern: "^[0-9a-fA-F]{64}$"
       description: A unique identifier for an account, represented as an Ed25519 public key (without the ed25519 prefix).
-
     Address:
       allOf:
         - $ref: "#/components/schemas/Hash256"
         - description: The hash of a set of UnlockConditions
-
     Alert:
       type: object
       properties:
@@ -3983,7 +3876,6 @@ components:
           type: string
           format: date-time
           description: The time the alert was created
-
     Attestation:
       type: object
       properties:
@@ -3996,7 +3888,6 @@ components:
           format: byte
         signature:
           $ref: "#/components/schemas/Signature"
-
     Block:
       type: object
       properties:
@@ -4022,12 +3913,10 @@ components:
             $ref: "#/components/schemas/Transaction"
         v2:
           $ref: "#/components/schemas/V2BlockData"
-
     BlockID:
       allOf:
         - $ref: "#/components/schemas/Hash256"
         - description: A unique identifier for a block
-
     ChainIndex:
       type: object
       properties:
@@ -4039,7 +3928,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/BlockID"
             - description: The ID of the block
-
     ContractMetadata:
       type: object
       properties:
@@ -4123,7 +4011,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/FileContractID"
             - description: The ID of the contract this one was renewed to, if applicable.
-
     ContractSpending:
       type: object
       properties:
@@ -4143,7 +4030,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/Currency"
             - description: Total amount spent on storing sectors
-
     CoveredFields:
       type: object
       properties:
@@ -4200,13 +4086,11 @@ components:
           items:
             type: integer
             format: uint64
-
     Currency:
       type: string
       pattern: "^\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
-
     FileContract:
       type: object
       description: A storage agreement between a renter and a host.
@@ -4245,12 +4129,10 @@ components:
           $ref: "#/components/schemas/Address"
         revisionNumber:
           $ref: "#/components/schemas/RevisionNumber"
-
     FileContractID:
       type: string
       pattern: "^fcid:[0-9a-fA-F]{64}$"
       description: A unique identifier for a file contract
-
     FileContractRevision:
       type: object
       description: Represents a revision to an existing file contract.
@@ -4295,12 +4177,10 @@ components:
             - description: The updated hash of the conditions required to unlock the contract funds.
         revisionNumber:
           $ref: "#/components/schemas/RevisionNumber"
-
     Hash256:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
       description: A 256-bit blake2b hash
-
     HostPrices:
       type: object
       properties:
@@ -4334,7 +4214,6 @@ components:
           description: The time at which these prices will no longer be honored by the host.
         signature:
           $ref: "#/components/schemas/Signature"
-
     HostV2Settings:
       type: object
       properties:
@@ -4365,12 +4244,10 @@ components:
           description: Total amount of storage space
         prices:
           $ref: "#/components/schemas/HostPrices"
-
     PublicKey:
       type: string
       pattern: "^ed25519:[0-9a-fA-F]{64}$"
       description: A ed25519 public key
-
     SatisfiedPolicy:
       type: object
       properties:
@@ -4385,7 +4262,6 @@ components:
           items:
             type: string
             format: byte
-
     SiacoinElement:
       type: object
       properties:
@@ -4405,7 +4281,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/BlockHeight"
             - description: The block height when the output matures
-
     SiacoinInput:
       type: object
       properties:
@@ -4417,7 +4292,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/UnlockConditions"
             - description: The unlock conditions required to spend the output
-
     SiacoinOutput:
       type: object
       properties:
@@ -4427,12 +4301,10 @@ components:
             - description: The amount of Siacoins in the output
         address:
           $ref: "#/components/schemas/Address"
-
     SiacoinOutputID:
       allOf:
         - $ref: "#/components/schemas/Hash256"
         - description: Unique identifier for a Siacoin output.
-
     SiafundElement:
       type: object
       properties:
@@ -4452,7 +4324,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/Currency"
             - description: value of SiafundTaxRevenue when element was created
-
     SiafundInput:
       type: object
       description: Represents an input used to spend an unspent Siafund output.
@@ -4469,7 +4340,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/Address"
             - description: The address receiving the Siacoin claim generated by the Siafund output.
-
     SiafundOutput:
       type: object
       description: Represents an output created to distribute Siafund.
@@ -4482,24 +4352,20 @@ components:
           allOf:
             - $ref: "#/components/schemas/Address"
             - description: The address receiving the Siafund.
-
     SiafundOutputID:
       allOf:
         - $ref: "#/components/schemas/Hash256"
         - description: Unique identifier for a Siafund output.
-
     Signature:
       type: string
       format: byte
       pattern: "[0-9a-fA-F]{64}"
       description: A ed25519 signature
-
     SignedCurrency:
       type: string
       pattern: "^-?\\d+$"
       maxLength: 39 # fits 2^128 - 1
       description: A signed amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
-
     StateElement:
       type: object
       properties:
@@ -4512,7 +4378,6 @@ components:
           description: The Merkle proof demonstrating the inclusion of the leaf
           items:
             $ref: "#/components/schemas/Hash256"
-
     StorageProof:
       type: object
       description: Represents a proof of storage for a file contract.
@@ -4530,7 +4395,6 @@ components:
           description: The Merkle proof demonstrating the inclusion of the leaf.
           items:
             $ref: "#/components/schemas/Hash256"
-
     Transaction:
       type: object
       properties:
@@ -4585,12 +4449,10 @@ components:
           description: List of cryptographic signatures verifying the transaction.
           items:
             $ref: "#/components/schemas/TransactionSignature"
-
     TransactionID:
       allOf:
         - $ref: "#/components/schemas/Hash256"
         - description: Unique identifier for a transaction.
-
     TransactionSignature:
       type: object
       properties:
@@ -4614,7 +4476,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/Signature"
             - description: The signature of the transaction
-
     UnlockConditions:
       type: object
       properties:
@@ -4630,7 +4491,6 @@ components:
           type: integer
           format: uint64
           description: The number of signatures required to spend the output
-
     UnlockKey:
       type: object
       properties:
@@ -4648,7 +4508,6 @@ components:
           type: string
           format: bytes
           pattern: "^[a-fA-F0-9]{64}$"
-
     V2BlockData:
       type: object
       properties:
@@ -4662,7 +4521,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/V2Transaction"
-
     V2FileContract:
       type: object
       properties:
@@ -4698,7 +4556,6 @@ components:
           $ref: "#/components/schemas/Signature"
         hostSignature:
           $ref: "#/components/schemas/Signature"
-
     V2FileContractElement:
       type: object
       properties:
@@ -4712,7 +4569,6 @@ components:
             - description: The state of the element
         v2FileContract:
           $ref: "#/components/schemas/V2FileContract"
-
     V2FileContractResolution:
       type: object
       properties:
@@ -4720,7 +4576,6 @@ components:
           $ref: "#/components/schemas/V2FileContractElement"
         resolution:
           type: object
-
     V2FileContractRevision:
       type: object
       properties:
@@ -4728,7 +4583,6 @@ components:
           $ref: "#/components/schemas/V2FileContractElement"
         revision:
           $ref: "#/components/schemas/V2FileContract"
-
     V2SiacoinInput:
       type: object
       properties:
@@ -4736,7 +4590,6 @@ components:
           $ref: "#/components/schemas/SiacoinElement"
         satisfiedPolicy:
           $ref: "#/components/schemas/SatisfiedPolicy"
-
     V2SiafundInput:
       type: object
       properties:
@@ -4746,7 +4599,6 @@ components:
           $ref: "#/components/schemas/Address"
         satisfiedPolicy:
           $ref: "#/components/schemas/SatisfiedPolicy"
-
     V2Transaction:
       type: object
       properties:
@@ -4791,7 +4643,6 @@ components:
           $ref: "#/components/schemas/Address"
         minerFee:
           $ref: "#/components/schemas/Currency"
-
     #############################
     #
     # Helper types
@@ -4807,13 +4658,11 @@ components:
           $ref: "#/components/schemas/ContractsConfig"
         hosts:
           $ref: "#/components/schemas/HostsConfig"
-
     BlockHeight:
       type: integer
       format: uint64
       description: The height of a block
       example: 92813
-
     Bucket:
       type: object
       properties:
@@ -4829,13 +4678,11 @@ components:
           type: string
           format: date-time
           description: The time the bucket was created
-
     BucketName:
       type: string
       pattern: (?!(^xn--|.+-s3alias$))^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
       description: The name of the bucket.
       example: "default"
-
     BucketPolicy:
       type: object
       description: Defines access rules and permissions for a bucket.
@@ -4843,7 +4690,6 @@ components:
         publicReadAccess:
           type: boolean
           description: Configures public read access to all the objects in the bucket.
-
     BuildState:
       type: object
       properties:
@@ -4860,13 +4706,11 @@ components:
         os:
           type: string
           description: The operating system of the build
-
     ConfigRecommendation:
       type: object
       properties:
         gougingSettings:
           $ref: "#/components/schemas/GougingSettings"
-
     ConsensusState:
       type: object
       properties:
@@ -4881,7 +4725,6 @@ components:
         synced:
           type: boolean
           description: Whether the node is synced with the network
-
     ContractLockID:
       type: object
       properties:
@@ -4890,7 +4733,6 @@ components:
           format: uint64
           description: The ID of the lock
           example: 12
-
     ContractMetric:
       type: object
       properties:
@@ -4915,7 +4757,6 @@ components:
           $ref: "#/components/schemas/Currency"
         uploadSpending:
           $ref: "#/components/schemas/Currency"
-
     ContractPruneMetric:
       type: object
       properties:
@@ -4938,7 +4779,6 @@ components:
           type: integer
           format: int64
           description: Duration in nanoseconds
-
     ContractsConfig:
       type: object
       properties:
@@ -4976,7 +4816,6 @@ components:
           type: boolean
           description: Whether to automatically prune deleted data from contracts
           default: false
-
     ContractSize:
       type: object
       properties:
@@ -4988,24 +4827,20 @@ components:
           type: integer
           format: uint64
           description: The total size of a contract
-
     DurationMS:
       type: integer
       format: int64
       description: A duration in milliseconds
       example: 30000
-
     EncryptionKey:
       type: string
       pattern: ^(key|skey):[0-9a-fA-F]{64}$
       description: A key used to encrypt and decrypt data. The key is either a regular key (key) or a salted key (skey). The latter requires a seed to be used for encryption and decryption.
-
     ETag:
       type: string
       pattern: '^(W/)?".*?"$'
       description: An ETag representing a resource
       example: 'W/"33a64df551425fcc55e4d42a148795d9f25f89d4"'
-
     Event:
       type: object
       description: A transaction or other event that affects the wallet including miner payouts, siafund claims, and file contract payouts.
@@ -5047,7 +4882,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Address"
-
     GougingParams:
       type: object
       properties:
@@ -5057,7 +4891,6 @@ components:
           $ref: "#/components/schemas/GougingSettings"
         redundancySettings:
           $ref: "#/components/schemas/RedundancySettings"
-
     GougingSettings:
       type: object
       properties:
@@ -5097,7 +4930,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/Currency"
             - description: The minimum max balance a host should allow us to fund an account with
-
     GougingSettingsPins:
       type: object
       properties:
@@ -5107,7 +4939,6 @@ components:
           $ref: "#/components/schemas/Pin"
         maxUpload:
           $ref: "#/components/schemas/Pin"
-
     HostsConfig:
       type: object
       properties:
@@ -5124,7 +4955,6 @@ components:
         minProtocolVersion:
           type: string
           description: The minimum supported protocol version of a host to be considered good
-
     Host:
       type: object
       properties:
@@ -5164,7 +4994,6 @@ components:
             type: string
             description: The addresses of the host for the V2 protocol
             example: "foo.bar:5678"
-
     HostChecks:
       type: object
       properties:
@@ -5174,7 +5003,6 @@ components:
           $ref: "#/components/schemas/HostScoreBreakdown"
         usabilityBreakdown:
           $ref: "#/components/schemas/HostUsabilityBreakdown"
-
     HostGougingBreakdown:
       type: object
       properties:
@@ -5190,7 +5018,6 @@ components:
         uploadErr:
           type: string
           description: Error message related to upload gouging checks.
-
     HostInfo:
       type: object
       properties:
@@ -5206,7 +5033,6 @@ components:
             type: string
             description: The addresses of the host for the V2 protocol
             example: "foo.bar:5678"
-
     HostInteractions:
       type: object
       properties:
@@ -5244,7 +5070,6 @@ components:
           type: number
           format: float
           description: The number of failed interactions with the host.
-
     HostScoreBreakdown:
       type: object
       properties:
@@ -5276,7 +5101,6 @@ components:
           type: number
           format: float
           description: Score contribution based on pricing metrics.
-
     HostUsabilityBreakdown:
       type: object
       properties:
@@ -5307,7 +5131,6 @@ components:
         notCompletingScan:
           type: boolean
           description: Indicates if the host is failing to complete scans.
-
     MemoryStatus:
       type: object
       properties:
@@ -5322,12 +5145,10 @@ components:
           description: The total amount of memory available in bytes
           example: 1073741824
           minimum: 1
-
     MimeType:
       type: string
       description: The MIME type of the object
       example: "text/plain"
-
     MultipartUpload:
       type: object
       properties:
@@ -5347,7 +5168,6 @@ components:
           type: string
           format: date-time
           description: When the upload was created
-
     MultipartListPartItem:
       type: object
       properties:
@@ -5363,7 +5183,6 @@ components:
           type: integer
           format: int64
           description: The size of this part in bytes
-
     MultipartCompletedPart:
       type: object
       properties:
@@ -5371,20 +5190,17 @@ components:
           $ref: "#/components/schemas/MultipartPartNumber"
         eTag:
           $ref: "#/components/schemas/ETag"
-
     MultipartPartNumber:
       type: integer
       description: The number of this part
       minimum: 1
       maximum: 10000
       example: 123
-
     MultipartUploadID:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
       description: A unique identifier for a multipart upload
       example: "7aaac83c6d553865755286c326e852a68300bebf7feea1b435d61bd3610bf82b"
-
     Network:
       type: object
       properties:
@@ -5515,7 +5331,6 @@ components:
                 - $ref: "#/components/schemas/BlockHeight"
                 - description: The height at which V2 consensus types are required
                 - example: 1025000
-
     Object:
       type: object
       allOf:
@@ -5532,12 +5347,10 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/SlabSlice"
-
     ObjectKey:
       type: string
       example: "folder/file"
       minLength: 1
-
     ObjectMetadata:
       type: object
       properties:
@@ -5565,13 +5378,11 @@ components:
         mimeType:
           type: string
           description: The MIME type of the object
-
     ObjectUserMetadata:
       type: object
       additionalProperties:
         type: string
       description: User-defined metadata about an object provided through X-Sia-Meta- headers
-
     PackedSlab:
       type: object
       properties:
@@ -5585,7 +5396,6 @@ components:
           description: The slab data
         encryptionKey:
           $ref: "#/components/schemas/EncryptionKey"
-
     Pin:
       type: object
       properties:
@@ -5596,7 +5406,6 @@ components:
           type: number
           format: float64
           description: The value of the underlying currency to which the setting is pinned
-
     PinnedObject:
       type: object
       description: The raw metadata of an object, suitable for downloading it directly from hosts using external tools.
@@ -5616,7 +5425,6 @@ components:
           description: The slabs that make up the object
           items:
             $ref: "#/components/schemas/PinnedSlab"
-
     PinnedSector:
       type: object
       properties:
@@ -5628,7 +5436,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/PublicKey"
             - description: The public key of the host storing the sector
-
     PinnedSlab:
       type: object
       properties:
@@ -5653,7 +5460,6 @@ components:
           type: integer
           format: uint32
           description: The length of the object's data within the slab
-
     PinnedSettings:
       type: object
       properties:
@@ -5665,17 +5471,14 @@ components:
           description: A percentage between 0 and 1 that determines when the pinned settings are updated based on the exchange rate at the time
         gougingSettingsPins:
           $ref: "#/components/schemas/GougingSettingsPins"
-
     Priority:
       type: integer
       format: int
       example: 80
-
     RawEncryptionKey:
       type: string
       pattern: ^[0-9a-fA-F]{64}$
       description: A raw 256-bit encryption key encoded as hex, without the 'key:' or 'skey:' prefix used by EncryptionKey
-
     RedundancySettings:
       type: object
       properties:
@@ -5683,21 +5486,18 @@ components:
           $ref: "#/components/schemas/RedundancySettingsMinShards"
         totalShards:
           $ref: "#/components/schemas/RedundancySettingsTotalShards"
-
     RedundancySettingsMinShards:
       type: integer
       minimum: 1
       format: uint8
       description: The number of data shards a piece of an object gets erasure-coded into
       default: 10
-
     RedundancySettingsTotalShards:
       type: integer
       minimum: 2
       format: uint8
       description: The number of total data shards a piece of an object gets erasure-coded into
       default: 30
-
     Revision:
       type: object
       properties:
@@ -5713,13 +5513,11 @@ components:
           type: integer
           format: uint64
           description: The size of the contract in bytes
-
     RevisionNumber:
       type: integer
       format: uint64
       description: The revision number of the contract
       example: 246
-
     SemVer:
       type: array
       description: "Represents a semantic version as an array of three unsigned 8-bit integers: [major, minor, patch]"
@@ -5731,13 +5529,11 @@ components:
         minimum: 0
         maximum: 255
       example: [1, 2, 3]
-
     SettingsID:
       type: string
       description: A 16-byte unique identifier represented as a hex string.
       format: byte
       example: "4d3b2a1c9f8e7d6c5b4a3f2e1d0c9b8a"
-
     SlabBuffer:
       type: object
       properties:
@@ -5758,13 +5554,11 @@ components:
         locked:
           type: boolean
           description: Whether the slab buffer is locked for uploading
-
     UploadID:
       type: string
       description: A 32-byte unique identifier represented as a hex string.
       format: byte
       example: "f1e2d3c4b5a697887776665544332211ffeeddccbbaa99887766554433221100"
-
     Slab:
       type: object
       description: A slab of data to migrate
@@ -5782,7 +5576,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/RedundancySettingsMinShards"
             - description: The number of data shards the slab is split into
-
     SlabSlice:
       type: object
       description: A contiguous region within a slab
@@ -5795,12 +5588,10 @@ components:
         limit:
           type: integer
           format: uint32
-
     SyncerAddress:
       type: string
       description: The address of the syncer
       example: "118.92.232.145:9981"
-
     S3Settings:
       type: object
       properties:
@@ -5813,7 +5604,6 @@ components:
         disableAuth:
           type: boolean
           description: Whether to disable S3 authentication
-
     UploadedPackedSlab:
       type: object
       properties:
@@ -5825,7 +5615,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/UploadedSector"
-
     UploadedSector:
       type: object
       properties:
@@ -5833,7 +5622,6 @@ components:
           $ref: "#/components/schemas/FileContractID"
         root:
           $ref: "#/components/schemas/Hash256"
-
     UploadSettings:
       type: object
       properties:
@@ -5841,7 +5629,6 @@ components:
           $ref: "#/components/schemas/UploadPackingSettings"
         redundancy:
           $ref: "#/components/schemas/RedundancySettings"
-
     UploadPackingSettings:
       type: object
       properties:
@@ -5852,7 +5639,6 @@ components:
           type: integer
           format: int64
           description: Maximum size for slab buffers
-
     WalletMetric:
       type: object
       properties:
@@ -5867,7 +5653,6 @@ components:
           $ref: "#/components/schemas/Currency"
         immature:
           $ref: "#/components/schemas/Currency"
-
     Webhook:
       type: object
       properties:
@@ -5891,7 +5676,6 @@ components:
           additionalProperties:
             type: string
           description: Custom headers to include in webhook requests
-
     WebhookEvent:
       type: object
       properties:
@@ -5909,7 +5693,6 @@ components:
         data:
           type: object
           description: Event-specific data payload
-
     WebhookQueueInfo:
       type: object
       properties:
