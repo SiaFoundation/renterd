@@ -77,9 +77,9 @@ func (cfg *testSQLStoreConfig) dbConnections(partialSlabDir string) (sql.Databas
 		// precreate the two databases
 		if tmpDB, err := mysql.Open(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.URI, ""); err != nil {
 			return nil, nil, err
-		} else if _, err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", mysqlCfg.Database)); err != nil {
+		} else if _, err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %#q", mysqlCfg.Database)); err != nil {
 			return nil, nil, err
-		} else if _, err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", mysqlCfg.MetricsDatabase)); err != nil {
+		} else if _, err := tmpDB.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %#q", mysqlCfg.MetricsDatabase)); err != nil {
 			return nil, nil, err
 		} else if err := tmpDB.Close(); err != nil {
 			return nil, nil, err
