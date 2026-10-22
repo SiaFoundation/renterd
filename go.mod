@@ -4,14 +4,14 @@ go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go v1.55.8
-	github.com/gabriel-vasile/mimetype v1.4.15
+	github.com/gabriel-vasile/mimetype v1.4.16
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.25.0
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/montanaflynn/stats v0.13.0
-	github.com/shopspring/decimal v1.5.0
+	github.com/shopspring/decimal v1.6.0
 	go.sia.tech/core v0.21.7
 	go.sia.tech/coreutils v0.25.0
 	go.sia.tech/gofakes3 v0.0.5
