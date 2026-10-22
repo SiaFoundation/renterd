@@ -194,7 +194,7 @@ func sanitizeConfig() error {
 
 func parseCLIFlags() {
 	// node
-	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API")
+	flag.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "Address for serving the API (overrides with RENTERD_HTTP_ADDRESS)")
 	flag.BoolVar(&cfg.HTTP.Pprof, "http.pprof", cfg.HTTP.Pprof, "Enables pprof endpoints on /debug/pprof (overrides with RENTERD_HTTP_PPROF)")
 	flag.StringVar(&cfg.Directory, "dir", cfg.Directory, "Directory for storing node state")
 	flag.BoolVar(&disableStdin, "env", false, "disable stdin prompts for environment variables (default false)")
@@ -333,6 +333,7 @@ func parseEnvironmentVariables() {
 	parseEnvVar("RENTERD_LOG_DATABASE_IGNORE_RECORD_NOT_FOUND_ERROR", &cfg.Log.Database.IgnoreRecordNotFoundError)
 	parseEnvVar("RENTERD_LOG_DATABASE_SLOW_THRESHOLD", &cfg.Log.Database.SlowThreshold)
 
+	parseEnvVar("RENTERD_HTTP_ADDRESS", &cfg.HTTP.Address)
 	parseEnvVar("RENTERD_HTTP_PPROF", &cfg.HTTP.Pprof)
 
 	parseEnvVar("RENTERD_EXPLORER_DISABLE", &cfg.Explorer.Disable)
