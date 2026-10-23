@@ -1,3 +1,9 @@
+## 2.9.5 (2026-10-23)
+
+### Fixes
+
+- Allow setting `HTTP.Address` via the `RENTERD_HTTP_ADDRESS` environment variable
+
 ## 2.9.4 (2026-09-08)
 
 ### Fixes
