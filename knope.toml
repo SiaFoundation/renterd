@@ -1,6 +1,9 @@
 [package]
 changelog = "CHANGELOG.md"
-versioned_files = ["go.mod"]
+versioned_files = [
+    "go.mod",
+    { path = "openapi.yml", regex = '(?m)^  version: (?<version>\S+)$' },
+]
 ignore_go_major_versioning = true
 
 [[workflows]]
@@ -44,12 +47,92 @@ variables = { "$version" = "Version" }
 template = "This PR was created automatically. Merging it will finalize the changelog for $version\n\n$changelog"
 variables = { "$changelog" = "ChangelogEntry", "$version" = "Version" }
 
-# Do not enable releases, just changelogs for now.
-# [[workflows]]
-# name = "release"
-#
-# [[workflows.steps]]
-# type = "Release"
+[[workflows]]
+name = "prepare-beta"
+
+[[workflows.steps]]
+type = "Command"
+command = "git switch -c release-beta"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+ignore_conventional_commits = true
+prerelease_label = "beta"
+
+[[workflows.steps]]
+type = "Command"
+command = "git commit -m \"chore: prepare release $version\""
+variables = { "$version" = "Version" }
+
+[[workflows.steps]]
+type = "Command"
+command = "git push --force --set-upstream origin release-beta"
+
+[workflows.steps.variables]
+"$version" = "Version"
+
+[[workflows.steps]]
+type = "CreatePullRequest"
+base = "master"
+
+[workflows.steps.title]
+template = "chore: prepare release $version"
+variables = { "$version" = "Version" }
+
+[workflows.steps.body]
+template = "This PR was created automatically. Merging it will finalize the changelog for beta $version\n\n$changelog"
+variables = { "$changelog" = "ChangelogEntry", "$version" = "Version" }
+
+[[workflows]]
+name = "tag"
+
+[[workflows.steps]]
+type = "Command"
+command = """
+set -e
+if git rev-parse -q --verify "refs/tags/v$version^{commit}" >/dev/null; then
+  if [ "$(git rev-parse "refs/tags/v$version^{commit}")" != "$(git rev-parse HEAD)" ]; then
+    echo "tag v$version already exists and does not point to HEAD" >&2
+    exit 1
+  fi
+  echo "tag v$version already points to HEAD, skipping"
+else
+  git tag "v$version"
+fi
+git push origin "v$version"
+"""
+shell = true
+variables = { "$version" = "Version" }
+
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "Command"
+command = """
+set -e
+NOTES_FILE=$(mktemp)
+# notes are read from CHANGELOG.md at runtime rather than substituted into
+# this script, so changelog content can never be interpreted as shell
+awk -v v="$version" '
+  /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+  found { print }
+' CHANGELOG.md > "$NOTES_FILE"
+if ! [ -s "$NOTES_FILE" ]; then
+  echo "no changelog entry found for $version" >&2
+  exit 1
+fi
+case v$version in *-*) PRERELEASE=--prerelease;; esac
+if gh release view "v$version" >/dev/null 2>&1; then
+  # re-run after a partial failure: reconcile notes and assets instead of failing
+  gh release edit "v$version" --title "v$version" --notes-file "$NOTES_FILE" $PRERELEASE
+  gh release upload "v$version" release/* --clobber
+else
+  gh release create "v$version" --title "v$version" --notes-file "$NOTES_FILE" $PRERELEASE release/*
+fi
+"""
+shell = true
+variables = { "$version" = "Version" }
 
 [github]
 owner = "SiaFoundation"

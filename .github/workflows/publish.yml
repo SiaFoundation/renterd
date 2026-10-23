@@ -1,22 +1,61 @@
 name: Publish
 
-# Controls when the action will run.
 on:
-  # Triggers the workflow on new SemVer tags
   push:
     branches:
       - master
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-**"
 
 concurrency:
-  group: ${{ github.workflow }}
+  # ordinary pushes share one group so only the newest pending run survives;
+  # release merges get their own group so a later push can never replace a pending release
+  group: "${{ github.workflow }}-${{ contains(github.event.head_commit.message, 'chore: prepare release') && github.sha || github.ref_name }}"
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
-  publish:
-    uses: SiaFoundation/workflows/.github/workflows/go-publish.yml@b42741de5798fcb1881143d714a923501ec4ff89 # master
+  test:
+    permissions:
+      contents: read
+    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@95130e8c532eb275d3e359b4c4ae97083ae96c8f # master
+    with:
+      go-version: "1.27"
+  tag:
+    name: Tag Release
+    needs:
+      - test
+    runs-on: tenki-standard-medium-4c-8g
+    permissions:
+      contents: write
+    env:
+      # only tag when a knope prepare-release PR is merged
+      RELEASE: "${{ contains(github.event.head_commit.message, 'chore: prepare release') }}"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Configure Git
+        if: env.RELEASE == 'true'
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+      - uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2
+        if: env.RELEASE == 'true'
+      - name: Tag release
+        if: env.RELEASE == 'true'
+        run: knope tag --verbose
+      - name: Read version tag
+        id: version
+        run: echo "version=$(git tag --points-at HEAD --list 'v*' | head -n1)" >> "$GITHUB_OUTPUT"
+  build:
+    needs:
+      - tag
+    permissions:
+      contents: read
+      packages: write
+    uses: SiaFoundation/workflows/.github/workflows/go-build.yml@95130e8c532eb275d3e359b4c4ae97083ae96c8f # master
     secrets: inherit
     with:
       linux-build-args: -tags='timetzdata netgo' -trimpath -a -ldflags '-s -w -linkmode external -extldflags "-static"'
@@ -24,5 +63,53 @@ jobs:
       macos-build-args: -tags='timetzdata netgo' -trimpath -a -ldflags '-s -w'
       cgo-enabled: 1
       project: renterd
+      ref: ${{ needs.tag.outputs.version }}
+  linux:
+    name: Dispatch Linux
+    needs:
+      - tag
+      - build
+    permissions:
+      contents: read
+    uses: SiaFoundation/workflows/.github/workflows/linux-dispatch.yml@95130e8c532eb275d3e359b4c4ae97083ae96c8f # master
+    secrets: inherit
+    with:
+      project: renterd
       project-desc: "renterd: The Next-Gen Sia Renter"
-      version-tag: ${{ github.ref_name }}
+      ref: ${{ needs.tag.outputs.version || github.sha }}
+  homebrew:
+    name: Dispatch Homebrew
+    if: needs.tag.outputs.version != '' && !contains(needs.tag.outputs.version, '-')
+    needs:
+      - tag
+      - build
+    permissions:
+      contents: read
+    uses: SiaFoundation/workflows/.github/workflows/homebrew-dispatch.yml@95130e8c532eb275d3e359b4c4ae97083ae96c8f # master
+    secrets: inherit
+    with:
+      project: renterd
+      project-desc: "renterd: The Next-Gen Sia Renter"
+      version-tag: ${{ needs.tag.outputs.version }}
+  release:
+    name: Create GitHub Release
+    if: needs.tag.outputs.version != ''
+    needs:
+      - tag
+      - build
+    runs-on: tenki-standard-medium-4c-8g
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: renterd
+          path: release
+      - uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2
+      - name: Create GitHub release
+        run: knope release --verbose
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
