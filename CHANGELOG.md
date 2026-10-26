@@ -1,3 +1,25 @@
+## 2.9.5 (2026-10-26)
+
+### Fixes
+
+- Allow setting `HTTP.Address` via the `RENTERD_HTTP_ADDRESS` environment variable
+
+#### Fix autopilot panic on hosts with extreme prices
+
+A host announcing prices that overflow the contract funding calculation no longer crashes the autopilot during contract formation, refresh or renewal. Hosts that fail to be scored are now marked unusable instead of keeping the result of their previous check.
+
+#### Fix worker panic on range requests with extreme offsets or lengths
+
+Range requests whose offset and length overflow are rejected with an invalid range error instead of crashing the worker.
+
+#### Persist uploading sectors in the bus database
+
+Sectors of in-flight uploads are now tracked in the database instead of in memory so a bus restart mid-upload no longer allows the pruner to delete sectors of uploads that are still in progress.
+
+#### Validate the host's latest revision before pruning
+
+The bus now verifies that the revision number didn't decrease and that the fields of a contract which can't change over its lifetime (keys, proof and expiration heights, output addresses, total collateral and payout) match the contract it knows about before signing a derived revision for pruning. Also updated `coreutils` to v0.25.2 which verifies the renter signature on fetched revisions.
+
 ## 2.9.4 (2026-09-08)
 
 ### Fixes
