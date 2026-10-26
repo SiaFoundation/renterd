@@ -704,12 +704,14 @@ func (w *Worker) headObject(ctx context.Context, bucket, key string, onlyMetadat
 	if opts.Range == nil {
 		opts.Range = &api.DownloadRange{Offset: 0, Length: -1}
 	}
-	if opts.Range.Length == -1 {
-		opts.Range.Length = res.Size - opts.Range.Offset
-	}
 
-	// check size of object against range
-	if opts.Range.Offset+opts.Range.Length > res.Size {
+	// check the range against the size of the object, the checks are ordered
+	// such that none of the arithmetic can overflow
+	if opts.Range.Offset < 0 || opts.Range.Offset > res.Size {
+		return nil, api.Object{}, http_range.ErrInvalid
+	} else if opts.Range.Length == -1 {
+		opts.Range.Length = res.Size - opts.Range.Offset
+	} else if opts.Range.Length < 0 || opts.Range.Length > res.Size-opts.Range.Offset {
 		return nil, api.Object{}, http_range.ErrInvalid
 	}
 

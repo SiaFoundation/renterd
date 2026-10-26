@@ -203,7 +203,11 @@ func (c *Contractor) formContract(ctx *mCtx, hs HostScanner, host api.Host, logg
 	endHeight := ctx.EndHeight(cs.BlockHeight)
 	duration := endHeight - cs.BlockHeight
 
-	renterFunds, hostCollateral := contractFunding(scan.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
+	renterFunds, hostCollateral, err := contractFunding(scan.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
+	if err != nil {
+		logger.Debugw("funding calculation failed", zap.Error(err))
+		return api.ContractMetadata{}, false, err
+	}
 
 	// form contract
 	contract, err := c.cm.FormContract(ctx, ctx.state.Address, renterFunds, hk, hostCollateral, endHeight)
@@ -252,7 +256,11 @@ func (c *Contractor) refreshContract(ctx *mCtx, contract contract, host api.Host
 		return api.ContractMetadata{}, true, err
 	}
 	duration := contract.EndHeight() - cs.BlockHeight
-	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, contract.Size, minRenterAllowance, minHostCollateral, duration)
+	renterFunds, hostCollateral, err := contractFunding(host.V2Settings.HostSettings, contract.Size, minRenterAllowance, minHostCollateral, duration)
+	if err != nil {
+		logger.Debugw("funding calculation failed", zap.Error(err))
+		return api.ContractMetadata{}, false, err
+	}
 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, contract.ID, contract.EndHeight(), renterFunds, hostCollateral)
@@ -305,7 +313,11 @@ func (c *Contractor) renewContract(ctx *mCtx, contract contract, host api.Host, 
 
 	// calculate the renter funds for the renewal a.k.a. the funds the renter will
 	// be able to spend
-	renterFunds, hostCollateral := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
+	renterFunds, hostCollateral, err := contractFunding(host.V2Settings.HostSettings, 0, minRenterAllowance, minHostCollateral, duration)
+	if err != nil {
+		logger.Debugw("funding calculation failed", zap.Error(err))
+		return api.ContractMetadata{}, false, err
+	}
 
 	// renew the contract
 	renewal, err := c.cm.RenewContract(ctx, fcid, endHeight, renterFunds, hostCollateral)
@@ -509,6 +521,12 @@ func calculateMinScore(candidates []scoredHost, numContracts uint64, logger *zap
 		return minValidScore
 	} else if cutoff := candidates[numContracts-1].score; minScore > cutoff {
 		minScore = cutoff
+	}
+
+	// never allow a min score of 0, otherwise hosts with a score of 0 would
+	// pass the low score check
+	if minScore < minValidScore {
+		minScore = minValidScore
 	}
 
 	logger.Infow("finished computing minScore",
@@ -888,8 +906,11 @@ func performHostChecks(ctx *mCtx, bus Database, cs ConsensusStore, logger *zap.S
 		// score host
 		sb, err := ctx.HostScore(host)
 		if err != nil {
-			logger.With(zap.Error(err)).Info("failed to score host")
-			continue
+			// a host that can't be scored gets a score of 0 so its check is
+			// updated and it's marked as unusable instead of keeping the
+			// result of a previous check
+			logger.With(zap.Error(err)).With("hostKey", host.PublicKey).Info("failed to score host")
+			sb = api.HostScoreBreakdown{}
 		}
 		scoredHosts = append(scoredHosts, newScoredHost(host, sb))
 	}
@@ -1006,8 +1027,17 @@ func performContractMaintenance(ctx *mCtx, alerter alerts.Alerter, s Database, c
 }
 
 // contractFunding is a helper that calculates the funding and collateral
-// that go into forming, refreshing or renewing a contract.
-func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowance, minCollateral types.Currency, duration uint64) (allowance, collateral types.Currency) {
+// that go into forming, refreshing or renewing a contract. It returns an error
+// if the host's prices are so extreme that the calculation overflows.
+func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowance, minCollateral types.Currency, duration uint64) (allowance, collateral types.Currency, err error) {
+	// extreme host prices cause the currency arithmetic to panic
+	defer func() {
+		if r := recover(); r != nil {
+			allowance, collateral = types.ZeroCurrency, types.ZeroCurrency
+			err = fmt.Errorf("failed to calculate contract funding: %v", r)
+		}
+	}()
+
 	multiplier := 1 + (existingData / minContractGrowthRate)
 	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / rhpv4.SectorSize // 100% growth clamped to [32GiB, 256GiB]
 	uploadCost := settings.Prices.RPCWriteSectorCost(rhpv4.SectorSize).RenterCost().Mul64(contractGrowth)
@@ -1025,7 +1055,7 @@ func contractFunding(settings rhpv4.HostSettings, existingData uint64, minAllowa
 	if collateral.Cmp(minCollateral) < 0 {
 		collateral = minCollateral // ensure we have at least the minimum collateral
 	}
-	return
+	return allowance, collateral, nil
 }
 
 func isErrRenterOutOfFunds(err error) bool {

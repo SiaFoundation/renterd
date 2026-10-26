@@ -9,6 +9,9 @@ import (
 	rhpv4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/renterd/v2/api"
+	"go.sia.tech/renterd/v2/internal/gouging"
+	rhp "go.sia.tech/renterd/v2/internal/rhp/v4"
+	"go.sia.tech/renterd/v2/internal/test"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -35,6 +38,35 @@ func TestCalculateMinScore(t *testing.T) {
 	minScore = calculateMinScore(candidates, 300, zap.NewNop().Sugar())
 	if minScore != math.SmallestNonzeroFloat64 {
 		t.Fatalf("expected minScore to be math.SmallestNonzeroFLoat64 but was %v", minScore)
+	}
+
+	// Test with 2 wanted contracts, one scored host and one host that failed
+	// to be scored. The cutoff would be 0 but the min score must stay
+	// positive so the unscored host fails the low score check.
+	minScore = calculateMinScore([]scoredHost{{score: 1}, {score: 0}}, 2, zap.NewNop().Sugar())
+	if minScore != math.SmallestNonzeroFloat64 {
+		t.Fatalf("expected minScore to be math.SmallestNonzeroFLoat64 but was %v", minScore)
+	}
+	if hc := checkHost(gouging.NewChecker(test.GougingSettings, api.ConsensusState{}), scoredHost{host: scoredHostFixture(), score: 0}, minScore, 1); !hc.UsabilityBreakdown.LowScore {
+		t.Fatalf("expected host with score 0 to have a low score: %+v %v", hc.UsabilityBreakdown, hc.GougingBreakdown)
+	}
+}
+
+func scoredHostFixture() api.Host {
+	return api.Host{
+		Scanned:           true,
+		KnownSince:        time.Now(),
+		LastAnnouncement:  time.Now(),
+		V2SiamuxAddresses: []string{"foo.bar:1234"},
+		V2Settings: rhp.HostSettings{
+			HostSettings: rhpv4.HostSettings{
+				AcceptingContracts:  true,
+				MaxContractDuration: 1000,
+				MaxCollateral:       types.Siacoins(1),
+			},
+			Validity: time.Hour,
+		},
+		Interactions: api.HostInteractions{TotalScans: 1, LastScanSuccess: true},
 	}
 }
 
@@ -142,8 +174,10 @@ func TestContractFunding(t *testing.T) {
 				test.modSettings(&settings)
 			}
 			expectedAllowance, expectedCollateral := test.calc(settings)
-			allowance, collateral := contractFunding(settings, test.initialDataSize, test.minAllowance, test.minCollateral, 1)
-			if !allowance.Equals(expectedAllowance) {
+			allowance, collateral, err := contractFunding(settings, test.initialDataSize, test.minAllowance, test.minCollateral, 1)
+			if err != nil {
+				t.Fatal(err)
+			} else if !allowance.Equals(expectedAllowance) {
 				t.Errorf("expected allowance %v but got %v", expectedAllowance, allowance)
 			}
 			if !collateral.Equals(expectedCollateral) {
@@ -245,5 +279,21 @@ func TestShouldForgiveFailedRenewal(t *testing.T) {
 	c.pruneContractRefreshFailures([]api.ContractMetadata{})
 	if len(c.firstRefreshFailure) != 0 {
 		t.Fatal("expected no failures")
+	}
+}
+
+func TestContractFundingExtremePrices(t *testing.T) {
+	settings := rhpv4.HostSettings{
+		MaxCollateral: types.Siacoins(1000),
+		Prices: rhpv4.HostPrices{
+			StoragePrice: types.MaxCurrency,
+			Collateral:   types.Siacoins(1),
+			IngressPrice: types.Siacoins(1),
+			EgressPrice:  types.Siacoins(1),
+		},
+	}
+	_, _, err := contractFunding(settings, 0, types.Siacoins(1), types.Siacoins(1), 1000)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }

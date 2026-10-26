@@ -12,8 +12,8 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/montanaflynn/stats v0.13.0
 	github.com/shopspring/decimal v1.6.0
-	go.sia.tech/core v0.21.7
-	go.sia.tech/coreutils v0.25.0
+	go.sia.tech/core v0.21.8
+	go.sia.tech/coreutils v0.25.2
 	go.sia.tech/gofakes3 v0.0.5
 	go.sia.tech/jape v0.14.4
 	go.sia.tech/web/renterd v0.88.2
@@ -38,17 +38,17 @@ require (
 	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.63.0 // indirect
+	github.com/quic-go/quic-go v0.64.1 // indirect
 	github.com/quic-go/webtransport-go v0.13.0 // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/shabbyrobe/gocovmerge v0.0.0-20230507112040-c3350d9342df // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
-	go.sia.tech/mux v1.5.3 // indirect
+	go.sia.tech/mux v1.5.4 // indirect
 	go.sia.tech/web v0.0.0-20240610131903-5611d44a533e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 )

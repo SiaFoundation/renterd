@@ -573,6 +573,12 @@ var (
 					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00039_host_settings_protocol_version", log)
 				},
 			},
+			{
+				ID: "00040_uploading_sectors",
+				Migrate: func(tx Tx) error {
+					return performMigration(ctx, tx, migrationsFs, dbIdentifier, "00040_uploading_sectors", log)
+				},
+			},
 		}
 	}
 	MetricsMigrations = func(ctx context.Context, migrationsFs embed.FS, log *zap.SugaredLogger) []Migration {

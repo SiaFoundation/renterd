@@ -241,3 +241,20 @@ CREATE UNIQUE INDEX `idx_contract_elements_db_contract_id` ON `contract_elements
 
 -- autopilot config
 CREATE TABLE autopilot_config (id INTEGER PRIMARY KEY CHECK (id = 1), created_at datetime, enabled integer NOT NULL DEFAULT 0, contracts_amount integer, contracts_period integer, contracts_renew_window integer, contracts_download integer, contracts_upload integer, contracts_storage integer, contracts_prune integer NOT NULL DEFAULT 0, hosts_max_downtime_hours integer, hosts_min_protocol_version text, hosts_max_consecutive_scan_failures integer);
+
+-- uploads
+CREATE TABLE `uploads` (
+    `id` integer PRIMARY KEY AUTOINCREMENT,
+    `created_at` datetime NOT NULL,
+    `upload_id` blob NOT NULL
+);
+CREATE UNIQUE INDEX `idx_uploads_upload_id` ON `uploads`(`upload_id`);
+
+-- uploading sectors
+CREATE TABLE `uploading_sectors` (
+    `id` integer PRIMARY KEY AUTOINCREMENT,
+    `db_upload_id` integer NOT NULL,
+    `root` blob NOT NULL,
+    CONSTRAINT `fk_uploading_sectors_uploads` FOREIGN KEY (`db_upload_id`) REFERENCES `uploads`(`id`) ON DELETE CASCADE
+);
+CREATE INDEX `idx_uploading_sectors_db_upload_id` ON `uploading_sectors`(`db_upload_id`);
