@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,11 +21,24 @@ func (b *Bus) pruneContract(ctx context.Context, rk types.PrivateKey, cm api.Con
 	signer := ibus.NewFormContractSigner(b.w, rk)
 
 	// get latest revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, cm.HostKey, hostIP, cm.ID)
+	rev, err := b.rhp4Client.LatestRevision(ctx, cm.HostKey, hostIP, rk.PublicKey(), cm.ID)
 	if err != nil {
 		return api.ContractPruneResponse{}, fmt.Errorf("failed to fetch revision for pruning: %w", err)
-	} else if rev.RevisionNumber < cm.RevisionNumber {
-		return api.ContractPruneResponse{}, fmt.Errorf("latest known revision %d is less than contract revision %d", rev.RevisionNumber, cm.RevisionNumber)
+	}
+
+	// fetch the known contract element, it doesn't exist for contracts that
+	// haven't been confirmed yet
+	var known *types.V2FileContract
+	fce, err := b.store.FileContractElement(ctx, cm.ID)
+	if err == nil {
+		known = &fce.V2FileContractElement.V2FileContract
+	} else if !errors.Is(err, api.ErrContractNotFound) {
+		return api.ContractPruneResponse{}, fmt.Errorf("failed to fetch contract element for pruning: %w", err)
+	}
+
+	// make sure the host didn't alter the revision
+	if err := checkRevision(cm, rk.PublicKey(), known, rev); err != nil {
+		return api.ContractPruneResponse{}, fmt.Errorf("invalid revision for pruning: %w", err)
 	}
 
 	// get prices
@@ -141,4 +155,53 @@ func (b *Bus) pruneContract(ctx context.Context, rk types.PrivateKey, cm api.Con
 		Pruned:       uint64(len(toPrune) * rhpv4.SectorSize),
 		Remaining:    (totalToPrune - uint64(len(toPrune))) * rhpv4.SectorSize,
 	}, nil
+}
+
+// checkRevision verifies that the revision number of the host's latest revision
+// didn't decrease and that the fields which can't change over the lifetime of
+// the contract match what the bus knows about the contract. The known contract
+// is optional since it only exists for confirmed contracts.
+func checkRevision(cm api.ContractMetadata, renterKey types.PublicKey, known *types.V2FileContract, rev types.V2FileContract) error {
+	if rev.RevisionNumber < cm.RevisionNumber {
+		return fmt.Errorf("revision number %d is less than known revision number %d", rev.RevisionNumber, cm.RevisionNumber)
+	} else if rev.HostPublicKey != cm.HostKey {
+		return fmt.Errorf("host key %v doesn't match known host key %v", rev.HostPublicKey, cm.HostKey)
+	} else if rev.RenterPublicKey != renterKey {
+		return fmt.Errorf("renter key %v doesn't match known renter key %v", rev.RenterPublicKey, renterKey)
+	} else if rev.ProofHeight != cm.WindowStart {
+		return fmt.Errorf("proof height %d doesn't match known proof height %d", rev.ProofHeight, cm.WindowStart)
+	} else if rev.ExpirationHeight != cm.WindowEnd {
+		return fmt.Errorf("expiration height %d doesn't match known expiration height %d", rev.ExpirationHeight, cm.WindowEnd)
+	}
+	if known == nil {
+		return nil
+	}
+
+	knownPayout, overflow := known.RenterOutput.Value.AddWithOverflow(known.HostOutput.Value)
+	if overflow {
+		return errors.New("known payout overflows")
+	}
+	payout, overflow := rev.RenterOutput.Value.AddWithOverflow(rev.HostOutput.Value)
+	if overflow {
+		return errors.New("payout overflows")
+	}
+	switch {
+	case rev.RenterOutput.Address != known.RenterOutput.Address:
+		return fmt.Errorf("renter address %v doesn't match known renter address %v", rev.RenterOutput.Address, known.RenterOutput.Address)
+	case rev.HostOutput.Address != known.HostOutput.Address:
+		return fmt.Errorf("host address %v doesn't match known host address %v", rev.HostOutput.Address, known.HostOutput.Address)
+	case !rev.TotalCollateral.Equals(known.TotalCollateral):
+		return fmt.Errorf("total collateral %v doesn't match known total collateral %v", rev.TotalCollateral, known.TotalCollateral)
+	case !payout.Equals(knownPayout):
+		return fmt.Errorf("payout %v doesn't match known payout %v", payout, knownPayout)
+	case rev.RenterPublicKey != known.RenterPublicKey:
+		return fmt.Errorf("renter key %v doesn't match known renter key %v", rev.RenterPublicKey, known.RenterPublicKey)
+	case rev.HostPublicKey != known.HostPublicKey:
+		return fmt.Errorf("host key %v doesn't match known host key %v", rev.HostPublicKey, known.HostPublicKey)
+	case rev.ProofHeight != known.ProofHeight:
+		return fmt.Errorf("proof height %d doesn't match known proof height %d", rev.ProofHeight, known.ProofHeight)
+	case rev.ExpirationHeight != known.ExpirationHeight:
+		return fmt.Errorf("expiration height %d doesn't match known expiration height %d", rev.ExpirationHeight, known.ExpirationHeight)
+	}
+	return nil
 }

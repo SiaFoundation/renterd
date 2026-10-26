@@ -67,7 +67,7 @@ func (b *Bus) accountsFundHandler(jc jape.Context) {
 	defer b.contractLocker.Release(req.ContractID, lockID)
 
 	// latest revision
-	rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.SiamuxAddr(), req.ContractID)
+	rev, err := b.rhp4Client.LatestRevision(jc.Request.Context(), cm.HostKey, host.SiamuxAddr(), rk.PublicKey(), req.ContractID)
 	if jc.Check("failed to fetch contract revision", err) != nil {
 		return
 	}
@@ -775,7 +775,7 @@ func (b *Bus) contractLatestRevisionHandlerGET(jc jape.Context) {
 		return
 	}
 
-	revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.SiamuxAddr(), fcid)
+	revision, err := b.rhp4Client.LatestRevision(jc.Request.Context(), contract.HostKey, host.SiamuxAddr(), b.masterKey.DeriveContractKey(contract.HostKey).PublicKey(), fcid)
 	if jc.Check("failed to fetch revision", err) != nil {
 		return
 	}
@@ -845,8 +845,12 @@ func (b *Bus) contractPruneHandlerPOST(jc jape.Context) {
 	}
 
 	// build map of uploading sectors
-	pending := make(map[types.Hash256]struct{})
-	for _, root := range b.sectors.Sectors() {
+	roots, err := b.store.UploadingSectors(ctx)
+	if jc.Check("failed to fetch uploading sectors", err) != nil {
+		return
+	}
+	pending := make(map[types.Hash256]struct{}, len(roots))
+	for _, root := range roots {
 		pending[root] = struct{}{}
 	}
 
@@ -1800,7 +1804,7 @@ func (b *Bus) stateHandlerGET(jc jape.Context) {
 func (b *Bus) uploadTrackHandlerPOST(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		jc.Check("failed to track upload", b.sectors.StartUpload(id))
+		jc.Check("failed to track upload", b.store.TrackUpload(jc.Request.Context(), id))
 	}
 }
 
@@ -1813,13 +1817,13 @@ func (b *Bus) uploadAddSectorHandlerPOST(jc jape.Context) {
 	if jc.Decode(&roots) != nil {
 		return
 	}
-	jc.Check("failed to add sectors", b.sectors.AddSectors(id, roots...))
+	jc.Check("failed to add sectors", b.store.AddUploadingSectors(jc.Request.Context(), id, roots))
 }
 
 func (b *Bus) uploadFinishedHandlerDELETE(jc jape.Context) {
 	var id api.UploadID
 	if jc.DecodeParam("id", &id) == nil {
-		b.sectors.FinishUpload(id)
+		jc.Check("failed to finish upload", b.store.FinishUpload(jc.Request.Context(), id))
 	}
 }
 

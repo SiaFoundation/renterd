@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 
+	"github.com/gotd/contrib/http_range"
 	"go.sia.tech/gofakes3"
 	"go.sia.tech/renterd/v2/api"
 	"go.sia.tech/renterd/v2/internal/utils"
@@ -207,7 +209,12 @@ func (s *s3) GetObject(ctx context.Context, bucketName, key string, rangeRequest
 	opts := api.DownloadObjectOptions{}
 	if rangeRequest != nil {
 		length := int64(-1)
-		if rangeRequest.End >= 0 {
+		if rangeRequest.Start < 0 || (rangeRequest.End >= 0 && rangeRequest.End < rangeRequest.Start) {
+			return nil, gofakes3.ErrorMessage(gofakes3.ErrInvalidRange, "invalid range")
+		} else if rangeRequest.End >= 0 {
+			if rangeRequest.End-rangeRequest.Start == math.MaxInt64 {
+				return nil, gofakes3.ErrorMessage(gofakes3.ErrInvalidRange, "range length overflows")
+			}
 			length = rangeRequest.End - rangeRequest.Start + 1
 		}
 		opts.Range = &api.DownloadRange{Offset: rangeRequest.Start, Length: length}
@@ -218,6 +225,8 @@ func (s *s3) GetObject(ctx context.Context, bucketName, key string, rangeRequest
 		return nil, gofakes3.BucketNotFound(bucketName)
 	} else if utils.IsErr(err, api.ErrObjectNotFound) {
 		return nil, gofakes3.KeyNotFound(key)
+	} else if utils.IsErr(err, http_range.ErrInvalid) {
+		return nil, gofakes3.ErrorMessage(gofakes3.ErrInvalidRange, err.Error())
 	} else if err != nil {
 		return nil, gofakes3.ErrorMessage(gofakes3.ErrInternal, err.Error())
 	}

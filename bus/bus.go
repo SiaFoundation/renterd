@@ -107,13 +107,6 @@ type (
 		UnconfirmedParents(txn types.Transaction) ([]types.Transaction, error)
 	}
 
-	UploadingSectorsCache interface {
-		AddSectors(uID api.UploadID, roots ...types.Hash256) error
-		FinishUpload(uID api.UploadID)
-		Sectors() (sectors []types.Hash256)
-		StartUpload(uID api.UploadID) error
-	}
-
 	PinManager interface {
 		Shutdown(context.Context) error
 		TriggerUpdate()
@@ -221,6 +214,11 @@ type (
 
 		DeleteHostSector(ctx context.Context, hk types.PublicKey, root types.Hash256) (int, error)
 
+		AddUploadingSectors(ctx context.Context, uID api.UploadID, roots []types.Hash256) error
+		FinishUpload(ctx context.Context, uID api.UploadID) error
+		TrackUpload(ctx context.Context, uID api.UploadID) error
+		UploadingSectors(ctx context.Context) ([]types.Hash256, error)
+
 		Bucket(_ context.Context, bucketName string) (api.Bucket, error)
 		Buckets(_ context.Context) ([]api.Bucket, error)
 		CreateBucket(_ context.Context, bucketName string, policy api.BucketPolicy) error
@@ -310,7 +308,6 @@ type Bus struct {
 
 	contractLocker        ContractLocker
 	explorer              *explorer.Explorer
-	sectors               UploadingSectorsCache
 	walletMetricsRecorder WalletMetricsRecorder
 
 	logger *zap.SugaredLogger
@@ -351,7 +348,6 @@ func New(cfg config.Bus, masterKey [32]byte, am AlertManager, cm ChainManager, s
 	b.contractLocker = ibus.NewContractLocker()
 
 	// create sectors cache
-	b.sectors = ibus.NewSectorsCache()
 
 	// create pin manager
 	b.pinMgr = ibus.NewPinManager(b.alerts, b.explorer, store, defaultPinUpdateInterval, defaultPinRateWindow, l)
@@ -548,7 +544,7 @@ func (b *Bus) broadcastContract(ctx context.Context, fcid types.FileContractID) 
 	fee := b.w.RecommendedFee().Mul64(10e3)
 
 	// fetch revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.SiamuxAddr(), fcid)
+	rev, err := b.rhp4Client.LatestRevision(ctx, c.HostKey, host.SiamuxAddr(), b.masterKey.DeriveContractKey(c.HostKey).PublicKey(), fcid)
 	if err != nil {
 		return types.TransactionID{}, fmt.Errorf("couldn't fetch revision; %w", err)
 	}
@@ -636,7 +632,7 @@ func (b *Bus) refreshContract(ctx context.Context, cs consensus.State, h api.Hos
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
 	// fetch the revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.SiamuxAddr(), c.ID)
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.SiamuxAddr(), renterKey.PublicKey(), c.ID)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}
@@ -692,7 +688,7 @@ func (b *Bus) renewContract(ctx context.Context, cs consensus.State, h api.Host,
 	signer := ibus.NewFormContractSigner(b.w, renterKey)
 
 	// fetch the revision
-	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.SiamuxAddr(), c.ID)
+	rev, err := b.rhp4Client.LatestRevision(ctx, h.PublicKey, h.SiamuxAddr(), renterKey.PublicKey(), c.ID)
 	if err != nil {
 		return api.ContractMetadata{}, err
 	}

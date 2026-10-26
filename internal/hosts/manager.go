@@ -148,7 +148,7 @@ func (c *hostV2DownloadClient) Prices(ctx context.Context) (rhpv4.HostPrices, er
 }
 
 func (c *hostV2UploadClient) UploadSector(ctx context.Context, sectorRoot types.Hash256, sector *[rhpv4.SectorSize]byte) error {
-	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), c.fcid)
+	fc, err := c.rhp4.LatestRevision(ctx, c.hi.PublicKey, c.hi.SiamuxAddr(), c.rk.PublicKey(), c.fcid)
 	if err != nil {
 		return errors.Join(err, rhp4.ErrFailedToFetchRevision)
 	}

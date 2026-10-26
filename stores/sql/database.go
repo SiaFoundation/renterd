@@ -71,6 +71,11 @@ type (
 		// until the given start height.
 		AncestorContracts(ctx context.Context, id types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error)
 
+		// AddUploadingSectors adds the given sector roots to the tracked upload
+		// with the given id. ErrUnknownUpload is returned if the upload isn't
+		// tracked.
+		AddUploadingSectors(ctx context.Context, uID api.UploadID, roots []types.Hash256) error
+
 		// ArchiveContract moves a contract from the regular contracts to the
 		// archived ones.
 		ArchiveContract(ctx context.Context, fcid types.FileContractID, reason string) error
@@ -145,6 +150,10 @@ type (
 
 		// DeleteSetting deletes the setting with the given key.
 		DeleteSetting(ctx context.Context, key string) error
+
+		// FinishUpload removes the tracked upload with the given id and all of
+		// its sectors.
+		FinishUpload(ctx context.Context, uID api.UploadID) error
 
 		// FileContractElement returns the up-to-date file contract element for
 		// a given contract id.
@@ -242,6 +251,10 @@ type (
 		// or slab buffer.
 		PruneSlabs(ctx context.Context, limit int64) (int64, error)
 
+		// PruneUploads removes all tracked uploads that were started before
+		// the given cutoff along with their sectors.
+		PruneUploads(ctx context.Context, cutoff time.Time) error
+
 		// PutContract inserts the contract if it does not exist, otherwise it
 		// will overwrite all fields.
 		PutContract(ctx context.Context, c api.ContractMetadata) error
@@ -305,6 +318,10 @@ type (
 		// Tip returns the sync height.
 		Tip(ctx context.Context) (types.ChainIndex, error)
 
+		// TrackUpload starts tracking the upload with the given id.
+		// ErrUploadAlreadyExists is returned if the upload is already tracked.
+		TrackUpload(ctx context.Context, uID api.UploadID) error
+
 		UpdateChainIndex(ctx context.Context, ci types.ChainIndex) error
 
 		// UnspentSiacoinElements returns all wallet outputs in the database.
@@ -350,6 +367,10 @@ type (
 		// between 'minValidity' and 'maxValidity' is used to determine the time
 		// the health of the updated slabs becomes invalid
 		UpdateSlabHealth(ctx context.Context, limit int64, minValidity, maxValidity time.Duration) (int64, error)
+
+		// UploadingSectors returns the roots of all sectors that belong to
+		// tracked uploads.
+		UploadingSectors(ctx context.Context) ([]types.Hash256, error)
 
 		// UpsertContractSectors ensures the given contract-sector links are
 		// present in the database.

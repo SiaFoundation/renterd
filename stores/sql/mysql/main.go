@@ -180,6 +180,10 @@ func (tx *MainDatabaseTx) AddPeer(ctx context.Context, addr string) error {
 	return err
 }
 
+func (tx *MainDatabaseTx) AddUploadingSectors(ctx context.Context, uID api.UploadID, roots []types.Hash256) error {
+	return ssql.AddUploadingSectors(ctx, tx, uID, roots)
+}
+
 func (tx *MainDatabaseTx) AncestorContracts(ctx context.Context, fcid types.FileContractID, startHeight uint64) ([]api.ContractMetadata, error) {
 	return ssql.AncestorContracts(ctx, tx, fcid, startHeight)
 }
@@ -324,6 +328,10 @@ func (tx *MainDatabaseTx) DeleteHostSector(ctx context.Context, hk types.PublicK
 
 func (tx *MainDatabaseTx) DeleteSetting(ctx context.Context, key string) error {
 	return ssql.DeleteSetting(ctx, tx, key)
+}
+
+func (tx *MainDatabaseTx) FinishUpload(ctx context.Context, uID api.UploadID) error {
+	return ssql.FinishUpload(ctx, tx, uID)
 }
 
 func (tx *MainDatabaseTx) FileContractElement(ctx context.Context, fcid types.FileContractID) (contracts.V2BroadcastElement, error) {
@@ -870,8 +878,16 @@ func (tx *MainDatabaseTx) SlabsForMigration(ctx context.Context, healthCutoff fl
 	return ssql.SlabsForMigration(ctx, tx, healthCutoff, limit)
 }
 
+func (tx *MainDatabaseTx) PruneUploads(ctx context.Context, cutoff time.Time) error {
+	return ssql.PruneUploads(ctx, tx, cutoff)
+}
+
 func (tx *MainDatabaseTx) Tip(ctx context.Context) (types.ChainIndex, error) {
 	return ssql.Tip(ctx, tx.Tx)
+}
+
+func (tx *MainDatabaseTx) TrackUpload(ctx context.Context, uID api.UploadID) error {
+	return ssql.TrackUpload(ctx, tx, uID)
 }
 
 func (tx *MainDatabaseTx) UnspentSiacoinElements(ctx context.Context) (ci types.ChainIndex, elements []types.SiacoinElement, err error) {
@@ -1078,6 +1094,10 @@ func (tx *MainDatabaseTx) UpdateSlabHealth(ctx context.Context, limit int64, min
 		return 0, fmt.Errorf("failed to update object health: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (tx *MainDatabaseTx) UploadingSectors(ctx context.Context) ([]types.Hash256, error) {
+	return ssql.UploadingSectors(ctx, tx)
 }
 
 func (tx *MainDatabaseTx) UpsertContractSectors(ctx context.Context, contractSectors []ssql.ContractSector) error {
