@@ -1,3 +1,11 @@
+## 2.9.6 (2026-10-30)
+
+### Fixes
+
+#### Update coreutils
+
+Update `coreutils` to v0.25.3, which fixes checkpoint retrieval and releases host inputs when contract formation or renewal fails.
+
 ## 2.9.5 (2026-10-26)
 
 ### Fixes

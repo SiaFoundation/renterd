@@ -1,7 +1,7 @@
 openapi: "3.0.0"
 info:
   title: Renterd API
-  version: 2.9.5
+  version: 2.9.6
   description: API that caters to both casual users seeking straightforward data storage and developers requiring a robust API for building apps on Sia
 tags:
   - name: authentication
