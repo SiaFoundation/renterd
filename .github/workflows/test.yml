@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate OpenAPI spec
@@ -41,7 +41,7 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: Configure MySQL
-        uses: shogo82148/actions-setup-mysql@083ec148d28e62f2b24b8f4541693dfe1d50488d # v1.54.0
+        uses: shogo82148/actions-setup-mysql@fb8ae72ad9f2f8244e594d6d48a981e975aee78e # v1.56.1
         with:
           distribution: "mysql"
           mysql-version: "9"
