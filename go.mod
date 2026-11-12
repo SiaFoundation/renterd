@@ -9,7 +9,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/gotd/contrib v0.25.0
 	github.com/klauspost/reedsolomon v1.14.2
-	github.com/mattn/go-sqlite3 v1.14.52
+	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/montanaflynn/stats v0.14.0
 	github.com/shopspring/decimal v1.6.0
 	go.sia.tech/core v0.21.8
@@ -19,7 +19,7 @@ require (
 	go.sia.tech/web/renterd v0.88.2
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.58.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.47.0
 	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
